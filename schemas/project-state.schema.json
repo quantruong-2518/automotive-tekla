@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:tekla-harness:schema:project-state:0.1",
+  "title": "Project state",
+  "description": "Orchestrator state for one project run. Gates change only on an explicit engineer action.",
+  "type": "object",
+  "required": ["schema_version", "project_id", "created_at", "harness_version", "current_step", "gates", "lots"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": "0.1" },
+    "project_id": { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/project_id" },
+    "created_at": { "type": "string", "format": "date-time" },
+    "harness_version": { "type": "string" },
+    "current_step": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 16,
+      "description": "Step number in docs/workflow.md."
+    },
+    "gates": {
+      "type": "object",
+      "required": ["g1_plan", "g2_approach", "g3_info_matrix", "g4_lot_check", "g5_phase_report", "g6_improve"],
+      "additionalProperties": false,
+      "properties": {
+        "g1_plan": { "$ref": "#/$defs/gate" },
+        "g2_approach": { "$ref": "#/$defs/gate" },
+        "g3_info_matrix": { "$ref": "#/$defs/gate" },
+        "g4_lot_check": { "$ref": "#/$defs/gate", "description": "Status of the most recent lot; per-lot history is in lots[]." },
+        "g5_phase_report": { "$ref": "#/$defs/gate" },
+        "g6_improve": { "$ref": "#/$defs/gate" }
+      }
+    },
+    "lots": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/lot" }
+    },
+    "tekla": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "version": { "type": "string" },
+        "original_model_path": { "type": "string" },
+        "working_model_path": { "type": "string" }
+      }
+    }
+  },
+  "$defs": {
+    "gate": {
+      "type": "object",
+      "required": ["status"],
+      "additionalProperties": false,
+      "properties": {
+        "status": { "enum": ["pending", "approved", "revision_requested", "not_required"] },
+        "decided_at": { "type": "string", "format": "date-time" },
+        "decided_by": { "type": "string", "description": "Engineer name. Never an agent." },
+        "note": { "type": "string" }
+      },
+      "if": { "properties": { "status": { "enum": ["approved", "revision_requested", "not_required"] } } },
+      "then": { "required": ["status", "decided_at", "decided_by"] }
+    },
+    "lot": {
+      "type": "object",
+      "required": ["lot", "status"],
+      "additionalProperties": false,
+      "properties": {
+        "lot": { "type": "integer", "minimum": 1 },
+        "status": { "enum": ["planned", "spec_ready", "built", "verified", "approved", "feedback", "rolled_back"] },
+        "run_id": { "type": "string" },
+        "spec_path": { "type": "string" },
+        "backup_path": { "type": "string" },
+        "critical_issues": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}

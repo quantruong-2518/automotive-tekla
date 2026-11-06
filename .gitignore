@@ -1,0 +1,55 @@
+# --- Client data: never commit ---
+projects/*
+!projects/README.md
+benchmark/data/
+*.dwg
+*.dxf
+*.ifc
+*.db1
+*.db2
+*.dwg.bak
+!tests/fixtures/**
+
+# Tekla model backups (models themselves live outside the repo)
+**/model_backups/
+
+# --- Secrets ---
+.env
+.env.*
+*.pfx
+*.snk
+
+# --- Claude Code personal files ---
+.claude/settings.local.json
+CLAUDE.local.md
+.claude/agent-memory-local/
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
+
+# --- .NET (Step 3) ---
+bin/
+obj/
+*.user
+*.suo
+.vs/
+packages/
+TestResults/
+
+# --- OS / editors ---
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/*
+!.vscode/extensions.json

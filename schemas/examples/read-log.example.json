@@ -1,0 +1,20 @@
+{
+  "schema_version": "0.1",
+  "project_id": "demo-warehouse",
+  "files": [
+    {
+      "file": "S-101.dwg",
+      "sha256": "9f2c6d8a4b1e0f37c5a2d9e8b7f6a5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8",
+      "format": "dwg",
+      "encoding": "tcvn3",
+      "attempts": [
+        { "tool": "oda_file_converter", "status": "failed", "error": "Converter not installed", "started_at": "2026-11-06T09:05:00+07:00", "duration_ms": 120 },
+        { "tool": "libredwg_dwg2dxf", "tool_version": "0.13", "status": "ok", "started_at": "2026-11-06T09:05:01+07:00", "duration_ms": 2300 },
+        { "tool": "ezdxf", "status": "ok", "started_at": "2026-11-06T09:05:04+07:00", "duration_ms": 850 }
+      ],
+      "outcome": "read",
+      "max_confidence": "medium",
+      "warnings": ["Fallback converter used: confidence capped at medium.", "Text style uses .VnTime: converted TCVN3 to Unicode."]
+    }
+  ]
+}

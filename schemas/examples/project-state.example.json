@@ -1,0 +1,24 @@
+{
+  "schema_version": "0.1",
+  "project_id": "demo-warehouse",
+  "created_at": "2026-11-06T09:00:00+07:00",
+  "harness_version": "0.1.0",
+  "current_step": 9,
+  "gates": {
+    "g1_plan": { "status": "approved", "decided_at": "2026-11-06T10:15:00+07:00", "decided_by": "engineer" },
+    "g2_approach": { "status": "approved", "decided_at": "2026-11-06T10:40:00+07:00", "decided_by": "engineer" },
+    "g3_info_matrix": { "status": "not_required", "decided_at": "2026-11-06T10:41:00+07:00", "decided_by": "engineer", "note": "No gaps." },
+    "g4_lot_check": { "status": "pending" },
+    "g5_phase_report": { "status": "pending" },
+    "g6_improve": { "status": "pending" }
+  },
+  "lots": [
+    { "lot": 1, "status": "spec_ready", "spec_path": "lots/1/spec.json" },
+    { "lot": 2, "status": "planned" }
+  ],
+  "tekla": {
+    "version": "TBD",
+    "original_model_path": "D:/TeklaModels/demo-warehouse",
+    "working_model_path": "D:/TeklaModels/demo-warehouse_harness_copy"
+  }
+}

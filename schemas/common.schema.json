@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:tekla-harness:schema:common:0.1",
+  "title": "Common definitions",
+  "description": "Shared types. Every value taken from a drawing carries provenance and confidence.",
+  "$defs": {
+    "confidence": {
+      "description": "high: read deterministically and cross-checked. medium: read deterministically, not cross-checked, or vector PDF. low: vision, scan, or inferred. Low values may not be used downstream without an engineer answer.",
+      "enum": ["high", "medium", "low"]
+    },
+    "method": {
+      "description": "How the value was obtained.",
+      "enum": [
+        "dxf_entity",
+        "dxf_dimension_text",
+        "dxf_dimension_measured",
+        "pdf_text_layer",
+        "pdf_vector",
+        "vision",
+        "table",
+        "engineer_answer",
+        "derived"
+      ]
+    },
+    "provenance": {
+      "type": "object",
+      "required": ["file", "sheet", "method"],
+      "additionalProperties": false,
+      "properties": {
+        "file": { "type": "string", "minLength": 1, "description": "Path relative to the project input folder." },
+        "sheet": { "type": "string", "minLength": 1, "description": "Sheet number as printed in the title block." },
+        "revision": { "type": ["string", "null"], "description": "Sheet revision as printed; null if none is printed." },
+        "region": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "page": { "type": "integer", "minimum": 1 },
+            "bbox": {
+              "type": "array",
+              "description": "x0, y0, x1, y1 in the source file's own units.",
+              "items": { "type": "number" },
+              "minItems": 4,
+              "maxItems": 4
+            },
+            "grid_ref": { "type": "string", "description": "e.g. 'C/3-4'." },
+            "detail": { "type": "string", "description": "Detail or section label, e.g. 'SECTION A-A'." }
+          }
+        },
+        "method": { "$ref": "#/$defs/method" },
+        "derived_from": {
+          "type": "array",
+          "description": "For method 'derived': the provenances combined.",
+          "items": { "$ref": "#/$defs/provenance" }
+        },
+        "question_id": { "type": "string", "description": "For method 'engineer_answer': the answered question id." }
+      }
+    },
+    "sourced_string": {
+      "type": "object",
+      "required": ["value", "provenance", "confidence"],
+      "additionalProperties": false,
+      "properties": {
+        "value": { "type": "string", "minLength": 1 },
+        "provenance": { "$ref": "#/$defs/provenance" },
+        "confidence": { "$ref": "#/$defs/confidence" }
+      }
+    },
+    "sourced_number": {
+      "type": "object",
+      "required": ["value", "provenance", "confidence"],
+      "additionalProperties": false,
+      "properties": {
+        "value": { "type": "number" },
+        "provenance": { "$ref": "#/$defs/provenance" },
+        "confidence": { "$ref": "#/$defs/confidence" }
+      }
+    },
+    "sourced_point": {
+      "type": "object",
+      "description": "Global coordinates in millimetres.",
+      "required": ["x", "y", "z", "provenance", "confidence"],
+      "additionalProperties": false,
+      "properties": {
+        "x": { "type": "number" },
+        "y": { "type": "number" },
+        "z": { "type": "number" },
+        "provenance": { "$ref": "#/$defs/provenance" },
+        "confidence": { "$ref": "#/$defs/confidence" }
+      }
+    },
+    "project_id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{1,63}$" },
+    "spec_id": { "type": "string", "pattern": "^[A-Z0-9][A-Z0-9_-]{0,63}$" },
+    "question_id": { "type": "string", "pattern": "^Q-[0-9]{3,}$" }
+  }
+}
