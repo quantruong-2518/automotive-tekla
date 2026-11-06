@@ -34,7 +34,9 @@ SHELL_TOOLS = frozenset({"Bash", "PowerShell"})
 # Executable name: tekla-cli or tekla-cli.exe, optionally with a Windows or POSIX path.
 _EXE = re.compile(r"(?:^|[\\/])tekla-cli(?:\.exe)?$", re.IGNORECASE)
 # Mentions of tekla-cli that the tokenizer might miss (e.g. inside $(...) or & "...").
-_MENTION = re.compile(r"tekla-cli", re.IGNORECASE)
+# A longer name such as `tekla-cli-contract.md` is a different word, not the tool (RTI-0005);
+# `tekla-cli.exe`, `tekla-cli.cmd` and `tekla-cli'` still count as mentions.
+_MENTION = re.compile(r"tekla-cli(?![-\w])", re.IGNORECASE)
 # Commands that only read or print their arguments. A tekla-cli mention after one of these
 # is data, not an invocation. Anything not listed here is treated as possibly executing.
 _INERT_COMMANDS = frozenset(

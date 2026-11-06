@@ -33,6 +33,8 @@ a subagent, and can deny the call.
 - Still unverified until the first real builder run: that `agent_type` is present in the
   payload of tool calls made inside the `builder` subagent. If it is missing, the builder is
   denied (safe), and the fix is in the hook, not in the agent prompt.
+- RTI-0005: a longer name such as `tekla-cli-contract.md` is not a mention of the tool, so
+  reading it with a non-inert command (`sed`, `python`) is allowed.
 
 ## Consequences
 

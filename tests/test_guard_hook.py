@@ -44,6 +44,8 @@ WRITE_COMMANDS = [
     'echo "`tekla-cli build`"',
     "git -c alias.x='!tekla-cli build' x",  # git aliases can run code
     "python -c \"import subprocess; subprocess.run(['tekla-cli', 'build'])\"",
+    "sed -n 'e tekla-cli build' x",  # sed `e` runs a shell command: sed is not inert
+    "bash -c 'tekla-cli.cmd build'",  # a shim name is still a mention
 ]
 
 # Commands that only mention the tool name as data. They must not be blocked, otherwise the
@@ -58,6 +60,9 @@ MENTION_ONLY_COMMANDS = [
     "Get-Content docs\\tekla-cli-contract.md",
     "cat bin/tekla-cli.exe",  # an exe path used as an argument is not an invocation
     "cat docs/tekla-cli-contract.md | head -20",
+    # RTI-0005: a file name that only contains the tool name, after a non-inert command.
+    "cd /repo && sed -n 1,40p docs/tekla-cli-contract.md; echo ----; sed -n 1,30p docs/roadmap.md",
+    "uv run python -I scripts/check.py docs/tekla-cli-contract.md",
 ]
 
 READ_COMMANDS = [

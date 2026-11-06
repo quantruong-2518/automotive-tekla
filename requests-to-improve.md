@@ -44,3 +44,18 @@ Severity: `critical` · `major` · `minor`.
 - Root cause: text decodes "successfully" into garbage; not detected by the fallback chain.
 - Proposed fix: detect encoding from text style font names; convert to Unicode deterministically.
 - Regression test: fixture with `.VnTime` text → correct Unicode output.
+
+## RTI-0005 — Write guard blocks reading a file whose name contains `tekla-cli`
+
+- Source: main session, 2026-11-06 (`sed -n 1,40p docs/tekla-cli-contract.md` was denied)
+- Classification: tooling · Severity: minor · Status: **done** (Unreleased; engineer approved the fix 2026-11-06)
+- Root cause: in a segment whose command word is not on the inert list (`sed`, `python`, …),
+  any `tekla-cli` substring counted as an unparsed invocation, so a file name such as
+  `tekla-cli-contract.md` was treated as a write. ADR-0004 says data mentions must pass.
+- Fix: the mention regex ignores `tekla-cli` followed by `-` or a word character (a longer,
+  different name). `sed` stays off the inert list: its `e` command runs shell code.
+- Regression test: `tests/test_guard_hook.py` — the denied command and a
+  `python … docs/tekla-cli-contract.md` call pass; `sed -n 'e tekla-cli build'` and
+  `bash -c 'tekla-cli.cmd build'` stay denied.
+- Known limit (unchanged): a heredoc or inline script that contains the bare word `tekla-cli`
+  is still denied; write such text with the Edit/Write tools instead.

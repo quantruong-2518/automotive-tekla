@@ -29,5 +29,7 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
   relying on an undocumented `onFailure` setting; the setting was removed.
 - `guard_tekla_write.py` no longer blocks commands that only mention `tekla-cli` as data
   (`cat`, `grep`, `git commit -m`), and no longer lets a read hide a later unparsed write.
+- Write guard no longer denies commands that only name a file containing `tekla-cli`
+  (e.g. `sed -n 1,40p docs/tekla-cli-contract.md`); RTI-0005.
 - `workflow.md`: the lot loop is strictly sequential (lot n+1 waits for gate 4 of lot n).
 - Added `PowerShell(...)` allow rules matching the existing `Bash(...)` ones.
