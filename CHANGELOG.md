@@ -20,6 +20,9 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
 - Step 1 S1: `harness detect` (format from file bytes, DWG version, sha256, extension mismatch
   warnings) and the `readlog` builder (timed attempts, refuses silent failures, validates
   before writing).
+- Step 1 S2: `harness dwg2dxf` — ODA File Converter, then LibreDWG `dwg2dxf` (ADR-0005).
+  Success requires a DXF that ezdxf opens; fallback caps confidence at `medium`; no converter
+  at all exits 3. Runtime dependency `ezdxf` (MIT) added: the DXF reader for all later slices.
 
 ### Fixed
 - `guard_tekla_write.py` now exits 2 (the blocking code) on any internal error instead of

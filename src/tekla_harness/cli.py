@@ -13,6 +13,7 @@ import sys
 from pathlib import Path
 
 from tekla_harness import __version__
+from tekla_harness.convert import DEFAULT_TIMEOUT_S, NoConverterError, dwg_to_dxf
 from tekla_harness.detect import detect_file, iter_input_files
 from tekla_harness.schemas import SCHEMA_NAMES, validate
 
@@ -59,6 +60,33 @@ def _cmd_detect(args: argparse.Namespace) -> int:
     return EXIT_INVALID if errors else EXIT_OK
 
 
+def _cmd_dwg2dxf(args: argparse.Namespace) -> int:
+    try:
+        result = dwg_to_dxf(
+            Path(args.dwg),
+            Path(args.out_dir),
+            oda=[args.oda] if args.oda else None,
+            dwg2dxf=[args.dwg2dxf] if args.dwg2dxf else None,
+            timeout=args.timeout,
+        )
+    except NoConverterError as exc:
+        print(str(exc), file=sys.stderr)
+        return EXIT_ENV
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return EXIT_USAGE
+    out = {
+        "dwg": str(result.dwg),
+        "dxf": str(result.dxf) if result.dxf else None,
+        "converter": result.converter,
+        "confidence_cap": result.confidence_cap,
+        "attempts": [a.as_dict() for a in result.attempts],
+        "warnings": result.warnings,
+    }
+    print(json.dumps(out, ensure_ascii=False, indent=2))
+    return EXIT_OK if result.dxf else EXIT_INVALID
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="harness", description="Tekla AI Harness tooling")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
@@ -72,6 +100,14 @@ def build_parser() -> argparse.ArgumentParser:
     p_det = sub.add_parser("detect", help="identify input file formats from their bytes and hash them")
     p_det.add_argument("paths", nargs="+", help="files or folders (walked recursively)")
     p_det.set_defaults(func=_cmd_detect)
+
+    p_dwg = sub.add_parser("dwg2dxf", help="convert one DWG to DXF: ODA, then LibreDWG (ADR-0005)")
+    p_dwg.add_argument("dwg")
+    p_dwg.add_argument("--out-dir", required=True, help="must not be inside the input folder")
+    p_dwg.add_argument("--oda", help="ODAFileConverter executable (default: $HARNESS_ODA_CONVERTER, PATH)")
+    p_dwg.add_argument("--dwg2dxf", help="LibreDWG dwg2dxf executable (default: $HARNESS_DWG2DXF, PATH)")
+    p_dwg.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT_S, help="seconds per converter")
+    p_dwg.set_defaults(func=_cmd_dwg2dxf)
 
     p_env = sub.add_parser("env-check", help="report whether this machine can run the harness")
     p_env.set_defaults(func=_cmd_env_check)
