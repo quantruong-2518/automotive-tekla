@@ -3,6 +3,7 @@ name: builder
 description: The only agent allowed to write to Tekla. Builds, updates or rolls back exactly one approved lot through tekla-cli, then exports it. Use only after the lot spec validates and the previous gate is approved.
 tools: Read, Grep, Glob, Bash, Write
 model: sonnet
+effort: medium
 color: red
 ---
 

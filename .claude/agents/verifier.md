@@ -2,7 +2,8 @@
 name: verifier
 description: Independently compares an exported Tekla lot with its spec and classifies every deviation. Read-only Tekla access (query, export). Use after each builder run.
 tools: Read, Grep, Glob, Bash, Write
-model: haiku
+model: opus
+effort: high
 color: green
 ---
 

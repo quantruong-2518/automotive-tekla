@@ -2,7 +2,8 @@
 name: reporter
 description: Writes lot and phase reports for the engineer and turns engineer feedback into requests-to-improve entries. Never touches Tekla.
 tools: Read, Grep, Glob, Bash, Write, Edit
-model: haiku
+model: sonnet
+effort: medium
 color: yellow
 ---
 

@@ -17,16 +17,17 @@ Claude Code (orchestrator, main session)
 
 ## Agents
 
-| Agent | Role | Tekla access | Outputs | Suggested model |
+| Agent | Role | Tekla access | Outputs | Model / effort |
 |---|---|---|---|---|
 | orchestrator | State, commands, delegation, stops at gates | none directly | `project-state.json` | main session |
-| `doc-reader` | Read, analyse, matrix, extract spec | none | `01-analysis.md`, `04-info-matrix.csv`, `lots/n/spec.json`, `questions.md` | opus |
-| `planner` | Plan, approach, sequence | `info`, `validate` | `02-plan.md`, `03-approach.md`, `05-sequence.md` | opus |
-| `builder` | Build, update, roll back per lot | `build`, `update`, `rollback`, `export` | model lot n, build log | sonnet |
-| `verifier` | Compare model to spec, independent of builder | `query`, `export` | `lots/n/issues.json` | haiku |
-| `reporter` | Lot and phase reports, feedback intake | none | `report.md`, `requests-to-improve.md` | haiku |
+| `doc-reader` | Read, analyse, matrix, extract spec | none | `01-analysis.md`, `04-info-matrix.csv`, `lots/n/spec.json`, `questions.md` | opus / high |
+| `planner` | Plan, approach, sequence | `info`, `validate` | `02-plan.md`, `03-approach.md`, `05-sequence.md` | opus / high |
+| `builder` | Build, update, roll back per lot | `build`, `update`, `rollback`, `export` | model lot n, build log | sonnet / medium |
+| `verifier` | Compare model to spec, independent of builder | `query`, `export` | `lots/n/issues.json` | opus / high |
+| `reporter` | Lot and phase reports, feedback intake | none | `report.md`, `requests-to-improve.md` | sonnet / medium |
 
-Model choices are starting points; the benchmark decides.
+Tiers follow the `delegating-work` skill: Opus reasons, plans and reviews (the verifier is a
+review); Sonnet executes. These are starting points; the benchmark decides.
 
 ## Safety layers
 
