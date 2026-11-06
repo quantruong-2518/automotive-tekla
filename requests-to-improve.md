@@ -11,7 +11,7 @@ Severity: `critical` · `major` · `minor`.
 ## RTI-0001 — No drawing inventory or revision control at intake
 
 - Source: flow review, 2026-11-06 (Flow I)
-- Classification: process · Severity: critical · Status: **proposed**
+- Classification: process · Severity: critical · Status: **approved** (engineer, 2026-11-06)
 - Root cause: step 1 copies files without checking the sheet list, revisions or duplicates.
 - Proposed fix: deterministic `inventory` step (hash, sheet no./rev/date from title block,
   compare with drawing list); lock `input/` by hash; a separate "new revision" flow.
@@ -21,7 +21,7 @@ Severity: `critical` · `major` · `minor`.
 ## RTI-0002 — Confidence assigned per file format instead of per value
 
 - Source: flow review, 2026-11-06 (Flow I)
-- Classification: reading · Severity: critical · Status: **proposed** (schema support already in v0)
+- Classification: reading · Severity: critical · Status: **approved** (engineer, 2026-11-06; schema support already in v0)
 - Root cause: fallback table rates DXF "High" regardless of dimension overrides, mixed scales,
   missing xrefs, units.
 - Proposed fix: per-value `provenance` + `confidence` (done in `schemas/common.schema.json`);
@@ -31,7 +31,7 @@ Severity: `critical` · `major` · `minor`.
 ## RTI-0003 — Grids and levels reach planning without human confirmation
 
 - Source: flow review, 2026-11-06 (Flow I)
-- Classification: process · Severity: critical · Status: **proposed**
+- Classification: process · Severity: critical · Status: **approved** (engineer, 2026-11-06)
 - Root cause: grids/levels are extracted inside the large analysis step and flow straight into the plan.
 - Proposed fix: deterministic `grids.json` / `levels.json`; mandatory section with a rendered
   grid plan in gate 1.
@@ -40,7 +40,7 @@ Severity: `critical` · `major` · `minor`.
 ## RTI-0004 — Legacy Vietnamese font encodings (TCVN3/VNI) in DWG/DXF
 
 - Source: flow review, 2026-11-06 (Flow I)
-- Classification: reading · Severity: major · Status: **proposed**
+- Classification: reading · Severity: major · Status: **approved** (engineer, 2026-11-06)
 - Root cause: text decodes "successfully" into garbage; not detected by the fallback chain.
 - Proposed fix: detect encoding from text style font names; convert to Unicode deterministically.
 - Regression test: fixture with `.VnTime` text → correct Unicode output.

@@ -22,10 +22,25 @@ pass, not when its code exists.
 - [x] `guard_tekla_write.py`, `session_env_check.py` + tests
 - [x] Schemas v0 + examples + `harness validate`
 - [ ] Run `scripts/setup.ps1` on the Tekla machine and confirm `harness env-check`
-- [ ] Engineer approves the flow-review proposals (see `requests-to-improve.md`)
+  (still open; the engineer decided on 2026-11-06 to start Step 1 in parallel, since Step 1
+  does not touch Tekla)
+- [x] Engineer approves the flow-review proposals: RTI-0001…0004 approved 2026-11-06
+
+## Step 1 — plan (DWG first, by engineer decision)
+
+Each slice: tests first, then one commit.
+
+1. S1 `detect_input` + sha256 + read-log builder validated against the schema (RTI-0001 hashing).
+2. S2 `dwg_to_dxf`: ODA → LibreDWG fallback chain ([ADR-0005](decisions/0005-dwg-converter-chain.md)).
+3. S3 minimal `read_dxf` + RTI-0002 checks (`$INSUNITS`, overridden dimension text, xrefs, scales).
+4. S4 TCVN3/VNI → Unicode (RTI-0004).
+5. Then title-block inventory and grids/levels (RTI-0001, RTI-0003), and the tier-1 skill last.
 
 ## Open before later steps
 
 - Exact Tekla version (with SP) — before Step 3.
 - Benchmark set with answer models — before Step 2.
-- Licence terms of ODA File Converter for commercial use — before Step 1.
+- Licence terms of ODA File Converter for commercial use — the engineer chose ODA with a
+  LibreDWG fallback (ADR-0005); written licence confirmation still needed before a client run.
+- PyMuPDF licence (AGPL-3 or commercial) — decide before the PDF slice.
+- 1–2 sample DWG files that are not client data — needed to prove the DWG path for real.
