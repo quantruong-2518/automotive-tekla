@@ -46,6 +46,25 @@ This file is tool-agnostic. Claude-specific notes live in `CLAUDE.md`.
 - Commits follow Conventional Commits (`feat:`, `fix:`, `docs:`, `chore:`, `test:`).
 - Smallest change that solves the task. No drive-by refactors.
 
+## Skills
+
+A skill holds the procedure; this file holds the rules. When they conflict, this file wins.
+Several rows match → apply them in table order (safety and gates always come first).
+A skill not installed on this machine is no blocker: follow the row's intent and say so.
+User-invoked skills (`/name`) only the engineer can run: suggest them, do not imitate them.
+
+| When | Skill | Repo-specific rule |
+|---|---|---|
+| Before any `git commit` | `commit` (project) | — |
+| Non-trivial code change | `karpathy-guidelines` | — |
+| Creating or editing a skill, agent definition, `AGENTS.md`, `CLAUDE.md` | `writing-for-agents`; `skill-creator` to evaluate a new skill | Needs engineer approval (principle 7). |
+| Bug not fixed by the first obvious attempt, or a failure you cannot reproduce on demand | `diagnosing-bugs` | Its regression test is the one every bug fix ships with. |
+| Fact that must come from a primary source | `research` | Tekla Open API → `tekla/api-notes.md` (Tekla version + source per note). Anything else → `docs/research/<topic>.md`. |
+| Library API lookup | `context7` (Python and other libraries), `microsoft-docs` (.NET, C#, Windows) | Neither covers Tekla Open API: use principle 8 sources. |
+| Engineer decision with several dependent open branches (a gate, a threshold, a flow) | `grilling` (engineer: `/grill-me`) | Rounds in Vietnamese; every answer recorded in an ADR, RTI or `docs/roadmap.md` before acting. |
+| Harness decision only a person outside the session can answer (licence, Tekla version, company UDA names) | `/to-questionnaire` | Save to `docs/questionnaires/`, prose in the recipient's language. Drawing questions in a project run go to `questions.md` instead. |
+| Session near its context limit, or work continues in a new session | `/handoff` | — |
+
 ## Where things live
 
 | Need | Location |
