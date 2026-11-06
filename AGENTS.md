@@ -55,6 +55,7 @@ User-invoked skills (`/name`) only the engineer can run: suggest them, do not im
 
 | When | Skill | Repo-specific rule |
 |---|---|---|
+| Before spawning any subagent, or changing an agent's `model`/`effort` | `delegating-work` | Project agents in `.claude/agents/` keep their own frontmatter; only `builder` writes to Tekla, whatever the tier. |
 | Before any `git commit` | `commit` (project) | — |
 | Non-trivial code change | `karpathy-guidelines` | — |
 | Creating or editing a skill, agent definition, `AGENTS.md`, `CLAUDE.md` | `writing-for-agents`; `skill-creator` to evaluate a new skill | Needs engineer approval (principle 7). |
