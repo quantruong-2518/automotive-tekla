@@ -36,6 +36,28 @@ WRITE_COMMANDS = [
     "tekla-cli delete-everything",  # unknown subcommand: fail closed
     "tekla-cli --lot 1 build",  # option before subcommand: contract violation, fail closed
     'tekla-cli build "unterminated',
+    "bash -c 'tekla-cli build --lot 1'",
+    "env tekla-cli build --lot 1",
+    "FOO=1 tekla-cli build --lot 1",
+    "tekla-cli info; bash -c 'tekla-cli build --lot 1'",  # a read must not hide a later write
+    'git commit -m "$(tekla-cli build --lot 1)"',  # substitution runs even inside double quotes
+    'echo "`tekla-cli build`"',
+    "git -c alias.x='!tekla-cli build' x",  # git aliases can run code
+    "python -c \"import subprocess; subprocess.run(['tekla-cli', 'build'])\"",
+]
+
+# Commands that only mention the tool name as data. They must not be blocked, otherwise the
+# main session cannot read the docs or commit work about the tool.
+MENTION_ONLY_COMMANDS = [
+    "cat docs/tekla-cli-contract.md",
+    "grep -rn tekla-cli docs/",
+    'git commit -m "docs: update tekla-cli contract"',
+    'git log --grep="tekla-cli"',
+    "git diff -- docs/tekla-cli-contract.md",
+    'echo "tekla-cli build is reserved for the builder"',
+    "Get-Content docs\\tekla-cli-contract.md",
+    "cat bin/tekla-cli.exe",  # an exe path used as an argument is not an invocation
+    "cat docs/tekla-cli-contract.md | head -20",
 ]
 
 READ_COMMANDS = [
@@ -65,6 +87,12 @@ def test_builder_gets_no_decision(guard, command):
 @pytest.mark.parametrize("command", READ_COMMANDS)
 @pytest.mark.parametrize("agent", [None, "planner", "verifier"])
 def test_reads_pass(guard, command, agent):
+    assert guard.decide(payload(command, agent)) is None
+
+
+@pytest.mark.parametrize("command", MENTION_ONLY_COMMANDS)
+@pytest.mark.parametrize("agent", [None, "planner", "builder"])
+def test_mention_only_is_not_blocked(guard, command, agent):
     assert guard.decide(payload(command, agent)) is None
 
 
@@ -106,12 +134,16 @@ def test_script_end_to_end():
     assert allowed.stdout == ""
 
 
-def test_script_crashes_on_garbage_input():
-    """A crash must be non-zero so `onFailure: block` blocks the call."""
+@pytest.mark.parametrize("stdin", ["not json", "[1, 2]", '"a string"', "42"])
+def test_script_fails_closed_on_bad_input(stdin):
+    """Claude Code blocks a tool call only on exit code 2 (other non-zero codes are
+    non-blocking errors), so every internal failure must exit exactly 2."""
     result = subprocess.run(
         [sys.executable, str(HOOKS / "guard_tekla_write.py")],
-        input="not json",
+        input=stdin,
         capture_output=True,
         text=True,
     )
-    assert result.returncode != 0
+    assert result.returncode == 2
+    assert "blocking the call" in result.stderr
+    assert result.stdout == ""

@@ -14,8 +14,25 @@ a subagent, and can deny the call.
 - A project `PreToolUse` hook on `Bash|PowerShell` parses every command for `tekla-cli`
   invocations. Any subcommand not in the read allowlist is a write. A write from any agent
   other than `builder` (including the main session) is denied.
-- The hook is set to `onFailure: "block"`: if it crashes or times out, the call is blocked.
+- The hook fails closed by itself: any internal error (bad stdin, unexpected payload) exits
+  with code 2, the blocking exit code. It does not rely on a settings field (see Amendment).
+- Commands that only mention `tekla-cli` as data (`cat docs/tekla-cli-contract.md`,
+  `git commit -m "..."`, `grep`) are allowed. A segment is skipped only if its command word
+  is on a short inert list and the command has no `$(` or backtick substitution.
 - Writes from `builder` still hit a `permissions.ask` rule, so the engineer confirms each one.
+
+## Amendment (2026-11-06, review)
+
+- The first version relied on `onFailure: "block"`. That field is not in the Claude Code hooks
+  documentation we checked, and a crash exited with code 1, which Claude Code treats as a
+  non-blocking error. The field was removed; the script now exits 2 on any failure.
+- The first version blocked every command containing the text `tekla-cli`, including reading
+  its own contract. It now parses per command segment (see Decision).
+- Still unverified: the hook timeout behaviour (a timeout is probably non-blocking). The script
+  is tiny and has no I/O besides stdin; re-check the docs before relying on it.
+- Still unverified until the first real builder run: that `agent_type` is present in the
+  payload of tool calls made inside the `builder` subagent. If it is missing, the builder is
+  denied (safe), and the fix is in the hook, not in the agent prompt.
 
 ## Consequences
 

@@ -32,7 +32,7 @@ Model choices are starting points; the benchmark decides.
 
 | # | Layer | Enforced by | Failure mode |
 |---|---|---|---|
-| 1 | Only `builder` runs `tekla-cli` writes | `PreToolUse` hook reading `agent_type` | fails closed (`onFailure: block`) |
+| 1 | Only `builder` runs `tekla-cli` writes | `PreToolUse` hook reading `agent_type` | fails closed (hook exits 2 on any error) |
 | 2 | Engineer confirms each write command | `permissions.ask` rules | prompt in main session |
 | 3 | Subagent tool scope | `tools` in agent frontmatter | tool absent |
 | 4 | Model copy + backup + tags | `tekla-cli` itself (Step 3) | command refuses to run |
