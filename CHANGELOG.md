@@ -17,6 +17,9 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
 - JSON Schemas v0: `spec`, `project-state`, `read-log`, shared `common` (provenance, confidence).
 - `tekla_harness` CLI: `harness validate`, `harness env-check`.
 - CI on Windows and Ubuntu: ruff, pyright, pytest.
+- Step 1 S1: `harness detect` (format from file bytes, DWG version, sha256, extension mismatch
+  warnings) and the `readlog` builder (timed attempts, refuses silent failures, validates
+  before writing).
 
 ### Fixed
 - `guard_tekla_write.py` now exits 2 (the blocking code) on any internal error instead of

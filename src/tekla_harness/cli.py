@@ -13,6 +13,7 @@ import sys
 from pathlib import Path
 
 from tekla_harness import __version__
+from tekla_harness.detect import detect_file, iter_input_files
 from tekla_harness.schemas import SCHEMA_NAMES, validate
 
 EXIT_OK, EXIT_INVALID, EXIT_USAGE, EXIT_ENV = 0, 1, 2, 3
@@ -47,6 +48,17 @@ def _cmd_env_check(_: argparse.Namespace) -> int:
     return EXIT_OK if ok else EXIT_ENV
 
 
+def _cmd_detect(args: argparse.Namespace) -> int:
+    files, errors = [], []
+    for path in iter_input_files(Path(p) for p in args.paths):
+        try:
+            files.append(detect_file(path))
+        except OSError as exc:
+            errors.append({"path": str(path), "message": str(exc)})
+    print(json.dumps({"files": files, "errors": errors}, ensure_ascii=False, indent=2))
+    return EXIT_INVALID if errors else EXIT_OK
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="harness", description="Tekla AI Harness tooling")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
@@ -56,6 +68,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_val.add_argument("schema", choices=[n for n in SCHEMA_NAMES if n != "common"])
     p_val.add_argument("files", nargs="+")
     p_val.set_defaults(func=_cmd_validate)
+
+    p_det = sub.add_parser("detect", help="identify input file formats from their bytes and hash them")
+    p_det.add_argument("paths", nargs="+", help="files or folders (walked recursively)")
+    p_det.set_defaults(func=_cmd_detect)
 
     p_env = sub.add_parser("env-check", help="report whether this machine can run the harness")
     p_env.set_defaults(func=_cmd_env_check)
