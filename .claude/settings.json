@@ -1,13 +1,10 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
-  "language": "vietnamese",
   "env": {
     "PYTHONUTF8": "1",
     "PYTHONIOENCODING": "utf-8"
   },
   "permissions": {
-    "defaultMode": "default",
-    "disableBypassPermissionsMode": "disable",
     "allow": [
       "Bash(uv run pytest)",
       "Bash(uv run pytest *)",
@@ -20,7 +17,28 @@
       "Bash(tekla-cli validate *)",
       "Bash(tekla-cli query *)",
       "Bash(tekla-cli selected *)",
-      "Bash(tekla-cli export *)"
+      "Bash(tekla-cli export *)",
+      "PowerShell(uv run pytest)",
+      "PowerShell(uv run pytest *)",
+      "PowerShell(uv run ruff *)",
+      "PowerShell(uv run harness *)",
+      "PowerShell(git status)",
+      "PowerShell(git diff *)",
+      "PowerShell(git log *)",
+      "PowerShell(tekla-cli info *)",
+      "PowerShell(tekla-cli validate *)",
+      "PowerShell(tekla-cli query *)",
+      "PowerShell(tekla-cli selected *)",
+      "PowerShell(tekla-cli export *)"
+    ],
+    "deny": [
+      "Read(./.env)",
+      "Read(./.env.*)",
+      "Edit(**/*.db1)",
+      "Edit(**/*.db2)",
+      "Bash(git push --force *)",
+      "Bash(git push -f *)",
+      "Bash(git reset --hard *)"
     ],
     "ask": [
       "Bash(tekla-cli build *)",
@@ -32,17 +50,8 @@
       "Bash(git push *)",
       "Bash(git commit *)"
     ],
-    "deny": [
-      "Read(./.env)",
-      "Read(./.env.*)",
-      "Edit(**/*.db1)",
-      "Write(**/*.db1)",
-      "Edit(**/*.db2)",
-      "Write(**/*.db2)",
-      "Bash(git push --force *)",
-      "Bash(git push -f *)",
-      "Bash(git reset --hard *)"
-    ]
+    "defaultMode": "default",
+    "disableBypassPermissionsMode": "disable"
   },
   "hooks": {
     "SessionStart": [
@@ -51,7 +60,9 @@
           {
             "type": "command",
             "command": "python",
-            "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/session_env_check.py"],
+            "args": [
+              "${CLAUDE_PROJECT_DIR}/.claude/hooks/session_env_check.py"
+            ],
             "timeout": 15
           }
         ]
@@ -64,25 +75,36 @@
           {
             "type": "command",
             "command": "python",
-            "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/guard_tekla_write.py"],
-            "timeout": 10,
-            "onFailure": "block"
+            "args": [
+              "${CLAUDE_PROJECT_DIR}/.claude/hooks/guard_tekla_write.py"
+            ],
+            "timeout": 10
           }
         ]
       }
     ]
   },
-  "extraKnownMarketplaces": {
-    "claude-plugins-official": {
-      "source": { "source": "github", "repo": "anthropics/claude-plugins-official" }
-    },
-    "karpathy-skills": {
-      "source": { "source": "github", "repo": "forrestchang/andrej-karpathy-skills" }
-    }
-  },
   "enabledPlugins": {
     "andrej-karpathy-skills@karpathy-skills": true,
     "pyright-lsp@claude-plugins-official": true,
-    "csharp-lsp@claude-plugins-official": true
-  }
+    "csharp-lsp@claude-plugins-official": true,
+    "skill-creator@claude-plugins-official": true,
+    "microsoft-docs@claude-plugins-official": true,
+    "context7@claude-plugins-official": true
+  },
+  "extraKnownMarketplaces": {
+    "claude-plugins-official": {
+      "source": {
+        "source": "github",
+        "repo": "anthropics/claude-plugins-official"
+      }
+    },
+    "karpathy-skills": {
+      "source": {
+        "source": "github",
+        "repo": "forrestchang/andrej-karpathy-skills"
+      }
+    }
+  },
+  "language": "vietnamese"
 }

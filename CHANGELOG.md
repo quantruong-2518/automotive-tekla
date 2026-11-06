@@ -16,4 +16,12 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
 - `session_env_check.py` SessionStart hook: reports remote session, missing `tekla-cli`, Python version.
 - JSON Schemas v0: `spec`, `project-state`, `read-log`, shared `common` (provenance, confidence).
 - `tekla_harness` CLI: `harness validate`, `harness env-check`.
-- CI on Windows and Ubuntu: ruff, pytest.
+- CI on Windows and Ubuntu: ruff, pyright, pytest.
+
+### Fixed
+- `guard_tekla_write.py` now exits 2 (the blocking code) on any internal error instead of
+  relying on an undocumented `onFailure` setting; the setting was removed.
+- `guard_tekla_write.py` no longer blocks commands that only mention `tekla-cli` as data
+  (`cat`, `grep`, `git commit -m`), and no longer lets a read hide a later unparsed write.
+- `workflow.md`: the lot loop is strictly sequential (lot n+1 waits for gate 4 of lot n).
+- Added `PowerShell(...)` allow rules matching the existing `Bash(...)` ones.
