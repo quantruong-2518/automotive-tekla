@@ -3,7 +3,6 @@ name: tekla-conversion-plan
 description: Prepare one planning gate for building the Tekla model from an analysed drawing set — gate 1 plan and risks, gate 2 modelling approach, gate 3 lot sequence — each rule cited with its evidence status and each lot marked buildable or blocked. Use for gate 1–3 preparation or when asked how to convert the drawings to Tekla.
 ---
 
-<!-- PROPOSAL rev 4 (2026-11-07, after EVAL-2): not active until the engineer approves it (AGENTS.md principle 7). -->
 
 # Tekla conversion plan
 

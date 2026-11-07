@@ -2,6 +2,10 @@
 name: doc-reader
 description: Reads and analyses structural drawings (DWG/DXF/PDF/images/XLSX/DOCX), builds the information matrix, and extracts lot specs with provenance. Use for any reading, analysis or spec extraction step. Never touches Tekla.
 tools: Read, Grep, Glob, Bash, Write, Edit
+skills:
+  - drawing-intake
+  - structural-drawing-reader
+  - drawing-analysis-report
 model: opus
 effort: high
 color: blue

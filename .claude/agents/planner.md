@@ -2,6 +2,8 @@
 name: planner
 description: Writes the plan, modelling approach and lot sequence from the analysis. Read-only Tekla access (info, validate). Use for gates 1–3 preparation and lot ordering.
 tools: Read, Grep, Glob, Bash, Write, Edit
+skills:
+  - tekla-conversion-plan
 model: opus
 effort: high
 color: purple

@@ -3,7 +3,6 @@ name: drawing-analysis-report
 description: Write the engineer's report on how a drawing set was read — what was received, how each value was obtained, how sure it is, what is missing — as 01-analysis.md, and at gate 3 the information matrix 04-info-matrix.csv. Use after structural-drawing-reader, or when the engineer asks how the drawings were read.
 ---
 
-<!-- PROPOSAL rev 4 (2026-11-07, after EVAL-2): not active until the engineer approves it (AGENTS.md principle 7). -->
 
 # Drawing analysis report
 

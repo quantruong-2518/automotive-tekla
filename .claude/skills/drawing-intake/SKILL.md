@@ -3,7 +3,6 @@ name: drawing-intake
 description: First pass over a project's drawing files — convert DWG, probe every DXF, log every read, run the extractors, and hand the engineer the first questions in questions.md. Use when a project's input/ folder is new or has changed, or when asked which input files are readable, partial or unreadable, or what the DWG converter did to them.
 ---
 
-<!-- PROPOSAL rev 4 (2026-11-07, after EVAL-2): not active until the engineer approves it (AGENTS.md principle 7). -->
 
 # Drawing intake
 

@@ -1,9 +1,8 @@
 ---
 name: structural-drawing-reader
-description: Expert reading of a structural drawing set after drawing-intake — sheet set, general notes, structural system, grid systems, levels, member marks and schedules — every judgement recorded as a finding tied to extracted entries, every gap a question. Use whenever the engineer asks what a drawing or sheet says, which sheet is which (đọc bản vẽ, phân loại các tờ, mặt bằng móng, chi tiết cột), what the general notes specify (mác bê tông, thép, lớp bảo vệ), whether beam or column marks on plans match the schedule (ký hiệu cấu kiện, bảng thống kê, schedule_only/plan_only), or to analyse a drawing set in projects/<id> for a Tekla model.
+description: Expert reading of a structural drawing set after drawing-intake — sheet set, general notes, structural system, grid systems, levels, member marks and schedules — every judgement recorded as a finding tied to extracted entries, every gap a question. Use whenever the engineer asks what a drawing or sheet says, which sheet is which (đọc bản vẽ, phân loại các tờ, mặt bằng móng, chi tiết cột, loại móng), which levels are storey levels and which are local (cao độ tầng, cao độ cục bộ), which grid axes the project uses (lưới trục), what the general notes specify (mác bê tông, thép, lớp bảo vệ), whether beam or column marks on plans match the schedule (ký hiệu cấu kiện, bảng thống kê, schedule_only/plan_only), or to analyse a drawing set in projects/<id> for a Tekla model.
 ---
 
-<!-- PROPOSAL rev 4 (2026-11-07, after EVAL-2): not active until the engineer approves it (AGENTS.md principle 7). -->
 
 # Structural drawing reader
 

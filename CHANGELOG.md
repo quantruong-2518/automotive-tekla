@@ -328,6 +328,14 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
 - `harness ask`: `units_answer_contradicts_evidence` is owned by grid-system (exact codes now win over
   another producer's prefix).
 
+- Drawing-reading skills active (engineer approval 2026-11-07, after EVAL-1, EVAL-2 and a
+  skill-creator trigger check): `drawing-intake`, `structural-drawing-reader`,
+  `drawing-analysis-report`, `tekla-conversion-plan` moved from `dwg-lab/proposals/skills/` to
+  `.claude/skills/`; registered in the AGENTS.md skills table; preloaded through `skills:` in
+  `.claude/agents/doc-reader.md` (first three) and `planner.md` (the plan). Trigger check, 2 runs per
+  query: intake 10/10 and 6/6 on fresh queries, reader 10/10 and 5/6, report 10/10, plan 10/10; no
+  near-miss triggered.
+
 ### Fixed
 - Reading toolchain, after an independent review of the EVAL-1 wave:
   - `harness marks`: a rotated header keyword (or one that is not a cell text) no longer crashes the run;
