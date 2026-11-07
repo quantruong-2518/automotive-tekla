@@ -33,7 +33,7 @@ Each slice: tests first, then one commit.
 1. S1 `detect_input` + sha256 + read-log builder validated against the schema (RTI-0001 hashing).
 2. S2 `dwg_to_dxf`: ODA → LibreDWG fallback chain ([ADR-0005](decisions/0005-dwg-converter-chain.md)).
    - S2b read cache for conversions ([ADR-0006](decisions/0006-memory-layers.md); design in
-     ADR-0007 from `docs/research/read-cache.md`).
+     ADR-0008 from `docs/research/read-cache.md`).
 3. S3 minimal `read_dxf` + RTI-0002 checks (`$INSUNITS`, overridden dimension text, xrefs, scales).
 4. S4 TCVN3/VNI → Unicode (RTI-0004).
 5. Then title-block inventory and grids/levels (RTI-0001, RTI-0003), and the tier-1 skill last.

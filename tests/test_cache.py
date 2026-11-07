@@ -1,4 +1,4 @@
-"""Content-addressed read cache (ADR-0007): keys, integrity, atomic writes, self-ignoring dir."""
+"""Content-addressed read cache (ADR-0008): keys, integrity, atomic writes, self-ignoring dir."""
 
 from __future__ import annotations
 

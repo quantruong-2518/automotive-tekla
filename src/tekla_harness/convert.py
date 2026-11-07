@@ -10,7 +10,7 @@ both run and hashed. UNVERIFIED: the ODA argument order below is from memory of 
 (input folder, output folder, version, type, recurse, audit, filter); check it against the
 installed version on the Tekla machine.
 
-With a ReadCache (ADR-0007), a conversion whose every attempt succeeded is recorded under an
+With a ReadCache (ADR-0008), a conversion whose every attempt succeeded is recorded under an
 action key built from everything that can change the result: the staged input's bytes, the
 converter chain (each command word that is a file by content digest, in order), the argument
 templates, the ezdxf version (the success oracle) and the source of the modules that produce

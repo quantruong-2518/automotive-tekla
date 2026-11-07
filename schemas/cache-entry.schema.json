@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:tekla-harness:schema:cache-entry:0.1",
   "title": "Read cache entry",
-  "description": "One action-cache entry (ADR-0007): the action key, the full key material, output blob digests, and the recorded result. Written last, after every blob exists; verified on every read.",
+  "description": "One action-cache entry (ADR-0008): the action key, the full key material, output blob digests, and the recorded result. Written last, after every blob exists; verified on every read.",
   "type": "object",
   "required": ["schema_version", "cache_format", "key", "action", "outputs", "result", "created_at"],
   "additionalProperties": false,

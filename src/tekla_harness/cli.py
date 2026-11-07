@@ -119,7 +119,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_dwg.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT_S, help="seconds per converter")
     p_dwg.add_argument(
         "--cache-dir",
-        help="project read cache (ADR-0007), e.g. projects/<id>/.cache; no cache when omitted",
+        help="project read cache (ADR-0008), e.g. projects/<id>/.cache; no cache when omitted",
     )
     p_dwg.add_argument("--refresh", action="store_true", help="ignore a cached result, recompute, overwrite")
     p_dwg.set_defaults(func=_cmd_dwg2dxf)

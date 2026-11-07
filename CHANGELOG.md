@@ -23,7 +23,7 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
 - Step 1 S2: `harness dwg2dxf` — ODA File Converter, then LibreDWG `dwg2dxf` (ADR-0005).
   Success requires a DXF that ezdxf opens; fallback caps confidence at `medium`; no converter
   at all exits 3. Runtime dependency `ezdxf` (MIT) added: the DXF reader for all later slices.
-- Step 1 S2b: per-project read cache (ADR-0006, ADR-0007). Content-addressed blobs plus an
+- Step 1 S2b: per-project read cache (ADR-0006, ADR-0008). Content-addressed blobs plus an
   action cache; key = SHA-256 over a domain tag and canonical JSON of input digest, converter
   chain by content digest, argument templates, ezdxf version and code digest. Every
   read is verified; corrupt or inconsistent entries are discarded; only clean successes (no

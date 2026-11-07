@@ -1,4 +1,4 @@
-# 0007. Read cache design: content-addressed, verified on every read
+# 0008. Read cache design: content-addressed, verified on every read
 
 - Status: accepted
 - Date: 2026-11-06

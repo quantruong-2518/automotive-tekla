@@ -1,4 +1,4 @@
-"""Content-addressed read cache (ADR-0006, ADR-0007).
+"""Content-addressed read cache (ADR-0006, ADR-0008).
 
 Two levels, as in the Bazel Remote Execution API and git:
 
