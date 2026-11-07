@@ -79,6 +79,40 @@ An Opus review found, and reproduced on NTFS (Windows build 26200) and in the gu
   invariant-globalization mode normalisation is not applied (not used on net48, where the CLI
   runs). The path is checked once per command; S4 re-checks it before `CommitChanges`.
 
+## Amendment 2 (2026-11-07, slice S1a and its independent review)
+
+Built from [`docs/research/windows-file-identity.md`](../research/windows-file-identity.md) and
+checked on real Windows (NTFS, .NET Framework 4.8). Rule 1 now allows a write only when all hold:
+
+1. The path-text guard passes (S1).
+2. Open model, working copy and original each resolve (`CreateFileW` with
+   `FILE_FLAG_BACKUP_SEMANTICS`, following reparse points) to a 128-bit `FILE_ID_INFO` that is not
+   all zeros or all ones, on NTFS or ReFS, on a fixed, removable or RAM drive.
+3. Open = working copy by identity; working copy ≠ original by identity.
+4. A folder whose final path is UNC cannot be proven different, so **both folders must be on
+   local drives**. An original on a server share is refused (open question for the engineer).
+5. No ancestor of either folder — from its final path and from its typed path — is the other.
+6. The working copy's typed path is its real path (final path equal ignoring case): subst and
+   mapped letters are per logon session, and Tekla reports the path from its own session. This
+   also refuses a copy typed through a junction (global, not per session): deliberate, so the
+   declared copy path is always the plain path. The original's typed drive letter must be its
+   real drive (second review: a subst letter may name another folder in another session);
+   junctions on the original's own drive stay allowed.
+7. Neither folder contains a reparse point (junction, symlink, mount point, and also cloud-sync
+   placeholders such as OneDrive Files-On-Demand: a model in a synced folder is refused), and
+   the working copy contains no file with more than one hard link (walk without following links). Reason: the review showed
+   `robocopy /E /SJ` copying a junction that still points into the original, and a write through
+   it landing in the original.
+
+Research steps not taken, with reason: no 64-bit file-index fallback (it can never prove
+"different", so it could only lead to the same refusal); no `VOLUME_NAME_GUID` retry (volumes
+without a drive letter are refused); handles are not held from check to write (S4 re-runs the
+check right before `CommitChanges`; a time-of-check gap remains and cannot be removed by this
+check); a third-party driver that reports "NTFS" on a local-looking letter is trusted (unverified).
+
+Not verified (needs admin rights or hardware not available): directory symlinks, mount points,
+ReFS, FAT/exFAT, volume shadow copies, Tekla multi-user models.
+
 ## Consequences
 
 - `tekla/README.md` layout is replaced by the table above.
