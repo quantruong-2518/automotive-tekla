@@ -15,6 +15,21 @@ public enum PathRefusal
     WorkingCopyAndOriginalNested,
     OpenIsOriginal,
     OpenIsNotWorkingCopy,
+
+    /// <summary>S1a: the OS could not tell which folder a path names, or its final path cannot be walked.</summary>
+    IdentityUnavailable,
+
+    /// <summary>S1a: the same path text named two different folders (replaced between lookups).</summary>
+    IdentityConflict,
+
+    /// <summary>S1a: the working copy path goes through subst, a junction or a mapped letter.</summary>
+    WorkingCopyPathIsAlias,
+
+    /// <summary>S1a: the original is declared through a drive letter other than its real one (subst/mapped).</summary>
+    OriginalPathIsAlias,
+
+    /// <summary>S1a: a junction, symlink, mount point (or, in the copy, a hard-linked file) inside a folder.</summary>
+    LinkInsideFolder,
 }
 
 /// <summary>Result of <see cref="ModelPathGuard.Check"/>.</summary>
@@ -121,6 +136,21 @@ internal sealed class WindowsPath
 
     /// <summary>Folder names as written, without empty and "." segments.</summary>
     public IReadOnlyList<string> Segments { get; }
+
+    /// <summary>Canonical text: upper-case drive, backslashes, no trailing separator.</summary>
+    public override string ToString() => Drive + @":\" + string.Join(@"\", Segments);
+
+    /// <summary>Typed parent folders as <c>\\?\</c> paths, from the drive root down, excluding this folder.</summary>
+    public IEnumerable<string> LongAncestors()
+    {
+        var current = @"\\?\" + Drive + @":\";
+        yield return current;
+        for (var i = 0; i < Segments.Count - 1; i++)
+        {
+            current = i == 0 ? current + Segments[i] : current + @"\" + Segments[i];
+            yield return current;
+        }
+    }
 
     public static bool TryParse(string? raw, out WindowsPath? path, out string reason)
     {

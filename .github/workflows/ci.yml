@@ -54,7 +54,11 @@ jobs:
         with:
           global-json-file: tekla/global.json
       - run: dotnet build TeklaHarness.slnx -c Release
-      - name: Test on net10.0
+      - name: Test on net10.0 (Linux, no Windows file-system tests)
+        if: runner.os != 'Windows'
+        run: dotnet test TeklaCore.Tests -c Release --no-build -f net10.0 --filter "Category!=Windows"
+      - name: Test on net10.0 (Windows, all tests)
+        if: runner.os == 'Windows'
         run: dotnet test TeklaCore.Tests -c Release --no-build -f net10.0
       - name: Test on net48 (Windows only)
         if: runner.os == 'Windows'

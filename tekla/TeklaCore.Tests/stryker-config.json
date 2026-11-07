@@ -1,0 +1,10 @@
+{
+  "stryker-config": {
+    "target-framework": "net10.0",
+    "test-case-filter": "Category!=Windows",
+    "mutate": [
+      "!**/Win32FolderResolver.cs"
+    ],
+    "reporters": [ "json", "progress" ]
+  }
+}
