@@ -38,9 +38,33 @@ Each slice: tests first, then one commit.
 4. S4 TCVN3/VNI → Unicode (RTI-0004).
 5. Then title-block inventory and grids/levels (RTI-0001, RTI-0003), and the tier-1 skill last.
 
+## Step 3 — plan (started in parallel with Step 1, by engineer decision)
+
+The engineer decided on 2026-11-07 to start Step 3 before Steps 1–2 are done: the Tekla-free
+part is written and tested on the development machine (WSL, .NET SDK in `~/.dotnet`); anything
+that runs against Tekla waits for the Tekla machine. Layout and build/test rules:
+[ADR-0009](decisions/0009-tekla-dotnet-layout.md). Behaviour: [ADR-0007](decisions/0007-tekla-cli-failure-backup-and-tags.md),
+[`tekla-cli-contract.md`](tekla-cli-contract.md). Each slice: tests first (proved red on a stub),
+mutation testing, independent review, then one commit.
+
+| Slice | Content | Runs where |
+|---|---|---|
+| S1 | Solution scaffold; `TeklaCore` exit codes and model-path guard (contract rule 1); .NET CI job | dev machine + CI |
+| S1b | Spec loading and validation (single source of truth decided first) | dev machine + CI |
+| S1c | Run journal (schema) and resume planner (contract rule 6) | dev machine + CI |
+| S2 | `TeklaAdapter` over the Open API (compiles here, runs on the Tekla machine) | compile here |
+| S3 | `tekla-cli` read commands: `info`, `validate`, `query`, `selected` | Tekla machine to run |
+| S4 | Write commands, backup macro, tag `objects.inp` | Tekla machine to run |
+| S5 | Integration tests on the test model (RTI-0007); the 19 checks in `tekla/api-notes.md` | Tekla machine only |
+
+Step 3 is done only when S5 passes on Tekla 2024.
+
 ## Open before later steps
 
-- Exact Tekla version (with SP) — before Step 3.
+- Tekla version: **2024 Diamond** (engineer, 2026-11-06); NuGet pinned to 2024.0.4 whatever the
+  service pack (`tekla/api-notes.md`). Still open for S5: who runs the Tekla machine, when, and
+  an empty test model.
+- Resume "differs" tolerance (points, mm) for contract rule 6 — engineer value, before S1c.
 - Benchmark set with answer models — before Step 2.
 - Licence terms of ODA File Converter for commercial use — the engineer chose ODA with a
   LibreDWG fallback (ADR-0005); written licence confirmation still needed before a client run.
