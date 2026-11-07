@@ -59,3 +59,22 @@ Severity: `critical` · `major` · `minor`.
   `bash -c 'tekla-cli.cmd build'` stay denied.
 - Known limit (unchanged): a heredoc or inline script that contains the bare word `tekla-cli`
   is still denied; write such text with the Edit/Write tools instead.
+
+## RTI-0006 — Write guard does not see the CLI under its default .NET build name
+
+- Source: review of `tekla/api-notes.md`, 2026-11-06
+- Classification: tooling · Severity: critical · Status: **done** (Unreleased; approved by the engineer 2026-11-07, both layers; ADR-0007)
+- Root cause: the guard recognises only the executable name `tekla-cli(.exe)`. An SDK-style
+  `TeklaCli.csproj` builds `TeklaCli.exe` by default, and `dotnet run --project tekla/TeklaCli -- build`
+  never names the exe. Today both `TeklaCli.exe build --lot 1` and that `dotnet run` call get
+  no decision from the guard, so the main session could write to Tekla.
+- Proposed fix: (1) contract: "the executable is named `tekla-cli.exe` (`AssemblyName`
+  `tekla-cli`); agents never invoke it through `dotnet run`/`dotnet exec`" (the csproj in
+  `tekla/api-notes.md` already sets `AssemblyName`); (2) hook: also treat `teklacli(.exe)`
+  and `dotnet run|exec` aimed at the CLI project as invocations (fail closed).
+- Regression test: `TeklaCli.exe build --lot 1` and `dotnet run --project tekla/TeklaCli -- build`
+  are denied outside `builder`.
+- Done: contract names the exe and forbids the dotnet routes; the hook matches `tekla[-_]?cli`
+  and denies any `dotnet run|exec|watch` (`tests/test_guard_hook.py`, RTI-0006 cases).
+- Open (not in this fix): `dotnet test` of a future `TeklaCore.Tests` project would reach the
+  Tekla API outside `builder`; decide in Step 3 how integration tests are allowed to run.

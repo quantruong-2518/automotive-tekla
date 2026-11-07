@@ -16,6 +16,10 @@ Mentions of `tekla-cli` that are only data (`cat docs/tekla-cli-contract.md`,
 `git commit -m "..."`, `grep tekla-cli`) are not invocations. A segment whose command word
 is on the inert list is skipped, unless the command contains `$(` or a backtick, which can
 run code even inside double quotes.
+
+The CLI is also recognised under its .NET project name (`TeklaCli.exe`), and any
+`dotnet run|exec|watch` counts as a write, because it can start the CLI without naming it
+(RTI-0006, ADR-0007). `dotnet build|restore|clean` stay allowed.
 """
 
 from __future__ import annotations
@@ -31,19 +35,26 @@ READ_SUBCOMMANDS = frozenset(
 )
 SHELL_TOOLS = frozenset({"Bash", "PowerShell"})
 
-# Executable name: tekla-cli or tekla-cli.exe, optionally with a Windows or POSIX path.
-_EXE = re.compile(r"(?:^|[\\/])tekla-cli(?:\.exe)?$", re.IGNORECASE)
-# Mentions of tekla-cli that the tokenizer might miss (e.g. inside $(...) or & "...").
+# Executable name: tekla-cli(.exe), optionally with a Windows or POSIX path. The .NET default
+# build names `TeklaCli.exe` / `tekla_cli` are matched too (RTI-0006), case-insensitive.
+_EXE = re.compile(r"(?:^|[\\/])tekla[-_]?cli(?:\.exe)?$", re.IGNORECASE)
+# Mentions of the tool that the tokenizer might miss (e.g. inside $(...) or & "...").
 # A longer name such as `tekla-cli-contract.md` is a different word, not the tool (RTI-0005);
-# `tekla-cli.exe`, `tekla-cli.cmd` and `tekla-cli'` still count as mentions.
-_MENTION = re.compile(r"tekla-cli(?![-\w])", re.IGNORECASE)
+# `tekla-cli.exe`, `tekla-cli.cmd`, `tekla-cli'` and the project folder `tekla/TeklaCli` count.
+_MENTION = re.compile(r"tekla[-_]?cli(?![-\w])", re.IGNORECASE)
+# `dotnet run|exec|watch` can start the CLI without naming its exe (e.g. from inside the project
+# folder). The contract forbids that route, so any such segment counts as a write (RTI-0006).
+_DOTNET = re.compile(r"(?:^|[\\/])dotnet(?:\.exe)?$", re.IGNORECASE)
+_DOTNET_RUN = frozenset({"run", "exec", "watch"})
+# `dotnet <sub>` is inert only for these: they build, they do not start the CLI.
+_DOTNET_INERT_SUBCOMMANDS = frozenset({"build", "restore", "clean"})
 # Commands that only read or print their arguments. A tekla-cli mention after one of these
 # is data, not an invocation. Anything not listed here is treated as possibly executing.
 _INERT_COMMANDS = frozenset(
     {
         "cat", "head", "tail", "less", "more", "wc", "grep", "egrep", "fgrep", "rg", "echo",
         "printf", "ls", "dir", "type", "get-content", "select-string", "get-childitem",
-        "write-output",
+        "write-output", "cd", "pushd", "set-location",
     }
 )  # fmt: skip
 # `git <sub>` is inert only for these subcommands, and never with `-c` (aliases can run code).
@@ -102,7 +113,16 @@ def _is_inert(segment: list[str], substitution: bool) -> bool:
         args = segment[idx + 1 :]
         sub = next((a for a in args if not a.startswith("-")), None)
         return sub in _GIT_INERT_SUBCOMMANDS and "-c" not in args
+    if name == "dotnet":
+        args = [a.lower() for a in segment[idx + 1 :]]
+        sub = next((a for a in args if not a.startswith("-")), None)
+        return sub in _DOTNET_INERT_SUBCOMMANDS and not _DOTNET_RUN.intersection(args)
     return False
+
+
+def _is_dotnet_run(segment: list[str]) -> bool:
+    """True if the segment runs `dotnet run|exec|watch` anywhere (fail closed: env, paths)."""
+    return any(_DOTNET.search(t) for t in segment) and any(t.lower() in _DOTNET_RUN for t in segment)
 
 
 def find_subcommands(command: str) -> list[str | None]:
@@ -115,6 +135,9 @@ def find_subcommands(command: str) -> list[str | None]:
     found: list[str | None] = []
     for segment in _segments(_split(command)):
         if _is_inert(segment, substitution):
+            continue
+        if _is_dotnet_run(segment):
+            found.append("<dotnet-run>")
             continue
         invoked = False
         for i, tok in enumerate(segment):

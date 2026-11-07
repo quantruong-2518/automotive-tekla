@@ -35,6 +35,9 @@ a subagent, and can deny the call.
   denied (safe), and the fix is in the hook, not in the agent prompt.
 - RTI-0005: a longer name such as `tekla-cli-contract.md` is not a mention of the tool, so
   reading it with a non-inert command (`sed`, `python`) is allowed.
+- RTI-0006 (ADR-0007): the .NET project name (`TeklaCli.exe`, `teklacli`, `tekla_cli`) is
+  recognised as the CLI, and every `dotnet run|exec|watch` counts as a write, since it can start
+  the CLI without naming it. `dotnet build|restore|clean` and `cd`/`pushd` are inert.
 
 ## Consequences
 

@@ -46,6 +46,18 @@ WRITE_COMMANDS = [
     "python -c \"import subprocess; subprocess.run(['tekla-cli', 'build'])\"",
     "sed -n 'e tekla-cli build' x",  # sed `e` runs a shell command: sed is not inert
     "bash -c 'tekla-cli.cmd build'",  # a shim name is still a mention
+    # RTI-0006: the .NET project name and dotnet-run routes.
+    "TeklaCli.exe build --lot 1",
+    r"tekla\TeklaCli\bin\x64\Release\net48\TeklaCli.exe build --lot 1",
+    "teklacli update --lot 2",
+    "tekla_cli rollback --run-id r1",
+    "dotnet run --project tekla/TeklaCli -- build --lot 1",
+    "cd tekla/TeklaCli && dotnet run -- build --lot 1",  # no name in the dotnet segment
+    "dotnet watch run --project tekla/TeklaCli",
+    "dotnet exec bin/tekla-cli.exe build",
+    "env dotnet run -- build",
+    "dotnet build tekla/TeklaCli && dotnet run --project tekla/TeklaCli -- build",
+    "C:/Program Files/dotnet/dotnet.exe run -- build",
 ]
 
 # Commands that only mention the tool name as data. They must not be blocked, otherwise the
@@ -63,6 +75,12 @@ MENTION_ONLY_COMMANDS = [
     # RTI-0005: a file name that only contains the tool name, after a non-inert command.
     "cd /repo && sed -n 1,40p docs/tekla-cli-contract.md; echo ----; sed -n 1,30p docs/roadmap.md",
     "uv run python -I scripts/check.py docs/tekla-cli-contract.md",
+    # RTI-0006: building and reading the CLI project is not running it.
+    "dotnet build tekla/TeklaCli/TeklaCli.csproj -c Release",
+    "cd tekla/TeklaCli && dotnet restore",
+    "dotnet clean tekla/TeklaCli",
+    "cat tekla/TeklaCli/Program.cs",
+    "ls tekla/TeklaCli/bin",
 ]
 
 READ_COMMANDS = [
@@ -72,6 +90,7 @@ READ_COMMANDS = [
     "tekla-cli selected",
     "tekla-cli export --lot 1 --out lots/1/export",
     r"C:\Tools\tekla-cli.exe info",
+    "TeklaCli.exe query --lot 1",
     "uv run pytest",
     "git status",
 ]
