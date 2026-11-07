@@ -90,7 +90,8 @@ checked on real Windows (NTFS, .NET Framework 4.8). Rule 1 now allows a write on
    all zeros or all ones, on NTFS or ReFS, on a fixed, removable or RAM drive.
 3. Open = working copy by identity; working copy ≠ original by identity.
 4. A folder whose final path is UNC cannot be proven different, so **both folders must be on
-   local drives**. An original on a server share is refused (open question for the engineer).
+   local drives**. An original on a server share is refused. The engineer confirmed on
+   2026-11-07 that original models live on local drives: the rule stays.
 5. No ancestor of either folder — from its final path and from its typed path — is the other.
 6. The working copy's typed path is its real path (final path equal ignoring case): subst and
    mapped letters are per logon session, and Tekla reports the path from its own session. This

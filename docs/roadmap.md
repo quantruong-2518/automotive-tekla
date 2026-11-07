@@ -51,7 +51,7 @@ mutation testing, independent review, then one commit.
 |---|---|---|
 | S1 | Solution scaffold; `TeklaCore` exit codes and model-path text guard (contract rule 1); .NET CI job | dev machine + CI |
 | S1a | File-identity check for rule 1 (volume serial + file ID; catches `subst`, junctions, mapped drives, links inside the folders). Blocks S4 | Windows (CI + local) |
-| S1b | Spec loading and validation (single source of truth decided first) | dev machine + CI |
+| S1b | Spec loading: Python validates and writes a receipt, C# checks the receipt ([ADR-0010](decisions/0010-spec-validation-receipt.md)) | dev machine + CI |
 | S1c | Run journal (schema) and resume planner (contract rule 6) | dev machine + CI |
 | S2 | `TeklaAdapter` over the Open API (compiles here, runs on the Tekla machine) | compile here |
 | S3 | `tekla-cli` read commands: `info`, `validate`, `query`, `selected` | Tekla machine to run |
@@ -63,9 +63,14 @@ Step 3 is done only when S5 passes on Tekla 2024.
 ## Open before later steps
 
 - Tekla version: **2024 Diamond** (engineer, 2026-11-06); NuGet pinned to 2024.0.4 whatever the
-  service pack (`tekla/api-notes.md`). Still open for S5: who runs the Tekla machine, when, and
-  an empty test model.
-- Resume "differs" tolerance (points, mm) for contract rule 6 — engineer value, before S1c.
+  service pack (`tekla/api-notes.md`). Tekla machine for S5: the Windows host of the
+  development WSL (engineer, 2026-11-07); Tekla 2024 is not installed there yet (no
+  `C:\Program Files\Tekla Structures` on 2026-11-07), and it needs the .NET SDK and an empty
+  test model. Still open: when Tekla is installed.
+- Resume "differs" tolerance for contract rule 6: **0.1 mm** on start and end points; profile
+  and material compared exactly (engineer, 2026-11-07; ADR-0007).
+- Original models live on local drives, so the local-only rule of ADR-0009 Amendment 2 stays
+  (engineer, 2026-11-07).
 - Benchmark set with answer models — before Step 2.
 - Licence terms of ODA File Converter for commercial use — the engineer chose ODA with a
   LibreDWG fallback (ADR-0005); written licence confirmation still needed before a client run.

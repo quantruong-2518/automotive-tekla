@@ -29,7 +29,8 @@ guard has a gap:
 2. **Retry resumes.** Re-running the same lot with the same `RUN_ID` skips every spec item whose
    `SPEC_ID` already exists in the model for that lot and run, and builds only the missing ones.
    It never creates a duplicate. If an existing object differs from its spec item, it stops
-   (exit `1`) and asks the engineer.
+   (exit `1`) and asks the engineer. "Differs" (engineer, 2026-11-07): a start or end point more
+   than **0.1 mm** from the spec, or any difference in profile or material (compared exactly).
 3. **Backup by macro.** Before writing, `tekla-cli` creates the lot backup itself by running a
    Tekla macro that performs *Save and create backup copy* (`Operation.RunMacro`), then checks
    that a new backup folder exists. If the macro fails or no new backup appears, it refuses to

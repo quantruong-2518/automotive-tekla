@@ -61,7 +61,9 @@ Adding a read subcommand requires updating `READ_SUBCOMMANDS` in
 2. Before writing, create the lot backup with a Tekla macro that runs *Save and create backup
    copy*, then check that a new backup folder exists. Refuse (exit `5`) if either fails. The
    macro route must pass on the test model before the first real lot.
-3. Refuse unless `--lot`, `--run-id` and a schema-valid `--spec` are given.
+3. Refuse unless `--lot`, `--run-id` and a schema-valid `--spec` are given. "Schema-valid" means
+   a validation receipt from `harness validate spec` whose SHA-256 matches the spec file
+   ([ADR-0010](decisions/0010-spec-validation-receipt.md)).
 4. Tag every created or modified object with UDAs `LOT`, `RUN_ID`, `SPEC_ID`. Refuse (exit `3`)
    unless all three are defined in the model as `unique_attribute`, type `string`, not affecting
    numbering (the repo ships the `objects.inp` to copy into each model folder).
