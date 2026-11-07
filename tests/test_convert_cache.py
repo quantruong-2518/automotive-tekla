@@ -411,6 +411,51 @@ def test_cli_refresh_without_cache_dir_is_a_usage_error(tmp_path, dwg, capsys):
     assert "--refresh needs --cache-dir" in capsys.readouterr().err
 
 
+# --- merge with main: converter ERROR lines and empty output (ADR-0005 amendment) -----
+
+
+def test_error_lines_result_round_trips_with_its_lowered_cap(tmp_path, template, dwg, cache):
+    oda = _raw_fake(
+        tmp_path,
+        "oda_err",
+        f"""\
+        import os, shutil, sys
+        sys.stderr.write("ERROR: bad string in block\\nERROR: text truncated\\nWarning: font\\n")
+        shutil.copy({str(template)!r}, os.path.join(sys.argv[2], os.path.splitext(sys.argv[7])[0] + '.dxf'))
+    """,
+    )
+    fresh = dwg_to_dxf(dwg, tmp_path / "w1", oda=oda, cache=cache)
+    hit = dwg_to_dxf(dwg, tmp_path / "w2", oda=oda, cache=cache)
+    assert fresh.confidence_cap == "medium" and fresh.stderr_error_lines == 2
+    assert info(hit)["hit"] is True, "a lowered cap must replay, not be discarded as inconsistent"
+    assert (hit.confidence_cap, hit.stderr_error_lines, hit.stderr_warning_lines, hit.stderr_tail) == (
+        fresh.confidence_cap,
+        fresh.stderr_error_lines,
+        fresh.stderr_warning_lines,
+        fresh.stderr_tail,
+    )
+    assert hit.warnings == fresh.warnings
+
+
+def test_replayed_cap_must_match_the_recorded_error_lines(tmp_path, template, dwg, cache):
+    oda = fake(tmp_path, "oda", ODA_OUT, True, template)
+    key = info(dwg_to_dxf(dwg, tmp_path / "w1", oda=oda, cache=cache))["key"]
+    _corrupt_result(cache, key, lambda d: d["result"].update(stderr_error_lines=3))  # cap stays high
+    assert info(dwg_to_dxf(dwg, tmp_path / "w2", oda=oda, cache=cache))["hit"] is False
+
+
+def test_empty_output_from_a_large_dwg_is_never_cached(tmp_path, dwg, cache):
+    dwg.write_bytes(b"AC1032" + b"\x00" * (20 * 1024))
+    empty = tmp_path / "empty.dxf"
+    new("R2018").saveas(empty)
+    oda = fake(tmp_path, "oda", ODA_OUT, True, empty)
+    for out in ("w1", "w2"):
+        result = dwg_to_dxf(dwg, tmp_path / out, oda=oda, cache=cache)
+        assert result.confidence_cap == "low" and info(result)["hit"] is False
+        assert any("was partial" in w for w in result.warnings)
+    assert calls(tmp_path, "oda") == 2
+
+
 # --- review round 2 ------------------------------------------------------------------
 
 

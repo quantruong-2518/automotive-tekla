@@ -1,0 +1,722 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:tekla-harness:schema:grids:0.1",
+  "title": "Grid axes of one DXF",
+  "description": "Output of `grids.extract_grids` (library; CLI wiring later). Input: the DXF, its text index and its sheets result. BUBBLE: a CIRCLE (or circular ELLIPSE) anywhere in the drawing, inside INSERTs too, whose centre holds exactly one axis-label text and no other text (ATTRIB, block text or loose TEXT; label pattern: 1-2 letters, 1-3 digits with an optional suffix letter ('1A'), a letter with 1-2 digits ('A1'), each with an optional prime, or 'x/y'; a circle that also holds other text, e.g. a section callout with its sheet number, is not a bubble: summary.bubbles_other_text). AXIS: a bubble paired with a straight LINE (or 2-vertex polyline) at least 10 bubble radii long that passes within 0.35 r of the centre with an end within 8 r of it (bar-mark circles on short leaders fail the length rule). Two same-label bubbles at the ends of one line make one axis; collinear pieces of one label join only when they overlap or leave a gap of at most 8 r (two plans side by side keep their own axes). VIEW (group): axes of one sheet whose lines cross, transitively; parallel-only groups join while their labels stay unique. FAMILY: axes of a view within 0.5 degrees of each other (directions are circular: 179.6 and -0.4 degrees are one family), family angle = the median of its axes' angles, ordered by offset along the normal (normal points to +x, or to +y for horizontal lines); an offset is measured at the line's midpoint, so an axis drawn from either end gives the same value. An axis is 'not parallel' (blocking, spacing low) when it drifts, end to end (length x sin of its deviation), by more than half the rounding step. Axes of one family on a layer or linetype other than the family majority raise blocking grid_axis_layer_mismatch; labels that neither rise nor fall along the family (1 3 2 4) raise blocking grid_label_order_nonmonotonic; both make the proposal incomplete. Spacings are in DRAWING UNITS with the declared header unit attached, never converted. The Tekla coordinate string is a PROPOSAL (relative spacings, 'n*d' runs, rounded to the rounding step) for the engineer to confirm at gate 1 (RTI-0003); which family is Tekla X and which is Y is NOT decided here (always a blocking question). Confidence of an axis, a spacing or a proposal is never 'high' in this slice: 'high' is reserved for an engineer answer at gate 1 (pairing bubbles with lines is heuristic). A spacing is medium from geometry; agreeing checks are kept as data in `evidence`; it is low when a dimension (adjacent or span) disagrees, or other views disagree and no independent view agrees, or a label or axis is low; never above the labels' confidence or file.confidence_cap. Every disagreement is also a blocking question. Cross-checks: a difference of at most 2e-4 of the spacing (DRAFTING_TOL, a heuristic, e.g. 5770.83 vs 5770) is status drafting_tolerance with a non-blocking grid_spacing_drafting_tolerance question; a larger one is a blocking grid_spacing_cross_sheet_mismatch. Bubbles whose nearer line end is up to 8 radii away still pair (a gap after the bubble's leader is common). Number and letter labels mixed in one family raise grid_label_kind_mixed (numbers run one way, letters the other: verified at grade B). Not handled: radial grids, XLINE/RAY or multi-segment polyline axes, curved axes. Sheet ids are detector ids from sheets.json ('unknown' off-sheet).",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "file",
+    "groups",
+    "cross_checks",
+    "unpaired_bubbles",
+    "summary",
+    "questions",
+    "warnings",
+    "question_counts"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "0.1"
+    },
+    "file": {
+      "$ref": "urn:tekla-harness:schema:sheets:0.1#/$defs/file"
+    },
+    "groups": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/group"
+      }
+    },
+    "cross_checks": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/cross_check"
+      }
+    },
+    "unpaired_bubbles": {
+      "type": "object",
+      "required": [
+        "count",
+        "listed"
+      ],
+      "additionalProperties": false,
+      "description": "Labelled circles with no axis line (bar marks, section marks, or a bubble whose line was not found).",
+      "properties": {
+        "count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "listed": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "$ref": "#/$defs/bubble"
+          }
+        }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "required": [
+        "circles",
+        "bubbles_labelled",
+        "bubbles_ambiguous_label",
+        "bubbles_other_text",
+        "bubbles_paired",
+        "axes",
+        "groups",
+        "families",
+        "isolated_axes",
+        "dimensions_linear",
+        "dimensions_matched",
+        "walk_skipped"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "circles": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "bubbles_labelled": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "bubbles_ambiguous_label": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Circles holding two different label-like texts: not used."
+        },
+        "bubbles_other_text": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Circles holding one label text and other text as well (a callout, not a grid bubble): not used."
+        },
+        "bubbles_paired": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "axes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "groups": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "families": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "isolated_axes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Axes that crossed nothing and joined no view: not reported as grids."
+        },
+        "dimensions_linear": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "dimensions_matched": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Linear dimensions whose two extension points lie on two axes of one family."
+        },
+        "walk_skipped": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      }
+    },
+    "questions": {
+      "type": "array",
+      "items": {
+        "$ref": "urn:tekla-harness:schema:sheets:0.1#/$defs/question"
+      }
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "question_counts": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "integer",
+        "minimum": 1
+      },
+      "description": "True number of questions per code. `questions` lists at most 100 per code (a warning says so); consumers count from here."
+    }
+  },
+  "$defs": {
+    "xy": {
+      "type": "array",
+      "items": {
+        "type": "number"
+      },
+      "minItems": 2,
+      "maxItems": 2
+    },
+    "bubble": {
+      "type": "object",
+      "required": [
+        "center",
+        "radius",
+        "label",
+        "label_source",
+        "tag",
+        "text_id",
+        "block_path",
+        "sheet"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "center": {
+          "$ref": "#/$defs/xy"
+        },
+        "radius": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "label": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "As displayed; null for an empty bubble."
+        },
+        "label_source": {
+          "enum": [
+            "attrib",
+            "block_text",
+            "text",
+            "none"
+          ]
+        },
+        "tag": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "ATTRIB tag when label_source is attrib."
+        },
+        "text_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "block_path": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Blocks holding the circle."
+        },
+        "sheet": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "line": {
+      "type": "object",
+      "required": [
+        "start",
+        "end",
+        "handle",
+        "layer",
+        "linetype",
+        "block_path"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "start": {
+          "$ref": "#/$defs/xy"
+        },
+        "end": {
+          "$ref": "#/$defs/xy"
+        },
+        "handle": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The line's handle, or that of the top-level INSERT it came through."
+        },
+        "layer": {
+          "type": "string"
+        },
+        "linetype": {
+          "type": "string",
+          "description": "Effective linetype (BYLAYER resolved)."
+        },
+        "block_path": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "axis": {
+      "type": "object",
+      "required": [
+        "axis_id",
+        "label",
+        "offset",
+        "line",
+        "bubbles",
+        "pairing",
+        "angle_deviation_deg",
+        "confidence"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "axis_id": {
+          "type": "string",
+          "pattern": "^G[0-9]{4,}$"
+        },
+        "label": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/sourced_string"
+            }
+          ]
+        },
+        "offset": {
+          "type": "number",
+          "description": "Signed distance along the family normal from the family's first axis, measured at the line midpoints (drawing units)."
+        },
+        "line": {
+          "$ref": "#/$defs/line"
+        },
+        "bubbles": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/bubble"
+          }
+        },
+        "pairing": {
+          "enum": [
+            "line",
+            "two_bubbles"
+          ],
+          "description": "two_bubbles: no line found; the axis runs between two same-label bubbles (low)."
+        },
+        "angle_deviation_deg": {
+          "type": "number",
+          "description": "This axis's angle minus the family angle."
+        },
+        "confidence": {
+          "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/confidence",
+          "description": "At most medium: the label's confidence, capped (pairing is heuristic)."
+        }
+      }
+    },
+    "dimension_evidence": {
+      "type": "object",
+      "required": [
+        "handle",
+        "from_label",
+        "to_label",
+        "measured",
+        "dimlfac",
+        "displayed",
+        "text",
+        "status"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "handle": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "from_label": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "to_label": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "measured": {
+          "type": "number",
+          "description": "ezdxf measurement of the dimension (drawing units)."
+        },
+        "dimlfac": {
+          "type": "number"
+        },
+        "displayed": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "description": "Override value when numeric, else measured x DIMLFAC."
+        },
+        "text": {
+          "type": "string",
+          "description": "Dimension text as stored ('' or '<>' = measured)."
+        },
+        "status": {
+          "enum": [
+            "agrees",
+            "measured",
+            "scaled",
+            "differs",
+            "not_numeric"
+          ],
+          "description": "agrees: a numeric override equals the axis spacing x DIMLFAC within half the displayed precision (an independent check; recorded in `evidence`, never raises confidence above medium). measured: the dimension shows its own measurement of the same geometry (evidence only, never raises confidence). scaled: measured value shown through DIMLFAC != 1 (evidence only). differs: the override disagrees beyond half the displayed precision. not_numeric: override text is not a plain number."
+        }
+      }
+    },
+    "spacing": {
+      "type": "object",
+      "required": [
+        "from_label",
+        "to_label",
+        "measured",
+        "value",
+        "dimension_evidence",
+        "evidence"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "from_label": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "to_label": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "measured": {
+          "type": "number",
+          "description": "Raw distance between the two axis lines (drawing units)."
+        },
+        "value": {
+          "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/sourced_number",
+          "description": "Rounded to the family rounding step; method 'derived' from the two lines."
+        },
+        "dimension_evidence": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/dimension_evidence"
+          }
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/evidence"
+          },
+          "description": "Every check of this spacing. Data for gate 1: agreeing evidence never raises the confidence above medium."
+        }
+      }
+    },
+    "proposal": {
+      "type": "object",
+      "required": [
+        "status",
+        "coordinates",
+        "labels",
+        "unit",
+        "unit_confidence",
+        "rounding_step",
+        "max_rounding_residual",
+        "complete",
+        "note"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "const": "proposal"
+        },
+        "coordinates": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Tekla style: '0' then relative spacings, equal runs as 'n*d', e.g. '0 3*6000 4500'."
+        },
+        "labels": {
+          "type": "string",
+          "description": "Labels in the same order, space separated ('?' for none)."
+        },
+        "unit": {
+          "enum": [
+            "mm",
+            "cm",
+            "m",
+            "in",
+            "ft",
+            "unknown"
+          ],
+          "description": "Declared header unit of the drawing; NOT converted, NOT confirmed."
+        },
+        "unit_confidence": {
+          "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/confidence"
+        },
+        "rounding_step": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "10^(floor(log10(smallest spacing)) - 3): four significant digits."
+        },
+        "max_rounding_residual": {
+          "type": "number",
+          "minimum": 0
+        },
+        "complete": {
+          "type": "boolean",
+          "description": "false when the family has a duplicate or conflicting label, mixed number and letter labels, labels out of order, a missing label, an unlabelled line, a non-parallel axis, an axis on another layer or linetype, a two_bubbles axis, or any low spacing."
+        },
+        "note": {
+          "type": "string"
+        }
+      }
+    },
+    "family": {
+      "type": "object",
+      "required": [
+        "family_id",
+        "direction",
+        "normal",
+        "angle_deg",
+        "axes",
+        "spacings",
+        "proposal",
+        "unlabelled_lines"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "family_id": {
+          "type": "string",
+          "pattern": "^F[0-9]{3,}$"
+        },
+        "direction": {
+          "$ref": "#/$defs/xy",
+          "description": "Unit vector along the axis lines."
+        },
+        "normal": {
+          "$ref": "#/$defs/xy",
+          "description": "Unit vector along which offsets and spacings are measured."
+        },
+        "angle_deg": {
+          "type": "number",
+          "minimum": -0.5,
+          "maximum": 180,
+          "description": "Direction angle from +x, canonical in [-0.5, 179.5)."
+        },
+        "axes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/axis"
+          }
+        },
+        "spacings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/spacing"
+          }
+        },
+        "proposal": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/proposal"
+            }
+          ],
+          "description": "null for a family of one axis."
+        },
+        "unlabelled_lines": {
+          "type": "array",
+          "description": "Lines on the family's layer and linetype, parallel, long, crossing the view, with no label: possibly a missing axis. NOT included in the spacings.",
+          "items": {
+            "type": "object",
+            "required": [
+              "offset",
+              "line",
+              "empty_bubble"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "offset": {
+                "type": "number"
+              },
+              "line": {
+                "$ref": "#/$defs/line"
+              },
+              "empty_bubble": {
+                "type": "boolean",
+                "description": "A circle without text sits at one end."
+              }
+            }
+          }
+        }
+      }
+    },
+    "group": {
+      "type": "object",
+      "required": [
+        "group_id",
+        "sheet",
+        "space",
+        "bbox",
+        "families"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "group_id": {
+          "type": "string",
+          "pattern": "^V[0-9]{3,}$"
+        },
+        "sheet": {
+          "type": "string",
+          "minLength": 1
+        },
+        "space": {
+          "type": "string",
+          "minLength": 1
+        },
+        "bbox": {
+          "$ref": "urn:tekla-harness:schema:sheets:0.1#/$defs/bbox"
+        },
+        "families": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/family"
+          }
+        }
+      }
+    },
+    "cross_check": {
+      "type": "object",
+      "required": [
+        "families",
+        "sheets",
+        "common_labels",
+        "status",
+        "ratio",
+        "differences"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "families": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "sheets": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "common_labels": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "status": {
+          "enum": [
+            "consistent",
+            "drafting_tolerance",
+            "scaled",
+            "mismatch",
+            "order_mismatch"
+          ],
+          "description": "drafting_tolerance: every difference is at most 2e-4 of the spacing (heuristic; non-blocking question). mismatch: at least one larger difference (blocking)."
+        },
+        "ratio": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "description": "Common spacing ratio first/second when status is 'scaled'."
+        },
+        "differences": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "from_label",
+              "to_label",
+              "first",
+              "second"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "from_label": {
+                "type": "string"
+              },
+              "to_label": {
+                "type": "string"
+              },
+              "first": {
+                "type": "number"
+              },
+              "second": {
+                "type": "number"
+              }
+            }
+          }
+        }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "required": [
+        "kind",
+        "agrees",
+        "independent",
+        "ref"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "dimension_adjacent",
+            "dimension_span",
+            "other_view"
+          ],
+          "description": "dimension_adjacent: a linear dimension between the two NEIGHBOURING axes of this spacing. dimension_span: a dimension over several spacings (an overall dimension); it checks only their sum, so it is evidence, never confirmation of one spacing (a disagreeing span still raises a question and lowers the spacings it covers). other_view: the same two labels in another view (cross_checks)."
+        },
+        "agrees": {
+          "type": "boolean",
+          "description": "The evidence matches this spacing (for other_view: equal within half the rounding step, or within the drafting tolerance; the ref says which)."
+        },
+        "independent": {
+          "type": "boolean",
+          "description": "dimension: true for a numeric override typed by the drafter, false for a measured value of the same geometry. other_view: false when both families sit on the same sheet, on copied sheets (sheets.json duplicate_of, or text multisets overlapping by >= 90 %, a heuristic), or come from the same block definition (top-level insert)."
+        },
+        "ref": {
+          "type": "string",
+          "description": "Human-readable pointer: the dimension handle and text, or the other view's group/family and sheet."
+        }
+      }
+    }
+  }
+}

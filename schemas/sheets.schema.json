@@ -1,0 +1,166 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:tekla-harness:schema:sheets:0.1",
+  "title": "Sheet segmentation and title-block candidates of one DXF",
+  "description": "Output of `sheets.extract_sheets` (library; CLI wiring later). A sheet is (a) a title-block FRAME: an axis-aligned closed rectangle (top level or inside INSERTs, in world/paper coordinates) with a sheet-like aspect ratio (long side / short side 1.2..1.8), large compared with the text inside it (short side >= 40 x median text height; without title-block evidence inside, i.e. no title-field label text or field ATTRIB, >= 60 x median text height or the size of an accepted frame, a heuristic: a schedule table is about 40) and holding >= 5 text entries; rectangles inside a larger frame are merged into it (inner border); a larger rectangle holding two or more disjoint frames is a container (dropped) only when those inner frames have their own title-block evidence or the size of a frame found outside it, otherwise it stays the sheet with a blocking sheet_frame_ambiguous question, or (b) a paper-space LAYOUT that holds content but no frame: the whole layout is one sheet. Paper-space viewports map model-space windows (view target + view centre, view height, plan view without twist only) to the sheet that holds the viewport. A model frame that a window shows, when that window shows no other model frame, is a border inside that layout's view and is not a sheet; a window over two or more frames is an overview and removes nothing. Every text-index entry is assigned to exactly one sheet or is unassigned: a model entry inside a model frame belongs to it; otherwise to the one layout sheet whose viewport window shows it; several layout sheets -> ambiguous (unassigned, counted). SHEET IDS ARE DETECTOR IDS ('model#01', '<layout>#01'), NOT PRINTED SHEET NUMBERS: provenance.sheet in grids/levels uses them; the printed number, when read, is title_block.sheet_number. Title-block fields are read only from ATTRIB tags on the title block (the frame's own INSERT, an INSERT carrying ATTRIBs of two or more fields, or within 10 text heights of a title-field label: a section callout's SHEET_NO is not a sheet number), from 'label: value' texts, from a value next to a label text, or (sheet number only) from a sheet-code pattern in the lower-right quadrant; constant template text of the frame block is never a value. Confidence: ATTRIB tag or inline label at most 'medium'; adjacency or pattern 'low'. Nothing in this document is a timestamp: same inputs give the same document.",
+  "type": "object",
+  "required": ["schema_version", "file", "sheets", "unassigned", "drawing_list", "summary", "questions", "warnings"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": "0.1" },
+    "file": { "$ref": "#/$defs/file" },
+    "sheets": { "type": "array", "items": { "$ref": "#/$defs/sheet" } },
+    "unassigned": {
+      "type": "object",
+      "required": ["text_ids", "ambiguous_text_ids"],
+      "additionalProperties": false,
+      "properties": {
+        "text_ids": { "type": "array", "items": { "type": "string" }, "description": "Text-index ids inside no sheet." },
+        "ambiguous_text_ids": { "type": "array", "items": { "type": "string" }, "description": "Model-space ids shown by viewports of more than one sheet; not assigned to any." }
+      }
+    },
+    "drawing_list": {
+      "type": "object",
+      "required": ["status"],
+      "additionalProperties": false,
+      "properties": {
+        "status": { "const": "not_searched", "description": "Drawing-list (sheet index) parsing is not implemented in this slice; absence of a list is NOT asserted." }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "required": ["sheet_count", "by_method", "text_entries", "assigned", "unassigned", "ambiguous", "frame_candidates_rejected"],
+      "additionalProperties": false,
+      "properties": {
+        "sheet_count": { "type": "integer", "minimum": 0 },
+        "by_method": { "type": "object", "additionalProperties": { "type": "integer", "minimum": 0 } },
+        "text_entries": { "type": "integer", "minimum": 0 },
+        "assigned": { "type": "integer", "minimum": 0 },
+        "unassigned": { "type": "integer", "minimum": 0 },
+        "ambiguous": { "type": "integer", "minimum": 0 },
+        "frame_candidates_rejected": { "type": "integer", "minimum": 0, "description": "Groups of >= 2 same-size rectangles holding text that failed the aspect-ratio or size rule." }
+      }
+    },
+    "questions": { "type": "array", "items": { "$ref": "#/$defs/question" } },
+    "warnings": { "type": "array", "items": { "type": "string" } }
+  },
+  "$defs": {
+    "file": {
+      "type": "object",
+      "required": ["path", "sha256", "confidence_cap", "declared_units"],
+      "additionalProperties": false,
+      "properties": {
+        "path": { "type": "string", "minLength": 1, "description": "As in the text index (file.path); used as provenance.file." },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$", "description": "Of the DXF; equal to the text index's (checked)." },
+        "confidence_cap": { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/confidence" },
+        "declared_units": { "$ref": "#/$defs/declared_units" }
+      }
+    },
+    "declared_units": {
+      "type": "object",
+      "required": ["insunits", "name"],
+      "additionalProperties": false,
+      "description": "Header $INSUNITS only, never confirmed and never used to convert.",
+      "properties": {
+        "insunits": { "type": ["integer", "null"] },
+        "name": { "enum": ["mm", "cm", "m", "in", "ft", "unknown"] }
+      }
+    },
+    "bbox": {
+      "type": "array",
+      "description": "x0, y0, x1, y1 in the coordinates of the sheet's space (wcs for model, paper units for a layout).",
+      "items": { "type": "number" },
+      "minItems": 4,
+      "maxItems": 4
+    },
+    "sheet": {
+      "type": "object",
+      "required": ["sheet_id", "space", "layout", "coordinate_frame", "bbox", "detection", "model_windows", "text_ids", "title_block", "duplicate_of"],
+      "additionalProperties": false,
+      "properties": {
+        "sheet_id": { "type": "string", "pattern": "^.+#[0-9]{2,}$", "description": "Detector id '<space>#NN', stable for the same file: frames numbered in rows from the top, left to right." },
+        "space": { "type": "string", "minLength": 1, "description": "'model' or the layout name, as in the text index." },
+        "layout": { "type": "string", "minLength": 1 },
+        "coordinate_frame": { "enum": ["wcs", "paper"] },
+        "bbox": { "$ref": "#/$defs/bbox" },
+        "detection": {
+          "type": "object",
+          "required": ["method", "confidence", "evidence"],
+          "additionalProperties": false,
+          "properties": {
+            "method": { "enum": ["frame_rectangle", "layout"] },
+            "confidence": { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/confidence", "description": "medium: a frame repeated at the same size >= 2 times, or a layout with content. low: a single frame." },
+            "evidence": { "type": "array", "items": { "type": "string" } },
+            "frame_handle": { "type": ["string", "null"], "description": "Handle of the rectangle, or of the top-level INSERT it came through." },
+            "frame_block": { "type": ["string", "null"], "description": "Block holding the rectangle; null for a top-level rectangle." },
+            "frame_layer": { "type": ["string", "null"] },
+            "inner_frames": { "type": "integer", "minimum": 0, "description": "Rectangles merged into this frame (inner borders)." }
+          }
+        },
+        "model_windows": {
+          "type": "array",
+          "description": "Model-space regions shown through this sheet's paper-space viewports (layout sheets only).",
+          "items": {
+            "type": "object",
+            "required": ["viewport_handle", "bbox"],
+            "additionalProperties": false,
+            "properties": {
+              "viewport_handle": { "type": ["string", "null"] },
+              "bbox": { "$ref": "#/$defs/bbox" }
+            }
+          }
+        },
+        "text_ids": { "type": "array", "items": { "type": "string" } },
+        "title_block": { "$ref": "#/$defs/title_block" },
+        "duplicate_of": { "type": ["string", "null"], "description": "Sheet id of the first sheet holding exactly the same texts (a copy, e.g. in a block); also a sheet_content_duplicate question. Grid cross-checks skip such pairs." }
+      }
+    },
+    "title_block": {
+      "type": "object",
+      "required": ["sheet_number", "revision", "candidates"],
+      "additionalProperties": false,
+      "properties": {
+        "sheet_number": { "anyOf": [{ "type": "null" }, { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/sourced_string" }], "description": "Set only when ALL candidates of the field agree; else null and a title_field_conflict question (blocking for sheet_number and revision; a lower-confidence candidate that disagrees is a conflict, not outvoted)." },
+        "revision": { "anyOf": [{ "type": "null" }, { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/sourced_string" }] },
+        "candidates": { "type": "array", "items": { "$ref": "#/$defs/field_candidate" } }
+      }
+    },
+    "field_candidate": {
+      "type": "object",
+      "required": ["field", "value", "evidence", "confidence", "provenance"],
+      "additionalProperties": false,
+      "properties": {
+        "field": { "enum": ["sheet_number", "revision", "title", "scale", "date", "project"] },
+        "value": { "type": "string", "minLength": 1 },
+        "evidence": {
+          "type": "object",
+          "required": ["kind", "key", "value_text_id", "label_text_id", "position"],
+          "additionalProperties": false,
+          "properties": {
+            "kind": { "enum": ["attrib_tag", "inline_label", "adjacent_label", "pattern"] },
+            "key": { "type": "string", "description": "The ATTRIB tag, the label text as displayed, or the pattern name." },
+            "value_text_id": { "type": "string" },
+            "label_text_id": { "type": ["string", "null"] },
+            "position": { "type": "array", "items": { "type": "number" }, "minItems": 2, "maxItems": 2, "description": "Value text position (x, y) as indexed." }
+          }
+        },
+        "confidence": { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/confidence" },
+        "provenance": { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/provenance" }
+      }
+    },
+    "question": {
+      "type": "object",
+      "description": "Open question for the engineer, same shape as dxf-probe questions plus the detector sheet id. blocking: nothing downstream may use the affected values until answered.",
+      "required": ["code", "blocking", "message", "where", "found"],
+      "additionalProperties": false,
+      "properties": {
+        "code": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+        "blocking": { "type": "boolean" },
+        "message": { "type": "string", "minLength": 1 },
+        "where": { "type": "string", "minLength": 1 },
+        "found": { "type": "string" },
+        "sheet": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

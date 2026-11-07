@@ -44,3 +44,63 @@ Severity: `critical` · `major` · `minor`.
 - Root cause: text decodes "successfully" into garbage; not detected by the fallback chain.
 - Proposed fix: detect encoding from text style font names; convert to Unicode deterministically.
 - Regression test: fixture with `.VnTime` text → correct Unicode output.
+
+## RTI-0005 — Write guard blocks reading a file whose name contains `tekla-cli`
+
+- Source: main session, 2026-11-06 (`sed -n 1,40p docs/tekla-cli-contract.md` was denied)
+- Classification: tooling · Severity: minor · Status: **done** (Unreleased; engineer approved the fix 2026-11-06)
+- Root cause: in a segment whose command word is not on the inert list (`sed`, `python`, …),
+  any `tekla-cli` substring counted as an unparsed invocation, so a file name such as
+  `tekla-cli-contract.md` was treated as a write. ADR-0004 says data mentions must pass.
+- Fix: the mention regex ignores `tekla-cli` followed by `-` or a word character (a longer,
+  different name). `sed` stays off the inert list: its `e` command runs shell code.
+- Regression test: `tests/test_guard_hook.py` — the denied command and a
+  `python … docs/tekla-cli-contract.md` call pass; `sed -n 'e tekla-cli build'` and
+  `bash -c 'tekla-cli.cmd build'` stay denied.
+- Known limit (unchanged): a heredoc or inline script that contains the bare word `tekla-cli`
+  is still denied; write such text with the Edit/Write tools instead.
+
+## RTI-0006 — Write guard does not see the CLI under its default .NET build name
+
+- Source: review of `tekla/api-notes.md`, 2026-11-06
+- Classification: tooling · Severity: critical · Status: **done** (Unreleased; approved by the engineer 2026-11-07, both layers; ADR-0007)
+- Root cause: the guard recognises only the executable name `tekla-cli(.exe)`. An SDK-style
+  `TeklaCli.csproj` builds `TeklaCli.exe` by default, and `dotnet run --project tekla/TeklaCli -- build`
+  never names the exe. Today both `TeklaCli.exe build --lot 1` and that `dotnet run` call get
+  no decision from the guard, so the main session could write to Tekla.
+- Proposed fix: (1) contract: "the executable is named `tekla-cli.exe` (`AssemblyName`
+  `tekla-cli`); agents never invoke it through `dotnet run`/`dotnet exec`" (the csproj in
+  `tekla/api-notes.md` already sets `AssemblyName`); (2) hook: also treat `teklacli(.exe)`
+  and `dotnet run|exec` aimed at the CLI project as invocations (fail closed).
+- Regression test: `TeklaCli.exe build --lot 1` and `dotnet run --project tekla/TeklaCli -- build`
+  are denied outside `builder`.
+- Done: contract names the exe and forbids the dotnet routes; the hook matches `tekla[-_]?cli`
+  and denies any `dotnet run|exec|watch` (`tests/test_guard_hook.py`, RTI-0006 cases).
+- Follow-up: integration tests that reach the Tekla API outside `builder` → RTI-0007.
+
+## RTI-0007 — Integration tests could write to whatever Tekla model is open
+
+- Source: review of RTI-0006, 2026-11-07
+- Classification: tooling · Severity: minor (no Tekla test project exists yet; major once
+  Step 3 adds one) · Status: **proposed** (engineer agreed with the direction 2026-11-07; to be
+  done when `tekla/` gets its first .NET project)
+- Root cause: an external Open API client talks to the first Tekla session started and writes
+  to whatever model is open there. A `dotnet test` run of integration tests, by an agent or by
+  the engineer, would build test objects into a real project model if one is open. The guard
+  hook cannot protect this: it sees only agents, and test runners can be started many ways
+  (`dotnet test`, `vstest.console`, Test Explorer, scripts), which ADR-0004 already accepts it
+  cannot catch.
+- Rejected: extending the hook to deny `dotnet test`. It would block the Tekla-free unit tests
+  (most of the code, runnable on Linux CI) or need fragile project-name matching, could still
+  be bypassed, would push test runs onto `builder` (wrong role), and would not stop the
+  engineer's own runs.
+- Proposed fix:
+  1. Two test projects: `TeklaCore.Tests` (no Tekla references, runs anywhere and in CI) and
+     `TeklaCore.IntegrationTests` (needs a running Tekla).
+  2. The integration fixture fails before any write unless the open model path equals the
+     declared test model path and that model folder holds a marker file
+     (e.g. `.harness-test-model`); same comparison code as contract safety rule 1.
+  3. A `permissions.ask` rule for `dotnet test` on the IntegrationTests project, so each run is
+     confirmed by the engineer.
+- Regression test: with a model open that lacks the marker or has another path, the integration
+  fixture fails before any write; `TeklaCore.Tests` builds and runs with no Tekla installed.

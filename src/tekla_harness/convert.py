@@ -32,6 +32,7 @@ from importlib.metadata import version
 from pathlib import Path
 from typing import Any
 
+from ezdxf.document import Drawing
 from ezdxf.filemanagement import readfile
 
 from tekla_harness.cache import CACHE_FORMAT, CacheEntry, ReadCache, action_key
@@ -50,6 +51,8 @@ _ARGS = {
 }
 DEFAULT_TIMEOUT_S = 300
 EZDXF_VERSION = version("ezdxf")
+EMPTY_CHECK_MIN_DWG_BYTES = 10 * 1024  # below this an empty drawing is plausible
+_LOWER_CAP = {"high": "medium", "medium": "medium", "low": "low"}
 _OUTPUT_NAME = "output.dxf"  # logical name in the cache; the real file takes the input's stem
 # Modules whose code decides what a cached conversion contains or how it is replayed.
 _CODE_FILES = ("convert.py", "cache.py", "readlog.py", "detect.py")
@@ -67,7 +70,20 @@ class ConversionResult:
     confidence_cap: str | None
     attempts: list[Attempt] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    stderr_tail: str = ""
+    stderr_error_lines: int = 0
+    stderr_warning_lines: int = 0
     cache: dict[str, Any] | None = None  # {"hit": bool, "key": str} when a cache was used
+
+
+@dataclass
+class _Probe:
+    """What one successful run revealed beyond 'a DXF exists'."""
+
+    stderr_tail: str = ""
+    error_lines: int = 0
+    warning_lines: int = 0
+    empty: bool = False
 
 
 def _split_command(value: str) -> list[str]:
@@ -183,10 +199,48 @@ def _text(data: bytes) -> str:
     return data.decode("utf-8", errors="replace")
 
 
-def _try(tool: str, exe: list[str], src: Path, timeout: float) -> tuple[Attempt, Path | None, Path]:
+def _count_prefixed(text: str, prefix: str) -> int:
+    return sum(1 for line in text.splitlines() if line.startswith(prefix))
+
+
+def _entity_count(doc: Drawing) -> int:
+    return sum(len(layout) for layout in doc.layouts)
+
+
+def _cap_for(tool: str, error_lines: int, empty: bool) -> str:
+    """The one rule for a result's confidence cap (ADR-0005 and its ERROR-line amendment).
+    Used for fresh runs and to check replayed ones."""
+    if empty:
+        return "low"
+    base = CONFIDENCE_CAP[tool]
+    return _LOWER_CAP[base] if error_lines > 0 else base
+
+
+def _apply_probe(result: ConversionResult, tool: str, probe: _Probe) -> None:
+    result.stderr_tail = probe.stderr_tail
+    result.stderr_error_lines = probe.error_lines
+    result.stderr_warning_lines = probe.warning_lines
+    if probe.error_lines > 0:
+        result.warnings.append(
+            f"converter reported {probe.error_lines} ERROR lines; "
+            "some objects/strings may be missing or truncated"
+        )
+        lowered = _cap_for(tool, probe.error_lines, empty=False)
+        if lowered != result.confidence_cap:
+            result.confidence_cap = lowered
+            result.warnings.append(f"confidence cap lowered to {lowered} because of converter ERROR lines")
+    if probe.empty:
+        result.confidence_cap = _cap_for(tool, probe.error_lines, empty=True)
+        result.warnings.append(
+            "DXF opened but contains no entities in any layout although the DWG is not tiny: "
+            "treat as a failed parse unless the engineer confirms the sheet is empty"
+        )
+
+
+def _try(tool: str, exe: list[str], src: Path, timeout: float) -> tuple[Attempt, Path | None, Path, _Probe]:
     """Run one converter in its own temp folder on a copy of the staged input.
-    Returns (attempt, dxf or None, temp dir). If it raises, it removes its temp dir itself:
-    the folder holds a copy of a client drawing."""
+    Returns (attempt, dxf or None, temp dir, probe). If it raises, it removes its temp dir
+    itself: the folder holds a copy of a client drawing."""
     work = Path(tempfile.mkdtemp(prefix=f"{tool}-"))
     try:
         return _try_in(tool, exe, src, timeout, work)
@@ -197,7 +251,8 @@ def _try(tool: str, exe: list[str], src: Path, timeout: float) -> tuple[Attempt,
 
 def _try_in(
     tool: str, exe: list[str], src: Path, timeout: float, work: Path
-) -> tuple[Attempt, Path | None, Path]:
+) -> tuple[Attempt, Path | None, Path, _Probe]:
+    probe = _Probe()
     src_dir, out_dir = work / "in", work / "out"
     src_dir.mkdir()
     out_dir.mkdir()
@@ -208,26 +263,33 @@ def _try_in(
             proc = subprocess.run(cmd, capture_output=True, timeout=timeout, check=False)
         except subprocess.TimeoutExpired:
             attempt.fail(f"timed out after {timeout:g} s")
-            return attempt, None, work
+            return attempt, None, work, probe
         except FileNotFoundError as exc:
             attempt.fail(f"converter not found: {exc}")
-            return attempt, None, work
+            return attempt, None, work, probe
         except OSError as exc:  # not executable, exec format error, ...
             attempt.fail(f"converter could not be started: {type(exc).__name__}: {exc}")
-            return attempt, None, work
+            return attempt, None, work, probe
         said = _tail(_text(proc.stderr or proc.stdout or b""))
         if proc.returncode != 0:
             attempt.fail(f"exit code {proc.returncode}: {said}")
-            return attempt, None, work
+            return attempt, None, work, probe
         if not out.is_file() or out.stat().st_size == 0:
             attempt.fail(f"exit code 0 but no DXF written ({said or 'no output'})")
-            return attempt, None, work
+            return attempt, None, work, probe
+        stderr = _text(proc.stderr or b"")
+        probe.stderr_tail = _tail(stderr)
+        probe.error_lines = _count_prefixed(stderr, "ERROR")
+        probe.warning_lines = _count_prefixed(stderr, "Warning")
         try:
-            readfile(out)
+            doc = readfile(out)
         except Exception as exc:  # ezdxf raises more than DXFError on corrupt files (e.g. StopIteration)
             attempt.fail(f"exit code 0 but the DXF cannot be opened by ezdxf: {type(exc).__name__}: {exc}")
-            return attempt, None, work
-    return attempt, out, work
+            return attempt, None, work, probe
+        if _entity_count(doc) == 0 and src.stat().st_size > EMPTY_CHECK_MIN_DWG_BYTES:
+            probe.empty = True
+            attempt.fail("DXF opened but contains no entities in any layout", status="partial")
+    return attempt, out, work, probe
 
 
 def _run_chain(
@@ -245,7 +307,7 @@ def _run_chain(
         if tool not in converters:
             result.warnings.append(f"{tool} not configured; skipped")
             continue
-        attempt, produced, work = _try(tool, converters[tool], src, timeout)
+        attempt, produced, work, probe = _try(tool, converters[tool], src, timeout)
         result.attempts.append(attempt)
         try:
             if produced is not None:
@@ -254,6 +316,7 @@ def _run_chain(
                     result.warnings.append(
                         f"fallback converter {tool} used: confidence capped at {CONFIDENCE_CAP[tool]}"
                     )
+                _apply_probe(result, tool, probe)
                 result.dxf = _deliver(produced, out_dir / f"{dwg.stem}.dxf")
                 if on_success is not None:  # after delivery: caching can never cost the DXF
                     on_success(produced, result)
@@ -272,7 +335,14 @@ def _replay(entry: CacheEntry, dwg: Path, out_dir: Path) -> ConversionResult:
     code could not have recorded, so a well-formed but wrong entry is never served."""
     recorded = entry.result
     converter, cap = recorded["converter"], recorded["confidence_cap"]
-    if converter not in CONFIDENCE_CAP or cap != CONFIDENCE_CAP[converter]:
+    tail, errors, warns = (
+        recorded["stderr_tail"],
+        recorded["stderr_error_lines"],
+        recorded["stderr_warning_lines"],
+    )
+    if not isinstance(tail, str) or any(type(n) is not int or n < 0 for n in (errors, warns)):
+        raise TypeError("recorded stderr fields have wrong types")
+    if converter not in CONFIDENCE_CAP or cap != _cap_for(converter, errors, empty=False):
         raise ValueError(f"recorded converter/cap {converter!r}/{cap!r} is inconsistent")
     raw_attempts, warnings = recorded["attempts"], recorded["warnings"]
     if not isinstance(raw_attempts, list) or not isinstance(warnings, list):
@@ -295,7 +365,17 @@ def _replay(entry: CacheEntry, dwg: Path, out_dir: Path) -> ConversionResult:
     if set(entry.outputs) != {_OUTPUT_NAME}:
         raise ValueError(f"recorded outputs {sorted(entry.outputs)} are not [{_OUTPUT_NAME!r}]")
     dxf = _deliver(entry.output_path(_OUTPUT_NAME), out_dir / f"{dwg.stem}.dxf")
-    return ConversionResult(dwg, dxf, converter, cap, attempts, list(warnings), None)
+    return ConversionResult(
+        dwg=dwg,
+        dxf=dxf,
+        converter=converter,
+        confidence_cap=cap,
+        attempts=attempts,
+        warnings=list(warnings),
+        stderr_tail=tail,
+        stderr_error_lines=errors,
+        stderr_warning_lines=warns,
+    )
 
 
 def _cached_run(
@@ -323,10 +403,14 @@ def _cached_run(
             return replayed
 
     def record(produced: Path, result: ConversionResult) -> None:
-        failed = [a.tool for a in result.attempts if a.status != "ok"]
-        if failed:  # a fallback after a failure may be transient: never pin it
+        unclean = [
+            f"{a.tool} {'failed' if a.status == 'failed' else 'was partial'}"
+            for a in result.attempts
+            if a.status != "ok"
+        ]
+        if unclean:  # a fallback after a failure may be transient; a partial is suspect: never pin
             result.warnings.append(
-                f"read cache: result not cached because {', '.join(failed)} failed in this run; "
+                f"read cache: result not cached because {', '.join(unclean)} in this run; "
                 "fix that converter to get cache hits"
             )
             return
@@ -335,6 +419,9 @@ def _cached_run(
             "confidence_cap": result.confidence_cap,
             "attempts": [a.as_dict() for a in result.attempts],
             "warnings": list(result.warnings),
+            "stderr_tail": result.stderr_tail,
+            "stderr_error_lines": result.stderr_error_lines,
+            "stderr_warning_lines": result.stderr_warning_lines,
         }
         try:
             cache_.put(key, material, {_OUTPUT_NAME: produced}, recorded)

@@ -1,0 +1,386 @@
+{
+  "schema_version": "0.1",
+  "file": {
+    "path": "structural-set.dxf",
+    "sha256": "c76afa09326ecec1b0df61e03a3f87471f14df8456548e08e177368d6748fbd6",
+    "confidence_cap": "high",
+    "declared_units": {
+      "insunits": 4,
+      "name": "mm"
+    }
+  },
+  "candidates": [
+    {
+      "candidate_id": "L0001",
+      "text_id": "T000018",
+      "sheet": "model#01",
+      "value": {
+        "value": 0.0,
+        "provenance": {
+          "file": "structural-set.dxf",
+          "sheet": "model#01",
+          "method": "dxf_entity",
+          "region": {
+            "bbox": [
+              40000.0,
+              40000.0,
+              41470.0,
+              40350.0
+            ]
+          }
+        },
+        "confidence": "low"
+      },
+      "value_text": "+0.000",
+      "form": "bare",
+      "prefix": null,
+      "decimals": 3,
+      "unit_suffix": null,
+      "name": null,
+      "symbol": null,
+      "flags": []
+    },
+    {
+      "candidate_id": "L0002",
+      "text_id": "T000019",
+      "sheet": "model#01",
+      "value": {
+        "value": 3.6,
+        "provenance": {
+          "file": "structural-set.dxf",
+          "sheet": "model#01",
+          "method": "dxf_entity",
+          "region": {
+            "bbox": [
+              40000.0,
+              43000.0,
+              41470.0,
+              43350.0
+            ]
+          }
+        },
+        "confidence": "medium"
+      },
+      "value_text": "+3.600",
+      "form": "bare",
+      "prefix": null,
+      "decimals": 3,
+      "unit_suffix": null,
+      "name": null,
+      "symbol": {
+        "block_name": "LVL_MARK",
+        "handle": "E6",
+        "distance": 320.156212
+      },
+      "flags": []
+    },
+    {
+      "candidate_id": "L0003",
+      "text_id": "T000020",
+      "sheet": "model#01",
+      "value": {
+        "value": 7.2,
+        "provenance": {
+          "file": "structural-set.dxf",
+          "sheet": "model#01",
+          "method": "dxf_entity",
+          "region": {
+            "bbox": [
+              40000.0,
+              46000.0,
+              41470.0,
+              46350.0
+            ]
+          }
+        },
+        "confidence": "low"
+      },
+      "value_text": "+7.200",
+      "form": "bare",
+      "prefix": null,
+      "decimals": 3,
+      "unit_suffix": null,
+      "name": null,
+      "symbol": null,
+      "flags": []
+    },
+    {
+      "candidate_id": "L0004",
+      "text_id": "T000021",
+      "sheet": "model#01",
+      "value": {
+        "value": 3.6,
+        "provenance": {
+          "file": "structural-set.dxf",
+          "sheet": "model#01",
+          "method": "dxf_entity",
+          "region": {
+            "bbox": [
+              50000.0,
+              43000.0,
+              53185.0,
+              43350.0
+            ]
+          }
+        },
+        "confidence": "low"
+      },
+      "value_text": "+3.600",
+      "form": "labelled",
+      "prefix": null,
+      "decimals": 3,
+      "unit_suffix": null,
+      "name": {
+        "value": "TẦNG 2",
+        "provenance": {
+          "file": "structural-set.dxf",
+          "sheet": "model#01",
+          "method": "dxf_entity",
+          "region": {
+            "bbox": [
+              50000.0,
+              43000.0,
+              53185.0,
+              43350.0
+            ]
+          }
+        },
+        "confidence": "low"
+      },
+      "symbol": null,
+      "flags": []
+    },
+    {
+      "candidate_id": "L0005",
+      "text_id": "T000037",
+      "sheet": "model#02",
+      "value": {
+        "value": 3.65,
+        "provenance": {
+          "file": "structural-set.dxf",
+          "sheet": "model#02",
+          "method": "dxf_entity",
+          "region": {
+            "bbox": [
+              130000.0,
+              43000.0,
+              133185.0,
+              43350.0
+            ]
+          }
+        },
+        "confidence": "low"
+      },
+      "value_text": "+3.650",
+      "form": "labelled",
+      "prefix": null,
+      "decimals": 3,
+      "unit_suffix": null,
+      "name": {
+        "value": "TẦNG 2",
+        "provenance": {
+          "file": "structural-set.dxf",
+          "sheet": "model#02",
+          "method": "dxf_entity",
+          "region": {
+            "bbox": [
+              130000.0,
+              43000.0,
+              133185.0,
+              43350.0
+            ]
+          }
+        },
+        "confidence": "low"
+      },
+      "symbol": null,
+      "flags": []
+    },
+    {
+      "candidate_id": "L0006",
+      "text_id": "T000038",
+      "sheet": "model#02",
+      "value": {
+        "value": 7.2,
+        "provenance": {
+          "file": "structural-set.dxf",
+          "sheet": "model#02",
+          "method": "dxf_entity",
+          "region": {
+            "bbox": [
+              130000.0,
+              46000.0,
+              131470.0,
+              46350.0
+            ]
+          }
+        },
+        "confidence": "low"
+      },
+      "value_text": "+7.200",
+      "form": "bare",
+      "prefix": null,
+      "decimals": 3,
+      "unit_suffix": null,
+      "name": null,
+      "symbol": null,
+      "flags": []
+    }
+  ],
+  "levels": [
+    {
+      "value": 0.0,
+      "value_text": "±0.000",
+      "candidate_ids": [
+        "L0001"
+      ],
+      "occurrences": 1,
+      "sheets": [
+        "model#01"
+      ],
+      "names": [],
+      "confidence": "low",
+      "used_for_heights": false
+    },
+    {
+      "value": 3.6,
+      "value_text": "+3.600",
+      "candidate_ids": [
+        "L0002",
+        "L0004"
+      ],
+      "occurrences": 2,
+      "sheets": [
+        "model#01"
+      ],
+      "names": [
+        "TẦNG 2"
+      ],
+      "confidence": "medium",
+      "used_for_heights": true
+    },
+    {
+      "value": 3.65,
+      "value_text": "+3.650",
+      "candidate_ids": [
+        "L0005"
+      ],
+      "occurrences": 1,
+      "sheets": [
+        "model#02"
+      ],
+      "names": [
+        "TẦNG 2"
+      ],
+      "confidence": "low",
+      "used_for_heights": true
+    },
+    {
+      "value": 7.2,
+      "value_text": "+7.200",
+      "candidate_ids": [
+        "L0003",
+        "L0006"
+      ],
+      "occurrences": 2,
+      "sheets": [
+        "model#01",
+        "model#02"
+      ],
+      "names": [],
+      "confidence": "low",
+      "used_for_heights": false
+    }
+  ],
+  "storey_heights": [
+    {
+      "from_value": 3.6,
+      "to_value": 3.65,
+      "height": {
+        "value": 0.05,
+        "provenance": {
+          "file": "structural-set.dxf",
+          "sheet": "unknown",
+          "method": "derived",
+          "derived_from": [
+            {
+              "file": "structural-set.dxf",
+              "sheet": "model#01",
+              "method": "dxf_entity",
+              "region": {
+                "bbox": [
+                  40000.0,
+                  43000.0,
+                  41470.0,
+                  43350.0
+                ]
+              }
+            },
+            {
+              "file": "structural-set.dxf",
+              "sheet": "model#02",
+              "method": "dxf_entity",
+              "region": {
+                "bbox": [
+                  130000.0,
+                  43000.0,
+                  133185.0,
+                  43350.0
+                ]
+              }
+            }
+          ]
+        },
+        "confidence": "low"
+      }
+    }
+  ],
+  "summary": {
+    "texts_scanned": 42,
+    "candidates": 6,
+    "by_form": {
+      "bare": 4,
+      "labelled": 2
+    },
+    "levels": 4,
+    "level_symbol_inserts": 1
+  },
+  "questions": [
+    {
+      "code": "level_finished_vs_structural",
+      "blocking": true,
+      "message": "Are these levels finished floor levels or structural (top of slab / beam) levels? The convention is not verified and the two differ by the screed thickness.",
+      "where": "+3.600, +3.650",
+      "found": "4 distinct value(s) on 2 sheet(s)"
+    },
+    {
+      "code": "level_name_conflict",
+      "blocking": true,
+      "message": "The same storey name is given with different levels. Which level is right (or are they different datums, e.g. architectural vs structural)?",
+      "where": "TẦNG 2",
+      "found": "+3.600 / +3.650"
+    },
+    {
+      "code": "level_single_occurrence",
+      "blocking": false,
+      "message": "This level appears only once in the file (a copied sheet does not count); it is not cross-checked by another view.",
+      "where": "L0001",
+      "found": "±0.000",
+      "sheet": "model#01"
+    },
+    {
+      "code": "level_single_occurrence",
+      "blocking": false,
+      "message": "This level appears only once in the file (a copied sheet does not count); it is not cross-checked by another view.",
+      "where": "L0005",
+      "found": "+3.650",
+      "sheet": "model#02"
+    }
+  ],
+  "question_counts": {
+    "level_finished_vs_structural": 1,
+    "level_name_conflict": 1,
+    "level_single_occurrence": 2
+  },
+  "warnings": []
+}

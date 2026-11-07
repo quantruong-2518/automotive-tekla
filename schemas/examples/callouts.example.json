@@ -1,0 +1,455 @@
+{
+  "schema_version": "0.1",
+  "kind": "callouts",
+  "project_id": "demo-callouts",
+  "inventory_sha256": "cdda43636630ca0a07d14add6d346a202cb00096bb674a33dba41014f83e88bc",
+  "files": [
+    {
+      "path": "plans/set.dxf",
+      "status": "scanned",
+      "reason": null,
+      "text_entries": 51,
+      "scanned": 51,
+      "candidates": 7
+    }
+  ],
+  "skipped_sheets": [],
+  "candidates": [
+    {
+      "id": "K000001",
+      "kind": "rebar_callout",
+      "file": "plans/set.dxf",
+      "sheet": "model#01",
+      "sheet_number": {
+        "value": "S-101",
+        "confidence": "medium"
+      },
+      "text_ref": {
+        "file": "plans/set.dxf",
+        "entry_id": "T000040"
+      },
+      "display_text": "4Ø16",
+      "position": {
+        "x": 62000.0,
+        "y": 57000.0
+      },
+      "layer": "0",
+      "encoding": "unknown",
+      "parsed": {
+        "form": "count_diameter",
+        "count": 4,
+        "diameter_mm": 16
+      },
+      "rule": "COUNT_DIA (docs/research/vn-structural-drawing-conventions.md: Parsing patterns 1, section 1.1, verified at grade B)",
+      "unparsed_reason": null,
+      "ambiguity": null,
+      "confidence": "medium",
+      "flags": [],
+      "provenance": {
+        "file": "plans/set.dxf",
+        "sheet": "S-101",
+        "method": "derived",
+        "revision": "A",
+        "derived_from": [
+          {
+            "file": "plans/set.dxf",
+            "sheet": "S-101",
+            "method": "dxf_entity",
+            "revision": "A",
+            "region": {
+              "bbox": [
+                62000.0,
+                57000.0,
+                62980.0,
+                57350.0
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "K000002",
+      "kind": "rebar_callout",
+      "file": "plans/set.dxf",
+      "sheet": "model#01",
+      "sheet_number": {
+        "value": "S-101",
+        "confidence": "medium"
+      },
+      "text_ref": {
+        "file": "plans/set.dxf",
+        "entry_id": "T000041"
+      },
+      "display_text": "Ø8a150",
+      "position": {
+        "x": 62000.0,
+        "y": 56500.0
+      },
+      "layer": "0",
+      "encoding": "unknown",
+      "parsed": {
+        "form": "diameter_spacing",
+        "diameter_mm": 8,
+        "spacing_mm": 150,
+        "spacing_mid_mm": null
+      },
+      "rule": "DIA_SPACING (docs/research/vn-structural-drawing-conventions.md: Parsing patterns 1, section 1.1, verified at grade B)",
+      "unparsed_reason": null,
+      "ambiguity": null,
+      "confidence": "medium",
+      "flags": [],
+      "provenance": {
+        "file": "plans/set.dxf",
+        "sheet": "S-101",
+        "method": "derived",
+        "revision": "A",
+        "derived_from": [
+          {
+            "file": "plans/set.dxf",
+            "sheet": "S-101",
+            "method": "dxf_entity",
+            "revision": "A",
+            "region": {
+              "bbox": [
+                62000.0,
+                56500.0,
+                63470.0,
+                56850.0
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "K000003",
+      "kind": "rebar_callout",
+      "file": "plans/set.dxf",
+      "sheet": "model#01",
+      "sheet_number": {
+        "value": "S-101",
+        "confidence": "medium"
+      },
+      "text_ref": {
+        "file": "plans/set.dxf",
+        "entry_id": "T000042"
+      },
+      "display_text": "13Ø8a100",
+      "position": {
+        "x": 62000.0,
+        "y": 56000.0
+      },
+      "layer": "0",
+      "encoding": "unknown",
+      "parsed": null,
+      "rule": "AMBIG_REBAR_COUNT_BEFORE_SPACING (docs/research/vn-structural-drawing-conventions.md: Ambiguous notations, #2)",
+      "unparsed_reason": "ambiguous notation, not parsed: rebar_count_before_spacing",
+      "ambiguity": "rebar_count_before_spacing",
+      "confidence": "low",
+      "flags": [],
+      "provenance": {
+        "file": "plans/set.dxf",
+        "sheet": "S-101",
+        "method": "derived",
+        "revision": "A",
+        "derived_from": [
+          {
+            "file": "plans/set.dxf",
+            "sheet": "S-101",
+            "method": "dxf_entity",
+            "revision": "A",
+            "region": {
+              "bbox": [
+                62000.0,
+                56000.0,
+                63960.0,
+                56350.0
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "K000004",
+      "kind": "rebar_grade",
+      "file": "plans/set.dxf",
+      "sheet": "model#01",
+      "sheet_number": {
+        "value": "S-101",
+        "confidence": "medium"
+      },
+      "text_ref": {
+        "file": "plans/set.dxf",
+        "entry_id": "T000043"
+      },
+      "display_text": "CB300-V",
+      "position": {
+        "x": 62000.0,
+        "y": 55500.0
+      },
+      "layer": "0",
+      "encoding": "unknown",
+      "parsed": {
+        "form": "rebar_grade",
+        "yield_class_mpa": 300,
+        "letter": "V",
+        "surface": "ribbed"
+      },
+      "rule": "REBAR_GRADE (docs/research/vn-structural-drawing-conventions.md: Parsing patterns 2, section 1.3)",
+      "unparsed_reason": null,
+      "ambiguity": "rebar_grade_edition",
+      "confidence": "medium",
+      "flags": [],
+      "provenance": {
+        "file": "plans/set.dxf",
+        "sheet": "S-101",
+        "method": "derived",
+        "revision": "A",
+        "derived_from": [
+          {
+            "file": "plans/set.dxf",
+            "sheet": "S-101",
+            "method": "dxf_entity",
+            "revision": "A",
+            "region": {
+              "bbox": [
+                62000.0,
+                55500.0,
+                63715.0,
+                55850.0
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "K000005",
+      "kind": "member_mark",
+      "file": "plans/set.dxf",
+      "sheet": "model#01",
+      "sheet_number": {
+        "value": "S-101",
+        "confidence": "medium"
+      },
+      "text_ref": {
+        "file": "plans/set.dxf",
+        "entry_id": "T000044"
+      },
+      "display_text": "C1",
+      "position": {
+        "x": 62000.0,
+        "y": 55000.0
+      },
+      "layer": "0",
+      "encoding": "unknown",
+      "parsed": null,
+      "rule": "MEMBER_MARK_SHAPE (docs/research/vn-structural-drawing-conventions.md: section 4: practice only, no standard defines the letters)",
+      "unparsed_reason": "member mark letters are not defined by any standard or by this drawing's legend yet (section 4)",
+      "ambiguity": null,
+      "lexical": {
+        "prefix": "C",
+        "number": "1",
+        "suffix": ""
+      },
+      "confidence": "low",
+      "flags": [],
+      "provenance": {
+        "file": "plans/set.dxf",
+        "sheet": "S-101",
+        "method": "derived",
+        "revision": "A",
+        "derived_from": [
+          {
+            "file": "plans/set.dxf",
+            "sheet": "S-101",
+            "method": "dxf_entity",
+            "revision": "A",
+            "region": {
+              "bbox": [
+                62000.0,
+                55000.0,
+                62490.0,
+                55350.0
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "K000006",
+      "kind": "member_mark",
+      "file": "plans/set.dxf",
+      "sheet": "model#01",
+      "sheet_number": {
+        "value": "S-101",
+        "confidence": "medium"
+      },
+      "text_ref": {
+        "file": "plans/set.dxf",
+        "entry_id": "T000045"
+      },
+      "display_text": "C2",
+      "position": {
+        "x": 62000.0,
+        "y": 54500.0
+      },
+      "layer": "0",
+      "encoding": "unknown",
+      "parsed": null,
+      "rule": "MEMBER_MARK_SHAPE (docs/research/vn-structural-drawing-conventions.md: section 4: practice only, no standard defines the letters)",
+      "unparsed_reason": "member mark letters are not defined by any standard or by this drawing's legend yet (section 4)",
+      "ambiguity": null,
+      "lexical": {
+        "prefix": "C",
+        "number": "2",
+        "suffix": ""
+      },
+      "confidence": "low",
+      "flags": [],
+      "provenance": {
+        "file": "plans/set.dxf",
+        "sheet": "S-101",
+        "method": "derived",
+        "revision": "A",
+        "derived_from": [
+          {
+            "file": "plans/set.dxf",
+            "sheet": "S-101",
+            "method": "dxf_entity",
+            "revision": "A",
+            "region": {
+              "bbox": [
+                62000.0,
+                54500.0,
+                62490.0,
+                54850.0
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "K000007",
+      "kind": "member_mark",
+      "file": "plans/set.dxf",
+      "sheet": "model#02",
+      "sheet_number": {
+        "value": "S-102",
+        "confidence": "medium"
+      },
+      "text_ref": {
+        "file": "plans/set.dxf",
+        "entry_id": "T000048"
+      },
+      "display_text": "C1",
+      "position": {
+        "x": 152000.0,
+        "y": 57000.0
+      },
+      "layer": "0",
+      "encoding": "unknown",
+      "parsed": null,
+      "rule": "MEMBER_MARK_SHAPE (docs/research/vn-structural-drawing-conventions.md: section 4: practice only, no standard defines the letters)",
+      "unparsed_reason": "member mark letters are not defined by any standard or by this drawing's legend yet (section 4)",
+      "ambiguity": null,
+      "lexical": {
+        "prefix": "C",
+        "number": "1",
+        "suffix": ""
+      },
+      "confidence": "low",
+      "flags": [],
+      "provenance": {
+        "file": "plans/set.dxf",
+        "sheet": "S-102",
+        "method": "derived",
+        "revision": "A",
+        "derived_from": [
+          {
+            "file": "plans/set.dxf",
+            "sheet": "S-102",
+            "method": "dxf_entity",
+            "revision": "A",
+            "region": {
+              "bbox": [
+                152000.0,
+                57000.0,
+                152490.0,
+                57350.0
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "question_counts": {
+    "callout_ambiguous": 2,
+    "member_mark_prefix_meaning": 1
+  },
+  "summary": {
+    "candidates": 7,
+    "parsed": 3,
+    "unparsed": 4,
+    "by_kind": {
+      "member_mark": 3,
+      "rebar_callout": 3,
+      "rebar_grade": 1
+    },
+    "by_confidence": {
+      "low": 4,
+      "medium": 3
+    },
+    "by_file": [
+      {
+        "file": "plans/set.dxf",
+        "total": 7,
+        "by_kind": {
+          "member_mark": 3,
+          "rebar_callout": 3,
+          "rebar_grade": 1
+        }
+      }
+    ],
+    "by_sheet": [
+      {
+        "file": "plans/set.dxf",
+        "sheet": "model#01",
+        "sheet_number": {
+          "value": "S-101",
+          "confidence": "medium"
+        },
+        "total": 6,
+        "by_kind": {
+          "member_mark": 2,
+          "rebar_callout": 3,
+          "rebar_grade": 1
+        }
+      },
+      {
+        "file": "plans/set.dxf",
+        "sheet": "model#02",
+        "sheet_number": {
+          "value": "S-102",
+          "confidence": "medium"
+        },
+        "total": 1,
+        "by_kind": {
+          "member_mark": 1
+        }
+      }
+    ],
+    "member_mark_prefixes": 1,
+    "files_scanned": 1,
+    "files_skipped": 0
+  },
+  "warnings": [
+    "plans/set.dxf: structure/plans/set.dxf.grids.json is missing: its texts are not excluded from member marks",
+    "plans/set.dxf: structure/plans/set.dxf.levels.json is missing: its texts are not excluded from member marks"
+  ]
+}

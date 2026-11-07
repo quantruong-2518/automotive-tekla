@@ -1,0 +1,378 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:tekla-harness:schema:grid-system:0.1",
+  "title": "Project grid systems (gate 1 proposal)",
+  "description": "Output of `harness grid-system` (`grid_system.run_grid_systems` / `build_grid_systems`; written as grid-systems.json with grid-system-questions.json and structure/grid-systems/*.svg). Input: inventory.json, structure-summary.json (must record this inventory's sha256, else exit 1: rerun read-structure) and every structure/<file>.grids.json + .sheets.json, plus the engineer answers (answers.json; only status 'active' counts; `answers_sha256` fingerprints the units and axis answers that were read, so a later answer makes the document stale). A GRID SYSTEM is one building's or structure's grid: one or two directions of axes. USABLE FAMILY: >= 2 axes, all labelled, labels unique, every spacing > 0 (otherwise listed in unassigned_families). A view (grids.py group) contributes its usable families; two of them within 0.5 degrees of orthogonal (heuristics.orthogonal_tolerance_deg) are one two-direction contribution. AGREE (heuristic, the grids.py cross-check rule): >= 2 shared labels, same or reversed order, every distance between consecutive shared labels equal within half the rounding step or within heuristics.drafting_tolerance (2e-4) of the distance; otherwise, with >= 2 shared labels, CONFLICT. The comparison is in MILLIMETRES (each family's distances and rounding step scaled by its own file's answered unit) when every contributing file of the comparison, i.e. both families' files, has an active units answer that agrees with itself; so one building drawn in m in one file and in mm in another merges into one system. Otherwise it is in DRAWING UNITS as drawn (the same numbers in two files whose units are not both answered are taken as the same unit). Views with the same label sets that agree with EVERY member of a cluster form it (full contributors); spacings are never averaged: a system shows its representative family's spacings (the first complete view by file and group) and the largest relative difference to the others (max_relative_spread); views that disagree beyond tolerance are never in one system. Clusters are ranked (directions, independent views, views, axes, file, group) and become systems S001...; a cluster whose families are all label subsets of an earlier system, agreeing with every full member, joins it as a PARTIAL contributor (confirms only some spacings, never counted as independent); when it fits several earlier systems that conflict with one another it stays its own system (flag ambiguous_subset, relations.subset_of). Same labels with incompatible spacings or order -> separate systems and a blocking grid_system_conflict question. INDEPENDENCE (heuristic, conservative): two views are not independent when in one file they share a sheet, are on copied sheets (sheets.json duplicate_of), share a top-level block, or grids.py recorded their other_view evidence as not independent (or its ref cannot be parsed); views of two files whose sha256 are equal are not independent. independent_views counts connected groups of full contributors; fewer than 2 -> flag single_source and confidence low. UNITS: spacings and coordinate strings are in DRAWING UNITS with the declared header unit (the representative family's file), never converted from it; a direction's `mm` is filled only when every contributing file has active units answers (codes units_confirm_all, units_conflict, units_suspect, units_unknown, grid_units_doubt; values {unit: mm|cm|m|in|ft}; an answer without file applies to every file) that agree with themselves, and the representative file's unit does the conversion (files of one system may answer different units: flag answered_units_differ); otherwise null with units.reason. TEKLA X/Y: only from active grid_family_axis_assignment answers ({<family_id>: X|Y}, bound to the answer's file) covering every direction without contradiction; else null. In Tekla, X coordinates belong to lines parallel to Y; X/Y strings are relative ('0' then spacings, equal runs 'n*d'); levels (Z, absolute) come from levels.json, not from here. Labels and positions run in drawing order (offset along the family normal); origin and direction are confirmed at gate 1. Confidence is never 'high' (gate 1 decides). Nothing here is a timestamp: same inputs and answers give the same document.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "project_id",
+    "inventory_sha256",
+    "answers_sha256",
+    "heuristics",
+    "files",
+    "systems",
+    "unassigned_families",
+    "summary",
+    "questions",
+    "question_counts",
+    "warnings"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": "0.1" },
+    "project_id": { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/project_id" },
+    "inventory_sha256": { "$ref": "#/$defs/sha256", "description": "sha256 of the inventory.json bytes this was built from; a different value means this document is stale (harness status)." },
+    "answers_sha256": { "$ref": "#/$defs/sha256", "description": "sha256 over the active units and grid_family_axis_assignment answers that were read (code, file, key, values); a different value for the current answers.json means this document is stale (harness status)." },
+    "heuristics": {
+      "type": "object",
+      "required": ["drafting_tolerance", "orthogonal_tolerance_deg", "max_confidence"],
+      "additionalProperties": false,
+      "description": "The thresholds used (heuristics, not standards).",
+      "properties": {
+        "drafting_tolerance": { "type": "number", "exclusiveMinimum": 0 },
+        "orthogonal_tolerance_deg": { "type": "number", "exclusiveMinimum": 0 },
+        "max_confidence": { "const": "medium" }
+      }
+    },
+    "files": {
+      "type": "array",
+      "description": "Every DWG/DXF row of the inventory, sorted by path.",
+      "items": { "$ref": "#/$defs/file" }
+    },
+    "systems": { "type": "array", "items": { "$ref": "#/$defs/system" } },
+    "unassigned_families": {
+      "type": "array",
+      "description": "Families of >= 2 axes that cannot be matched by label (single-axis families are only counted).",
+      "items": {
+        "type": "object",
+        "required": ["file", "sheet", "group_id", "family_id", "labels", "reason"],
+        "additionalProperties": false,
+        "properties": {
+          "file": { "type": "string", "minLength": 1 },
+          "sheet": { "type": "string", "minLength": 1 },
+          "group_id": { "$ref": "#/$defs/group_id" },
+          "family_id": { "$ref": "#/$defs/family_id" },
+          "labels": { "type": "string", "description": "As drawn, '?' for none." },
+          "reason": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "required": [
+        "files_read",
+        "views",
+        "views_used",
+        "single_axis_families",
+        "families_unassigned",
+        "systems",
+        "two_direction",
+        "single_source",
+        "conflicts"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "files_read": { "type": "integer", "minimum": 0 },
+        "views": { "type": "integer", "minimum": 0 },
+        "views_used": { "type": "integer", "minimum": 0 },
+        "single_axis_families": { "type": "integer", "minimum": 0 },
+        "families_unassigned": { "type": "integer", "minimum": 0 },
+        "systems": { "type": "integer", "minimum": 0 },
+        "two_direction": { "type": "integer", "minimum": 0 },
+        "single_source": { "type": "integer", "minimum": 0 },
+        "conflicts": { "type": "integer", "minimum": 0, "description": "Conflicting system pairs." }
+      }
+    },
+    "questions": { "type": "array", "items": { "$ref": "#/$defs/question" } },
+    "question_counts": {
+      "type": "object",
+      "additionalProperties": { "type": "integer", "minimum": 1 },
+      "description": "True number of questions per code; `questions` lists at most 100 per code (a warning says so)."
+    },
+    "warnings": { "type": "array", "items": { "type": "string" } }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "group_id": { "type": "string", "pattern": "^V[0-9]{3,}$" },
+    "family_id": { "type": "string", "pattern": "^F[0-9]{3,}$" },
+    "unit": { "enum": ["mm", "cm", "m", "in", "ft"] },
+    "declared_unit": {
+      "enum": ["mm", "cm", "m", "in", "ft", "unknown", "mixed"],
+      "description": "Header $INSUNITS name, never confirmed; 'mixed' when the contributing files declare different units."
+    },
+    "confidence": {
+      "enum": ["medium", "low"],
+      "description": "Never 'high': the engineer confirms at gate 1."
+    },
+    "file": {
+      "type": "object",
+      "required": ["path", "sha256", "grids", "status", "declared_unit", "views", "families_usable", "units_answer"],
+      "additionalProperties": false,
+      "properties": {
+        "path": { "type": "string", "minLength": 1, "description": "Input-relative, as in inventory.json (answers use it)." },
+        "sha256": { "$ref": "#/$defs/sha256", "description": "Of the input file (inventory)." },
+        "grids": { "type": ["string", "null"], "description": "Grids document, relative to the work folder." },
+        "status": { "enum": ["read", "no_grids"], "description": "no_grids: read-structure skipped the file." },
+        "declared_unit": {
+          "anyOf": [{ "type": "null" }, { "enum": ["mm", "cm", "m", "in", "ft", "unknown"] }]
+        },
+        "views": { "type": "integer", "minimum": 0 },
+        "families_usable": { "type": "integer", "minimum": 0 },
+        "units_answer": {
+          "anyOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "required": ["status", "unit"],
+              "additionalProperties": false,
+              "properties": {
+                "status": { "enum": ["answered", "not_answered", "disagree", "invalid"] },
+                "unit": { "anyOf": [{ "type": "null" }, { "$ref": "#/$defs/unit" }] }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "family_ref": {
+      "type": "object",
+      "required": ["file", "sheet", "group_id", "family_id"],
+      "additionalProperties": false,
+      "properties": {
+        "file": { "type": "string", "minLength": 1 },
+        "sheet": { "type": "string", "minLength": 1, "description": "Detector sheet id (sheets.json)." },
+        "group_id": { "$ref": "#/$defs/group_id" },
+        "family_id": { "$ref": "#/$defs/family_id" }
+      }
+    },
+    "mm": {
+      "type": "object",
+      "required": ["spacings", "coordinates"],
+      "additionalProperties": false,
+      "properties": {
+        "spacings": { "type": "array", "items": { "type": "number", "exclusiveMinimum": 0 } },
+        "coordinates": { "type": "string", "minLength": 1 }
+      }
+    },
+    "direction": {
+      "type": "object",
+      "required": [
+        "labels",
+        "spacings",
+        "coordinates",
+        "unit",
+        "rounding_step",
+        "angle_deg",
+        "max_relative_spread",
+        "families",
+        "representative",
+        "provenance",
+        "confidence",
+        "tekla_axis",
+        "mm"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "labels": { "type": "array", "minItems": 2, "items": { "type": "string", "minLength": 1 } },
+        "spacings": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "number", "exclusiveMinimum": 0 },
+          "description": "Drawing units, the representative family's rounded spacings (grids.py values); one fewer than labels."
+        },
+        "coordinates": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Tekla style in drawing units: '0' then the spacings, equal runs as 'n*d'."
+        },
+        "unit": { "$ref": "#/$defs/declared_unit" },
+        "rounding_step": { "type": "number", "exclusiveMinimum": 0 },
+        "angle_deg": { "type": "number", "description": "Representative family's line direction in the drawing." },
+        "max_relative_spread": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Largest relative difference of a contributing family's distance to the representative's (<= drafting tolerance or below half the rounding step)."
+        },
+        "families": { "type": "integer", "minimum": 1, "description": "Contributing families of this direction." },
+        "representative": { "$ref": "#/$defs/family_ref" },
+        "provenance": { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/provenance" },
+        "confidence": { "$ref": "#/$defs/confidence" },
+        "tekla_axis": { "enum": ["X", "Y", null], "description": "Only from an active grid_family_axis_assignment answer." },
+        "mm": {
+          "anyOf": [{ "type": "null" }, { "$ref": "#/$defs/mm" }],
+          "description": "Only when every contributing file has an agreeing units answer (see units.reason)."
+        }
+      }
+    },
+    "contributor": {
+      "type": "object",
+      "required": ["file", "sheet", "group_id", "role", "independence_group", "families"],
+      "additionalProperties": false,
+      "properties": {
+        "file": { "type": "string", "minLength": 1 },
+        "sheet": { "type": "string", "minLength": 1 },
+        "group_id": { "$ref": "#/$defs/group_id" },
+        "role": { "enum": ["full", "partial"], "description": "partial: label subset of the system; not counted as independent." },
+        "independence_group": {
+          "type": ["integer", "null"],
+          "minimum": 1,
+          "description": "Full contributors with the same number are not independent of each other; null for partial."
+        },
+        "families": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 2,
+          "items": {
+            "type": "object",
+            "required": ["family_id", "direction", "labels", "complete"],
+            "additionalProperties": false,
+            "properties": {
+              "family_id": { "$ref": "#/$defs/family_id" },
+              "direction": { "type": "integer", "minimum": 0, "maximum": 1, "description": "Index into directions." },
+              "labels": { "type": "string" },
+              "complete": { "type": "boolean", "description": "grids.py proposal.complete." }
+            }
+          }
+        }
+      }
+    },
+    "system": {
+      "type": "object",
+      "required": [
+        "system_id",
+        "status",
+        "directions",
+        "evidence",
+        "flags",
+        "confidence",
+        "relations",
+        "units",
+        "axis_assignment",
+        "tekla_grid",
+        "svg",
+        "note"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "system_id": { "type": "string", "pattern": "^S[0-9]{3,}$" },
+        "status": { "const": "proposal" },
+        "directions": { "type": "array", "minItems": 1, "maxItems": 2, "items": { "$ref": "#/$defs/direction" } },
+        "evidence": {
+          "type": "object",
+          "required": ["views", "full_views", "partial_views", "independent_views", "sheets", "files", "contributors"],
+          "additionalProperties": false,
+          "properties": {
+            "views": { "type": "integer", "minimum": 1 },
+            "full_views": { "type": "integer", "minimum": 1 },
+            "partial_views": { "type": "integer", "minimum": 0 },
+            "independent_views": { "type": "integer", "minimum": 1 },
+            "sheets": { "type": "integer", "minimum": 1, "description": "Distinct (file, sheet) pairs." },
+            "files": { "type": "integer", "minimum": 1 },
+            "contributors": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/contributor" } }
+          }
+        },
+        "flags": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "single_source",
+              "single_direction",
+              "family_incomplete",
+              "within_drafting_tolerance",
+              "conflict",
+              "ambiguous_subset",
+              "declared_units_differ",
+              "units_not_confirmed",
+              "answered_units_differ",
+              "axis_unassigned"
+            ]
+          },
+          "description": "family_incomplete: a representative family's grids.py proposal is incomplete (see its questions). within_drafting_tolerance: some contributors agree only within the drafting tolerance. answered_units_differ: the files of this system answered different units (they were merged in millimetres; the drawing-unit values are the representative's)."
+        },
+        "confidence": { "$ref": "#/$defs/confidence", "description": "low when single_source, ambiguous_subset, family_incomplete or a direction is low." },
+        "relations": {
+          "type": "object",
+          "required": ["compatible_with", "conflicts_with", "subset_of"],
+          "additionalProperties": false,
+          "properties": {
+            "compatible_with": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Share >= 2 labels in a direction and never disagree (e.g. one adds intermediate axes)."
+            },
+            "conflicts_with": { "type": "array", "items": { "type": "string" } },
+            "subset_of": { "type": "array", "items": { "type": "string" }, "description": "ambiguous_subset: the conflicting systems it fits." }
+          }
+        },
+        "units": {
+          "type": "object",
+          "required": ["declared", "answered", "status", "reason"],
+          "additionalProperties": false,
+          "properties": {
+            "declared": { "$ref": "#/$defs/declared_unit" },
+            "answered": { "anyOf": [{ "type": "null" }, { "$ref": "#/$defs/unit" }], "description": "The unit the representative's file answered (the drawing-unit values are in it); null while units are not confirmed." },
+            "status": { "enum": ["confirmed", "not_confirmed"] },
+            "reason": {
+              "enum": [
+                null,
+                "units not confirmed",
+                "units answers disagree",
+                "units answer invalid"
+              ]
+            }
+          }
+        },
+        "axis_assignment": {
+          "type": "object",
+          "required": ["status", "reason"],
+          "additionalProperties": false,
+          "properties": {
+            "status": { "enum": ["answered", "not_answered", "contradictory"] },
+            "reason": { "type": ["string", "null"] }
+          }
+        },
+        "tekla_grid": {
+          "description": "Ready for a Tekla Grid (CoordinateX/LabelX, CoordinateY/LabelY) only when units are confirmed and X/Y answered; a single-direction system fills one axis. Z comes from levels.",
+          "anyOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "required": ["unit", "coordinate_x", "label_x", "coordinate_y", "label_y"],
+              "additionalProperties": false,
+              "properties": {
+                "unit": { "const": "mm" },
+                "coordinate_x": { "type": ["string", "null"] },
+                "label_x": { "type": ["string", "null"] },
+                "coordinate_y": { "type": ["string", "null"] },
+                "label_y": { "type": ["string", "null"] }
+              }
+            }
+          ]
+        },
+        "svg": {
+          "type": "string",
+          "pattern": "^structure/grid-systems/S[0-9]{3,}\\.svg$",
+          "description": "Gate-1 drawing, relative to the work folder. Written by `harness grid-system`; after `--no-svg` the drawings are removed and this path points at nothing."
+        },
+        "note": { "type": "string" }
+      }
+    },
+    "question": {
+      "type": "object",
+      "description": "Open question for the engineer (grids.py shape plus file), numbered in grid-system-questions.json. Codes: grid_system_select (one per project), grid_system_conflict, grid_system_units_unconfirmed, grid_system_axis_unassigned; all blocking.",
+      "required": ["code", "blocking", "message", "where", "found"],
+      "additionalProperties": false,
+      "properties": {
+        "code": { "enum": ["grid_system_select", "grid_system_conflict", "grid_system_units_unconfirmed", "grid_system_axis_unassigned"] },
+        "blocking": { "type": "boolean" },
+        "message": { "type": "string", "minLength": 1 },
+        "where": { "type": "string", "minLength": 1 },
+        "found": { "type": "string" },
+        "file": { "type": "string", "minLength": 1 },
+        "sheet": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

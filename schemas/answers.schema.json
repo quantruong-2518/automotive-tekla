@@ -1,0 +1,101 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:tekla-harness:schema:answers:0.1",
+  "title": "Engineer answers",
+  "description": "answers.json in the work folder: the engineer's answers to questions, the highest-trust provenance (common method 'engineer_answer', with the question_id). An answer is bound to the question's stable `key` (see question-registry), never to the positional-looking id alone: when the drawing behind a question changes, the question gets a new key, is asked again, and the old answer becomes 'stale' (kept, never deleted, never re-bound). Written only by `harness answer` (run by the engineer or on the engineer's explicit instruction) and, for the 'stale' transition, by the producers (intake, read-structure, callouts, grid-system). At most one answer per key is 'active'; a later answer to the same key marks the earlier one 'superseded'. Structured `values` are defined for some codes; for all other codes `values` is {}.",
+  "type": "object",
+  "required": ["schema_version", "project_id", "answers"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": "0.1" },
+    "project_id": { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/project_id" },
+    "answers": { "type": "array", "description": "In the order the answers were given.", "items": { "$ref": "#/$defs/answer" } }
+  },
+  "$defs": {
+    "unit": { "enum": ["mm", "cm", "m", "in", "ft"] },
+    "answer": {
+      "type": "object",
+      "required": ["key", "question_id", "code", "file", "answer_text", "values", "answered_by", "answered_on", "status"],
+      "additionalProperties": false,
+      "properties": {
+        "key": { "type": "string", "pattern": "^[0-9a-f]{16}$", "description": "Stable key of the answered question (question-registry)." },
+        "question_id": { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/question_id", "description": "The id the question had when it was answered." },
+        "code": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+        "file": { "type": ["string", "null"], "minLength": 1, "description": "Input-relative path the question is about; null for a project-level question." },
+        "answer_text": { "type": "string", "pattern": "\\S", "description": "The engineer's words, verbatim." },
+        "values": { "type": "object", "description": "Structured values, only for the codes listed in allOf below; {} for every other code." },
+        "answered_by": { "type": "string", "pattern": "\\S" },
+        "answered_on": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$", "description": "YYYY-MM-DD." },
+        "status": { "enum": ["active", "stale", "superseded"] },
+        "stale_reason": { "type": "string", "minLength": 1, "description": "Only when status is 'stale': why (input file changed or removed, question no longer raised)." }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "code": { "enum": ["units_confirm_all", "units_conflict", "units_suspect", "units_unknown", "grid_units_doubt"] } }, "required": ["code"] },
+          "then": {
+            "properties": {
+              "values": {
+                "description": "The unit the engineer confirmed: {\"unit\": \"mm\"}.",
+                "required": ["unit"],
+                "additionalProperties": false,
+                "properties": { "unit": { "$ref": "#/$defs/unit" } }
+              }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "code": { "const": "grid_family_axis_assignment" } }, "required": ["code"] },
+          "then": {
+            "properties": {
+              "values": {
+                "description": "Tekla axis of each grid family: {\"<family_id>\": \"X\"}.",
+                "minProperties": 1,
+                "additionalProperties": { "enum": ["X", "Y"] }
+              }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "code": { "const": "member_mark_prefix_meaning" } }, "required": ["code"] },
+          "then": {
+            "properties": {
+              "values": {
+                "description": "Meaning of each member mark prefix: {\"<prefix>\": \"<meaning>\"}.",
+                "minProperties": 1,
+                "additionalProperties": { "type": "string", "pattern": "\\S" }
+              }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "code": { "const": "grid_system_select" } }, "required": ["code"] },
+          "then": {
+            "properties": {
+              "values": {
+                "description": "Optional: the grid systems the project uses, {\"systems\": [\"S001\", \"S002\"]} (ids of the grid-systems.json the question was raised from). Without it every system listed in the question counts as used.",
+                "additionalProperties": false,
+                "properties": {
+                  "systems": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "pattern": "^S[0-9]{3,}$" } }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": { "not": { "enum": ["units_confirm_all", "units_conflict", "units_suspect", "units_unknown", "grid_units_doubt", "grid_family_axis_assignment", "member_mark_prefix_meaning", "grid_system_select"] } }
+            },
+            "required": ["code"]
+          },
+          "then": { "properties": { "values": { "maxProperties": 0 } } }
+        },
+        {
+          "if": { "properties": { "status": { "const": "stale" } }, "required": ["status"] },
+          "then": { "required": ["stale_reason"] },
+          "else": { "not": { "required": ["stale_reason"] } }
+        }
+      ]
+    }
+  }
+}

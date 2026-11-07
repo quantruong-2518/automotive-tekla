@@ -1,0 +1,181 @@
+{
+  "schema_version": "0.1",
+  "kind": "status",
+  "project_id": "demo-warehouse",
+  "inventory_sha256": "08155c46dfc4ed07c0711a686292c94e28f8e9f665a9c8f2116a620a907ae147",
+  "producers": [
+    {
+      "producer": "intake",
+      "command": "harness intake",
+      "questions": {
+        "total": 4,
+        "blocking": 2,
+        "blocking_unknown": 0,
+        "blocking_open": 1,
+        "answered": 1,
+        "obsolete": 0
+      },
+      "blocking_open_ids": [
+        "Q-001"
+      ],
+      "stale_answers": [],
+      "outputs": {
+        "status": "fresh",
+        "files": [
+          "inventory.json",
+          "questions.json"
+        ],
+        "reason": null,
+        "rerun": null
+      }
+    },
+    {
+      "producer": "read-structure",
+      "command": "harness read-structure",
+      "questions": {
+        "total": 18,
+        "blocking": 16,
+        "blocking_unknown": 0,
+        "blocking_open": 16,
+        "answered": 0,
+        "obsolete": 0
+      },
+      "blocking_open_ids": [
+        "Q-005",
+        "Q-006",
+        "Q-007",
+        "Q-008",
+        "Q-009",
+        "Q-010",
+        "Q-011",
+        "Q-012",
+        "Q-013",
+        "Q-014",
+        "Q-015",
+        "Q-016",
+        "Q-017",
+        "Q-018",
+        "Q-019",
+        "Q-020"
+      ],
+      "stale_answers": [],
+      "outputs": {
+        "status": "fresh",
+        "files": [
+          "structure-summary.json",
+          "structure-questions.json"
+        ],
+        "reason": null,
+        "rerun": null
+      }
+    },
+    {
+      "producer": "callouts",
+      "command": "harness callouts",
+      "questions": {
+        "total": 0,
+        "blocking": 0,
+        "blocking_unknown": 0,
+        "blocking_open": 0,
+        "answered": 0,
+        "obsolete": 0
+      },
+      "blocking_open_ids": [],
+      "stale_answers": [],
+      "outputs": {
+        "status": "missing",
+        "files": [
+          "callouts.json",
+          "callouts-questions.json"
+        ],
+        "reason": "callouts.json, callouts-questions.json not found",
+        "rerun": "harness callouts work"
+      }
+    },
+    {
+      "producer": "marks",
+      "command": "harness marks",
+      "questions": {
+        "total": 0,
+        "blocking": 0,
+        "blocking_unknown": 0,
+        "blocking_open": 0,
+        "answered": 0,
+        "obsolete": 0
+      },
+      "blocking_open_ids": [],
+      "stale_answers": [],
+      "outputs": {
+        "status": "missing",
+        "files": [
+          "marks.json",
+          "marks-questions.json"
+        ],
+        "reason": "marks.json, marks-questions.json not found",
+        "rerun": "harness marks work"
+      }
+    },
+    {
+      "producer": "grid-system",
+      "command": "harness grid-system",
+      "questions": {
+        "total": 4,
+        "blocking": 4,
+        "blocking_unknown": 0,
+        "blocking_open": 4,
+        "answered": 0,
+        "obsolete": 0
+      },
+      "blocking_open_ids": [
+        "Q-023",
+        "Q-024",
+        "Q-025",
+        "Q-026"
+      ],
+      "stale_answers": [],
+      "outputs": {
+        "status": "stale",
+        "files": [
+          "grid-systems.json",
+          "grid-system-questions.json"
+        ],
+        "reason": "grid-systems.json was built before the latest units / axis answers",
+        "rerun": "harness grid-system work"
+      }
+    },
+    {
+      "producer": "reader",
+      "command": "harness ask",
+      "questions": {
+        "total": 0,
+        "blocking": 0,
+        "blocking_unknown": 0,
+        "blocking_open": 0,
+        "answered": 0,
+        "obsolete": 0
+      },
+      "blocking_open_ids": [],
+      "stale_answers": [],
+      "outputs": {
+        "status": "n/a",
+        "files": [],
+        "reason": null,
+        "rerun": null
+      }
+    }
+  ],
+  "gate1": {
+    "ready_for_gate1": false,
+    "reasons": [
+      "units: other.dxf has no active units answer (harness answer <id> ... --value unit=mm)",
+      "grid systems: not checked, the grid-system outputs are stale",
+      "levels: Q-017 level_finished_vs_structural (other.dxf) is not answered",
+      "levels: Q-018 level_finished_vs_structural (set.dxf) is not answered",
+      "intake: 1 blocking question(s) open (Q-001)",
+      "read-structure: 16 blocking question(s) open (Q-005, Q-006, Q-007, Q-008, Q-009, Q-010, Q-011, Q-012, Q-013, Q-014 and 6 more)",
+      "grid-system: 4 blocking question(s) open (Q-023, Q-024, Q-025, Q-026)",
+      "callouts: outputs missing (callouts.json, callouts-questions.json not found); rerun harness callouts work",
+      "grid-system: outputs stale (grid-systems.json was built before the latest units / axis answers); rerun harness grid-system work"
+    ]
+  }
+}

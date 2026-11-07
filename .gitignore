@@ -53,3 +53,14 @@ desktop.ini
 .idea/
 .vscode/*
 !.vscode/extensions.json
+
+# --- dwg-lab: third-party downloads (keep only our own SOURCES/manifests) ---
+dwg-lab/samples/**
+!dwg-lab/samples/**/
+!dwg-lab/samples/**/SOURCE.md
+!dwg-lab/samples/**/*.md
+dwg-lab/vendor/*/
+dwg-lab/references/**/*.pdf
+dwg-lab/references/**/*.zip
+dwg-lab/tools/
+dwg-lab/samples/CONVERSION-REPORT.md

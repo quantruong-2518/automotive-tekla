@@ -1,0 +1,177 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:tekla-harness:schema:sheet-text:0.1",
+  "title": "Sheet list and sheet text",
+  "description": "Read-only views over an intake work folder (`sheet_text.py`). 'sheet_list': every detected sheet of every DXF/DWG file with its printed sheet number, frame bbox, text count and the largest texts as title candidates. 'sheet_text': the text entries assigned to ONE sheet (by the sheets document), in reading order, in compact form. Nothing is decoded or interpreted: entries keep the encoding, confidence and flags of the text index. Reading order: rows from the top down (larger y first); an entry joins the current row when its y is within 0.6 x the median text height of the sheet of the row's first entry's y; inside a row left to right; ties by entry id; entries without a position last, row null.",
+  "type": "object",
+  "required": ["kind"],
+  "properties": { "kind": { "enum": ["sheet_list", "sheet_text"] } },
+  "allOf": [
+    { "if": { "required": ["kind"], "properties": { "kind": { "const": "sheet_list" } } }, "then": { "$ref": "#/$defs/sheet_list" } },
+    { "if": { "required": ["kind"], "properties": { "kind": { "const": "sheet_text" } } }, "then": { "$ref": "#/$defs/sheet_text" } }
+  ],
+  "$defs": {
+    "bbox": {
+      "type": "array",
+      "description": "x0, y0, x1, y1 in the coordinates of the sheet's space (wcs for model, paper units for a layout).",
+      "items": { "type": "number" },
+      "minItems": 4,
+      "maxItems": 4
+    },
+    "sheet_number": {
+      "anyOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "required": ["value", "confidence"],
+          "additionalProperties": false,
+          "properties": {
+            "value": { "type": "string", "minLength": 1, "description": "As read from the title block." },
+            "confidence": { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/confidence" }
+          }
+        }
+      ],
+      "description": "The title block's settled sheet number; null when none was settled (the detector id is then the only handle)."
+    },
+    "sheet_list": {
+      "type": "object",
+      "required": ["schema_version", "kind", "project_id", "files", "summary", "warnings"],
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": { "const": "0.1" },
+        "kind": { "const": "sheet_list" },
+        "project_id": { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/project_id" },
+        "files": { "type": "array", "description": "DXF/DWG inventory rows, sorted by path.", "items": { "$ref": "#/$defs/list_file" } },
+        "summary": {
+          "type": "object",
+          "required": ["files", "listed", "skipped", "sheets", "text_entries"],
+          "additionalProperties": false,
+          "properties": {
+            "files": { "type": "integer", "minimum": 0 },
+            "listed": { "type": "integer", "minimum": 0 },
+            "skipped": { "type": "integer", "minimum": 0 },
+            "sheets": { "type": "integer", "minimum": 0 },
+            "text_entries": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "warnings": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "list_file": {
+      "type": "object",
+      "required": ["path", "status", "reason", "text_entries", "unassigned_text", "sheets"],
+      "additionalProperties": false,
+      "properties": {
+        "path": { "type": "string", "minLength": 1, "description": "Inventory path, relative to the input folder." },
+        "status": { "enum": ["listed", "skipped"] },
+        "reason": { "type": ["string", "null"], "description": "Why the file has no sheet list; null when listed." },
+        "text_entries": { "type": ["integer", "null"], "minimum": 0, "description": "Entries in the text index; null when there is none." },
+        "unassigned_text": { "type": ["integer", "null"], "minimum": 0, "description": "Entries on no sheet or on several (ambiguous); null when not listed." },
+        "sheets": { "anyOf": [{ "type": "null" }, { "type": "array", "items": { "$ref": "#/$defs/list_sheet" } }] }
+      }
+    },
+    "list_sheet": {
+      "type": "object",
+      "required": ["sheet_id", "space", "layout", "bbox", "detection_confidence", "sheet_number", "duplicate_of", "text_count", "titles"],
+      "additionalProperties": false,
+      "properties": {
+        "sheet_id": { "type": "string", "pattern": "^.+#[0-9]{2,}$", "description": "Detector id, the handle for sheet_text." },
+        "space": { "type": "string", "minLength": 1 },
+        "layout": { "type": "string", "minLength": 1 },
+        "bbox": { "$ref": "#/$defs/bbox" },
+        "detection_confidence": { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/confidence" },
+        "sheet_number": { "$ref": "#/$defs/sheet_number" },
+        "duplicate_of": { "type": ["string", "null"], "description": "Sheet id of the first sheet with exactly the same texts." },
+        "text_count": { "type": "integer", "minimum": 0 },
+        "titles": {
+          "type": "array",
+          "maxItems": 5,
+          "description": "Largest texts of the sheet (height, then id), identical texts once: candidates for the drawing title, NOT a decision.",
+          "items": {
+            "type": "object",
+            "required": ["entry_id", "display_text", "height", "truncated"],
+            "additionalProperties": false,
+            "properties": {
+              "entry_id": { "type": "string" },
+              "display_text": { "type": "string", "description": "Whitespace collapsed, cut at 120 characters (then '…' is appended)." },
+              "height": { "type": "number" },
+              "truncated": { "type": "boolean" }
+            }
+          }
+        }
+      }
+    },
+    "sheet_text": {
+      "type": "object",
+      "required": ["schema_version", "kind", "project_id", "file", "sheet", "query", "counts", "entries", "warnings"],
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": { "const": "0.1" },
+        "kind": { "const": "sheet_text" },
+        "project_id": { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/project_id" },
+        "file": { "type": "string", "minLength": 1, "description": "Inventory path." },
+        "sheet": {
+          "type": "object",
+          "required": ["sheet_id", "space", "layout", "bbox", "sheet_number", "duplicate_of"],
+          "additionalProperties": false,
+          "properties": {
+            "sheet_id": { "type": "string" },
+            "space": { "type": "string", "minLength": 1 },
+            "layout": { "type": "string", "minLength": 1 },
+            "bbox": { "$ref": "#/$defs/bbox" },
+            "sheet_number": { "$ref": "#/$defs/sheet_number" },
+            "duplicate_of": { "type": ["string", "null"] }
+          }
+        },
+        "query": {
+          "type": "object",
+          "required": ["contains", "max_entries"],
+          "additionalProperties": false,
+          "properties": {
+            "contains": { "type": ["string", "null"], "description": "Case-insensitive substring (NFC + casefold, diacritics significant); null = no filter." },
+            "max_entries": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "counts": {
+          "type": "object",
+          "description": "True counts, whatever was returned.",
+          "required": ["assigned", "matched", "returned", "omitted", "truncated"],
+          "additionalProperties": false,
+          "properties": {
+            "assigned": { "type": "integer", "minimum": 0, "description": "Entries assigned to the sheet." },
+            "matched": { "type": "integer", "minimum": 0, "description": "Assigned entries passing the filter." },
+            "returned": { "type": "integer", "minimum": 0 },
+            "omitted": { "type": "integer", "minimum": 0, "description": "matched - returned." },
+            "truncated": { "type": "boolean" }
+          }
+        },
+        "entries": { "type": "array", "items": { "$ref": "#/$defs/entry" } },
+        "warnings": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "entry": {
+      "type": "object",
+      "description": "Compact view of a text-index entry. display_text is exactly the index's (decoded where the encoding is known, %%c already expanded); unknown encodings are returned as stored, with their flags.",
+      "required": ["id", "row", "display_text", "encoding", "confidence", "flags", "layer", "style", "x", "y", "height", "rotation", "entity_type"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "pattern": "^T[0-9]{6,}$" },
+        "row": { "type": ["integer", "null"], "minimum": 0, "description": "Reading-order row; null for an entry without a position." },
+        "display_text": { "type": "string" },
+        "encoding": { "enum": ["unicode", "tcvn3", "vni", "unknown", "mixed"], "description": "decode.encoding_used." },
+        "confidence": { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/confidence" },
+        "flags": { "type": "array", "items": { "type": "string" } },
+        "case_uncertain": { "const": true, "description": "Present only when true: the case of some letters is a guess." },
+        "layer": { "type": "string" },
+        "style": { "type": ["string", "null"] },
+        "x": { "type": ["number", "null"] },
+        "y": { "type": ["number", "null"] },
+        "height": { "type": ["number", "null"] },
+        "rotation": { "type": ["number", "null"] },
+        "entity_type": { "enum": ["TEXT", "MTEXT", "ATTRIB", "MULTILEADER", "DIMENSION"] },
+        "tag": { "type": ["string", "null"], "description": "ATTRIB only." },
+        "block_name": { "type": ["string", "null"], "description": "ATTRIB only." }
+      }
+    }
+  }
+}

@@ -1,0 +1,242 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:tekla-harness:schema:callouts:0.1",
+  "title": "Callout candidates of an intake work folder",
+  "description": "Deterministic candidates (`callouts.py`) for rebar callouts, rebar grades, steel section labels, steel grades, plates, bolts and member marks, found in the text indexes of a work folder. A candidate is text that looks like a notation, never a decision. `parsed` is filled ONLY for notations the research marks verified (docs/research/vn-structural-drawing-conventions.md, 'Parsing patterns'); otherwise it is null and `unparsed_reason` says why. `rule` names the pattern or detector. Parsed numbers are copied from the text: nothing is computed (no quantity, length, weight, unit conversion) and no catalogue is consulted. `provenance` is 'derived' from the text entry's provenance, with `file` relative to the input folder and `sheet` the printed sheet number or 'unknown'. The questions are not in this document: `harness callouts` writes them, numbered, to callouts-questions.json; `question_counts` here only says how many things are asked per code.",
+  "type": "object",
+  "required": ["schema_version", "kind", "project_id", "inventory_sha256", "files", "skipped_sheets", "candidates", "question_counts", "summary", "warnings"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": "0.1" },
+    "kind": { "const": "callouts" },
+    "project_id": { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/project_id" },
+    "inventory_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$", "description": "Hash of the inventory.json bytes this was built from." },
+    "files": { "type": "array", "description": "DXF/DWG inventory rows, sorted by path.", "items": { "$ref": "#/$defs/file" } },
+    "skipped_sheets": {
+      "type": "array",
+      "description": "Sheets that are exact copies of an earlier sheet: not scanned, so their texts are not counted twice.",
+      "items": {
+        "type": "object",
+        "required": ["file", "sheet", "duplicate_of", "text_entries"],
+        "additionalProperties": false,
+        "properties": {
+          "file": { "type": "string", "minLength": 1 },
+          "sheet": { "type": "string", "minLength": 1 },
+          "duplicate_of": { "type": "string", "minLength": 1 },
+          "text_entries": { "type": "integer", "minimum": 0 }
+        }
+      }
+    },
+    "candidates": { "type": "array", "description": "In scan order: files by path, text entries in index order, lines, position in the line.", "items": { "$ref": "#/$defs/candidate" } },
+    "question_counts": {
+      "type": "object",
+      "description": "Per question code, how many things are asked over the whole project: one callout_ambiguous per ambiguous notation, one member_mark_prefix_meaning per member mark prefix, 1 grade_legacy_mapping when legacy grade groups appear. Codes with none are absent. callouts-questions.json splits these per file.",
+      "propertyNames": { "enum": ["callout_ambiguous", "member_mark_prefix_meaning", "grade_legacy_mapping"] },
+      "additionalProperties": { "type": "integer", "minimum": 1 }
+    },
+    "summary": { "$ref": "#/$defs/summary" },
+    "warnings": { "type": "array", "items": { "type": "string" } }
+  },
+  "$defs": {
+    "kind": { "enum": ["rebar_callout", "rebar_grade", "section_label", "steel_grade", "plate", "bolt", "member_mark"] },
+    "kind_counts": { "type": "object", "propertyNames": { "$ref": "#/$defs/kind" }, "additionalProperties": { "type": "integer", "minimum": 1 } },
+    "sheet_number": {
+      "anyOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "required": ["value", "confidence"],
+          "additionalProperties": false,
+          "properties": {
+            "value": { "type": "string", "minLength": 1 },
+            "confidence": { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/confidence" }
+          }
+        }
+      ]
+    },
+    "file": {
+      "type": "object",
+      "required": ["path", "status", "reason", "text_entries", "scanned", "candidates"],
+      "additionalProperties": false,
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "status": { "enum": ["scanned", "skipped"] },
+        "reason": { "type": ["string", "null"] },
+        "text_entries": { "type": ["integer", "null"], "minimum": 0 },
+        "scanned": { "type": "integer", "minimum": 0, "description": "Entries scanned (text entries minus those of skipped duplicate sheets)." },
+        "candidates": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "candidate": {
+      "type": "object",
+      "required": ["id", "kind", "file", "sheet", "sheet_number", "text_ref", "display_text", "position", "layer", "encoding", "parsed", "rule", "unparsed_reason", "ambiguity", "confidence", "flags", "provenance"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "pattern": "^K[0-9]{6,}$" },
+        "kind": { "$ref": "#/$defs/kind" },
+        "file": { "type": "string", "minLength": 1, "description": "Inventory path, relative to the input folder." },
+        "sheet": { "type": ["string", "null"], "description": "Detector sheet id ('model#01'); null when the text lies on no sheet (or the sheets document is missing)." },
+        "sheet_number": { "$ref": "#/$defs/sheet_number", "description": "Printed sheet number as read by the title-block detector, with its own confidence; null when none was settled." },
+        "text_ref": {
+          "type": "object",
+          "required": ["file", "entry_id"],
+          "additionalProperties": false,
+          "properties": { "file": { "type": "string", "minLength": 1 }, "entry_id": { "type": "string", "pattern": "^T[0-9]{6,}$" } }
+        },
+        "display_text": { "type": "string", "minLength": 1, "description": "The matched characters of the entry's display_text (%%c already expanded to U+00D8)." },
+        "line_text": { "type": "string", "description": "The whole line, whitespace collapsed and cut at 200 characters; present only when it differs from display_text." },
+        "position": {
+          "type": "object",
+          "required": ["x", "y"],
+          "additionalProperties": false,
+          "properties": { "x": { "type": ["number", "null"] }, "y": { "type": ["number", "null"] } }
+        },
+        "layer": { "type": "string" },
+        "encoding": { "enum": ["unicode", "tcvn3", "vni", "unknown", "mixed"], "description": "decode.encoding_used of the text entry." },
+        "parsed": { "anyOf": [{ "type": "null" }, { "$ref": "#/$defs/parsed" }] },
+        "rule": { "type": "string", "minLength": 1, "description": "Pattern or detector id plus the research section that verifies it (or says it is unverified)." },
+        "unparsed_reason": { "type": ["string", "null"], "description": "Why `parsed` is null; null when parsed." },
+        "ambiguity": { "type": ["string", "null"], "pattern": "^[a-z][a-z0-9_]*$", "description": "Notation id of the callout_ambiguous question this candidate is referenced from; null when none." },
+        "lexical": {
+          "type": "object",
+          "description": "member_mark only: the text split into prefix, number and suffix. A split of characters, not a reading: the prefix has no verified meaning.",
+          "required": ["prefix", "number", "suffix"],
+          "additionalProperties": false,
+          "properties": {
+            "prefix": { "type": "string", "minLength": 1 },
+            "number": { "type": "string", "minLength": 1 },
+            "suffix": { "type": "string" }
+          }
+        },
+        "confidence": { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/confidence", "description": "min(rule cap, text entry confidence); forced low by case_uncertain text, unmapped characters, unknown-encoding flags and a literal diameter sign in non-Unicode text. Verified grade-B grammar is at most medium; unparsed, ambiguous and member marks are low." },
+        "flags": { "type": "array", "items": { "type": "string" }, "description": "The text entry's flags, 'case_uncertain' when its case is a guess, and 'diameter_sign_literal_non_unicode' when a literal diameter sign was read from non-Unicode text." },
+        "provenance": {
+          "allOf": [
+            { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/provenance" },
+            { "properties": { "method": { "const": "derived" } }, "required": ["derived_from"] }
+          ]
+        }
+      },
+      "allOf": [
+        { "if": { "properties": { "parsed": { "type": "null" } } }, "then": { "properties": { "unparsed_reason": { "type": "string", "minLength": 1 } } }, "else": { "properties": { "unparsed_reason": { "type": "null" } } } },
+        { "if": { "properties": { "kind": { "const": "member_mark" } } }, "then": { "required": ["lexical"], "properties": { "parsed": { "type": "null" }, "confidence": { "const": "low" } } }, "else": { "not": { "required": ["lexical"] } } }
+      ]
+    },
+    "parsed": {
+      "description": "Only verified notations. Numbers are as written (mm unless the name says otherwise), never computed.",
+      "oneOf": [
+        {
+          "type": "object", "required": ["form", "count", "diameter_mm"], "additionalProperties": false,
+          "properties": { "form": { "const": "count_diameter" }, "count": { "type": "integer", "minimum": 0 }, "diameter_mm": { "type": "integer", "minimum": 0 } }
+        },
+        {
+          "type": "object", "required": ["form", "diameter_mm", "spacing_mm", "spacing_mid_mm"], "additionalProperties": false,
+          "description": "Ø8a150, or Ø8a100/200 (spacing_mm = 100 at the ends, spacing_mid_mm = 200 in the middle, per the research).",
+          "properties": {
+            "form": { "const": "diameter_spacing" },
+            "diameter_mm": { "type": "integer", "minimum": 0 },
+            "spacing_mm": { "type": "integer", "minimum": 0 },
+            "spacing_mid_mm": { "type": ["integer", "null"], "minimum": 0 }
+          }
+        },
+        {
+          "type": "object", "required": ["form", "yield_class_mpa", "letter", "surface"], "additionalProperties": false,
+          "properties": {
+            "form": { "const": "rebar_grade" },
+            "yield_class_mpa": { "enum": [240, 300, 400, 500, 600] },
+            "letter": { "enum": ["T", "V"] },
+            "surface": { "enum": ["plain", "ribbed"], "description": "T = tron (plain), V = van (ribbed)." }
+          }
+        },
+        {
+          "type": "object", "required": ["form", "family", "group"], "additionalProperties": false,
+          "description": "CI..CIV or A-I..A-IV: the group name only. Yield strength and product standard are NOT stated; never mapped to CB grades.",
+          "properties": { "form": { "const": "legacy_group" }, "family": { "type": "string" }, "group": { "enum": ["I", "II", "III", "IV"] } }
+        },
+        {
+          "type": "object", "required": ["form", "prefix", "number", "suffix", "standard"], "additionalProperties": false,
+          "properties": {
+            "form": { "const": "steel_grade_vn" },
+            "prefix": { "enum": ["CCT", "XCT"] },
+            "number": { "enum": [34, 38, 42, 52] },
+            "suffix": { "type": ["string", "null"], "description": "'Mn' for CCT38Mn." },
+            "standard": { "enum": ["TCVN 1765:1975", "TCVN 5709:1993"], "description": "Naming standard of the prefix (TCXDVN 338:2005)." }
+          }
+        },
+        {
+          "type": "object", "required": ["form", "name"], "additionalProperties": false,
+          "properties": { "form": { "const": "steel_grade_foreign" }, "name": { "type": "string", "minLength": 1 } }
+        },
+        {
+          "type": "object", "required": ["form", "count", "letter", "leg_mm", "thickness_mm"], "additionalProperties": false,
+          "description": "2 L 65 x 8: optional leading count, letter L or V as written, leg and thickness.",
+          "properties": {
+            "form": { "const": "angle" },
+            "count": { "type": ["integer", "null"], "minimum": 0 },
+            "letter": { "enum": ["L", "V"] },
+            "leg_mm": { "type": "integer", "minimum": 0 },
+            "thickness_mm": { "type": "integer", "minimum": 0 }
+          }
+        },
+        {
+          "type": "object", "required": ["form", "series", "nominal_depth_mm", "nominal_width_mm", "mass_kg_per_m"], "additionalProperties": false,
+          "description": "457x191x82 UB: nominal depth x nominal width x kg/m (BS EN 10365 serial size; verified for the UB table only, UC is not parsed). Actual dimensions differ and come from a catalogue.",
+          "properties": {
+            "form": { "const": "ub" },
+            "series": { "const": "UB" },
+            "nominal_depth_mm": { "type": "integer", "minimum": 0 },
+            "nominal_width_mm": { "type": "integer", "minimum": 0 },
+            "mass_kg_per_m": { "type": "number", "minimum": 0, "description": "The number written in the label, kg/m; not computed." }
+          }
+        },
+        {
+          "type": "object", "required": ["form", "strength_class", "thread_label"], "additionalProperties": false,
+          "properties": {
+            "form": { "const": "bolt_class" },
+            "strength_class": { "enum": ["4.6", "5.6", "5.8", "8.8", "10.9", "12.9"] },
+            "thread_label": { "type": ["string", "null"], "description": "The M-label found on the same line (e.g. 'M20'), copied; its meaning is unverified." }
+          }
+        }
+      ]
+    },
+    "summary": {
+      "type": "object",
+      "required": ["candidates", "parsed", "unparsed", "by_kind", "by_confidence", "by_file", "by_sheet", "member_mark_prefixes", "files_scanned", "files_skipped"],
+      "additionalProperties": false,
+      "properties": {
+        "candidates": { "type": "integer", "minimum": 0 },
+        "parsed": { "type": "integer", "minimum": 0 },
+        "unparsed": { "type": "integer", "minimum": 0 },
+        "by_kind": { "$ref": "#/$defs/kind_counts" },
+        "by_confidence": { "type": "object", "propertyNames": { "enum": ["high", "medium", "low"] }, "additionalProperties": { "type": "integer", "minimum": 1 } },
+        "by_file": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["file", "total", "by_kind"],
+            "additionalProperties": false,
+            "properties": { "file": { "type": "string" }, "total": { "type": "integer", "minimum": 1 }, "by_kind": { "$ref": "#/$defs/kind_counts" } }
+          }
+        },
+        "by_sheet": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["file", "sheet", "sheet_number", "total", "by_kind"],
+            "additionalProperties": false,
+            "properties": {
+              "file": { "type": "string" },
+              "sheet": { "type": ["string", "null"] },
+              "sheet_number": { "$ref": "#/$defs/sheet_number" },
+              "total": { "type": "integer", "minimum": 1 },
+              "by_kind": { "$ref": "#/$defs/kind_counts" }
+            }
+          }
+        },
+        "member_mark_prefixes": { "type": "integer", "minimum": 0 },
+        "files_scanned": { "type": "integer", "minimum": 0 },
+        "files_skipped": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}

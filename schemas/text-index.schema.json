@@ -1,0 +1,260 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:tekla-harness:schema:text-index:0.1",
+  "title": "DXF text index",
+  "description": "Every piece of text in one DXF (`extract_text`): TEXT, MTEXT, ATTRIB, MULTILEADER text, DIMENSION override text, in modelspace and paper-space layouts, and the same kinds found inside INSERTed blocks (recursively, with a block_path). ATTDEFs are listed apart as definitions: they are not visible text. Nothing is interpreted. Entry order is deterministic (layouts in tab order, entities in file order, an INSERT's attributes then its block content depth-first). Handles are valid only for this conversion of the drawing; entries from block content are virtual copies and have no handle (see definition_handle). Encoding is decided from FONT NAMES (encoding.font_hint) and an approved knowledge-table row (knowledge/font-encodings.csv); the only thing read from the text itself is code-point evidence: a Vietnamese letter or tone mark that single-byte legacy text cannot hold proves Unicode. Values are capped at file.confidence_cap (ADR-0005); 'high' is only given to text whose font is a known Unicode family. 'status' is 'partial' when at least one entity raised: it is listed in summary.errors and absent from entries; 'unreadable' carries only file, attempts and error.",
+  "type": "object",
+  "required": ["schema_version", "status", "file", "attempts"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": "0.1" },
+    "status": { "enum": ["ok", "partial", "unreadable"] },
+    "file": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256", "ezdxf_version", "dxf_version", "converter", "confidence_cap", "handles_reliable", "codepage"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1, "description": "The file as recorded, also in every provenance.file: relative to the project input folder when written by `harness intake` (for a DWG, the DWG itself; sha256 is that of the converted DXF that was read); the path as given for `harness extract-text`." },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "ezdxf_version": { "type": "string" },
+        "dxf_version": { "type": ["string", "null"] },
+        "converter": { "enum": ["oda", "libredwg", "none"] },
+        "confidence_cap": { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/confidence" },
+        "handles_reliable": { "type": "boolean", "description": "Same rule as the dxf-probe: false for R12-era files without stored handles; then every handle is null." },
+        "codepage": { "type": ["string", "null"], "description": "Python codec of the file's text: 'utf8' for R2007+ files (whatever $DWGCODEPAGE says), else the code page ezdxf used. Anything other than utf8/cp1252/latin-1 triggers a re-encode before legacy conversion (unvalidated on real files)." }
+      }
+    },
+    "attempts": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "urn:tekla-harness:schema:read-log:0.1#/$defs/attempt" }
+    },
+    "error": { "type": "string", "description": "Why the file could not be read. Only when status is 'unreadable'." },
+    "entries": { "type": "array", "items": { "$ref": "#/$defs/entry" } },
+    "attdefs": {
+      "type": "array",
+      "description": "ATTDEF definitions of every non-xref block. Not visible text; values are defaults.",
+      "items": { "$ref": "#/$defs/attdef" }
+    },
+    "summary": { "$ref": "#/$defs/summary" },
+    "warnings": { "type": "array", "items": { "type": "string" } }
+  },
+  "$defs": {
+    "decode": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["encoding_used", "source", "knowledge_patterns", "capital_font", "case_uncertain", "ambiguous_count", "unmapped_count", "nfd_damaged", "runs", "mixed_fonts", "run_details"],
+      "properties": {
+        "encoding_used": {
+          "enum": ["unicode", "tcvn3", "vni", "unknown", "mixed"],
+          "description": "unicode: a known Unicode family, or code-point evidence (source codepoint_evidence), or an approved knowledge row. tcvn3 / vni: a '.Vn...' / 'VNI-...' font name or an approved knowledge row; the text was converted. unknown: neither the font name nor an approved row says anything (SHX, VntimeH, Calibri...); the text is kept as stored, never converted. mixed: an MTEXT whose runs use different encodings (see run_details)."
+        },
+        "source": { "enum": ["style_font", "mtext_inline_font", "knowledge_table", "codepoint_evidence", "none"], "description": "What decided the encoding. Precedence when runs differ: codepoint_evidence (a Vietnamese letter above U+00FF or a tone mark proves Unicode, whatever the font; confidence capped at medium), knowledge_table (an approved row, listed in knowledge_patterns; text style runs only; confidence capped at medium), mtext_inline_font (any run had an inline \\F font switch), style_font (font_hint on the style name or its font file). none: nothing gave an encoding."},
+        "knowledge_patterns": { "type": "array", "items": { "type": "string" }, "description": "Patterns of the approved knowledge rows that decided a run (distinct, in order); empty when none did. Proposed rows are never listed: they decide nothing (flag proposed_knowledge_row)." },
+        "capital_font": { "type": ["boolean", "null"], "description": "font_hint capital-font hint (style or inline font name ends in 'H'), combined over runs; null when absent or conflicting. A hint, not a fact." },
+        "case_uncertain": { "type": "boolean", "description": "True when ambiguous_count > 0: the case of some letters is a guess (TCVN3 has no toned capitals; capital fonts draw a-z as capitals). The decoded text keeps lowercase." },
+        "ambiguous_count": { "type": "integer", "minimum": 0 },
+        "unmapped_count": { "type": "integer", "minimum": 0, "description": "Characters the converter has no table entry for (kept as stored)." },
+        "nfd_damaged": { "type": "boolean", "description": "Combining marks found in text decoded as legacy: it was decomposed upstream, the conversion cannot be trusted." },
+        "runs": { "type": "integer", "minimum": 1, "description": "MTEXT runs of constant inline font (1 for single-line text)." },
+        "mixed_fonts": { "type": "boolean", "description": "More than one distinct font among the runs." },
+        "run_details": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["font", "font_source", "encoding", "capital_font", "knowledge_pattern"],
+            "properties": {
+              "font": { "type": ["string", "null"], "description": "Inline font family; null when the text style applies." },
+              "font_source": { "enum": ["style_font", "mtext_inline_font", "knowledge_table", "codepoint_evidence", "none"] },
+              "encoding": { "enum": ["unicode", "tcvn3", "vni", "unknown"] },
+              "capital_font": { "type": ["boolean", "null"], "description": "Null for a run proved Unicode by code points." },
+              "knowledge_pattern": { "type": ["string", "null"], "description": "Pattern of the approved knowledge row that decided this run; null otherwise." }
+            }
+          }
+        }
+      }
+    },
+    "entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id", "entity_type", "space", "layout", "coordinate_frame", "layer", "definition_layer", "layer_state", "style",
+        "font_file", "position", "alignment", "height", "rotation", "handle", "definition_handle", "block_path",
+        "insert_handles", "tag", "block_name", "insert_handle", "invisible", "text_rule", "raw_text", "plain_text",
+        "decoded_text", "display_text", "special_codes", "decode", "flags", "confidence", "provenance"
+      ],
+      "properties": {
+        "id": { "type": "string", "pattern": "^T[0-9]{6,}$", "description": "Sequential in output order; stable for the same file and ezdxf version." },
+        "entity_type": { "enum": ["TEXT", "MTEXT", "ATTRIB", "MULTILEADER", "DIMENSION"] },
+        "space": { "type": "string", "minLength": 1, "description": "'model' or the paper-space layout name. Text found in an INSERTed block keeps the space of the top-level INSERT; block_path says it is in a block." },
+        "layout": { "type": "string", "minLength": 1, "description": "Layout (tab) name; 'Model' for modelspace. Kept apart from provenance.sheet, which is 'unknown' because the printed sheet number is not read here." },
+        "coordinate_frame": { "enum": ["wcs", "paper"], "description": "wcs: modelspace (and block content placed in it), world coordinates. paper: paper-space layout coordinates (sheet units), NOT model coordinates." },
+        "layer": { "type": "string", "description": "Effective layer. Inside a block, an entity on layer '0' takes the layer of the INSERT it came through (AutoCAD rule); definition_layer then holds '0'." },
+        "definition_layer": { "type": ["string", "null"] },
+        "layer_state": { "enum": ["on", "off", "frozen", "unknown"], "description": "State of the effective layer in the layer table only; viewport freezes are not evaluated." },
+        "style": { "type": ["string", "null"], "description": "Text style name; for DIMENSION the dimension style's text style; null when unresolved." },
+        "font_file": { "type": ["string", "null"], "description": "Font file of the style as stored (SHX or TTF); null when the style is unknown. Availability is not checked." },
+        "position": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["x", "y", "basis"],
+          "properties": {
+            "x": { "type": ["number", "null"] },
+            "y": { "type": ["number", "null"] },
+            "basis": { "enum": ["insert", "align_point", "text_midpoint", "context_mtext_insert", "context_block_insert"], "description": "Which stored point this is. align_point: TEXT/ATTRIB with a non-left/baseline alignment (the displayed anchor). context_block_insert: MULTILEADER block content, the position of its block, not of the attribute." }
+          }
+        },
+        "alignment": { "type": ["string", "null"], "description": "ezdxf alignment name (TEXT: LEFT, MIDDLE_CENTER, ...; MTEXT: TOP_LEFT, ...)." },
+        "height": { "type": ["number", "null"], "description": "Text or character height in drawing units, as stored (after block transforms for block content). Null when not stored." },
+        "rotation": { "type": ["number", "null"], "description": "Degrees, as stored (OCS for TEXT/ATTRIB; see the non_default_extrusion flag)." },
+        "handle": { "type": ["string", "null"], "description": "Handle of the entity. For DIMENSION entries the dimension's handle. Null for virtual block content and when handles_reliable is false." },
+        "definition_handle": { "type": ["string", "null"], "description": "Block content only: handle of the entity in the block definition it was copied from." },
+        "block_path": { "type": "array", "items": { "type": "string" }, "description": "Block names from the top-level INSERT down to the block definition holding the entity. Empty for entities not inside a block. An ATTRIB belongs to an INSERT, so its path stops before that INSERT's own block (block_name)." },
+        "insert_handles": { "type": "array", "items": { "type": ["string", "null"] }, "description": "Same length as block_path: handle of the INSERT through which each block was entered (null for nested, virtual INSERTs)." },
+        "tag": { "type": ["string", "null"], "description": "ATTRIB tag, or the attribute definition tag of a MULTILEADER block attribute. Grid labels live here." },
+        "block_name": { "type": ["string", "null"], "description": "ATTRIB only: name of the block of the INSERT that owns the attribute." },
+        "insert_handle": { "type": ["string", "null"], "description": "ATTRIB only: handle of the owning INSERT (null if virtual)." },
+        "invisible": { "type": ["boolean", "null"], "description": "ATTRIB only: the invisible flag. Invisible attributes are kept, flagged attribute_invisible." },
+        "text_rule": { "enum": ["override", "measured_with_text", null], "description": "DIMENSION only. override: text typed over the measurement. measured_with_text: contains '<>' (measurement placeholder) with a prefix or suffix. Pure measured values are the probe's job." },
+        "raw_text": { "type": "string", "description": "As stored: MTEXT with all inline codes, '%%' codes unexpanded, legacy bytes undecoded." },
+        "plain_text": { "type": "string", "description": "raw_text with MTEXT formatting codes removed (ezdxf MTextParser, as `plain_mtext` does) and '\\n' for paragraph breaks. Legacy bytes NOT decoded and '%%' codes NOT expanded: ezdxf's own plain_text() expands %%c before any decoding, which is the order hazard." },
+        "decoded_text": { "type": "string", "description": "plain_text after legacy conversion (NFC), '%%' codes still as written. Equal to plain_text for unicode and unknown encodings." },
+        "display_text": { "type": "string", "description": "decoded_text with special codes expanded AFTER decoding: %%c -> U+00D8, %%d -> U+00B0, %%p -> U+00B1, %%% -> '%' (the ezdxf table; U+00D8 is the Latin letter O with stroke, not the diameter sign U+2300). %%u %%o %%k are removed. Unknown '%%' sequences stay as written (flag unknown_special_code)." },
+        "special_codes": { "type": "array", "items": { "type": "string" }, "description": "Distinct known '%%x' codes found, lower-cased, in order of first appearance." },
+        "decode": { "$ref": "#/$defs/decode" },
+        "flags": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Reasons a reader should look twice: dxf_unicode_escape_decoded (\\U+XXXX turned into the character), mif_escape_not_decoded (\\M+ multibyte escape left as written), encoding_unknown_non_ascii, codepage_reencode_failed, unknown_special_code, mixed_fonts, inline_font_unknown, unicode_evidence_contradicts_font (Unicode letters in a run whose font said TCVN3 or VNI: not converted), eth_for_d_stroke (U+00D0 Eth, which looks like the Vietnamese D-stroke, inside Vietnamese Unicode text: kept as stored, never replaced), knowledge_conflict (approved knowledge rows disagree about the text style: undecided), proposed_knowledge_row (a proposed knowledge row matches the text style: not applied), style_not_found, style_unresolved, layer_off, layer_frozen, layer_from_insert, attribute_invisible, non_default_extrusion, block_content_attribute, position_is_block_insert."
+        },
+        "confidence": { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/confidence" },
+        "provenance": {
+          "allOf": [
+            { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/provenance" },
+            {
+              "properties": {
+                "sheet": { "const": "unknown" },
+                "method": { "enum": ["dxf_entity", "dxf_dimension_text"] }
+              }
+            }
+          ],
+          "description": "sheet is always 'unknown' at this stage; method is dxf_dimension_text for DIMENSION entries, dxf_entity otherwise."
+        }
+      }
+    },
+    "attdef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["space", "coordinate_frame", "block", "tag", "prompt", "default_text", "layer", "style", "position", "height", "invisible", "constant", "handle"],
+      "properties": {
+        "space": { "type": "string", "pattern": "^block:" },
+        "coordinate_frame": { "const": "block_definition" },
+        "block": { "type": "string" },
+        "tag": { "type": "string" },
+        "prompt": { "type": "string" },
+        "default_text": { "type": "string", "description": "Raw default value, not decoded. A constant attribute shows this text on every insert and never becomes an ATTRIB." },
+        "layer": { "type": "string" },
+        "style": { "type": "string" },
+        "position": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["x", "y"],
+          "properties": { "x": { "type": ["number", "null"] }, "y": { "type": ["number", "null"] } }
+        },
+        "height": { "type": ["number", "null"] },
+        "invisible": { "type": "boolean" },
+        "constant": { "type": "boolean" },
+        "handle": { "type": ["string", "null"] }
+      }
+    },
+    "ranked": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["total_distinct", "top", "truncated"],
+      "properties": {
+        "total_distinct": { "type": "integer", "minimum": 0 },
+        "top": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "count"],
+            "properties": { "name": { "type": "string" }, "count": { "type": "integer", "minimum": 1 } }
+          }
+        },
+        "truncated": { "type": "boolean" }
+      }
+    },
+    "counts": { "type": "object", "additionalProperties": { "type": "integer", "minimum": 0 } },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "total_entries", "by_entity_type", "by_space", "by_layer", "by_encoding_used", "by_confidence",
+        "unknown_or_mixed_encoding_by_style", "case_uncertain_count", "in_block_count", "depth_limit_count",
+        "max_block_depth", "cycle_count", "xref_inserts_skipped", "missing_block_inserts", "empty_text_skipped",
+        "dimensions_without_override", "not_extracted", "transform_skipped", "errors_total", "errors"
+      ],
+      "properties": {
+        "total_entries": { "type": "integer", "minimum": 0 },
+        "by_entity_type": { "$ref": "#/$defs/counts" },
+        "by_space": { "$ref": "#/$defs/ranked" },
+        "by_layer": { "$ref": "#/$defs/ranked" },
+        "by_encoding_used": { "$ref": "#/$defs/counts" },
+        "by_confidence": { "$ref": "#/$defs/counts" },
+        "unknown_or_mixed_encoding_by_style": { "$ref": "#/$defs/ranked" },
+        "case_uncertain_count": { "type": "integer", "minimum": 0 },
+        "in_block_count": { "type": "integer", "minimum": 0, "description": "Entries with a non-empty block_path." },
+        "depth_limit_count": { "type": "integer", "minimum": 0, "description": "INSERTs holding text that were not expanded because the nesting limit was reached." },
+        "max_block_depth": { "type": "integer", "minimum": 1 },
+        "cycle_count": { "type": "integer", "minimum": 0, "description": "INSERTs not expanded because their block already appears in the path (a block that contains itself)." },
+        "xref_inserts_skipped": { "type": "integer", "minimum": 0 },
+        "missing_block_inserts": { "type": "integer", "minimum": 0, "description": "INSERTs whose block definition does not exist." },
+        "empty_text_skipped": { "type": "integer", "minimum": 0, "description": "TEXT/MTEXT/ATTRIB/... with empty or blank text: counted, not indexed." },
+        "dimensions_without_override": { "type": "integer", "minimum": 0, "description": "Dimensions that show the pure measurement (or no text): measured values are the probe's job." },
+        "not_extracted": { "$ref": "#/$defs/counts" },
+        "transform_skipped": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["count", "by_entity_type", "listed"],
+          "description": "Block entities ezdxf's virtual_entities() could not transform (reported through its skipped_entity_callback).",
+          "properties": {
+            "count": { "type": "integer", "minimum": 0 },
+            "by_entity_type": { "$ref": "#/$defs/counts" },
+            "listed": {
+              "type": "array",
+              "maxItems": 50,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["entity_type", "reason"],
+                "properties": { "entity_type": { "type": "string" }, "reason": { "type": "string" } }
+              }
+            }
+          }
+        },
+        "errors_total": { "type": "integer", "minimum": 0 },
+        "errors": {
+          "type": "array",
+          "maxItems": 200,
+          "description": "Entities whose processing raised (first 200). Each is absent from entries; status is 'partial' when any exist.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["handle", "entity_type", "space", "block_path", "error"],
+            "properties": {
+              "handle": { "type": ["string", "null"] },
+              "entity_type": { "type": "string" },
+              "space": { "type": "string" },
+              "block_path": { "type": "array", "items": { "type": "string" } },
+              "error": { "type": "string" }
+            }
+          }
+        }
+      }
+    }
+  }
+}

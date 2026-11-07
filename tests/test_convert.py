@@ -20,6 +20,12 @@ from tekla_harness.convert import NoConverterError, dwg_to_dxf
 # dwg2dxf is called as: <exe> -y -o out.dxf in.dwg
 BEHAVIOURS = {
     "ok": "shutil.copy(TEMPLATE, out_path)",
+    "ok_with_errors": (
+        "shutil.copy(TEMPLATE, out_path); "
+        "sys.stderr.write('ERROR: bit_read_TU buffer overflow\\nERROR: again\\n"
+        "Warning: unhandled class X\\nnote ERROR not at line start\\n')"
+    ),
+    "empty_layouts": "import ezdxf; ezdxf.new('R2018').saveas(out_path)",
     "exit_1": "sys.stderr.write('fatal: bad header'); sys.exit(1)",
     "timeout": "time.sleep(30)",
     "no_output": "pass",
@@ -176,3 +182,54 @@ def test_cli_exit_codes(tmp_path, template, dwg, out_dir, capsys, monkeypatch):
     monkeypatch.delenv("HARNESS_ODA_CONVERTER")
     monkeypatch.setattr("tekla_harness.convert.shutil.which", lambda _name: None)
     assert main(["dwg2dxf", str(dwg), "--out-dir", str(tmp_path / "work3")]) == 3
+
+
+@pytest.fixture
+def big_dwg(tmp_path):
+    input_dir = tmp_path / "input_big"
+    input_dir.mkdir()
+    path = input_dir / "S-102.dwg"
+    path.write_bytes(b"AC1032" + b"\x00" * 20_000)
+    return path
+
+
+def test_plain_success_has_no_stderr_signals(tmp_path, template, dwg, out_dir):
+    result = dwg_to_dxf(dwg, out_dir, dwg2dxf=fake_converter(tmp_path, "dwg2dxf", "ok", template))
+    assert result.stderr_error_lines == 0 and result.stderr_warning_lines == 0
+    assert result.stderr_tail == ""
+    assert all("ERROR" not in w and "no entities" not in w for w in result.warnings)
+    assert result.attempts[0].status == "ok"
+
+
+def test_error_lines_on_success_are_counted_and_warned(tmp_path, template, dwg, out_dir):
+    result = dwg_to_dxf(dwg, out_dir, dwg2dxf=fake_converter(tmp_path, "dwg2dxf", "ok_with_errors", template))
+    assert result.dxf is not None
+    assert result.stderr_error_lines == 2
+    assert result.stderr_warning_lines == 1
+    assert "buffer overflow" in result.stderr_tail
+    assert result.attempts[0].status == "ok"
+    assert result.confidence_cap == "medium"  # LibreDWG is already medium; the count is the finer signal
+    assert any("2 ERROR lines" in w and "may be missing or truncated" in w for w in result.warnings)
+
+
+def test_error_lines_lower_oda_cap_one_step(tmp_path, template, dwg, out_dir):
+    result = dwg_to_dxf(dwg, out_dir, oda=fake_converter(tmp_path, "oda", "ok_with_errors", template))
+    assert result.converter == "oda_file_converter"
+    assert result.confidence_cap == "medium"
+    assert any("lowered" in w for w in result.warnings)
+
+
+def test_empty_layouts_from_large_dwg_is_partial_and_low(tmp_path, big_dwg, out_dir):
+    result = dwg_to_dxf(big_dwg, out_dir, oda=fake_converter(tmp_path, "oda", "empty_layouts", None))
+    assert result.dxf is not None and result.dxf.is_file()
+    assert result.confidence_cap == "low"
+    (attempt,) = result.attempts
+    assert attempt.status == "partial"
+    assert attempt.error == "DXF opened but contains no entities in any layout"
+    assert any("no entities" in w for w in result.warnings)
+
+
+def test_empty_layouts_from_tiny_dwg_is_not_flagged(tmp_path, dwg, out_dir):
+    result = dwg_to_dxf(dwg, out_dir, oda=fake_converter(tmp_path, "oda", "empty_layouts", None))
+    assert result.confidence_cap == "high"
+    assert result.attempts[0].status == "ok"

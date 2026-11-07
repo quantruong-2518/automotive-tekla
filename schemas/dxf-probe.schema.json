@@ -1,0 +1,364 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:tekla-harness:schema:dxf-probe:0.1",
+  "title": "DXF probe",
+  "description": "Deterministic facts read from one DXF with ezdxf (`harness read-dxf`). Nothing is inferred from geometry. Entity handles are valid only for this conversion: a new DWG-to-DXF conversion of the same drawing may renumber them. When status is 'unreadable', only file, attempts and error are present. When status is 'partial', at least one section raised: it is absent from the document and listed in section_errors (with a blocking probe_section_failed question), and the other sections are valid. Every value is capped at file.confidence_cap (ADR-0005: libredwg gives 'medium').",
+  "type": "object",
+  "required": ["schema_version", "status", "file", "attempts"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": "0.1" },
+    "status": { "enum": ["ok", "partial", "unreadable"] },
+    "file": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "ezdxf_version": { "type": "string" },
+        "dxf_version": { "type": ["string", "null"], "description": "Header $ACADVER, e.g. 'AC1032'. Null if unreadable or absent." },
+        "converter": { "enum": ["oda", "libredwg", "none"], "description": "Tool that produced this DXF from a DWG; 'none' for a DXF supplied as such." },
+        "confidence_cap": { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/confidence" },
+        "handles_reliable": { "type": "boolean", "description": "False when the file stores no usable entity handles (R12-era: $HANDLING 0 or missing, or no group 5 tags in a pre-R2000 file; R2000 and later always store them). Then every handle in this document is null and ezdxf's synthesized numbers are not reported. Group 5 presence is not scanned in binary DXF, where $HANDLING alone decides." }
+      },
+      "required": ["path", "sha256", "ezdxf_version", "dxf_version", "converter", "confidence_cap", "handles_reliable"]
+    },
+    "attempts": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "urn:tekla-harness:schema:read-log:0.1#/$defs/attempt" }
+    },
+    "error": { "type": "string", "description": "Why the file could not be read. Present only when status is 'unreadable'." },
+    "section_errors": {
+      "type": "array",
+      "description": "Sections that raised or were skipped because a section they depend on raised (e.g. everything built on the entity scan). Present only when status is 'partial'. Each also yields a blocking probe_section_failed question.",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["section", "error"],
+        "additionalProperties": false,
+        "properties": {
+          "section": { "type": "string", "description": "Top-level property name that is missing (or 'scan', 'handles')." },
+          "error": { "type": "string" }
+        }
+      }
+    },
+    "units": { "$ref": "#/$defs/units" },
+    "extents": {
+      "type": ["object", "null"],
+      "description": "Header $EXTMIN/$EXTMAX in drawing units, as stored (not recomputed). Null when the header holds no usable extents. Recorded only; never used to infer units.",
+      "required": ["min", "max", "source"],
+      "additionalProperties": false,
+      "properties": {
+        "min": { "$ref": "#/$defs/point" },
+        "max": { "$ref": "#/$defs/point" },
+        "source": { "const": "header" }
+      }
+    },
+    "layouts": { "type": "array", "items": { "$ref": "#/$defs/layout" } },
+    "layers": {
+      "type": "array",
+      "description": "Layer table plus any layer used by an entity but missing from the table (defined: false).",
+      "items": { "$ref": "#/$defs/layer" }
+    },
+    "blocks": {
+      "type": "object",
+      "required": ["named", "named_total", "truncated", "anonymous"],
+      "additionalProperties": false,
+      "properties": {
+        "named": {
+          "type": "array",
+          "description": "Non-anonymous, non-xref, non-layout blocks sorted by insert_count descending then name; at most 500 rows (truncation adds a warning).",
+          "maxItems": 500,
+          "items": { "$ref": "#/$defs/block" }
+        },
+        "named_total": { "type": "integer", "minimum": 0 },
+        "truncated": { "type": "boolean", "description": "True when named_total exceeds the 500 rows listed." },
+        "anonymous": {
+          "type": "object",
+          "description": "Blocks whose name starts with '*' (dimension geometry, hatches, dynamic blocks), counted, not listed. Inserts of dynamic-block copies ('*U...') are attributed to their source block through the block record's AcDbBlockRepBTag XDATA (group 1005 = source BLOCK_RECORD handle) when that resolves, else through AcDbDynamicBlockTrueName (group 1000 = source block name, as DWG converters write it) when that names an existing block.",
+          "required": ["count", "insert_count", "attributed_dynamic", "unresolved_dynamic"],
+          "additionalProperties": false,
+          "properties": {
+            "count": { "type": "integer", "minimum": 0 },
+            "insert_count": { "type": "integer", "minimum": 0, "description": "All inserts of anonymous blocks, including those also counted for a source block." },
+            "attributed_dynamic": { "type": "integer", "minimum": 0, "description": "Of insert_count: inserts of '*U' copies counted in their source block's insert_count." },
+            "unresolved_dynamic": { "type": "integer", "minimum": 0, "description": "Inserts of '*U' copies whose source block could not be resolved (a warning is raised)." }
+          }
+        }
+      }
+    },
+    "xrefs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "path", "resolved", "checked"],
+        "additionalProperties": false,
+        "properties": {
+          "name": { "type": "string" },
+          "path": { "type": "string", "description": "Path exactly as stored in the DXF." },
+          "resolved": { "type": "boolean", "description": "True when a file with the xref's base name exists next to the DXF, or in the folder given as xref_dir (the original drawing's folder when the DXF is a conversion). No other folder is searched." },
+          "checked": { "type": "array", "items": { "type": "string" }, "description": "File names looked for in that folder." }
+        }
+      }
+    },
+    "text_styles": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "font", "bigfont", "family", "is_shx_like", "capital_font"],
+        "additionalProperties": false,
+        "properties": {
+          "name": { "type": "string" },
+          "font": { "type": "string", "description": "Font file as stored; empty if none." },
+          "bigfont": { "type": "string" },
+          "family": { "type": "string", "description": "TrueType family from the style's ACAD XDATA; empty if none. Recorded only: it plays no part in the encoding hints." },
+          "is_shx_like": { "type": "boolean", "description": "Font or bigfont ends in .shx. Says nothing about whether the font is installed; availability is not checked." },
+          "capital_font": { "type": ["boolean", "null"], "description": "Capital-font hint of this style (encoding.font_hint: legacy-looking style name ending in an uppercase 'H'; an approved knowledge row may fill a null). Recorded for every style, also when no encoding hint row exists. A naming convention, not a fact; null when there is no hint." }
+        }
+      }
+    },
+    "text_encoding_hints": {
+      "type": "array",
+      "description": "Text styles that look like a legacy Vietnamese font: one row per style. The decision is encoding.font_hint(style name, font file), the same call extract_text makes (a name starting '.Vn' is TCVN3, 'VNI-' is VNI; an unknown name is tried on the font file name); only when that says nothing, an APPROVED row of knowledge/font-encodings.csv decides, with source 'knowledge_table'. Proposed rows never appear here (see the font_encoding_proposed question). A hint, not a fact: the text itself is not decoded here.",
+      "items": {
+        "type": "object",
+        "required": ["style", "encoding_hint", "capital_font", "source", "knowledge_pattern", "matched", "kind"],
+        "additionalProperties": false,
+        "properties": {
+          "style": { "type": "string" },
+          "encoding_hint": { "enum": ["tcvn3", "vni"] },
+          "capital_font": { "type": ["boolean", "null"], "description": "As in text_styles for this style." },
+          "source": { "enum": ["font_hint", "knowledge_table"] },
+          "knowledge_pattern": { "type": ["string", "null"], "description": "Pattern of the first approved knowledge row that decided; null when source is font_hint." },
+          "matched": {
+            "type": "array",
+            "minItems": 1,
+            "description": "The style fields that carry the hint: 'name' (style name) and/or 'font' (font file name).",
+            "items": {
+              "type": "object",
+              "required": ["field", "value"],
+              "additionalProperties": false,
+              "properties": { "field": { "enum": ["name", "font"] }, "value": { "type": "string" } }
+            }
+          },
+          "kind": { "const": "hint" }
+        }
+      }
+    },
+    "unreadable_objects": {
+      "type": "array",
+      "description": "Objects ezdxf cannot interpret, never dropped silently. kind: proxy, acad_table, ole, acis (3DSOLID, BODY, REGION, *SURFACE), unknown (any other type ezdxf keeps as raw tags). Entities in modelspace, layouts and blocks are counted together; by_layer is empty for objects in the OBJECTS section and omits entities without a layer.",
+      "items": {
+        "type": "object",
+        "required": ["kind", "dxftype", "count", "by_layer", "handles"],
+        "additionalProperties": false,
+        "properties": {
+          "kind": { "enum": ["proxy", "acad_table", "ole", "acis", "unknown"] },
+          "dxftype": { "type": "string" },
+          "count": { "type": "integer", "minimum": 1 },
+          "by_layer": { "type": "object", "additionalProperties": { "type": "integer", "minimum": 1 } },
+          "handles": { "type": "array", "maxItems": 5, "items": { "type": "string" }, "description": "First handles found (examples only); empty when file.handles_reliable is false." }
+        }
+      }
+    },
+    "unparsed_objects": {
+      "type": "array",
+      "description": "Every OBJECTS-section object type that ezdxf keeps as raw tags (SCALE, TABLESTYLE, dynamic-block parameter objects, FIELD...), counted by type. Informational: most are harmless. Types that can carry drawing content (FIELD) are also listed in unreadable_objects and raise a question.",
+      "items": {
+        "type": "object",
+        "required": ["dxftype", "count"],
+        "additionalProperties": false,
+        "properties": { "dxftype": { "type": "string" }, "count": { "type": "integer", "minimum": 1 } }
+      }
+    },
+    "entities_without_layer": { "type": "integer", "minimum": 0, "description": "Raw-tag entities with no group 8; they are not counted on any layer (no fake layer is created). A warning is raised when above 0." },
+    "dimension_audit": { "$ref": "#/$defs/dimension_audit" },
+    "scales": { "$ref": "#/$defs/scales" },
+    "questions": { "type": "array", "items": { "$ref": "#/$defs/question" } },
+    "warnings": { "type": "array", "items": { "type": "string" } }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "status": { "const": "ok" } } },
+      "then": {
+        "required": [
+          "units", "extents", "layouts", "layers", "blocks", "xrefs", "text_styles",
+          "text_encoding_hints", "unreadable_objects", "unparsed_objects", "entities_without_layer",
+          "dimension_audit", "scales", "questions", "warnings"
+        ],
+        "not": { "anyOf": [{ "required": ["error"] }, { "required": ["section_errors"] }] }
+      }
+    },
+    {
+      "if": { "properties": { "status": { "const": "partial" } } },
+      "then": { "required": ["section_errors", "questions", "warnings"], "not": { "required": ["error"] } }
+    },
+    {
+      "if": { "properties": { "status": { "const": "unreadable" } } },
+      "then": { "required": ["error"] }
+    }
+  ],
+  "$defs": {
+    "point": { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3 },
+    "units": {
+      "type": "object",
+      "description": "Drawing units from header $INSUNITS only. $INSUNITS is accepted only as an integral code 0..20 (negatives, floats such as 6.9, booleans, text, >20 are invalid: header_code null, raw value kept in evidence). Code 0, a missing or invalid variable, or a code outside mm/cm/m/in/ft gives 'unknown' and a blocking units_unknown question; metres are never assumed. 'unitless' is reserved and not produced in this slice. TRUST: header units alone never reach 'high' (capped at 'medium', with a non-blocking units_confirm question); 'high' is reserved for a unit confirmed by an independent check, which this slice does not implement, so confidence is never 'high' here. It drops to 'low' with a blocking question when (a) $MEASUREMENT (0 imperial, 1 metric) disagrees with the unit system of the unit (in/ft imperial; mm/cm/m metric): units_conflict; or (b) the magnitude heuristic fails: the median absolute length of the modelspace linear and aligned dimensions (group 42 actual measurement when present, else ezdxf's measurement; at least 3 needed, otherwise the check is skipped and evidence says so), converted to metres with the declared unit, is below 0.01 m or above 100 m: units_suspect, with the median, count and thresholds in evidence. The thresholds are a documented heuristic: they only raise a question and never change the unit value.",
+      "required": ["value", "source", "header_code", "confidence", "evidence"],
+      "additionalProperties": false,
+      "properties": {
+        "value": { "enum": ["mm", "cm", "m", "in", "ft", "unitless", "unknown"] },
+        "source": { "const": "header" },
+        "header_code": { "type": ["integer", "null"], "minimum": 0, "maximum": 20, "description": "$INSUNITS as stored when it is a valid integral code 0..20; null when the variable is missing or invalid (see evidence)." },
+        "confidence": { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/confidence" },
+        "evidence": { "type": "array", "items": { "type": "string" }, "description": "What was read and which checks ran or were skipped, in plain words." }
+      }
+    },
+    "layout": {
+      "type": "object",
+      "required": ["name", "is_model", "entity_total", "entity_counts", "viewports"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string" },
+        "is_model": { "type": "boolean" },
+        "entity_total": { "type": "integer", "minimum": 0 },
+        "entity_counts": { "type": "object", "description": "Entity count by DXF type.", "additionalProperties": { "type": "integer", "minimum": 1 } },
+        "viewports": { "type": "array", "items": { "$ref": "#/$defs/viewport" } }
+      }
+    },
+    "viewport": {
+      "type": "object",
+      "required": ["handle", "id", "is_overall", "scale", "scale_note", "target", "view_height"],
+      "additionalProperties": false,
+      "properties": {
+        "handle": { "type": ["string", "null"], "description": "Null when file.handles_reliable is false." },
+        "id": { "type": "integer" },
+        "is_overall": { "type": "boolean", "description": "The first VIEWPORT entity of a paper-space layout (its overall viewport), whatever its id (converted DWGs often store id 0), unless that first viewport has id >= 2, which marks a user viewport. Excluded from the viewport scale check." },
+        "scale": { "type": ["number", "null"], "description": "Paper units per model unit (0.01 is 1:100) as ezdxf computes it; null when not computable." },
+        "scale_note": { "type": ["string", "null"], "description": "Why scale is null." },
+        "target": { "type": ["array", "null"], "items": { "type": "number" }, "minItems": 3, "maxItems": 3, "description": "View target point." },
+        "view_height": { "type": ["number", "null"] }
+      }
+    },
+    "layer": {
+      "type": "object",
+      "required": ["name", "defined", "on", "frozen", "locked", "entities"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string" },
+        "defined": { "type": "boolean", "description": "False when an entity uses the layer but the layer table has no such entry." },
+        "on": { "type": ["boolean", "null"] },
+        "frozen": { "type": ["boolean", "null"] },
+        "locked": { "type": ["boolean", "null"] },
+        "entities": {
+          "type": "object",
+          "description": "Entity counts kept apart on purpose: block entities appear once per definition, not once per INSERT.",
+          "required": ["modelspace", "layouts", "blocks"],
+          "additionalProperties": false,
+          "properties": {
+            "modelspace": { "type": "integer", "minimum": 0 },
+            "layouts": { "type": "integer", "minimum": 0, "description": "Paper-space layouts." },
+            "blocks": { "type": "integer", "minimum": 0, "description": "Block definitions, anonymous ones included." }
+          }
+        }
+      }
+    },
+    "block": {
+      "type": "object",
+      "required": ["name", "insert_count", "dynamic_insert_count", "has_attdef", "has_attrib"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string" },
+        "insert_count": { "type": "integer", "minimum": 0, "description": "INSERT entities naming this block in modelspace, layouts and other blocks (a MINSERT counts once), plus those reaching it through dynamic-block copies (dynamic_insert_count)." },
+        "dynamic_insert_count": { "type": "integer", "minimum": 0, "description": "Part of insert_count that comes from '*U' dynamic-block copies of this block." },
+        "has_attdef": { "type": "boolean", "description": "The block definition contains ATTDEF entities." },
+        "has_attrib": { "type": "boolean", "description": "At least one INSERT of the block carries ATTRIB entities." }
+      }
+    },
+    "dimension_audit": {
+      "type": "object",
+      "description": "DIMENSION entities in modelspace, paper-space layouts and block definitions (layout 'block:<name>', audited once per definition, not per INSERT; in_blocks counts them and a warning is raised). text_rule: 'measured' (text empty or '<>'), 'measured_with_text' (contains '<>' plus other text), 'suppressed' (a single blank), 'override' (anything else). measured is ezdxf get_measurement() (angular: degrees). actual_measurement is the stored group 42 (angular: radians) when present; measurement_agrees is true when it equals measured (angular: converted to radians) or, for a positive DIMLFAC other than 1, measured * DIMLFAC (real files store group 42 either way), within a relative tolerance of 1e-6; it is null when either value is missing. A group 42 that equals only the unscaled geometry while a positive DIMLFAC other than 1 is in force makes an override row 'not_compared' (unclear which value the text should show). COMPARISON of override text (only text_rule 'override'): override_value (a finite plain decimal) is compared with measured * DIMLFAC for linear, aligned, radius and diameter dimensions, which are gated on DIMLUNIT = 2 (decimal; otherwise 'not_compared'); angular dimensions (angular, angular_3p) are gated on DIMAUNIT instead: 0 compares degrees, 2 grads (measured * 400/360) and 3 radians; 1 (degrees/minutes/seconds) and 4 (surveyor's units) are 'not_compared' with that reason, and DIMLUNIT is ignored for them. Ordinate dimensions, rows whose group 42 disagrees with the geometry measurement (measurement_agrees false), and rows with an unusable DIMLFAC (zero, non-finite) or DIMDEC/DIMADEC outside 0..16 are 'not_compared'. A negative DIMLFAC is a paper-space-only factor: for a modelspace dimension factor 1 is used only when group 42 is present and agrees (which proves it), otherwise 'not_compared'; in a layout or a block it is 'not_compared'. TOLERANCE: half of the displayed precision, 0.5 * 10^-DIMDEC (DIMADEC for angular, DIMDEC when DIMADEC is -1), and at least DIMRND / 2 when DIMRND is set; the override is 'override_differs' when |override_value - expected| exceeds it. DIMDEC, DIMRND, DIMLFAC, DIMLUNIT and DIMAUNIT are the effective values (entity override, else dimension style). Override text is parsed strictly after stripping MTEXT formatting: only plain decimals such as '3500' or '3500.5' are numeric; '3,500' and numbers too large to be finite are 'not_numeric'. status: 'ok' (measured shown, suppressed, or override equals expected within tolerance), 'override_differs', 'not_numeric', 'not_compared', 'error' (a row that raised; dim_type is still the real type and the message is in note). Rows are sorted: flagged first (override_differs, error), then the rest in file order (seq). At most 200 rows are listed; counts always cover every dimension. One dimension_override_differs question is raised per override_differs row of ALL rows, not just the listed ones, up to 500 questions (a warning gives the true count beyond that).",
+      "required": ["total", "in_blocks", "by_status", "by_text_rule", "tolerance_rule", "max_rows", "truncated", "rows"],
+      "additionalProperties": false,
+      "properties": {
+        "total": { "type": "integer", "minimum": 0 },
+        "in_blocks": { "type": "integer", "minimum": 0, "description": "Part of total that sits in block definitions." },
+        "by_status": { "type": "object", "additionalProperties": { "type": "integer", "minimum": 1 } },
+        "by_text_rule": { "type": "object", "additionalProperties": { "type": "integer", "minimum": 1 } },
+        "tolerance_rule": { "type": "string", "description": "The tolerance rule in words, repeated for readers of the output." },
+        "max_rows": { "const": 200 },
+        "truncated": { "type": "boolean" },
+        "rows": {
+          "type": "array",
+          "maxItems": 200,
+          "items": {
+            "type": "object",
+            "required": ["seq", "handle", "layout", "dim_type", "text_rule", "text", "measured", "actual_measurement", "measurement_agrees", "expected_text_value", "override_value", "tolerance", "status", "note"],
+            "additionalProperties": false,
+            "properties": {
+              "seq": { "type": "integer", "minimum": 1, "description": "1-based position of the dimension in the scan (layouts in tab order, then block definitions); identifies a row when handle is null." },
+              "handle": { "type": ["string", "null"], "description": "Null when file.handles_reliable is false." },
+              "layout": { "type": "string", "description": "Layout name, or 'block:<name>' for a block definition." },
+              "dim_type": { "type": "string" },
+              "text_rule": { "enum": ["measured", "measured_with_text", "suppressed", "override"] },
+              "text": { "type": "string", "description": "dxf.text verbatim." },
+              "measured": { "type": ["number", "null"] },
+              "actual_measurement": { "type": ["number", "null"], "description": "Group 42 as stored (angular: radians); null when absent." },
+              "measurement_agrees": { "type": ["boolean", "null"] },
+              "expected_text_value": { "type": ["number", "null"], "description": "measured * DIMLFAC (angular: measured in the DIMAUNIT unit)." },
+              "override_value": { "type": ["number", "null"] },
+              "tolerance": { "type": ["number", "null"] },
+              "status": { "enum": ["ok", "override_differs", "not_numeric", "not_compared", "error"] },
+              "note": { "type": ["string", "null"] }
+            }
+          }
+        }
+      }
+    },
+    "scales": {
+      "type": "object",
+      "description": "Scale values kept in two separate families, never pooled (DIMSCALE 100 and viewport scale 0.01 describe the same 1:100). dimscale counts the effective DIMSCALE of every DIMENSION entity in modelspace and layouts (entity override, else its style; block-definition dimensions are left out); 0 means 'scale to viewport'. Dimension styles that no dimension uses are listed in dimstyles but do not set a flag. viewport_scales covers non-overall viewports whose scale is computable. Within a family, values equal within a relative tolerance of 1e-4 are one scale, and a value and its reciprocal (1:N and N) are treated as the same scale; every distinct raw value of a group is kept in members. multiple_scales is true when either family has more than one group.",
+      "required": ["dimscale", "dimstyles", "viewport_scales", "multiple_dimscale", "multiple_viewport_scales", "multiple_scales"],
+      "additionalProperties": false,
+      "properties": {
+        "dimscale": { "type": "array", "items": { "$ref": "#/$defs/scale_count" } },
+        "dimstyles": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "dimscale"],
+            "additionalProperties": false,
+            "properties": { "name": { "type": "string" }, "dimscale": { "type": ["number", "null"] } }
+          }
+        },
+        "viewport_scales": { "type": "array", "items": { "$ref": "#/$defs/scale_count" } },
+        "multiple_dimscale": { "type": "boolean" },
+        "multiple_viewport_scales": { "type": "boolean" },
+        "multiple_scales": { "type": "boolean" }
+      }
+    },
+    "scale_count": {
+      "type": "object",
+      "required": ["value", "count", "members"],
+      "additionalProperties": false,
+      "properties": {
+        "value": { "type": "number", "description": "Smallest member of the group." },
+        "count": { "type": "integer", "minimum": 1 },
+        "members": { "type": "array", "minItems": 1, "items": { "type": "number" }, "description": "Distinct raw values merged into this group, ascending." }
+      }
+    },
+    "question": {
+      "type": "object",
+      "description": "Open question for the engineer. blocking: true means nothing downstream may use the affected values until answered. Entity handles in 'where' are valid only for this conversion.",
+      "required": ["code", "blocking", "message", "where", "found"],
+      "additionalProperties": false,
+      "properties": {
+        "code": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+        "blocking": { "type": "boolean" },
+        "message": { "type": "string", "minLength": 1 },
+        "where": { "type": "string", "minLength": 1, "description": "Layout, entity handle, layer or header variable." },
+        "found": { "type": "string", "description": "The value found, verbatim." }
+      }
+    }
+  }
+}

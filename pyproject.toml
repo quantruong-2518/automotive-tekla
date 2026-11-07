@@ -31,6 +31,7 @@ packages = ["src/tekla_harness"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "schemas" = "tekla_harness/schema_files"
+"knowledge" = "tekla_harness/knowledge_files"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

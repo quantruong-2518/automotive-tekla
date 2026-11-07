@@ -1,0 +1,189 @@
+{
+  "schema_version": "0.1",
+  "kind": "questions",
+  "project_id": "demo-warehouse",
+  "questions": [
+    {
+      "id": "Q-008",
+      "key": "5f179c387a5069c5",
+      "code": "units_confirm_all",
+      "blocking": true,
+      "file": "S-101.dwg",
+      "message": "Header units are unreliable on real drawings and are not accepted automatically. Confirm the drawing unit of this DXF (against a known dimension, a PDF or your own knowledge) before any extraction. Replaces the non-blocking units_confirm probe question.",
+      "count": 1,
+      "truncated": false,
+      "refs": [
+        {
+          "file": "S-101.dwg",
+          "where": "header $INSUNITS",
+          "found": "mm ($INSUNITS=4), confidence medium, flags: units_confirm",
+          "unit": "mm",
+          "confidence": "medium",
+          "flags": [
+            "units_confirm"
+          ]
+        }
+      ],
+      "answer": null
+    },
+    {
+      "id": "Q-002",
+      "key": "b9dc54e6a2dffa1b",
+      "code": "units_confirm_all",
+      "blocking": true,
+      "file": "S-102.dxf",
+      "message": "Header units are unreliable on real drawings and are not accepted automatically. Confirm the drawing unit of this DXF (against a known dimension, a PDF or your own knowledge) before any extraction. Replaces the non-blocking units_confirm probe question.",
+      "count": 1,
+      "truncated": false,
+      "refs": [
+        {
+          "file": "S-102.dxf",
+          "where": "header $INSUNITS",
+          "found": "unknown ($INSUNITS=0), confidence low, flags: units_unknown",
+          "unit": "unknown",
+          "confidence": "low",
+          "flags": [
+            "units_unknown"
+          ]
+        }
+      ],
+      "answer": {
+        "key": "b9dc54e6a2dffa1b",
+        "question_id": "Q-002",
+        "code": "units_confirm_all",
+        "file": "S-102.dxf",
+        "answer_text": "Dimension between grid 1 and 2 reads 6000 and the scale bar agrees: the drawing is in millimetres.",
+        "values": {
+          "unit": "mm"
+        },
+        "answered_by": "Nguyen Van A",
+        "answered_on": "2026-11-03",
+        "status": "active"
+      }
+    },
+    {
+      "id": "Q-003",
+      "key": "888281b0e47e4a65",
+      "code": "units_unknown",
+      "blocking": true,
+      "file": "S-102.dxf",
+      "message": "The DXF header does not give usable drawing units ($INSUNITS missing, 0, invalid or outside mm/cm/m/in/ft). In which unit are the coordinates drawn? Metres are not assumed.",
+      "count": 1,
+      "truncated": false,
+      "refs": [
+        {
+          "file": "S-102.dxf",
+          "where": "header $INSUNITS",
+          "found": "0"
+        }
+      ],
+      "answer": null
+    },
+    {
+      "id": "Q-009",
+      "key": "07805c2152753a43",
+      "code": "dimension_override_differs",
+      "blocking": false,
+      "file": "S-101.dwg",
+      "message": "Dimension text was typed over and differs from the measured value. Which one is right: the text or the geometry?",
+      "count": 3,
+      "truncated": false,
+      "refs": [
+        {
+          "file": "S-101.dwg",
+          "where": "A1 Plan, DIMENSION 2F1",
+          "found": "3600"
+        },
+        {
+          "file": "S-101.dwg",
+          "where": "A1 Plan, DIMENSION 2F4",
+          "found": "7200"
+        },
+        {
+          "file": "S-101.dwg",
+          "where": "A1 Plan, DIMENSION 30A",
+          "found": "5000"
+        }
+      ],
+      "answer": null
+    },
+    {
+      "id": "Q-010",
+      "key": "afbaf7e97b222450",
+      "code": "font_encoding_proposed",
+      "blocking": false,
+      "file": "S-101.dwg",
+      "message": "A text style matches a PROPOSED row of the font-encoding knowledge table (knowledge/font-encodings.csv). A proposed row changes nothing: the text of this style is still read as 'unknown'. Check the evidence, then approve or reject the row (edit its status in a reviewed commit).",
+      "count": 1,
+      "truncated": false,
+      "refs": [
+        {
+          "file": "S-101.dwg",
+          "where": "knowledge row font_file 'VH*.TTF' -> tcvn3 (proposed); text style(s) kt..1",
+          "found": "style kt..1 (font VHARIAL.TTF) in a sample holds 1105 non-ASCII entries; decodes to Vietnamese with TCVN3 [source: example sample]"
+        }
+      ],
+      "answer": null
+    },
+    {
+      "id": "Q-011",
+      "key": "e9371bc26ff5f2b0",
+      "code": "encoding_unknown_non_ascii",
+      "blocking": false,
+      "file": "S-101.dwg",
+      "message": "Text with non-ASCII characters was found in text styles whose font gives no encoding (not a known Unicode family or legacy Vietnamese font name, and no approved knowledge-table row). It is kept as stored with low confidence. Say which encoding each style uses (TCVN3, VNI or Unicode); an answer can become an approved row in knowledge/font-encodings.csv.",
+      "count": 1,
+      "truncated": false,
+      "refs": [
+        {
+          "file": "S-101.dwg",
+          "where": "text style kt..1",
+          "found": "1105 entries with non-ASCII text and no known encoding (font file VHARIAL.TTF)"
+        }
+      ],
+      "answer": null
+    },
+    {
+      "id": "Q-012",
+      "key": "246b8fee10739b03",
+      "code": "converter_errors",
+      "blocking": false,
+      "file": "S-101.dwg",
+      "message": "The DWG converter printed ERROR lines although it exited normally: some objects or strings may be missing or truncated, and confidence is capped. Check the text-heavy parts of this sheet or provide a DXF or PDF export.",
+      "count": 1,
+      "truncated": false,
+      "refs": [
+        {
+          "file": "S-101.dwg",
+          "where": "dwg conversion",
+          "found": "4 ERROR line(s), 120 warning line(s)"
+        }
+      ],
+      "answer": null
+    },
+    {
+      "id": "Q-013",
+      "key": "2c81da4a01db5701",
+      "code": "no_reader_implemented",
+      "blocking": true,
+      "file": "general-notes.pdf",
+      "message": "No reader exists yet for these file formats (roadmap), so nothing was extracted from them. Provide a DXF or DWG of each listed sheet, or wait for the reader.",
+      "count": 1,
+      "truncated": false,
+      "refs": [
+        {
+          "file": "general-notes.pdf",
+          "where": "format pdf",
+          "found": "no reader implemented for pdf yet (roadmap)"
+        }
+      ],
+      "answer": null
+    }
+  ],
+  "summary": {
+    "questions": 8,
+    "blocking_questions": 4,
+    "answered": 1,
+    "blocking_open": 3
+  }
+}
