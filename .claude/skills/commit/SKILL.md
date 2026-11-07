@@ -89,11 +89,26 @@ If a check fails, fix it or stop and report. Never `--no-verify`, never commit r
 
 ## 5. Commit
 
-Write the message through a quoted heredoc so nothing is expanded:
+Each task lives on its own feature branch (`feat/…`, `fix/…`, `docs/…`, `chore/…`); never
+commit on `master` (engineer rule, 2026-11-07). Check with `git branch --show-current` first.
+
+Write the message to a file with the file-writing tool (in the session's scratchpad or temp
+folder, never in the repo), then commit with `-F <file>`:
 
 ```bash
 git add src/tekla_harness/convert.py tests/test_convert.py
-git commit -F - <<'EOF'
+git commit -F /path/to/scratchpad/msg.txt
+```
+
+Never pass the message inline (`-m`) or through a heredoc (`-F - <<'EOF'`). The guard hook
+reads the whole shell command, message included: the `(` in `type(scope):` starts a new
+shell segment, and a later mention of the Tekla CLI name in that segment is then taken as a
+real invocation and the commit is denied. Worktree-isolated sessions also refuse heredoc
+commands. A message file avoids both.
+
+Example message file:
+
+```
 fix(convert): treat truncated DXF output as a failed attempt
 
 Why: ezdxf raises StopIteration on a truncated file, which crashed the
@@ -106,11 +121,8 @@ whole dwg2dxf command instead of falling back to the next converter.
 Verify: uv run pytest tests/test_convert.py
 Refs: ADR-0005
 Co-Authored-By: <attribution line>
-EOF
 ```
 
-- No backticks or `$(` anywhere in the message: the guard hook treats them as command
-  substitution and blocks the whole command if the text also mentions the Tekla CLI.
 - `git commit` is an `ask` rule: the engineer confirms each one. Do not try to avoid the prompt.
 - Do not push, amend a pushed commit, or rewrite history unless the engineer asks.
 - After committing, show `git log --oneline -<n>` for the commits you made, plus anything
