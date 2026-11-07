@@ -76,5 +76,31 @@ Severity: `critical` · `major` · `minor`.
   are denied outside `builder`.
 - Done: contract names the exe and forbids the dotnet routes; the hook matches `tekla[-_]?cli`
   and denies any `dotnet run|exec|watch` (`tests/test_guard_hook.py`, RTI-0006 cases).
-- Open (not in this fix): `dotnet test` of a future `TeklaCore.Tests` project would reach the
-  Tekla API outside `builder`; decide in Step 3 how integration tests are allowed to run.
+- Follow-up: integration tests that reach the Tekla API outside `builder` → RTI-0007.
+
+## RTI-0007 — Integration tests could write to whatever Tekla model is open
+
+- Source: review of RTI-0006, 2026-11-07
+- Classification: tooling · Severity: minor (no Tekla test project exists yet; major once
+  Step 3 adds one) · Status: **proposed** (engineer agreed with the direction 2026-11-07; to be
+  done when `tekla/` gets its first .NET project)
+- Root cause: an external Open API client talks to the first Tekla session started and writes
+  to whatever model is open there. A `dotnet test` run of integration tests, by an agent or by
+  the engineer, would build test objects into a real project model if one is open. The guard
+  hook cannot protect this: it sees only agents, and test runners can be started many ways
+  (`dotnet test`, `vstest.console`, Test Explorer, scripts), which ADR-0004 already accepts it
+  cannot catch.
+- Rejected: extending the hook to deny `dotnet test`. It would block the Tekla-free unit tests
+  (most of the code, runnable on Linux CI) or need fragile project-name matching, could still
+  be bypassed, would push test runs onto `builder` (wrong role), and would not stop the
+  engineer's own runs.
+- Proposed fix:
+  1. Two test projects: `TeklaCore.Tests` (no Tekla references, runs anywhere and in CI) and
+     `TeklaCore.IntegrationTests` (needs a running Tekla).
+  2. The integration fixture fails before any write unless the open model path equals the
+     declared test model path and that model folder holds a marker file
+     (e.g. `.harness-test-model`); same comparison code as contract safety rule 1.
+  3. A `permissions.ask` rule for `dotnet test` on the IntegrationTests project, so each run is
+     confirmed by the engineer.
+- Regression test: with a model open that lacks the marker or has another path, the integration
+  fixture fails before any write; `TeklaCore.Tests` builds and runs with no Tekla installed.
