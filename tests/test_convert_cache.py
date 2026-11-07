@@ -109,6 +109,7 @@ def test_fallback_after_a_failure_is_never_cached(tmp_path, template, dwg, cache
     for out in ("w1", "w2"):
         result = dwg_to_dxf(dwg, tmp_path / out, oda=oda, dwg2dxf=libre, cache=cache, timeout=1)
         assert result.converter == "libredwg_dwg2dxf" and info(result)["hit"] is False
+        assert any("not cached because oda_file_converter failed" in w for w in result.warnings)
     assert calls(tmp_path, "oda") == 2
     ok_oda = fake(tmp_path, "oda", ODA_OUT, True, template)  # ODA recovers
     assert dwg_to_dxf(dwg, tmp_path / "w3", oda=ok_oda, dwg2dxf=libre, cache=cache).confidence_cap == "high"
@@ -174,6 +175,26 @@ def test_bare_command_name_is_resolved_and_hashed(tmp_path, template, dwg, cache
     monkeypatch.delenv("HARNESS_ODA_CONVERTER", raising=False)
     monkeypatch.delenv("HARNESS_DWG2DXF", raising=False)
     assert dwg_to_dxf(dwg, tmp_path / "w1", dwg2dxf=["dwg2dxf"], cache=cache).converter == "libredwg_dwg2dxf"
+    launcher.write_text(launcher.read_text() + "# upgraded\n", encoding="utf-8")
+    assert info(dwg_to_dxf(dwg, tmp_path / "w2", dwg2dxf=["dwg2dxf"], cache=cache))["hit"] is False
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX PATH lookup")
+def test_bare_name_hashes_the_file_that_runs_not_a_cwd_decoy(tmp_path, template, dwg, cache, monkeypatch):
+    """A bare name runs from PATH, so a same-named file in the cwd must not be what is hashed."""
+    script = fake(tmp_path, "libre", LIBRE_OUT, True, template)[1]
+    bindir, cwd = tmp_path / "bin", tmp_path / "cwd"
+    bindir.mkdir()
+    cwd.mkdir()
+    launcher = bindir / "dwg2dxf"
+    launcher.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{script}" "$@"\n', encoding="utf-8")
+    launcher.chmod(0o755)
+    (cwd / "dwg2dxf").write_text("decoy, never run\n", encoding="utf-8")
+    monkeypatch.chdir(cwd)
+    monkeypatch.setenv("PATH", str(bindir))
+    monkeypatch.delenv("HARNESS_ODA_CONVERTER", raising=False)
+    monkeypatch.delenv("HARNESS_DWG2DXF", raising=False)
+    dwg_to_dxf(dwg, tmp_path / "w1", dwg2dxf=["dwg2dxf"], cache=cache)
     launcher.write_text(launcher.read_text() + "# upgraded\n", encoding="utf-8")
     assert info(dwg_to_dxf(dwg, tmp_path / "w2", dwg2dxf=["dwg2dxf"], cache=cache))["hit"] is False
 

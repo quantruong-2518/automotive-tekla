@@ -76,10 +76,15 @@ def _split_command(value: str) -> list[str]:
 
 
 def _resolve_word(word: str) -> str:
-    """Resolve a bare name (or a Windows path without its extension) on PATH once, so the file
-    that runs is the file the cache key hashes. Unresolvable words stay as given and fail."""
+    """Turn the executable into one absolute path that is both run and hashed.
+
+    A bare name is looked up on PATH, as subprocess does on POSIX (a same-named file in the
+    current folder is not what runs). A path is resolved; a Windows path without its extension
+    goes through `which` for PATHEXT. Unresolvable words stay as given and fail as attempts."""
+    if not any(sep in word for sep in (os.sep, os.altsep) if sep):
+        return shutil.which(word) or word
     if Path(word).is_file():
-        return word
+        return str(Path(word).resolve())
     return shutil.which(word) or word
 
 
@@ -287,8 +292,13 @@ def _cached_run(
             return replayed
 
     def record(produced: Path, result: ConversionResult) -> None:
-        if any(a.status != "ok" for a in result.attempts):
-            return  # a fallback after a failure may be transient: never pin it
+        failed = [a.tool for a in result.attempts if a.status != "ok"]
+        if failed:  # a fallback after a failure may be transient: never pin it
+            result.warnings.append(
+                f"read cache: result not cached because {', '.join(failed)} failed in this run; "
+                "fix that converter to get cache hits"
+            )
+            return
         recorded = {
             "converter": result.converter,
             "confidence_cap": result.confidence_cap,

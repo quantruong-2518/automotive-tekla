@@ -115,4 +115,13 @@ files).
 - Review: an independent Opus review (2026-11-06) found 2 critical and 4 major defects in the
   first implementation (transient-failure pinning, caching the delivered copy, refresh leaving
   stale entries, unvalidated replay, unsnapshotted input, bare names keyed by name). Each has a
-  regression test that fails on the first implementation.
+  regression test that fails on the first implementation. A follow-up found that a bare name
+  was hashed from the current folder while PATH decided what ran; fixed and tested.
+- Deferred review findings:
+  - Windows: entry files are never byte-identical (timestamps), so a `PermissionError` while
+    replacing an entry means "not cached" with a warning, not a silent no-op.
+  - An uncaught crash in the CLI exits 1, which reads like a validation failure (exit 1).
+  - `read-log.json` has no field for a cache hit yet; add it in the slice that first writes
+    conversions to the read log.
+- A converter that is configured but always fails prevents every cache hit; each such run
+  says so in a warning ("result not cached because … failed").
