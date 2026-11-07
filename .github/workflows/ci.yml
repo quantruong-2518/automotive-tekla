@@ -36,3 +36,26 @@ jobs:
           uv run harness validate spec schemas/examples/spec.example.json
           uv run harness validate project-state schemas/examples/project-state.example.json
           uv run harness validate read-log schemas/examples/read-log.example.json
+
+  dotnet:
+    # Tekla-free .NET code only (ADR-0009 §2). Integration tests never run in CI (RTI-0007).
+    name: dotnet (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    defaults:
+      run:
+        working-directory: tekla
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: tekla/global.json
+      - run: dotnet build TeklaHarness.slnx -c Release
+      - name: Test on net10.0
+        run: dotnet test TeklaCore.Tests -c Release --no-build -f net10.0
+      - name: Test on net48 (Windows only)
+        if: runner.os == 'Windows'
+        run: dotnet test TeklaCore.Tests -c Release --no-build -f net48

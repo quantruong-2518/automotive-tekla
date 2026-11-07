@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Tekla-free rules of the CLI (ADR-0009). Must never reference Tekla.Structures.*. -->
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <AssemblyName>TeklaCore</AssemblyName>
+    <RootNamespace>TeklaHarness.Core</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="TeklaCore.Tests" />
+  </ItemGroup>
+</Project>
