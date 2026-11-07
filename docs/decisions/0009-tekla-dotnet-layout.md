@@ -39,7 +39,8 @@ and one test project "against an empty test model". Since then:
    `CultureInfo.InvariantCulture`; a test runs the core under `vi-VN` (comma decimal separator).
    Reason: the Tekla machine may use a Vietnamese locale, and number formatting also differs
    between .NET Framework and .NET.
-4. **The model-path guard fails closed and does not use `System.IO.Path`.** It compares Windows
+4. **The model-path guard fails closed and does not use `System.IO.Path`** (restated in the
+   Amendment: text checks are necessary but not sufficient; S1a adds file identity). It compares Windows
    paths with its own normaliser (separators, case, trailing separator, `.` segments). It allows
    a write only when the open path is provably the working copy and provably not the original.
    Anything it cannot prove (`..`, UNC vs drive letter, `\\?\` prefixes, 8.3 short names,
@@ -49,6 +50,34 @@ and one test project "against an empty test model". Since then:
 6. **Tool names and the guard.** Shell commands that name the CLI project after a non-inert
    command are denied by the guard hook (RTI-0006); project files are created with editor tools,
    and builds use `dotnet build` (inert). The guard is not loosened.
+
+## Amendment (2026-11-07, independent review of slice S1)
+
+An Opus review found, and reproduced on NTFS (Windows build 26200) and in the guard under
+.NET Framework 4.8 and .NET 10:
+
+- **Text compare missed NTFS equal names.** "NFKC then upper-case" allowed e.g. `Pi`+U+0307
+  vs `PI`+U+0307, which NTFS treats as one folder (it upper-cases each UTF-16 unit and does not
+  normalise). Fixed in S1: names are "possibly equal" if they match by per-unit upper-casing
+  (as NTFS), or after NFKC, or after NFKD. Acceptance: 0 false allows over all 973 Windows
+  upcase mappings (`RtlUpcaseUnicodeChar`) on .NET Framework 4.8.
+- **Text cannot prove two paths are different folders.** `subst` drives, junctions, symlinks,
+  volume mount points and two mapped drives on one share are aliases the text guard allows.
+  §4 is therefore restated:
+  1. The text guard (S1, `TeklaCore`) is necessary, not sufficient.
+  2. Slice **S1a** adds a file-identity check on Windows: volume serial number + file ID
+     (`GetFileInformationByHandleEx`, `FILE_ID_INFO`, which also covers ReFS) of the open model,
+     the working copy, the original and their parent folders. A write needs: open = working
+     copy by identity; working copy, open and original pairwise different by identity and not
+     ancestors of one another; any path whose identity cannot be read refuses.
+  3. No write command (slice S4) ships before S1a passes on Windows.
+  4. UNC paths stay refused by the text guard until S1a exists; S1a may then allow them.
+- Exit codes for rule 1: another model open is "wrong model" (3); every other refusal is 5.
+  The contract states this split.
+- Known limits, accepted: a legitimate folder name such as `Rev~2` is refused (it looks like
+  an 8.3 short name); short names set by hand without `~N` are left to S1a; under .NET
+  invariant-globalization mode normalisation is not applied (not used on net48, where the CLI
+  runs). The path is checked once per command; S4 re-checks it before `CommitChanges`.
 
 ## Consequences
 

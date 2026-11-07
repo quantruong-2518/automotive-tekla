@@ -49,7 +49,8 @@ mutation testing, independent review, then one commit.
 
 | Slice | Content | Runs where |
 |---|---|---|
-| S1 | Solution scaffold; `TeklaCore` exit codes and model-path guard (contract rule 1); .NET CI job | dev machine + CI |
+| S1 | Solution scaffold; `TeklaCore` exit codes and model-path text guard (contract rule 1); .NET CI job | dev machine + CI |
+| S1a | File-identity check for rule 1 (volume serial + file ID; catches `subst`, junctions, mapped drives). Blocks S4 | Windows (CI + local) |
 | S1b | Spec loading and validation (single source of truth decided first) | dev machine + CI |
 | S1c | Run journal (schema) and resume planner (contract rule 6) | dev machine + CI |
 | S2 | `TeklaAdapter` over the Open API (compiles here, runs on the Tekla machine) | compile here |
