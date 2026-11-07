@@ -245,6 +245,10 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
   read-structure, which raises them (EVAL-1 F-20, F-21); `harness marks`, `harness questions-md` and
   `harness finding` registered as stubs that exit 3 until their modules land. Schemas changed:
   `question-registry`, `status` (6 producers).
+- Step 3 groundwork: `tekla/api-notes.md` (Tekla Open API 2024 Diamond, 2025/2026 deltas;
+  doc-sourced, not run-verified) and ADR-0007 (on error stop, keep and resume by `SPEC_ID`;
+  backup by macro; exe config at build time; per-model unique tag UDAs). The CLI contract now
+  names the executable `tekla-cli.exe` and pins NuGet 2024.0.4.
 - Versioning note: the reading-toolchain schemas above have not been released; they stay `0.1` and their
   changes are recorded here until the first tagged release, from which every change bumps its `$id`
   (AGENTS.md). Pending engineer confirmation.
