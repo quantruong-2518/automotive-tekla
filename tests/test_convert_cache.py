@@ -1,0 +1,407 @@
+"""dwg_to_dxf with the read cache: a hit must be indistinguishable from a fresh run in
+provenance and confidence, and must never hide a change that could alter the result."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import sys
+import textwrap
+
+import pytest
+from ezdxf.filemanagement import new
+
+from tekla_harness import convert
+from tekla_harness.cache import ReadCache
+from tekla_harness.cli import main
+from tekla_harness.convert import dwg_to_dxf
+
+ODA_OUT = "os.path.join(sys.argv[2], os.path.splitext(sys.argv[7])[0] + '.dxf')"
+LIBRE_OUT = "sys.argv[sys.argv.index('-o') + 1]"
+
+
+def fake(tmp_path, name: str, out_expr: str, ok: bool, template, variant: str = "") -> list[str]:
+    """A converter that appends one line to <name>.calls on every run."""
+    calls = tmp_path / f"{name}.calls"
+    body = "shutil.copy(TEMPLATE, out_path)" if ok else "sys.stderr.write('fatal'); sys.exit(1)"
+    script = tmp_path / f"{name}.py"
+    script.write_text(
+        textwrap.dedent(f"""\
+            import os, shutil, sys
+            TEMPLATE = {str(template)!r}
+            open({str(calls)!r}, 'a').write('x\\n')
+            out_path = {out_expr}
+            {body}
+            # {variant}
+        """),
+        encoding="utf-8",
+    )
+    return [sys.executable, str(script)]
+
+
+def info(result) -> dict:
+    assert result.cache is not None, "a cache was passed, so the result must report it"
+    return result.cache
+
+
+def calls(tmp_path, name: str) -> int:
+    path = tmp_path / f"{name}.calls"
+    return len(path.read_text().splitlines()) if path.exists() else 0
+
+
+@pytest.fixture
+def template(tmp_path):
+    path = tmp_path / "template.dxf"
+    doc = new("R2018")
+    doc.modelspace().add_line((0, 0), (6000, 0))
+    doc.saveas(path)
+    return path
+
+
+@pytest.fixture
+def dwg(tmp_path):
+    (tmp_path / "input").mkdir()
+    path = tmp_path / "input" / "S-101.dwg"
+    path.write_bytes(b"AC1032" + b"\x00" * 64)
+    return path
+
+
+@pytest.fixture
+def cache(tmp_path):
+    return ReadCache(tmp_path / "project" / ".cache")
+
+
+def test_second_run_is_a_hit_and_runs_no_converter(tmp_path, template, dwg, cache):
+    oda = fake(tmp_path, "oda", ODA_OUT, True, template)
+    first = dwg_to_dxf(dwg, tmp_path / "w1", oda=oda, cache=cache)
+    second = dwg_to_dxf(dwg, tmp_path / "w2", oda=oda, cache=cache)
+    assert first.cache == {"hit": False, "key": info(second)["key"]}
+    assert info(second)["hit"] is True
+    assert calls(tmp_path, "oda") == 1
+    assert second.dxf == (tmp_path / "w2" / "S-101.dxf").resolve()
+    assert first.dxf is not None and second.dxf is not None
+    assert second.dxf.read_bytes() == first.dxf.read_bytes()
+
+
+@pytest.fixture
+def no_path_converters(monkeypatch):
+    monkeypatch.delenv("HARNESS_ODA_CONVERTER", raising=False)
+    monkeypatch.delenv("HARNESS_DWG2DXF", raising=False)
+    monkeypatch.setattr("tekla_harness.convert.shutil.which", lambda _name: None)
+
+
+def test_hit_preserves_provenance_and_cap(tmp_path, template, dwg, cache, no_path_converters):
+    libre = fake(tmp_path, "libre", LIBRE_OUT, True, template)  # LibreDWG is the only converter
+    fresh = dwg_to_dxf(dwg, tmp_path / "w1", dwg2dxf=libre, cache=cache)
+    hit = dwg_to_dxf(dwg, tmp_path / "w2", dwg2dxf=libre, cache=cache)
+    assert info(hit)["hit"] is True
+    assert hit.converter == fresh.converter == "libredwg_dwg2dxf"
+    assert hit.confidence_cap == fresh.confidence_cap == "medium"
+    assert [a.as_dict() for a in hit.attempts] == [a.as_dict() for a in fresh.attempts]
+    assert hit.warnings == fresh.warnings
+    assert any("not configured" in w for w in hit.warnings)
+
+
+def test_fallback_after_a_failure_is_never_cached(tmp_path, template, dwg, cache):
+    """Review C1: a transient ODA failure must not pin the medium LibreDWG result."""
+    oda = fake(tmp_path, "oda", ODA_OUT, False, template)
+    libre = fake(tmp_path, "libre", LIBRE_OUT, True, template)
+    for out in ("w1", "w2"):
+        result = dwg_to_dxf(dwg, tmp_path / out, oda=oda, dwg2dxf=libre, cache=cache, timeout=1)
+        assert result.converter == "libredwg_dwg2dxf" and info(result)["hit"] is False
+    assert calls(tmp_path, "oda") == 2
+    ok_oda = fake(tmp_path, "oda", ODA_OUT, True, template)  # ODA recovers
+    assert dwg_to_dxf(dwg, tmp_path / "w3", oda=ok_oda, dwg2dxf=libre, cache=cache).confidence_cap == "high"
+
+
+def test_cache_stores_the_validated_output_not_the_delivered_copy(
+    tmp_path, template, dwg, cache, monkeypatch
+):
+    """Review C2: another run writing the same output name must not end up in our entry."""
+    real_deliver = convert._deliver
+
+    def racing_deliver(src, dst):
+        delivered = real_deliver(src, dst)
+        delivered.write_bytes(b"another run's DXF")  # a concurrent run with the same stem
+        return delivered
+
+    monkeypatch.setattr(convert, "_deliver", racing_deliver)
+    oda = fake(tmp_path, "oda", ODA_OUT, True, template)
+    dwg_to_dxf(dwg, tmp_path / "w1", oda=oda, cache=cache)
+    monkeypatch.setattr(convert, "_deliver", real_deliver)
+    hit = dwg_to_dxf(dwg, tmp_path / "w2", oda=oda, cache=cache)
+    assert info(hit)["hit"] is True
+    assert hit.dxf is not None and hit.dxf.read_bytes() == template.read_bytes()
+
+
+def test_key_and_converters_see_one_snapshot_of_the_input(tmp_path, template, dwg, cache, monkeypatch):
+    """Review M5: the input changing during the run must not desynchronise key and output."""
+    seen = tmp_path / "seen.sha"
+    script = tmp_path / "oda_hash.py"
+    script.write_text(
+        textwrap.dedent(f"""\
+            import hashlib, os, shutil, sys
+            src = os.path.join(sys.argv[1], sys.argv[7])
+            open({str(seen)!r}, 'w').write(hashlib.sha256(open(src, 'rb').read()).hexdigest())
+            out = os.path.join(sys.argv[2], os.path.splitext(sys.argv[7])[0] + '.dxf')
+            shutil.copy({str(template)!r}, out)
+        """),
+        encoding="utf-8",
+    )
+    original = dwg.read_bytes()
+    real_try = convert._try
+
+    def editing_try(*args, **kwargs):
+        dwg.write_bytes(b"AC1032" + b"\x07" * 64)  # the engineer saves a new revision mid-run
+        return real_try(*args, **kwargs)
+
+    monkeypatch.setattr(convert, "_try", editing_try)
+    result = dwg_to_dxf(dwg, tmp_path / "w1", oda=[sys.executable, str(script)], cache=cache)
+    entry = json.loads(cache.entry_path(info(result)["key"]).read_text(encoding="utf-8"))
+    assert seen.read_text() == entry["action"]["input_sha256"] == hashlib.sha256(original).hexdigest()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX launcher script")
+def test_bare_command_name_is_resolved_and_hashed(tmp_path, template, dwg, cache, monkeypatch):
+    """Review M6: replacing the executable found on PATH must invalidate."""
+    script = fake(tmp_path, "libre", LIBRE_OUT, True, template)[1]
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    launcher = bindir / "dwg2dxf"
+    launcher.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{script}" "$@"\n', encoding="utf-8")
+    launcher.chmod(0o755)
+    monkeypatch.setenv("PATH", str(bindir))
+    monkeypatch.delenv("HARNESS_ODA_CONVERTER", raising=False)
+    monkeypatch.delenv("HARNESS_DWG2DXF", raising=False)
+    assert dwg_to_dxf(dwg, tmp_path / "w1", dwg2dxf=["dwg2dxf"], cache=cache).converter == "libredwg_dwg2dxf"
+    launcher.write_text(launcher.read_text() + "# upgraded\n", encoding="utf-8")
+    assert info(dwg_to_dxf(dwg, tmp_path / "w2", dwg2dxf=["dwg2dxf"], cache=cache))["hit"] is False
+
+
+def _corrupt_result(cache, key, change):
+    path = cache.entry_path(key)
+    data = json.loads(path.read_text(encoding="utf-8"))
+    change(data)
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        lambda d: d["result"].pop("converter"),
+        lambda d: d["result"].update(confidence_cap="medium"),  # ODA result claiming medium
+        lambda d: d["result"].update(warnings="abc"),
+        lambda d: d["result"].update(warnings=[1]),
+        lambda d: d["result"].update(attempts=[]),
+        lambda d: d["result"].update(attempts=["x"]),
+        lambda d: d["result"]["attempts"][0].update(status="failed", error="boom"),
+        lambda d: d["outputs"][0].update(name="other.dxf"),
+        lambda d: d.update(outputs=[]),
+        lambda d: d["action"].update(input_sha256=1.5),
+    ],
+    ids=["no-converter", "cap-mismatch", "warnings-str", "warnings-int", "no-attempts",
+         "attempt-not-dict", "failed-attempt", "wrong-output-name", "no-outputs", "float-in-action"],
+)  # fmt: skip
+def test_well_formed_but_wrong_entry_is_discarded_and_recomputed(tmp_path, template, dwg, cache, change):
+    """Review M4: no recorded result is served unless a fresh run could have produced it."""
+    oda = fake(tmp_path, "oda", ODA_OUT, True, template)
+    key = info(dwg_to_dxf(dwg, tmp_path / "w1", oda=oda, cache=cache))["key"]
+    _corrupt_result(cache, key, change)
+    again = dwg_to_dxf(dwg, tmp_path / "w2", oda=oda, cache=cache)
+    assert info(again)["hit"] is False
+    assert again.converter == "oda_file_converter" and again.confidence_cap == "high"
+    assert calls(tmp_path, "oda") == 2
+    assert info(dwg_to_dxf(dwg, tmp_path / "w3", oda=oda, cache=cache))["hit"] is True  # rewritten
+
+
+def test_unreadable_blob_is_a_miss_and_keeps_the_entry(tmp_path, template, dwg, cache, monkeypatch):
+    oda = fake(tmp_path, "oda", ODA_OUT, True, template)
+    key = info(dwg_to_dxf(dwg, tmp_path / "w1", oda=oda, cache=cache))["key"]
+
+    def locked(_path):
+        raise PermissionError("in use by another process")
+
+    monkeypatch.setattr("tekla_harness.cache.sha256_file", locked)
+    assert cache.get(key) is None
+    assert cache.entry_path(key).exists()
+
+
+def test_newly_available_converter_invalidates(tmp_path, template, dwg, cache, monkeypatch):
+    """Regression guard: a LibreDWG-only result must not be served once ODA is available."""
+    monkeypatch.delenv("HARNESS_ODA_CONVERTER", raising=False)
+    monkeypatch.delenv("HARNESS_DWG2DXF", raising=False)
+    monkeypatch.setattr("tekla_harness.convert.shutil.which", lambda _name: None)
+    libre = fake(tmp_path, "libre", LIBRE_OUT, True, template)
+    first = dwg_to_dxf(dwg, tmp_path / "w1", dwg2dxf=libre, cache=cache)
+    assert first.converter == "libredwg_dwg2dxf"
+
+    oda = fake(tmp_path, "oda", ODA_OUT, True, template)
+    second = dwg_to_dxf(dwg, tmp_path / "w2", oda=oda, dwg2dxf=libre, cache=cache)
+    assert info(second)["hit"] is False
+    assert second.converter == "oda_file_converter"
+    assert second.confidence_cap == "high"
+    assert calls(tmp_path, "oda") == 1
+
+
+def test_changed_converter_binary_invalidates(tmp_path, template, dwg, cache):
+    dwg_to_dxf(dwg, tmp_path / "w1", oda=fake(tmp_path, "oda", ODA_OUT, True, template), cache=cache)
+    upgraded = fake(tmp_path, "oda", ODA_OUT, True, template, variant="v2")  # same path, new bytes
+    again = dwg_to_dxf(dwg, tmp_path / "w2", oda=upgraded, cache=cache)
+    assert info(again)["hit"] is False
+    assert calls(tmp_path, "oda") == 2
+
+
+def test_changed_input_content_invalidates(tmp_path, template, dwg, cache):
+    oda = fake(tmp_path, "oda", ODA_OUT, True, template)
+    dwg_to_dxf(dwg, tmp_path / "w1", oda=oda, cache=cache)
+    dwg.write_bytes(b"AC1032" + b"\x01" * 64)
+    assert info(dwg_to_dxf(dwg, tmp_path / "w2", oda=oda, cache=cache))["hit"] is False
+
+
+def test_paths_are_not_part_of_the_key(tmp_path, template, dwg, cache):
+    """Same bytes under another name or folder is the same action; output takes the new name."""
+    oda = fake(tmp_path, "oda", ODA_OUT, True, template)
+    dwg_to_dxf(dwg, tmp_path / "w1", oda=oda, cache=cache)
+    renamed = dwg.parent / "S-101-copy.dwg"
+    renamed.write_bytes(dwg.read_bytes())
+    hit = dwg_to_dxf(renamed, tmp_path / "elsewhere", oda=oda, cache=cache, timeout=7)
+    assert info(hit)["hit"] is True
+    assert hit.dxf == (tmp_path / "elsewhere" / "S-101-copy.dxf").resolve()
+
+
+@pytest.mark.parametrize("component", ["code", "ezdxf"])
+def test_code_and_oracle_versions_are_in_the_key(tmp_path, template, dwg, cache, monkeypatch, component):
+    oda = fake(tmp_path, "oda", ODA_OUT, True, template)
+    dwg_to_dxf(dwg, tmp_path / "w1", oda=oda, cache=cache)
+    if component == "code":
+        monkeypatch.setattr(convert, "_code_digest", lambda: "f" * 64)
+    else:
+        monkeypatch.setattr(convert, "EZDXF_VERSION", "0.0.0-test")
+    assert info(dwg_to_dxf(dwg, tmp_path / "w2", oda=oda, cache=cache))["hit"] is False
+
+
+def test_failures_are_not_cached(tmp_path, template, dwg, cache):
+    oda = fake(tmp_path, "oda", ODA_OUT, False, template)
+    libre = fake(tmp_path, "libre", LIBRE_OUT, False, template)
+    for out in ("w1", "w2"):
+        result = dwg_to_dxf(dwg, tmp_path / out, oda=oda, dwg2dxf=libre, cache=cache)
+        assert result.dxf is None and info(result)["hit"] is False
+    assert calls(tmp_path, "oda") == 2 and calls(tmp_path, "libre") == 2
+    assert not (cache.root / "ac").exists() or not any((cache.root / "ac").rglob("*.json"))
+
+
+def test_refresh_recomputes(tmp_path, template, dwg, cache):
+    oda = fake(tmp_path, "oda", ODA_OUT, True, template)
+    dwg_to_dxf(dwg, tmp_path / "w1", oda=oda, cache=cache)
+    again = dwg_to_dxf(dwg, tmp_path / "w2", oda=oda, cache=cache, refresh=True)
+    assert info(again)["hit"] is False
+    assert calls(tmp_path, "oda") == 2
+    assert info(dwg_to_dxf(dwg, tmp_path / "w3", oda=oda, cache=cache))["hit"] is True
+
+
+def switchable_oda(tmp_path, template):
+    """ODA fake whose bytes never change; it fails while <tmp>/oda.broken exists."""
+    flag = tmp_path / "oda.broken"
+    script = tmp_path / "oda_switch.py"
+    script.write_text(
+        textwrap.dedent(f"""\
+            import os, shutil, sys
+            open({str(tmp_path / "oda.calls")!r}, 'a').write('x\\n')
+            if os.path.exists({str(flag)!r}):
+                sys.stderr.write('license server down'); sys.exit(1)
+            out = os.path.join(sys.argv[2], os.path.splitext(sys.argv[7])[0] + '.dxf')
+            shutil.copy({str(template)!r}, out)
+        """),
+        encoding="utf-8",
+    )
+    return [sys.executable, str(script)], flag
+
+
+def test_refresh_that_fails_leaves_no_old_result(tmp_path, template, dwg, cache):
+    """Review M3b: --refresh is the documented fix for an in-place upgrade; a failed recompute
+    must not leave the old success to be served on the next run."""
+    oda, flag = switchable_oda(tmp_path, template)
+    key = info(dwg_to_dxf(dwg, tmp_path / "w1", oda=oda, cache=cache))["key"]
+    flag.touch()
+    failed = dwg_to_dxf(dwg, tmp_path / "w2", oda=oda, cache=cache, refresh=True)
+    assert failed.dxf is None
+    assert not cache.entry_path(key).exists()
+    assert dwg_to_dxf(dwg, tmp_path / "w3", oda=oda, cache=cache).dxf is None  # not a stale hit
+
+
+def test_refresh_while_oda_fails_does_not_downgrade(tmp_path, template, dwg, cache):
+    """Review M3a: refreshing during an ODA outage must not record a medium fallback."""
+    oda, flag = switchable_oda(tmp_path, template)
+    libre = fake(tmp_path, "libre", LIBRE_OUT, True, template)
+    dwg_to_dxf(dwg, tmp_path / "w1", oda=oda, dwg2dxf=libre, cache=cache)
+    flag.touch()
+    assert dwg_to_dxf(dwg, tmp_path / "w2", oda=oda, dwg2dxf=libre, cache=cache, refresh=True).converter == (
+        "libredwg_dwg2dxf"
+    )
+    flag.unlink()
+    healed = dwg_to_dxf(dwg, tmp_path / "w3", oda=oda, dwg2dxf=libre, cache=cache)
+    assert info(healed)["hit"] is False and healed.confidence_cap == "high"
+
+
+def test_cache_write_failure_keeps_the_conversion(tmp_path, template, dwg, cache, monkeypatch):
+    def full_disk(*_args, **_kwargs):
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(ReadCache, "put", full_disk)
+    result = dwg_to_dxf(dwg, tmp_path / "w1", oda=fake(tmp_path, "oda", ODA_OUT, True, template), cache=cache)
+    assert result.dxf is not None and result.confidence_cap == "high"
+    assert any("not cached" in w for w in result.warnings)
+
+
+def test_no_cache_means_no_cache_field_hit(tmp_path, template, dwg):
+    oda = fake(tmp_path, "oda", ODA_OUT, True, template)
+    result = dwg_to_dxf(dwg, tmp_path / "w1", oda=oda)
+    assert result.cache is None
+
+
+def test_cache_inside_input_is_refused(tmp_path, template, dwg):
+    oda = fake(tmp_path, "oda", ODA_OUT, True, template)
+    with pytest.raises(ValueError, match="input"):
+        dwg_to_dxf(dwg, tmp_path / "w1", oda=oda, cache=ReadCache(dwg.parent / ".cache"))
+
+
+def test_cache_that_contains_the_input_is_refused(tmp_path, template, dwg):
+    """Review m7: --cache-dir projects/<id> would tag the whole project as a cache."""
+    oda = fake(tmp_path, "oda", ODA_OUT, True, template)
+    with pytest.raises(ValueError, match="contains the input"):
+        dwg_to_dxf(dwg, tmp_path / "w1", oda=oda, cache=ReadCache(tmp_path))
+
+
+def test_foreign_non_empty_folder_is_refused(tmp_path, template, dwg):
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "02-plan.md").write_text("plan", encoding="utf-8")
+    oda = fake(tmp_path, "oda", ODA_OUT, True, template)
+    with pytest.raises(ValueError, match="not a read cache"):
+        dwg_to_dxf(dwg, tmp_path / "w1", oda=oda, cache=ReadCache(project))
+    assert not (project / "CACHEDIR.TAG").exists()
+
+
+def test_cli_refresh_without_cache_dir_is_a_usage_error(tmp_path, dwg, capsys):
+    assert main(["dwg2dxf", str(dwg), "--out-dir", str(tmp_path / "w"), "--refresh"]) == 2
+
+
+def test_cli_cache_dir_and_refresh(tmp_path, template, dwg, capsys):
+    oda = fake(tmp_path, "oda", ODA_OUT, True, template)
+    cache_dir = tmp_path / "project" / ".cache"
+    base = ["dwg2dxf", str(dwg), "--oda", oda[1], "--cache-dir", str(cache_dir)]
+    # The CLI takes one executable; run the fake through the interpreter via a launcher file.
+    launcher = tmp_path / ("oda.cmd" if sys.platform == "win32" else "oda.sh")
+    if sys.platform == "win32":
+        launcher.write_text(f'@"{sys.executable}" "{oda[1]}" %*\n', encoding="utf-8")
+    else:
+        launcher.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{oda[1]}" "$@"\n', encoding="utf-8")
+        launcher.chmod(0o755)
+    base[3] = str(launcher)
+
+    assert main([*base, "--out-dir", str(tmp_path / "w1")]) == 0
+    assert json.loads(capsys.readouterr().out)["cache"]["hit"] is False
+    assert main([*base, "--out-dir", str(tmp_path / "w2")]) == 0
+    assert json.loads(capsys.readouterr().out)["cache"]["hit"] is True
+    assert main([*base, "--out-dir", str(tmp_path / "w3"), "--refresh"]) == 0
+    assert json.loads(capsys.readouterr().out)["cache"]["hit"] is False

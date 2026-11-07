@@ -48,6 +48,18 @@ class Attempt:
             out["error"] = self.error
         return out
 
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> Attempt:
+        """Inverse of as_dict (used to replay recorded attempts from the read cache)."""
+        return cls(
+            tool=data["tool"],
+            started_at=data["started_at"],
+            status=data["status"],
+            duration_ms=data.get("duration_ms", 0),
+            error=data.get("error"),
+            tool_version=data.get("tool_version"),
+        )
+
 
 @contextmanager
 def timed_attempt(tool: str, tool_version: str | None = None) -> Iterator[Attempt]:

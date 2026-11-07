@@ -13,6 +13,7 @@ import sys
 from pathlib import Path
 
 from tekla_harness import __version__
+from tekla_harness.cache import ReadCache
 from tekla_harness.convert import DEFAULT_TIMEOUT_S, NoConverterError, dwg_to_dxf
 from tekla_harness.detect import detect_file, iter_input_files
 from tekla_harness.schemas import SCHEMA_NAMES, validate
@@ -61,6 +62,9 @@ def _cmd_detect(args: argparse.Namespace) -> int:
 
 
 def _cmd_dwg2dxf(args: argparse.Namespace) -> int:
+    if args.refresh and not args.cache_dir:
+        print("--refresh needs --cache-dir", file=sys.stderr)
+        return EXIT_USAGE
     try:
         result = dwg_to_dxf(
             Path(args.dwg),
@@ -68,6 +72,8 @@ def _cmd_dwg2dxf(args: argparse.Namespace) -> int:
             oda=[args.oda] if args.oda else None,
             dwg2dxf=[args.dwg2dxf] if args.dwg2dxf else None,
             timeout=args.timeout,
+            cache=ReadCache(Path(args.cache_dir)) if args.cache_dir else None,
+            refresh=args.refresh,
         )
     except NoConverterError as exc:
         print(str(exc), file=sys.stderr)
@@ -82,6 +88,7 @@ def _cmd_dwg2dxf(args: argparse.Namespace) -> int:
         "confidence_cap": result.confidence_cap,
         "attempts": [a.as_dict() for a in result.attempts],
         "warnings": result.warnings,
+        "cache": result.cache,
     }
     print(json.dumps(out, ensure_ascii=False, indent=2))
     return EXIT_OK if result.dxf else EXIT_INVALID
@@ -107,6 +114,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_dwg.add_argument("--oda", help="ODAFileConverter executable (default: $HARNESS_ODA_CONVERTER, PATH)")
     p_dwg.add_argument("--dwg2dxf", help="LibreDWG dwg2dxf executable (default: $HARNESS_DWG2DXF, PATH)")
     p_dwg.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT_S, help="seconds per converter")
+    p_dwg.add_argument(
+        "--cache-dir",
+        help="project read cache (ADR-0007), e.g. projects/<id>/.cache; no cache when omitted",
+    )
+    p_dwg.add_argument("--refresh", action="store_true", help="ignore a cached result, recompute, overwrite")
     p_dwg.set_defaults(func=_cmd_dwg2dxf)
 
     p_env = sub.add_parser("env-check", help="report whether this machine can run the harness")

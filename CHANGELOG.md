@@ -23,6 +23,13 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
 - Step 1 S2: `harness dwg2dxf` — ODA File Converter, then LibreDWG `dwg2dxf` (ADR-0005).
   Success requires a DXF that ezdxf opens; fallback caps confidence at `medium`; no converter
   at all exits 3. Runtime dependency `ezdxf` (MIT) added: the DXF reader for all later slices.
+- Step 1 S2b: per-project read cache (ADR-0006, ADR-0007). Content-addressed blobs plus an
+  action cache; key = SHA-256 over a domain tag and canonical JSON of input digest, converter
+  chain by content digest, argument templates, ezdxf version and code digest. Every
+  read is verified; corrupt or inconsistent entries are discarded; only clean successes (no
+  failed attempt) are cached; the input is snapshotted once; a hit replays
+  converter, confidence cap, attempts and warnings. `harness dwg2dxf --cache-dir … [--refresh]`.
+  New schema `cache-entry` (`urn:tekla-harness:schema:cache-entry:0.1`) and example.
 
 ### Fixed
 - `guard_tekla_write.py` now exits 2 (the blocking code) on any internal error instead of
