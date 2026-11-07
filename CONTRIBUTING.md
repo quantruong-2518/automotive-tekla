@@ -2,11 +2,14 @@
 
 ## Workflow
 
-1. Branch from `main`: `feat/<topic>`, `fix/<topic>`, `docs/<topic>`.
+1. Branch from `master`, one branch per task: `feat/<topic>`, `fix/<topic>`, `docs/<topic>`,
+   `chore/<topic>`. Never commit on `master`. Parallel agent sessions each use their own git
+   worktree under `.claude/worktrees/`.
 2. Make the smallest change that solves the task. Add or update tests.
-3. Run locally: `uv run ruff check . && uv run ruff format --check . && uv run pytest`.
-4. Commit with Conventional Commits. Open a PR using the template.
-5. Merge only after review and green CI.
+3. Run locally: `uv run ruff check . && uv run ruff format --check . && uv run pyright && uv run pytest`.
+4. Commit with Conventional Commits (`.claude/skills/commit/SKILL.md`). Push the branch and open
+   a PR into `master` using the template (`gh pr create --base master --fill` or the GitHub MCP).
+5. Merge only after review and green CI (Linux and Windows).
 
 ## Changes to the harness itself (skills, agents, hooks, schemas, TeklaCore)
 
