@@ -735,7 +735,9 @@ def test_the_shipped_table_is_the_default(tmp_path):
     path = build(tmp_path, lambda doc: text_at(doc.modelspace(), "T1", "VntimeH"))
     result = extract_text(path)  # no knowledge argument
     assert validate("text-index", result) == []
-    assert "proposed_knowledge_row" in result["entries"][0]["flags"]  # vntimeh.shx matches vn*.shx (proposed)
+    decode = result["entries"][0]["decode"]  # vntimeh.shx: approved TCVN3 row (engineer, 2026-11-07)
+    assert (decode["encoding_used"], decode["source"]) == ("tcvn3", "knowledge_table")
+    assert decode["knowledge_patterns"] == ["vntimeh.shx"]
 
 
 def test_a_bad_default_table_raises(tmp_path, monkeypatch):

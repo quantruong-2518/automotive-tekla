@@ -24,7 +24,7 @@ from pathlib import Path
 from ezdxf.enums import TextEntityAlignment
 from ezdxf.filemanagement import readfile
 
-from _callout_fixtures import REL, write_structure
+from _callout_fixtures import PROPOSED_FONT_TABLE, REL, write_structure
 from _dxf_fixtures import build_set
 from tekla_harness.intake import run_intake
 from tekla_harness.structure import read_structure
@@ -134,7 +134,7 @@ def build_marks_work(base: Path, *, full: bool = False, plan_texts: tuple[str, .
     folder."""
     root = build_marks_dxf(base, plan_texts)
     work = base / "work"
-    run_intake(root, work, PROJECT)
+    run_intake(root, work, PROJECT, knowledge=PROPOSED_FONT_TABLE)
     if full:
         read_structure(work, root)
     else:

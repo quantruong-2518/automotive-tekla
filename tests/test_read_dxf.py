@@ -814,8 +814,10 @@ def test_the_shipped_table_is_used_by_default(tmp_path):
         doc.styles.new("TKT", dxfattribs={"font": "vntimeh.shx"})
 
     result = probe(make(tmp_path, build))  # no knowledge argument: knowledge/font-encodings.csv
-    (question,) = [q for q in result["questions"] if q["code"] == "font_encoding_proposed"]
-    assert "vntimeh.shx" in question["where"]
+    assert not [q for q in result["questions"] if q["code"] == "font_encoding_proposed"]
+    (hint,) = [h for h in result["text_encoding_hints"] if h["style"] == "TKT"]  # approved 2026-11-07
+    got = (hint["encoding_hint"], hint["source"], hint["knowledge_pattern"])
+    assert got == ("tcvn3", "knowledge_table", "vntimeh.shx")
 
 
 def test_a_bad_default_knowledge_table_raises_instead_of_a_section_error(tmp_path, monkeypatch):

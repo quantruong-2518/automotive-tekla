@@ -336,6 +336,13 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
   query: intake 10/10 and 6/6 on fresh queries, reader 10/10 and 5/6, report 10/10, plan 10/10; no
   near-miss triggered.
 
+### Changed
+- `knowledge/font-encodings.csv`: the three seed rows are approved by the engineer (2026-11-07) after
+  reading decoded samples: `VHARIAL.TTF` and `vntimeh.shx` = TCVN3, `vn_vni.shx` = VNI. Text in these
+  fonts is now decoded instead of blocked by the legacy-font gate. The engineer also endorsed the
+  `.Vn*…H` = TCVN3 capital-font naming convention that `encoding.font_hint` already applies.
+  Test fixtures that need a blocked font now pin their own proposed-row table instead of the shipped one.
+
 ### Fixed
 - Reading toolchain, after an independent review of the EVAL-1 wave:
   - `harness marks`: a rotated header keyword (or one that is not a cell text) no longer crashes the run;

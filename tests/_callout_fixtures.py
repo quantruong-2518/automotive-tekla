@@ -18,7 +18,15 @@ from ezdxf.filemanagement import readfile
 
 from _dxf_fixtures import build_set
 from tekla_harness.intake import dump_json, run_intake
+from tekla_harness.knowledge import FontEncodingRow, FontEncodingTable
 from tekla_harness.sheets import extract_sheets
+
+# The fixtures need a font whose non-ASCII text is blocked and which carries a proposed knowledge
+# row (vntimeh.shx). They pin this table instead of the shipped `knowledge/font-encodings.csv`, whose
+# rows the engineer approves over time: approving a row must not change what these fixtures test.
+PROPOSED_FONT_TABLE = FontEncodingTable(
+    (FontEncodingRow(2, "vntimeh.shx", "font_file", "tcvn3", None, "proposed", "test row", "tests", "", ""),)
+)
 
 REL = "plans/set.dxf"
 COLUMN_X = 62000.0
@@ -130,7 +138,7 @@ def build_work(
     doc.saveas(root / REL)
     (root / "notes.txt").write_text("not a drawing", encoding="utf-8")
     work = base / "work"
-    run_intake(root, work, "demo-callouts")
+    run_intake(root, work, "demo-callouts", knowledge=PROPOSED_FONT_TABLE)
     write_structure(root, work)
     return work
 

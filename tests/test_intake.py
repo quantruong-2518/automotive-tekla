@@ -580,7 +580,11 @@ def test_default_knowledge_is_the_shipped_table(text_folder, tmp_path):
     out = tmp_path / "work"
     run_intake(text_folder, out, "demo-intake")
     codes = [q["code"] for q in load(out, "questions.json")["questions"]]
-    assert "font_encoding_proposed" in codes  # knowledge/font-encodings.csv proposes VH*.TTF
+    # knowledge/font-encodings.csv approves VHARIAL.TTF as TCVN3: no proposed-row question, and the
+    # kt..1 entries decode instead of staying unknown
+    assert "font_encoding_proposed" not in codes
+    a = by_file(load(out, "inventory.json"))["a.dxf"]
+    assert a["text"]["by_encoding_used"] == {"tcvn3": 4, "unicode": 1, "unknown": 1}
 
 
 def test_text_folder_is_cleared_on_rerun(text_folder, tmp_path):
