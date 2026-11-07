@@ -3,15 +3,15 @@ name: tekla-conversion-plan
 description: Prepare one planning gate for building the Tekla model from an analysed drawing set — gate 1 plan and risks, gate 2 modelling approach, gate 3 lot sequence — each rule cited with its evidence status and each lot marked buildable or blocked. Use for gate 1–3 preparation or when asked how to convert the drawings to Tekla.
 ---
 
-<!-- PROPOSAL rev 3 (2026-11-07, after EVAL-1): not active until the engineer approves it (AGENTS.md principle 7). -->
+<!-- PROPOSAL rev 4 (2026-11-07, after EVAL-2): not active until the engineer approves it (AGENTS.md principle 7). -->
 
 # Tekla conversion plan
 
 Owner: `planner`. You plan; the engineer opens each gate; only `builder` builds. **One run =
 one gate**: the orchestrator says which (`gate: 1 | 2 | 3`); you write that gate's document and
 stop. Rules R1–R17 are the table in `docs/research/tekla-modelling-from-drawings.md` §11; cite
-each as `R# (status)` with the status word from that table (`cited`, `example`, `practice`,
-`proposal`). Treat `example` and `practice` like `proposal`: the engineer accepts or rejects.
+each as `R# (status)` with the status as the table writes it (`cited`, `example`, `practice`,
+`proposal`, or a compound such as `cited + practice`, kept whole). Treat `example` and `practice` like `proposal`: the engineer accepts or rejects.
 
 ## Inputs
 
@@ -25,13 +25,22 @@ every file's units and the selected grid systems are answered.
 
 ## Gate 1 — `02-plan.md`
 
-Scope (in/out), per building when the set holds several (`separate=` systems); **Lưới trục
-và cao độ** (mandatory, RTI-0003): each selected grid system with coordinate strings (mm only
-if the system has them), X/Y status, SVG link; levels table (confirmed storey levels only, in
-metres as written); base point/origin (R13). No tool emits the Tekla Z string or the origin
+When `harness status` says `ready_for_gate1: false`, the document is a draft: its first lines
+are `BẢN NHÁP — gate 1 chưa sẵn sàng` and the `gate1.reasons` with their question ids; the rest
+follows as below.
+
+Scope (in/out), per building when the set holds several (`separate=` systems); for several
+buildings, "one Tekla model per building or one model" is an engineer decision listed here
+(R13). A file that no selected grid system covers is a scope decision too: name it, never drop
+it silently. **Lưới trục và cao độ** (mandatory, RTI-0003): each selected grid system with
+coordinate strings (mm only if the system has them), X/Y status, SVG link; levels table
+(confirmed storey levels only, in metres as written; none confirmed → one line saying so with
+the question ids); base point/origin (R13). No tool emits the Tekla Z string or the origin
 coordinates yet: write them as `chờ công cụ + xác nhận` under the R1 gap. Assumptions, each
 tied to a question id or answer; risks Critical / Major / Minor. Lots are a gate-3 decision:
-gate 1 lists none. *Done when* every blocking open question is listed with the scope it blocks.
+gate 1 lists none. Every word comes from an allowed entry, a finding or an answer: a term found
+only in font-blocked text stays out of scope rows and risk titles too. *Done when* every
+blocking open question is listed with the scope it blocks.
 
 ## Gate 2 — `03-approach.md`
 

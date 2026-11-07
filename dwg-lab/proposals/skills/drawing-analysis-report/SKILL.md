@@ -3,14 +3,17 @@ name: drawing-analysis-report
 description: Write the engineer's report on how a drawing set was read — what was received, how each value was obtained, how sure it is, what is missing — as 01-analysis.md, and at gate 3 the information matrix 04-info-matrix.csv. Use after structural-drawing-reader, or when the engineer asks how the drawings were read.
 ---
 
-<!-- PROPOSAL rev 3 (2026-11-07, after EVAL-1): not active until the engineer approves it (AGENTS.md principle 7). -->
+<!-- PROPOSAL rev 4 (2026-11-07, after EVAL-2): not active until the engineer approves it (AGENTS.md principle 7). -->
 
 # Drawing analysis report
 
 Owner: `doc-reader`, in a fresh dispatch after the reading, so the report is built from the
 artefacts rather than from memory of the reading. The engineer must be able to audit every
-figure in minutes. You write; you do not re-read the drawings. Every number and claim you print
-names the artefact it comes from; anything without one becomes a question.
+figure in minutes. You write; you do not re-read the drawings and you raise no questions. Every
+number and claim you print names the artefact it comes from. A figure the skill asks for that no
+artefact holds is printed as `không có trong artefact`; a gap you notice (a `low` value nobody
+asked about, a missing count) goes in §9 under **Chưa hỏi** and in your final message to the
+orchestrator, who sends it back to the reader.
 
 ## Inputs
 
@@ -50,7 +53,7 @@ Vietnamese, these sections in order:
 10. **Câu hỏi mở** — blocking open first, ids as in `questions.md`.
 
 *Done when* every number in the report appears in a named artefact, and every `low` or
-unconfirmed value carries a question id.
+unconfirmed value carries a question id or is listed under **Chưa hỏi** in §9.
 
 ## Part B — `projects/<id>/04-info-matrix.csv` (gate 3, workflow step 7)
 
@@ -65,7 +68,9 @@ every spec field.
 
 ## Style
 
-Conclusion first, short sentences, units always printed. The engineer's words: bản vẽ, tờ,
+Conclusion first, short sentences, units always printed. A word found only in font-blocked text
+appears nowhere in the report, not even as a topic name; blocked items are cited by entry id and
+font question. The engineer's words: bản vẽ, tờ,
 lưới trục, cao độ, ký hiệu, bảng thống kê, câu hỏi chặn. Tool names appear only as the command
 the engineer would run. Print a script's numbers as given; a total appears only when a script
 computed it.

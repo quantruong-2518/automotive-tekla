@@ -1,9 +1,9 @@
 ---
 name: drawing-intake
-description: First pass over a project's drawing files — convert DWG, probe every DXF, log every read, run the extractors, and hand the engineer the first questions in questions.md. Use when a project's input/ folder is new or has changed.
+description: First pass over a project's drawing files — convert DWG, probe every DXF, log every read, run the extractors, and hand the engineer the first questions in questions.md. Use when a project's input/ folder is new or has changed, or when asked which input files are readable, partial or unreadable, or what the DWG converter did to them.
 ---
 
-<!-- PROPOSAL rev 3 (2026-11-07, after EVAL-1): not active until the engineer approves it (AGENTS.md principle 7). -->
+<!-- PROPOSAL rev 4 (2026-11-07, after EVAL-2): not active until the engineer approves it (AGENTS.md principle 7). -->
 
 # Drawing intake
 
@@ -43,9 +43,12 @@ Layout: machine artefacts in `projects/<id>/work/`; engineer documents (`questio
   confirms the same unit.
 - **After any units, `grid_system_select` or axis answer**, rerun `harness grid-system`, then
   `harness status`: the grid systems read the answers.
-- **Converter.** LibreDWG output is capped at `medium`; converter `ERROR` lines make a file
-  `partial` and lower its cap (only their count is kept today). `conversion_empty` is
-  unreadable until the engineer answers.
+- **Converter.** LibreDWG output is capped at `medium` (ERROR lines cannot lower it further);
+  converter `ERROR` lines make a file `partial` (only their count is kept today); report the
+  converter name and that its version is not recorded. `conversion_empty` is unreadable until
+  the engineer answers.
+- **No sheet detected** (`sheets_not_detected`): the reader cannot reach that file's text; say
+  so in the report to the orchestrator.
 - **Legacy Vietnamese fonts.** Text decodes only by a font name, Unicode evidence or an
   `approved` row of `knowledge/font-encodings.csv`. Other non-ASCII text is **blocked**: the
   reader quotes it but takes no meaning from it. A `font_encoding_proposed` question closes when

@@ -1,9 +1,9 @@
 ---
 name: structural-drawing-reader
-description: Expert reading of a structural drawing set after intake — sheet set, general notes, structural system, grid systems, levels, member marks and schedules — every judgement recorded as a finding tied to extracted entries, every gap a question. Use when analysing drawings for a Tekla model or answering what a drawing says.
+description: Expert reading of a structural drawing set after drawing-intake — sheet set, general notes, structural system, grid systems, levels, member marks and schedules — every judgement recorded as a finding tied to extracted entries, every gap a question. Use whenever the engineer asks what a drawing or sheet says, which sheet is which (đọc bản vẽ, phân loại các tờ, mặt bằng móng, chi tiết cột), what the general notes specify (mác bê tông, thép, lớp bảo vệ), whether beam or column marks on plans match the schedule (ký hiệu cấu kiện, bảng thống kê, schedule_only/plan_only), or to analyse a drawing set in projects/<id> for a Tekla model.
 ---
 
-<!-- PROPOSAL rev 3 (2026-11-07, after EVAL-1): not active until the engineer approves it (AGENTS.md principle 7). -->
+<!-- PROPOSAL rev 4 (2026-11-07, after EVAL-2): not active until the engineer approves it (AGENTS.md principle 7). -->
 
 # Structural drawing reader
 
@@ -34,9 +34,18 @@ neither place does not exist: the report prints only what the artefacts hold.
 
 Each entry carries `meaning: allowed | blocked`. **Blocked** text (legacy font not yet
 approved) is quoted verbatim with its entry id and read no further: no class, value, keyword or
-paraphrase comes from it, and `harness finding` refuses it. Tie it to the font question in
-`legacy_font_gate.question_ids`. A step whose items are all blocked for a file is done for that
-file when one reader question lists them and points at that font question.
+paraphrase comes from it, and `harness finding` refuses it. A word that appears only in blocked
+text stays out of everything you write — finding values, question text, notes — even when you
+can guess the decoding. Tie it to the font question in `legacy_font_gate.question_ids`. A step
+whose items are all blocked for a file is done for that file when one reader question lists
+them (entry ids, no paraphrase) and points at that font question.
+
+## A file with no detected sheet
+
+`list-sheets` lists no sheet for it and read-structure raised `sheets_not_detected`: its text is
+out of reach of `sheet-text` and `find-text`. Point to that question for steps 1–3; steps 4–6 run
+on the JSON artefacts (`grid-systems.json`, `levels.json`, `marks.json`, `callouts.json`), which
+do not depend on sheets; record the gap in your step report.
 
 ## Asking
 
@@ -47,6 +56,8 @@ file when one reader question lists them and points at that font question.
 - Write `--text` in Vietnamese, one question per call; `--found` verbatim.
 - An engineer answer contradicted by drawing text → a blocking reader question quoting both
   (answer id and entry id). You never pick one.
+- More than one input file and no answer yet on whether they are one set → before comparing
+  anything across files, one project-level `reader_file_set_relation` question (no `--file`).
 
 ## Steps
 
@@ -77,11 +88,15 @@ file when one reader question lists them and points at that font question.
    questions are open.
 5. **Levels.** `structure/<file>.levels.json`: storey levels vs local ones (beam soffits, steps,
    wet rooms, storage platforms, canopies, landings — even when their title says TẦNG). The
-   extractor's `storey_heights` stay unconfirmed. Unless the engineer has answered a storey
-   selection, raise one blocking `reader_level_storey_selection` per file listing the candidate
-   storey levels verbatim, and quote level texts the extractor missed (e.g. `(+ 6.00M LEVEL)`) as
-   candidates. Finished vs structural stays a question until answered. *Done when* every level
-   used later is a confirmed storey level or in a question.
+   extractor's `storey_heights` stay unconfirmed. When read-structure raised
+   `level_storey_selection` for the file, add your candidates to the record by citing that id;
+   otherwise, unless the engineer has answered a storey selection, raise one blocking
+   `reader_level_storey_selection` per file listing the candidate storey levels verbatim. Quote
+   level texts the extractor missed (e.g. `(+ 6.00M LEVEL)`) as candidates. A level value whose
+   entries are blocked is not a candidate. A finding that states a level value takes
+   `--confidence low` unless `levels.json` gives that value `medium`. Finished vs structural stays
+   a question until answered. *Done when* every level used later is a confirmed storey level or
+   in a question.
 6. **Members and schedules.** From `W/marks.json`: plan marks per sheet, schedule tables, the
    `matched` / `schedule_only` / `plan_only` lists, notation variants, size conflicts, tables
    with a blocked header. A member word in a title (`title_member_word`, `DẦM D1.1`) is evidence
