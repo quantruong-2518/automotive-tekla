@@ -51,7 +51,13 @@ Adding a read subcommand requires updating `READ_SUBCOMMANDS` in
 
 1. Refuse unless the open model path matches the project's declared working copy, and that
    path differs from the declared original. Check on every command: external applications
-   talk only to the first Tekla session started.
+   talk only to the first Tekla session started. Both a path-text check and a file-identity
+   check must prove it ([ADR-0009](decisions/0009-tekla-dotnet-layout.md), Amendments 1–2); any
+   doubt refuses. Both folders must be on local NTFS/ReFS drives, the working copy must be
+   declared and opened by its real path (no subst, junction or mapped letter), the original by
+   its real drive letter, and neither folder may contain links or cloud-sync placeholders (nor
+   the copy hard-linked files). Another model open is exit `3` (wrong
+   model); any other refusal is exit `5`.
 2. Before writing, create the lot backup with a Tekla macro that runs *Save and create backup
    copy*, then check that a new backup folder exists. Refuse (exit `5`) if either fails. The
    macro route must pass on the test model before the first real lot.

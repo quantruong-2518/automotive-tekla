@@ -40,6 +40,7 @@ build/
 # --- .NET (Step 3) ---
 bin/
 obj/
+StrykerOutput/
 *.user
 *.suo
 .vs/

@@ -256,6 +256,19 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
   doc-sourced, not run-verified) and ADR-0007 (on error stop, keep and resume by `SPEC_ID`;
   backup by macro; exe config at build time; per-model unique tag UDAs). The CLI contract now
   names the executable `tekla-cli.exe` and pins NuGet 2024.0.4.
+- Step 3 S1 (ADR-0009): .NET solution `tekla/TeklaHarness.slnx` (SDK 10 pinned in
+  `tekla/global.json`), Tekla-free `TeklaCore` (netstandard2.0) with the contract exit codes and
+  the model-path text guard for safety rule 1 (fail closed: refuses relative, UNC, device, `..`,
+  8.3, trailing dot/space, invalid characters; NTFS-style case folding plus NFKC/NFKD caution);
+  `TeklaCore.Tests` on net10.0 and net48; Stryker.NET as a local tool; CI job `dotnet` (Windows
+  runs net10.0 and net48, Ubuntu net10.0). Globalization analyzers are errors.
+- Step 3 S1a (ADR-0009 Amendment 2): `ModelLocationGuard` completes safety rule 1 with Windows
+  file identity through `IFolderResolver` / `Win32FolderResolver` (128-bit `FILE_ID_INFO`, final
+  path, NTFS/ReFS on local drives only): refuses aliases (subst, junctions, mapped drives),
+  nesting found through real or typed ancestors, remote folders, a working copy declared through
+  an alias, and links inside either folder or hard-linked files in the copy. Research note
+  `docs/research/windows-file-identity.md`. Windows file-system tests run on CI windows-latest
+  only (`Category=Windows`); Stryker config `tekla/TeklaCore.Tests/stryker-config.json`.
 - Versioning note: the reading-toolchain schemas above have not been released; they stay `0.1` and their
   changes are recorded here until the first tagged release, from which every change bumps its `$id`
   (AGENTS.md). Pending engineer confirmation.

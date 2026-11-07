@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="TeklaCore.Tests/TeklaCore.Tests.csproj" />
+  <Project Path="TeklaCore/TeklaCore.csproj" />
+</Solution>

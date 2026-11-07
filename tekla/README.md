@@ -1,15 +1,16 @@
 # tekla/ — TeklaCore and tekla-cli (Step 3)
 
-Placeholder. Nothing here talks to Tekla yet.
-
-Planned layout:
+Nothing here talks to Tekla yet. Layout and build/test rules: [ADR-0009](../docs/decisions/0009-tekla-dotnet-layout.md).
 
 ```
 tekla/
-  TeklaCore/          class library, .NET Framework 4.8, NuGet Tekla.Structures.* (exact version TBD)
-  TeklaCli/           console app implementing docs/tekla-cli-contract.md
-  TeklaCore.Tests/    tests against an empty test model
-  api-notes.md        verified Open API behaviour, with version and source for each note
+  TeklaCore/                     netstandard2.0, no Tekla references: rules, journal, guards
+  TeklaAdapter/                  net48 x64, Tekla.Structures.* 2024.0.4: Open API gateways
+  TeklaCli/                      net48 x64 exe named tekla-cli: implements docs/tekla-cli-contract.md
+  TeklaCore.Tests/               net10.0 + net48 unit tests, no Tekla
+  TeklaCore.IntegrationTests/    net48, Tekla machine and test model only (RTI-0007)
+  api-notes.md                   Open API facts, with version and source for each note
 ```
 
-Blocked on: exact Tekla version + service pack, and an empty test model.
+Target: Tekla Structures 2024 (Diamond). Running against Tekla still needs the Tekla machine and
+an empty test model (roadmap, Step 3 S5).

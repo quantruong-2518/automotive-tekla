@@ -1,0 +1,14 @@
+<Project>
+  <!-- Shared settings for every project under tekla/ (ADR-0009). -->
+  <PropertyGroup>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <Deterministic>true</Deterministic>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <!-- Culture bugs are safety bugs here (ADR-0009 §3): every globalization rule is an error. -->
+    <AnalysisModeGlobalization>All</AnalysisModeGlobalization>
+    <!-- CA1303 (localize literals) does not apply: output is machine-readable JSON. -->
+    <NoWarn>$(NoWarn);CA1303</NoWarn>
+  </PropertyGroup>
+</Project>
