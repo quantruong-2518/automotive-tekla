@@ -185,7 +185,11 @@ class ReadCache:
             raise ValueError(f"cache folder {self.root} is not a folder")
         if (self.root / "CACHEDIR.TAG").is_file():
             return
-        foreign = sorted(p.name for p in self.root.iterdir() if p.name not in self._OWN_NAMES)
+        foreign = sorted(
+            p.name
+            for p in self.root.iterdir()
+            if p.name not in self._OWN_NAMES and not p.name.startswith(".tmp-")  # our temp files
+        )
         if foreign:
             raise ValueError(
                 f"cache folder {self.root} is not empty and is not a read cache "
@@ -245,11 +249,21 @@ class ReadCache:
                 raise _Corrupt(f"output {name} is corrupt")
         return CacheEntry(key, data["action"], outputs, data["result"], self.root)
 
-    def invalidate(self, key: str, reason: str) -> None:
-        """Delete an entry (blobs stay: other entries may share them)."""
-        if self.entry_path(key).exists():
+    def invalidate(self, key: str, reason: str, strict: bool = False) -> None:
+        """Delete an entry (blobs stay: other entries may share them). With `strict`, an entry
+        that cannot be deleted raises OSError instead of a warning."""
+        path = self.entry_path(key)
+        if not path.exists():
+            return
+        if strict:
+            try:
+                path.unlink(missing_ok=True)
+            except OSError as exc:
+                raise OSError(f"cannot refresh: entry {key[:12]} cannot be deleted ({exc})") from exc
+        else:
+            _unlink(path)
+        if not path.exists():
             _warn(f"discarded entry {key[:12]}: {reason}")
-        _unlink(self.entry_path(key))
 
     # --- write ------------------------------------------------------------------------
 

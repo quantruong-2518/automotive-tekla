@@ -84,7 +84,7 @@ def _resolve_word(word: str) -> str:
     if not any(sep in word for sep in (os.sep, os.altsep) if sep):
         return shutil.which(word) or word
     if Path(word).is_file():
-        return str(Path(word).resolve())
+        return str(Path(word).absolute())  # absolute, symlinks kept: argv[0] stays as given
     return shutil.which(word) or word
 
 
@@ -169,18 +169,35 @@ def _tail(text: str, limit: int = 300) -> str:
 
 
 def _deliver(src: Path, dst: Path) -> Path:
-    """Copy a validated DXF to the caller's output folder."""
+    """Copy a validated DXF's bytes to the caller's output folder. Content only (copyfile):
+    a hit and a fresh run give the same file mode and a current timestamp."""
     dst.parent.mkdir(parents=True, exist_ok=True)
-    return Path(shutil.copy2(src, dst))
+    return Path(shutil.copyfile(src, dst))
 
 
 # --- conversion ----------------------------------------------------------------------
 
 
+def _text(data: bytes) -> str:
+    """Converter output in any encoding (Windows uses the ANSI code page): never raises."""
+    return data.decode("utf-8", errors="replace")
+
+
 def _try(tool: str, exe: list[str], src: Path, timeout: float) -> tuple[Attempt, Path | None, Path]:
     """Run one converter in its own temp folder on a copy of the staged input.
-    Returns (attempt, dxf or None, temp dir)."""
+    Returns (attempt, dxf or None, temp dir). If it raises, it removes its temp dir itself:
+    the folder holds a copy of a client drawing."""
     work = Path(tempfile.mkdtemp(prefix=f"{tool}-"))
+    try:
+        return _try_in(tool, exe, src, timeout, work)
+    except BaseException:
+        shutil.rmtree(work, ignore_errors=True)
+        raise
+
+
+def _try_in(
+    tool: str, exe: list[str], src: Path, timeout: float, work: Path
+) -> tuple[Attempt, Path | None, Path]:
     src_dir, out_dir = work / "in", work / "out"
     src_dir.mkdir()
     out_dir.mkdir()
@@ -188,20 +205,22 @@ def _try(tool: str, exe: list[str], src: Path, timeout: float) -> tuple[Attempt,
     cmd, out = _command(tool, exe, local, out_dir)
     with timed_attempt(tool) as attempt:
         try:
-            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, check=False)
-        except (FileNotFoundError, PermissionError) as exc:
-            attempt.fail(f"converter not found or not executable: {exc}")
-            return attempt, None, work
+            proc = subprocess.run(cmd, capture_output=True, timeout=timeout, check=False)
         except subprocess.TimeoutExpired:
             attempt.fail(f"timed out after {timeout:g} s")
             return attempt, None, work
+        except FileNotFoundError as exc:
+            attempt.fail(f"converter not found: {exc}")
+            return attempt, None, work
+        except OSError as exc:  # not executable, exec format error, ...
+            attempt.fail(f"converter could not be started: {type(exc).__name__}: {exc}")
+            return attempt, None, work
+        said = _tail(_text(proc.stderr or proc.stdout or b""))
         if proc.returncode != 0:
-            attempt.fail(f"exit code {proc.returncode}: {_tail(proc.stderr or proc.stdout)}")
+            attempt.fail(f"exit code {proc.returncode}: {said}")
             return attempt, None, work
         if not out.is_file() or out.stat().st_size == 0:
-            attempt.fail(
-                f"exit code 0 but no DXF written ({_tail(proc.stderr or proc.stdout) or 'no output'})"
-            )
+            attempt.fail(f"exit code 0 but no DXF written ({said or 'no output'})")
             return attempt, None, work
         try:
             readfile(out)
@@ -235,9 +254,9 @@ def _run_chain(
                     result.warnings.append(
                         f"fallback converter {tool} used: confidence capped at {CONFIDENCE_CAP[tool]}"
                     )
-                if on_success is not None:
-                    on_success(produced, result)
                 result.dxf = _deliver(produced, out_dir / f"{dwg.stem}.dxf")
+                if on_success is not None:  # after delivery: caching can never cost the DXF
+                    on_success(produced, result)
                 return result
         finally:
             shutil.rmtree(work, ignore_errors=True)
@@ -261,6 +280,16 @@ def _replay(entry: CacheEntry, dwg: Path, out_dir: Path) -> ConversionResult:
     if not all(isinstance(w, str) for w in warnings):
         raise TypeError("recorded warnings must be strings")
     attempts = [Attempt.from_dict(a) for a in raw_attempts]
+    for a in attempts:
+        if not (
+            isinstance(a.tool, str)
+            and isinstance(a.started_at, str)
+            and type(a.duration_ms) is int
+            and a.duration_ms >= 0
+            and a.error is None
+            and (a.tool_version is None or isinstance(a.tool_version, str))
+        ):
+            raise TypeError(f"recorded attempt has wrong field types: {a!r}")
     if not attempts or any(a.status != "ok" for a in attempts) or attempts[-1].tool != converter:
         raise ValueError("recorded attempts are not a clean success by the recorded converter")
     if set(entry.outputs) != {_OUTPUT_NAME}:
@@ -281,11 +310,13 @@ def _cached_run(
     material = _key_material(sha256_file(src), converters)
     key = action_key(material)
     if refresh:
-        cache_.invalidate(key, "refresh requested")  # a failed recompute must not leave it behind
+        # A failed recompute must not leave the old entry behind, so a refresh that cannot
+        # delete it (Windows: file in use) stops instead of pretending.
+        cache_.invalidate(key, "refresh requested", strict=True)
     elif (entry := cache_.get(key)) is not None:
         try:
             replayed = _replay(entry, dwg, out_dir)
-        except (KeyError, TypeError, ValueError, AttributeError) as exc:
+        except (KeyError, TypeError, ValueError, AttributeError, OSError) as exc:
             cache_.invalidate(key, f"recorded result unusable ({type(exc).__name__}: {exc})")
         else:
             replayed.cache = {"hit": True, "key": key}
@@ -307,8 +338,8 @@ def _cached_run(
         }
         try:
             cache_.put(key, material, {_OUTPUT_NAME: produced}, recorded)
-        except (OSError, ValueError) as exc:  # the conversion stands; only the cache write failed
-            result.warnings.append(f"read cache write failed, result not cached: {exc}")
+        except Exception as exc:  # the conversion stands; the failure is reported, not hidden
+            result.warnings.append(f"read cache write failed, result not cached: {type(exc).__name__}: {exc}")
 
     result = _run_chain(src, dwg, out_dir, converters, timeout, on_success=record)
     result.cache = {"hit": False, "key": key}

@@ -116,7 +116,14 @@ files).
   first implementation (transient-failure pinning, caching the delivered copy, refresh leaving
   stale entries, unvalidated replay, unsnapshotted input, bare names keyed by name). Each has a
   regression test that fails on the first implementation. A follow-up found that a bare name
-  was hashed from the current folder while PATH decided what ran; fixed and tested.
+  was hashed from the current folder while PATH decided what ran; fixed and tested. A second
+  review round confirmed those fixes and found one more major defect (non-UTF-8 converter
+  output or an exec-format error crashed the chain and left a copy of the client drawing in
+  the system temp folder) and six minor ones (locked entry on refresh, record before
+  delivery, blob file mode on hits, stray temp file refused, blob vanishing after `get`,
+  unchecked attempt field types); all fixed with regression tests. Converter output is read
+  as bytes and decoded with replacement; a converter's work folder is removed on every exit
+  path; a refresh that cannot delete its entry stops with exit 3.
 - Deferred review findings:
   - Windows: entry files are never byte-identical (timestamps), so a `PermissionError` while
     replacing an entry means "not cached" with a warning, not a silent no-op.

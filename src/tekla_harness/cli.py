@@ -81,6 +81,9 @@ def _cmd_dwg2dxf(args: argparse.Namespace) -> int:
     except ValueError as exc:
         print(str(exc), file=sys.stderr)
         return EXIT_USAGE
+    except OSError as exc:  # e.g. a refresh that cannot delete a locked entry
+        print(str(exc), file=sys.stderr)
+        return EXIT_ENV
     out = {
         "dwg": str(result.dwg),
         "dxf": str(result.dxf) if result.dxf else None,

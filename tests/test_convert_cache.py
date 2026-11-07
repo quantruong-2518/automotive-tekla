@@ -104,15 +104,18 @@ def test_hit_preserves_provenance_and_cap(tmp_path, template, dwg, cache, no_pat
 
 def test_fallback_after_a_failure_is_never_cached(tmp_path, template, dwg, cache):
     """Review C1: a transient ODA failure must not pin the medium LibreDWG result."""
-    oda = fake(tmp_path, "oda", ODA_OUT, False, template)
+    oda, flag = switchable_oda(tmp_path, template)  # same bytes throughout: same key
     libre = fake(tmp_path, "libre", LIBRE_OUT, True, template)
+    flag.touch()
     for out in ("w1", "w2"):
         result = dwg_to_dxf(dwg, tmp_path / out, oda=oda, dwg2dxf=libre, cache=cache, timeout=1)
         assert result.converter == "libredwg_dwg2dxf" and info(result)["hit"] is False
         assert any("not cached because oda_file_converter failed" in w for w in result.warnings)
     assert calls(tmp_path, "oda") == 2
-    ok_oda = fake(tmp_path, "oda", ODA_OUT, True, template)  # ODA recovers
-    assert dwg_to_dxf(dwg, tmp_path / "w3", oda=ok_oda, dwg2dxf=libre, cache=cache).confidence_cap == "high"
+    flag.unlink()  # ODA recovers; the key is unchanged, so only a pinned entry could hit
+    healed = dwg_to_dxf(dwg, tmp_path / "w3", oda=oda, dwg2dxf=libre, cache=cache)
+    assert info(healed)["hit"] is False and healed.confidence_cap == "high"
+    assert calls(tmp_path, "oda") == 3
 
 
 def test_cache_stores_the_validated_output_not_the_delivered_copy(
@@ -405,6 +408,178 @@ def test_foreign_non_empty_folder_is_refused(tmp_path, template, dwg):
 
 def test_cli_refresh_without_cache_dir_is_a_usage_error(tmp_path, dwg, capsys):
     assert main(["dwg2dxf", str(dwg), "--out-dir", str(tmp_path / "w"), "--refresh"]) == 2
+    assert "--refresh needs --cache-dir" in capsys.readouterr().err
+
+
+# --- review round 2 ------------------------------------------------------------------
+
+
+def _raw_fake(tmp_path, name: str, body: str) -> list[str]:
+    script = tmp_path / f"{name}.py"
+    script.write_text(textwrap.dedent(body), encoding="utf-8")
+    return [sys.executable, str(script)]
+
+
+def _leftover_work_dirs(prefix: str) -> set[str]:
+    import tempfile
+    from pathlib import Path
+
+    return {p.name for p in Path(tempfile.gettempdir()).glob(f"{prefix}*")}
+
+
+@pytest.mark.parametrize("exit_code", [0, 1])
+def test_non_utf8_converter_output_is_a_recorded_failure(tmp_path, template, dwg, exit_code):
+    """Review N1: bytes that are not UTF-8 on stderr must not crash the chain."""
+    before = _leftover_work_dirs("oda_file_converter-")
+    oda = _raw_fake(
+        tmp_path,
+        "oda_bytes",
+        f"""\
+        import sys
+        sys.stderr.buffer.write(b"\\xff\\xfe l\\xe1i \\x81")
+        sys.exit({exit_code})
+    """,
+    )
+    libre = fake(tmp_path, "libre", LIBRE_OUT, True, template)
+    result = dwg_to_dxf(dwg, tmp_path / "w1", oda=oda, dwg2dxf=libre)
+    assert result.attempts[0].status == "failed" and result.attempts[0].error
+    assert result.converter == "libredwg_dwg2dxf"
+    assert _leftover_work_dirs("oda_file_converter-") <= before
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX exec format error")
+def test_unexecutable_converter_is_a_recorded_failure(tmp_path, template, dwg):
+    """Review N1: an OSError other than not-found (exec format error) is an attempt failure."""
+    bogus = tmp_path / "ODAFileConverter"
+    bogus.write_bytes(b"\x00\x01not an executable")
+    bogus.chmod(0o755)
+    libre = fake(tmp_path, "libre", LIBRE_OUT, True, template)
+    result = dwg_to_dxf(dwg, tmp_path / "w1", oda=[str(bogus)], dwg2dxf=libre)
+    assert result.attempts[0].status == "failed"
+    assert result.converter == "libredwg_dwg2dxf"
+
+
+def test_work_folder_is_removed_when_try_raises(tmp_path, template, dwg, monkeypatch):
+    before = _leftover_work_dirs("oda_file_converter-")
+
+    def boom(*_args, **_kwargs):
+        raise RuntimeError("unexpected")
+
+    monkeypatch.setattr(convert.subprocess, "run", boom)
+    with pytest.raises(RuntimeError):
+        dwg_to_dxf(dwg, tmp_path / "w1", oda=fake(tmp_path, "oda", ODA_OUT, True, template))
+    assert _leftover_work_dirs("oda_file_converter-") <= before
+
+
+def test_locked_entry_makes_refresh_fail_loudly(tmp_path, template, dwg, cache, monkeypatch):
+    """Review N2: if refresh cannot delete the old entry, it must not pretend it did."""
+    oda = fake(tmp_path, "oda", ODA_OUT, True, template)
+    key = info(dwg_to_dxf(dwg, tmp_path / "w1", oda=oda, cache=cache))["key"]
+    real_unlink = convert.Path.unlink
+
+    def locked_unlink(self, *args, **kwargs):
+        if self == cache.entry_path(key):
+            raise PermissionError("in use by another process")
+        return real_unlink(self, *args, **kwargs)
+
+    monkeypatch.setattr(convert.Path, "unlink", locked_unlink)
+    with pytest.raises(OSError, match="refresh"):
+        dwg_to_dxf(dwg, tmp_path / "w2", oda=oda, cache=cache, refresh=True)
+
+
+def test_cache_failure_of_any_kind_still_delivers_the_dxf(tmp_path, template, dwg, cache, monkeypatch):
+    """Review N3: the cache is an optimisation; a bug in it must not cost the conversion."""
+
+    def broken_put(*_args, **_kwargs):
+        raise RuntimeError("bug in put")
+
+    monkeypatch.setattr(ReadCache, "put", broken_put)
+    result = dwg_to_dxf(dwg, tmp_path / "w1", oda=fake(tmp_path, "oda", ODA_OUT, True, template), cache=cache)
+    assert result.dxf is not None and result.dxf.is_file()
+    assert any("not cached" in w and "RuntimeError" in w for w in result.warnings)
+
+
+def test_hit_and_fresh_deliver_files_alike(tmp_path, template, dwg, cache):
+    """Review N4: a hit must not hand out the blob's private mode or old timestamp."""
+    oda = fake(tmp_path, "oda", ODA_OUT, True, template)
+    fresh = dwg_to_dxf(dwg, tmp_path / "w1", oda=oda, cache=cache)
+    hit = dwg_to_dxf(dwg, tmp_path / "w2", oda=oda, cache=cache)
+    assert fresh.dxf is not None and hit.dxf is not None and info(hit)["hit"] is True
+    assert hit.dxf.stat().st_mode == fresh.dxf.stat().st_mode
+    assert hit.dxf.stat().st_mtime >= fresh.dxf.stat().st_mtime
+
+
+def test_stray_temp_file_does_not_block_a_new_cache(tmp_path, template, dwg):
+    """Review N5: a killed writer's temp file in a not-yet-tagged cache is ours, not foreign."""
+    root = tmp_path / "project" / ".cache"
+    root.mkdir(parents=True)
+    (root / ".tmp-abc123").write_text("half", encoding="utf-8")
+    oda = fake(tmp_path, "oda", ODA_OUT, True, template)
+    assert dwg_to_dxf(dwg, tmp_path / "w1", oda=oda, cache=ReadCache(root)).dxf is not None
+
+
+def test_blob_vanishing_after_get_is_a_miss(tmp_path, template, dwg, cache, monkeypatch):
+    """Review N6: a blob deleted between verification and delivery must not crash."""
+    oda = fake(tmp_path, "oda", ODA_OUT, True, template)
+    dwg_to_dxf(dwg, tmp_path / "w1", oda=oda, cache=cache)
+    real_get = ReadCache.get
+
+    def get_then_lose_blob(self, key):
+        entry = real_get(self, key)
+        if entry is not None:
+            entry.output_path("output.dxf").unlink()
+        return entry
+
+    monkeypatch.setattr(ReadCache, "get", get_then_lose_blob)
+    again = dwg_to_dxf(dwg, tmp_path / "w2", oda=oda, cache=cache)
+    assert again.dxf is not None and info(again)["hit"] is False
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"duration_ms": "slow"},
+        {"duration_ms": -1},
+        {"tool": 7},
+        {"started_at": None},
+        {"error": 5},
+        {"tool_version": ["x"]},
+    ],
+)
+def test_attempt_field_types_are_checked_on_replay(tmp_path, template, dwg, cache, change):
+    """Review N7."""
+    oda = fake(tmp_path, "oda", ODA_OUT, True, template)
+    key = info(dwg_to_dxf(dwg, tmp_path / "w1", oda=oda, cache=cache))["key"]
+    _corrupt_result(cache, key, lambda d: d["result"]["attempts"][0].update(change))
+    assert info(dwg_to_dxf(dwg, tmp_path / "w2", oda=oda, cache=cache))["hit"] is False
+
+
+def test_code_digest_covers_every_tekla_harness_module_convert_uses():
+    """Review gap: dropping a module from _CODE_FILES must fail a test."""
+    import inspect
+
+    used = set()
+    for value in vars(convert).values():
+        module = inspect.getmodule(value)
+        if module is not None and module.__name__.startswith("tekla_harness."):
+            used.add(module.__name__.rsplit(".", 1)[1] + ".py")
+    assert used <= set(convert._CODE_FILES), used - set(convert._CODE_FILES)
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows PATHEXT lookup")
+def test_bare_name_resolves_through_pathext_on_windows(tmp_path, template, dwg, cache, monkeypatch):
+    """Review gap: the production OS resolves `dwg2dxf` to `dwg2dxf.cmd` via PATHEXT."""
+    script = fake(tmp_path, "libre", LIBRE_OUT, True, template)[1]
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    launcher = bindir / "dwg2dxf.cmd"
+    launcher.write_text(f'@"{sys.executable}" "{script}" %*\n', encoding="utf-8")
+    monkeypatch.setenv("PATH", str(bindir))
+    monkeypatch.delenv("HARNESS_ODA_CONVERTER", raising=False)
+    monkeypatch.delenv("HARNESS_DWG2DXF", raising=False)
+    assert dwg_to_dxf(dwg, tmp_path / "w1", dwg2dxf=["dwg2dxf"], cache=cache).converter == "libredwg_dwg2dxf"
+    launcher.write_text(launcher.read_text() + "rem upgraded\n", encoding="utf-8")
+    assert info(dwg_to_dxf(dwg, tmp_path / "w2", dwg2dxf=["dwg2dxf"], cache=cache))["hit"] is False
 
 
 def test_cli_cache_dir_and_refresh(tmp_path, template, dwg, capsys):
