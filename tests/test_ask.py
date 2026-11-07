@@ -138,6 +138,7 @@ def test_unknown_file_is_refused_with_exit_1_and_writes_nothing(world, capsys):
         ("grid_family_axis_assignment", "structure"),
         ("grid_units_doubt", "structure"),
         ("mark_unmatched", "marks"),
+        ("units_answer_contradicts_evidence", "grid-system"),  # exact code beats intake's units_ prefix
         ("schedule_row_unparsed", "marks"),
     ],
 )

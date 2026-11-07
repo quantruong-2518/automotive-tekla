@@ -296,6 +296,21 @@ def test_implausible_magnitude_is_suspect_and_blocking(tmp_path, units, value, l
     assert any("median" in line for line in result["units"]["evidence"])
 
 
+def test_dimension_median_is_kept_for_every_unit_and_retested_with_another_unit(tmp_path):
+    result = probe(make(tmp_path, lambda doc: add_model_dims(doc, 4000), units=6))  # m declared
+    median = result["units"]["dimension_median"]
+    assert median == {"value": 4001.0, "count": 3}
+    # the same test as units_suspect, for the unit an engineer answers instead of the declared one
+    assert read_dxf.implausible_dimensions(median, "mm") is None  # 4 m
+    evidence = read_dxf.implausible_dimensions(median, "m")
+    assert evidence is not None and "4001 drawing units = 4001 m in m" in evidence
+    assert read_dxf.implausible_dimensions(None, "m") is None
+    unknown = probe(make(tmp_path, lambda doc: add_model_dims(doc, 4000), units=0, name="u.dxf"))
+    assert unknown["units"]["value"] == "unknown" and unknown["units"]["dimension_median"] == median
+    few = probe(make(tmp_path, lambda doc: add_model_dims(doc, 4000, n=2), name="few.dxf"))
+    assert few["units"]["dimension_median"] is None
+
+
 def test_plausible_magnitude_is_not_suspect(tmp_path):
     result = probe(make(tmp_path, lambda doc: add_model_dims(doc, 3000), units=4))
     assert "units_suspect" not in codes(result)

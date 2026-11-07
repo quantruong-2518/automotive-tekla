@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:tekla-harness:schema:grid-system:0.1",
   "title": "Project grid systems (gate 1 proposal)",
-  "description": "Output of `harness grid-system` (`grid_system.run_grid_systems` / `build_grid_systems`; written as grid-systems.json with grid-system-questions.json and structure/grid-systems/*.svg). Input: inventory.json, structure-summary.json (must record this inventory's sha256, else exit 1: rerun read-structure) and every structure/<file>.grids.json + .sheets.json, plus the engineer answers (answers.json; only status 'active' counts; `answers_sha256` fingerprints the units and axis answers that were read, so a later answer makes the document stale). A GRID SYSTEM is one building's or structure's grid: one or two directions of axes. USABLE FAMILY: >= 2 axes, all labelled, labels unique, every spacing > 0 (otherwise listed in unassigned_families). A view (grids.py group) contributes its usable families; two of them within 0.5 degrees of orthogonal (heuristics.orthogonal_tolerance_deg) are one two-direction contribution. AGREE (heuristic, the grids.py cross-check rule): >= 2 shared labels, same or reversed order, every distance between consecutive shared labels equal within half the rounding step or within heuristics.drafting_tolerance (2e-4) of the distance; otherwise, with >= 2 shared labels, CONFLICT. The comparison is in MILLIMETRES (each family's distances and rounding step scaled by its own file's answered unit) when every contributing file of the comparison, i.e. both families' files, has an active units answer that agrees with itself; so one building drawn in m in one file and in mm in another merges into one system. Otherwise it is in DRAWING UNITS as drawn (the same numbers in two files whose units are not both answered are taken as the same unit). Views with the same label sets that agree with EVERY member of a cluster form it (full contributors); spacings are never averaged: a system shows its representative family's spacings (the first complete view by file and group) and the largest relative difference to the others (max_relative_spread); views that disagree beyond tolerance are never in one system. Clusters are ranked (directions, independent views, views, axes, file, group) and become systems S001...; a cluster whose families are all label subsets of an earlier system, agreeing with every full member, joins it as a PARTIAL contributor (confirms only some spacings, never counted as independent); when it fits several earlier systems that conflict with one another it stays its own system (flag ambiguous_subset, relations.subset_of). Same labels with incompatible spacings or order -> separate systems and a blocking grid_system_conflict question. INDEPENDENCE (heuristic, conservative): two views are not independent when in one file they share a sheet, are on copied sheets (sheets.json duplicate_of), share a top-level block, or grids.py recorded their other_view evidence as not independent (or its ref cannot be parsed); views of two files whose sha256 are equal are not independent. independent_views counts connected groups of full contributors; fewer than 2 -> flag single_source and confidence low. UNITS: spacings and coordinate strings are in DRAWING UNITS with the declared header unit (the representative family's file), never converted from it; a direction's `mm` is filled only when every contributing file has active units answers (codes units_confirm_all, units_conflict, units_suspect, units_unknown, grid_units_doubt; values {unit: mm|cm|m|in|ft}; an answer without file applies to every file) that agree with themselves, and the representative file's unit does the conversion (files of one system may answer different units: flag answered_units_differ); otherwise null with units.reason. TEKLA X/Y: only from active grid_family_axis_assignment answers ({<family_id>: X|Y}, bound to the answer's file) covering every direction without contradiction; else null. In Tekla, X coordinates belong to lines parallel to Y; X/Y strings are relative ('0' then spacings, equal runs 'n*d'); levels (Z, absolute) come from levels.json, not from here. Labels and positions run in drawing order (offset along the family normal); origin and direction are confirmed at gate 1. Confidence is never 'high' (gate 1 decides). Nothing here is a timestamp: same inputs and answers give the same document.",
+  "description": "Output of `harness grid-system` (`grid_system.run_grid_systems` / `build_grid_systems`; written as grid-systems.json with grid-system-questions.json and structure/grid-systems/*.svg). Input: inventory.json, structure-summary.json (must record this inventory's sha256, else exit 1: rerun read-structure) and every structure/<file>.grids.json + .sheets.json, plus the engineer answers (answers.json; only status 'active' counts; `answers_sha256` fingerprints the units and axis answers that were read, so a later answer makes the document stale). A GRID SYSTEM is one building's or structure's grid: one or two directions of axes. USABLE FAMILY: >= 2 axes, all labelled, labels unique, every spacing > 0 (otherwise listed in unassigned_families). A view (grids.py group) contributes its usable families; two of them within 0.5 degrees of orthogonal (heuristics.orthogonal_tolerance_deg) are one two-direction contribution. AGREE (heuristic, the grids.py cross-check rule): >= 2 shared labels, same or reversed order, every distance between consecutive shared labels equal within half the rounding step or within heuristics.drafting_tolerance (2e-4) of the distance; otherwise, with >= 2 shared labels, CONFLICT. The comparison is in MILLIMETRES (each family's distances and rounding step scaled by its own file's answered unit) when every contributing file of the comparison, i.e. both families' files, has an active units answer that agrees with itself; so one building drawn in m in one file and in mm in another merges into one system. Otherwise it is in DRAWING UNITS as drawn (the same numbers in two files whose units are not both answered are taken as the same unit). Views with the same label sets that agree with EVERY member of a cluster form it (full contributors); spacings are never averaged: a system shows its representative family's spacings (the first complete view by file and group) and the largest relative difference to the others (max_relative_spread); views that disagree beyond tolerance are never in one system. Clusters are ranked (directions, independent views, views, axes, file, group) and become systems S001...; a cluster whose families are all label subsets of an earlier system, agreeing with every full member, joins it as a PARTIAL contributor (confirms only some spacings, never counted as independent); when it fits several earlier systems that conflict with one another it stays its own system (flag ambiguous_subset, relations.subset_of). Same labels with incompatible spacings or order -> separate systems and one grid_system_conflict question per pair (top-level `conflicts`), blocking unless the grid_system_select answer leaves one of the two out of `systems` or declares both `separate`; an answer to the conflict question itself closes nothing. INDEPENDENCE (heuristic, conservative): two views are not independent when in one file they share a sheet, are on copied sheets (sheets.json duplicate_of), share a top-level block, or grids.py recorded their other_view evidence as not independent (or its ref cannot be parsed); views of two files whose sha256 are equal are not independent. independent_views counts connected groups of full contributors; fewer than 2 -> flag single_source and confidence low. UNITS: spacings and coordinate strings are in DRAWING UNITS with the declared header unit (the representative family's file), never converted from it; a direction's `mm` is filled only when every contributing file has active units answers (codes units_confirm_all, units_conflict, units_suspect, units_unknown, grid_units_doubt; values {unit: mm|cm|m|in|ft}; an answer without file applies to every file) that agree with themselves and are not contradicted, and the representative file's unit does the conversion (files of one system may answer different units: flag answered_units_differ); otherwise null with units.reason. CONTRADICTED: when a file's answered unit makes the probe's median modelspace linear dimension (inventory units.dimension_median) fall outside 0.01 m..100 m (the units_suspect test), a blocking units_answer_contradicts_evidence question quotes the answer(s) and the evidence, and the file's units stay unconfirmed (status 'contradicted') until that question is answered with the same unit or the units answer changes. TEKLA X/Y: from active grid_family_axis_assignment answers ({<family_id>: X|Y}, bound to the answer's file) and the system's own grid_system_axis_unassigned answer ({dir1: X|Y, dir2: X|Y}, bound by `axis_question_key`), unioned; every direction covered without contradiction, else null. SELECTION: only the grid_system_select answer to this run's select question counts (bound by its key: system ids are positional); systems outside its `systems` raise no blocking question. In Tekla, X coordinates belong to lines parallel to Y; X/Y strings are relative ('0' then spacings, equal runs 'n*d'); levels (Z, absolute) come from levels.json, not from here. Labels and positions run in drawing order (offset along the family normal); origin and direction are confirmed at gate 1. Confidence is never 'high' (gate 1 decides). Nothing here is a timestamp: same inputs and answers give the same document.",
   "type": "object",
   "required": [
     "schema_version",
@@ -14,6 +14,7 @@
     "systems",
     "unassigned_families",
     "summary",
+    "conflicts",
     "questions",
     "question_counts",
     "warnings"
@@ -23,7 +24,7 @@
     "schema_version": { "const": "0.1" },
     "project_id": { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/project_id" },
     "inventory_sha256": { "$ref": "#/$defs/sha256", "description": "sha256 of the inventory.json bytes this was built from; a different value means this document is stale (harness status)." },
-    "answers_sha256": { "$ref": "#/$defs/sha256", "description": "sha256 over the active units and grid_family_axis_assignment answers that were read (code, file, key, values); a different value for the current answers.json means this document is stale (harness status)." },
+    "answers_sha256": { "$ref": "#/$defs/sha256", "description": "sha256 over the active answers this command reads (units codes, grid_family_axis_assignment, grid_system_axis_unassigned, grid_system_select, units_answer_contradicts_evidence: code, file, key, values), taken after the run registered its questions; a different value for the current answers.json means this document is stale (harness status)." },
     "heuristics": {
       "type": "object",
       "required": ["drafting_tolerance", "orthogonal_tolerance_deg", "max_confidence"],
@@ -84,6 +85,21 @@
         "conflicts": { "type": "integer", "minimum": 0, "description": "Conflicting system pairs." }
       }
     },
+    "conflicts": {
+      "type": "array",
+      "description": "One entry per conflicting system pair (relations.conflicts_with), in system order. blocking: its grid_system_conflict question blocks gate 1; closed_by: why it does not ('not_selected': one of the two is outside the grid_system_select answer's systems; 'separate': that answer declares both separate buildings), null while it blocks. Nothing else closes a conflict. question_key: registry key of its question (null when the per-code cap dropped the question).",
+      "items": {
+        "type": "object",
+        "required": ["systems", "blocking", "closed_by", "question_key"],
+        "additionalProperties": false,
+        "properties": {
+          "systems": { "type": "array", "minItems": 2, "maxItems": 2, "items": { "type": "string", "pattern": "^S[0-9]{3,}$" } },
+          "blocking": { "type": "boolean" },
+          "closed_by": { "enum": [null, "not_selected", "separate"] },
+          "question_key": { "anyOf": [{ "type": "null" }, { "type": "string", "pattern": "^[0-9a-f]{16}$" }] }
+        }
+      }
+    },
     "questions": { "type": "array", "items": { "$ref": "#/$defs/question" } },
     "question_counts": {
       "type": "object",
@@ -119,6 +135,18 @@
         },
         "views": { "type": "integer", "minimum": 0 },
         "families_usable": { "type": "integer", "minimum": 0 },
+        "grid_spacing_median": {
+          "description": "Median positive grid spacing over every family of the file's grids document, in drawing units, and how many spacings. Null when the file has no spacing. `harness grid-system` and `harness status` test the engineer's answered unit against it (plausible range 0.5 m to 30 m) next to the dimension median (units_answer_contradicts_evidence). Always written by harness grid-system; absent only in a document from an older run.",
+          "anyOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "required": ["value", "count"],
+              "additionalProperties": false,
+              "properties": { "value": { "type": "number", "exclusiveMinimum": 0 }, "count": { "type": "integer", "minimum": 1 } }
+            }
+          ]
+        },
         "units_answer": {
           "anyOf": [
             { "type": "null" },
@@ -127,7 +155,7 @@
               "required": ["status", "unit"],
               "additionalProperties": false,
               "properties": {
-                "status": { "enum": ["answered", "not_answered", "disagree", "invalid"] },
+                "status": { "enum": ["answered", "not_answered", "disagree", "invalid", "contradicted"], "description": "contradicted: answered, but the drawing's dimensions contradict the unit and the units_answer_contradicts_evidence question is not answered with it." },
                 "unit": { "anyOf": [{ "type": "null" }, { "$ref": "#/$defs/unit" }] }
               }
             }
@@ -251,7 +279,8 @@
         "axis_assignment",
         "tekla_grid",
         "svg",
-        "note"
+        "note",
+        "axis_question_key"
       ],
       "additionalProperties": false,
       "properties": {
@@ -319,6 +348,7 @@
                 null,
                 "units not confirmed",
                 "units answers disagree",
+                "units answer contradicted by the drawing",
                 "units answer invalid"
               ]
             }
@@ -356,16 +386,17 @@
           "pattern": "^structure/grid-systems/S[0-9]{3,}\\.svg$",
           "description": "Gate-1 drawing, relative to the work folder. Written by `harness grid-system`; after `--no-svg` the drawings are removed and this path points at nothing."
         },
-        "note": { "type": "string" }
+        "note": { "type": "string" },
+        "axis_question_key": { "anyOf": [{ "type": "null" }, { "type": "string", "pattern": "^[0-9a-f]{16}$" }], "description": "Registry key of this system's grid_system_axis_unassigned question (raised for every system); `harness status` names its id. Null when the per-code cap dropped the question." }
       }
     },
     "question": {
       "type": "object",
-      "description": "Open question for the engineer (grids.py shape plus file), numbered in grid-system-questions.json. Codes: grid_system_select (one per project), grid_system_conflict, grid_system_units_unconfirmed, grid_system_axis_unassigned; all blocking.",
+      "description": "Question for the engineer (grids.py shape plus file), numbered in grid-system-questions.json. Codes: grid_system_select (one per project, blocking); grid_system_conflict (one per pair, see `conflicts`); grid_system_axis_unassigned (one per system, always raised so its answer keeps its key: blocking only when the system is selected and not assigned; `found` names the directions dir1, dir2); grid_system_units_unconfirmed (never blocking: the units question to answer is the file's units_confirm_all); units_answer_contradicts_evidence (one per contradicted file, blocking).",
       "required": ["code", "blocking", "message", "where", "found"],
       "additionalProperties": false,
       "properties": {
-        "code": { "enum": ["grid_system_select", "grid_system_conflict", "grid_system_units_unconfirmed", "grid_system_axis_unassigned"] },
+        "code": { "enum": ["grid_system_select", "grid_system_conflict", "grid_system_units_unconfirmed", "grid_system_axis_unassigned", "units_answer_contradicts_evidence"] },
         "blocking": { "type": "boolean" },
         "message": { "type": "string", "minLength": 1 },
         "where": { "type": "string", "minLength": 1 },

@@ -27,7 +27,8 @@
     "evidence": [
       "header $INSUNITS = 0",
       "ezdxf unit table: no building unit for this code"
-    ]
+    ],
+    "dimension_median": null
   },
   "extents": {
     "min": [

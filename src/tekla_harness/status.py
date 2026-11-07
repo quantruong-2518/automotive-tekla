@@ -10,10 +10,16 @@ documents (they can be stale after `harness answer` or a producer rerun):
     built from (`inventory_sha256`); grid-system also fingerprints the units and axis answers it read
     (`answers_sha256`). Intake's own documents are fresh when they exist (inventory.json is the reference).
   * `gate1.ready_for_gate1`, true only when `reasons` is empty (see schemas/status.schema.json for the
-    exact rules): units answered for every probed DXF/DWG; grid systems found, grid_system_select answered
-    and every used system axis-assigned; level_storey_selection and level_finished_vs_structural answered;
-    no blocking question open in intake, read-structure, grid-system or reader (the drawing-reader's
-    `harness ask` questions); all outputs fresh (reader: n/a, it has no freshness).
+    exact rules): every probed DXF/DWG has an active answer on its own units_confirm_all question, its unit
+    answers agree, and the answered unit is not contradicted by the drawing's dimensions (or that was
+    confirmed on the units_answer_contradicts_evidence question); grid systems found, grid_system_select
+    answered, every used system axis-assigned (family or system answers) and no conflict between two used
+    systems that the select answer does not declare `separate`; level_storey_selection and
+    level_finished_vs_structural answered; no blocking question open in intake, read-structure, grid-system
+    or reader (the drawing-reader's `harness ask` questions); all outputs fresh (reader: n/a).
+    These are checked from the answers' structured values and grid-systems.json, never from an answer's
+    words: an answer to a grid_system_conflict question (legacy) does not close it. Every reason names the
+    question id to answer.
 
 An entry written to the registry before it recorded the `blocking` flag counts as blocking (never assume a
 question is harmless) and is reported in `blocking_unknown`.
@@ -29,11 +35,16 @@ import json
 from pathlib import Path
 from typing import Any
 
-from tekla_harness.grid_system import consumed_answers_digest, units_by_file
+from tekla_harness.grid_system import consumed_answers_digest, units_by_file, units_evidence
 from tekla_harness.questions import (
+    CONFLICT_CODE,
+    CONTRADICTION_CODE,
     PRODUCER_COMMANDS,
     REGISTRY_FILE,
     SELECT_CODE,
+    UNIT_CODES,
+    UNITS,
+    UNITS_CONFIRM_CODE,
     QuestionsError,
     active_answers,
     load_ledger,
@@ -56,6 +67,9 @@ PRODUCERS = (
 )
 # gate 1 needs no blocking question open in these
 GATE_PRODUCERS = ("intake", "read-structure", "grid-system", "reader")
+# an answer to these never closes them: they close through another question's structured values
+NOT_CLOSED_BY_AN_ANSWER = frozenset({CONFLICT_CODE})
+ANSWER = 'harness answer {work_dir} {id} --text "..." --by "..."'
 
 
 class StatusError(Exception):
@@ -88,7 +102,10 @@ def _question_counts(
     entries = {k: e for k, e in registry["questions"].items() if e["producer"] == producer}
     live = {k: e for k, e in entries.items() if e["status"] != "obsolete"}
     blocking = {k: e for k, e in live.items() if e.get("blocking", True)}
-    open_ids = sorted((e["id"] for k, e in blocking.items() if k not in active), key=_id_number)
+    open_ids = sorted(
+        (e["id"] for k, e in blocking.items() if k not in active or e["code"] in NOT_CLOSED_BY_AN_ANSWER),
+        key=_id_number,
+    )
     counts = {
         "total": len(live),
         "blocking": len(blocking),
@@ -161,7 +178,7 @@ def _outputs(
             reason = f"{files[0]} was built from another inventory.json (intake reran since)"
         elif label == "grid-system" and doc.get("answers_sha256") != consumed_answers_digest(answers):
             status = "stale"
-            reason = "grid-systems.json was built before the latest units / axis answers"
+            reason = "grid-systems.json was built before the latest answers it reads (units, axes, selection)"
     return {
         "status": status,
         "files": files,
@@ -178,18 +195,104 @@ def _ids(ids: list[str]) -> str:
     return shown + (f" and {len(ids) - REASON_IDS} more" if len(ids) > REASON_IDS else "")
 
 
-def _units_reasons(inventory: dict[str, Any], answers: list[dict[str, Any]]) -> list[str]:
-    """`answers`: every answer of answers.json; only the active ones count."""
-    probed = [
-        r["path"] for r in inventory["files"] if r["format"] in ("dwg", "dxf") and r["probe"] is not None
-    ]
-    statuses = units_by_file([a for a in answers if a["status"] == "active"], probed, [])
-    why = {
-        "not_answered": "has no active units answer (harness answer <id> ... --value unit=mm)",
-        "disagree": "has active units answers that disagree",
-        "invalid": "has a units answer without a valid unit",
+def _live(registry: dict[str, Any], code: str) -> dict[str | None, tuple[str, dict[str, Any]]]:
+    """file -> (key, entry) of the non-obsolete registry entries of a code (the latest one per file)."""
+    out: dict[str | None, tuple[str, dict[str, Any]]] = {}
+    for k, e in sorted(registry["questions"].items(), key=lambda kv: _id_number(kv[1]["id"])):
+        if e["code"] == code and e["status"] != "obsolete":
+            out[e["file"]] = (k, e)
+    return out
+
+
+def _spacing_medians(work: Path, inventory_sha: str) -> dict[str, dict[str, Any] | None]:
+    """file -> median grid spacing (drawing units) recorded by `harness grid-system`; empty when
+    grid-systems.json is absent, unreadable or built from another inventory (the outputs check says so)."""
+    path = work / "grid-systems.json"
+    try:
+        doc = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return {}
+    if not isinstance(doc, dict) or doc.get("inventory_sha256") != inventory_sha:
+        return {}
+    return {
+        f["path"]: f.get("grid_spacing_median")
+        for f in doc.get("files", [])
+        if isinstance(f, dict) and isinstance(f.get("path"), str)
     }
-    return [f"units: {f} {why[st]}" for f, (st, _) in statuses.items() if st != "answered"]
+
+
+def _units_reasons(
+    inventory: dict[str, Any],
+    registry: dict[str, Any],
+    active: dict[str, dict[str, Any]],
+    answers: list[dict[str, Any]],
+    spacing_medians: dict[str, dict[str, Any] | None],
+    work_dir: str,
+) -> list[str]:
+    """Per probed DXF/DWG: its units_confirm_all answered with a unit, unit answers that agree, and an
+    answered unit the drawing's dimensions and grid spacings do not contradict (units_suspect test, grid
+    plausibility range) unless confirmed on purpose.
+    `answers`: every answer of answers.json; only the active ones count."""
+    rows = {
+        r["path"]: r for r in inventory["files"] if r["format"] in ("dwg", "dxf") and r["probe"] is not None
+    }
+    current = [a for a in answers if a["status"] == "active"]
+    statuses = units_by_file(current, list(rows), [])
+    confirm, contra = _live(registry, UNITS_CONFIRM_CODE), _live(registry, CONTRADICTION_CODE)
+    values = "--value unit=" + "|".join(UNITS)
+    reasons = []
+    for f, row in rows.items():
+        status, unit = statuses[f]
+        hit = confirm.get(f)
+        command = (
+            ANSWER.format(work_dir=work_dir, id=hit[1]["id"])
+            if hit
+            else f"harness answer {work_dir} <{UNITS_CONFIRM_CODE} id>"
+        )
+        if hit is not None and hit[0] not in active:
+            reasons.append(f"units: {f} is not confirmed: {command} {values} ({UNITS_CONFIRM_CODE})")
+            continue
+        if status == "not_answered":
+            reasons.append(
+                f"units: {f} has no active units answer and no open {UNITS_CONFIRM_CODE} question: rerun "
+                "harness intake"
+            )
+        elif status == "disagree":
+            ids = sorted(
+                {a["question_id"] for a in current if a["code"] in UNIT_CODES and a["file"] in (f, None)}
+            )
+            reasons.append(
+                f"units: {f} has active units answers that disagree ({', '.join(ids)}): answer them with one "
+                f"unit ({command} {values})"
+            )
+        elif status == "invalid":
+            reasons.append(f"units: {f} has a units answer without a valid unit: {command} {values}")
+        elif unit is not None:
+            units_row = row["units"] or {}
+            if row["units"] is not None and "dimension_median" not in units_row:
+                reasons.append(
+                    f"units: {f}: inventory.json has no dimension_median (built by an older intake), so the "
+                    f"answered unit {unit} cannot be tested against the drawing: rerun harness intake"
+                )
+                continue
+            evidence = units_evidence(units_row.get("dimension_median"), spacing_medians.get(f), unit)
+            if evidence is None:
+                continue
+            c = contra.get(f)
+            if c is not None and c[0] in active and active[c[0]]["values"].get("unit") == unit:
+                continue  # the engineer confirmed this unit against the evidence, on purpose
+            where = (
+                f"{ANSWER.format(work_dir=work_dir, id=c[1]['id'])} --value unit={unit} "
+                f"({CONTRADICTION_CODE})"
+                if c is not None
+                else f"the {CONTRADICTION_CODE} question that harness grid-system raises (rerun it)"
+            )
+            reasons.append(
+                f"units: {f}: the answered unit {unit} contradicts the drawing ({evidence}): answer "
+                f"{hit[1]['id'] if hit else UNITS_CONFIRM_CODE} again with the right unit, or confirm {unit} "
+                f"on purpose with {where}"
+            )
+    return reasons
 
 
 def _grid_reasons(
@@ -197,6 +300,7 @@ def _grid_reasons(
     registry: dict[str, Any],
     active: dict[str, dict[str, Any]],
     outputs: dict[str, Any],
+    work_dir: str,
 ) -> list[str]:
     if outputs["status"] != "fresh":
         return [f"grid systems: not checked, the grid-system outputs are {outputs['status']}"]
@@ -210,24 +314,52 @@ def _grid_reasons(
         if e["code"] == SELECT_CODE and e["producer"] == "grid-system" and e["status"] != "obsolete"
     ]
     answer = next((active[k] for k, _ in select if k in active), None)
+    select_ids = ", ".join(e["id"] for _, e in select) or SELECT_CODE
+    # a command names one question: the latest select question (an answer to any live one is read)
+    select_command = ANSWER.format(
+        work_dir=work_dir,
+        id=max((e["id"] for _, e in select), key=_id_number) if select else f"<{SELECT_CODE} id>",
+    )
     if answer is None:
-        ids = ", ".join(e["id"] for _, e in select) or SELECT_CODE
         return [
-            f"grid systems: {SELECT_CODE} ({ids}) is not answered: say which systems are the project's grids"
+            f"grid systems: {SELECT_CODE} ({select_ids}) is not answered: say which systems are the "
+            f"project's grids ({select_command} [--value systems=S001,S002])"
         ]
     used = answer["values"].get("systems") or list(systems)
+    separate = set(answer["values"].get("separate") or [])
+    id_of = {k: e["id"] for k, e in registry["questions"].items() if e["status"] != "obsolete"}
     reasons = [
         f"grid systems: the {SELECT_CODE} answer names {sid}, which is not in the latest grid-systems.json"
-        for sid in used
+        for sid in [*used, *sorted(separate)]
         if sid not in systems
     ]
     for sid in used:
-        axis = systems.get(sid, {}).get("axis_assignment")
-        if axis is not None and axis["status"] != "answered":
-            reasons.append(
-                f"grid systems: {sid} has no Tekla X/Y ({axis['reason']}): answer "
-                "grid_family_axis_assignment for its families, then rerun harness grid-system"
+        system = systems.get(sid)
+        if system is None:
+            continue
+        axis = system["axis_assignment"]
+        if axis["status"] != "answered":
+            qid = id_of.get(system.get("axis_question_key") or "")
+            names = ["dir1", "dir2"][: len(system["directions"])]
+            how = (
+                f"{ANSWER.format(work_dir=work_dir, id=qid)} " + " ".join(f"--value {n}=X|Y" for n in names)
+                if qid
+                else f"answer the grid_system_axis_unassigned question of {sid}"
             )
+            reasons.append(
+                f"grid systems: {sid} has no Tekla X/Y ({axis['reason']}): {how} (or answer "
+                "grid_family_axis_assignment per family), then rerun harness grid-system"
+            )
+    for c in doc.get("conflicts", []):
+        a, b = c["systems"]
+        if a not in used or b not in used or {a, b} <= separate:
+            continue
+        qid = id_of.get(c["question_key"] or "") or CONFLICT_CODE
+        reasons.append(
+            f"grid systems: {a} and {b} conflict ({qid}); an answer to it closes nothing: answer "
+            f"{SELECT_CODE} ({select_ids}) again with systems= leaving one of them out, or with "
+            f"separate={a},{b} if they are different buildings, then rerun harness grid-system"
+        )
     return reasons
 
 
@@ -285,8 +417,10 @@ def build_status(work_dir: str | Path) -> dict[str, Any]:
         )
     by_label = {p["producer"]: p for p in producers}
 
-    reasons = _units_reasons(inventory, answers)
-    reasons += _grid_reasons(work, registry, active, by_label["grid-system"]["outputs"])
+    reasons = _units_reasons(
+        inventory, registry, active, answers, _spacing_medians(work, inventory_sha), shown
+    )
+    reasons += _grid_reasons(work, registry, active, by_label["grid-system"]["outputs"], shown)
     reasons += _level_reasons(registry, active)
     for label in GATE_PRODUCERS:
         q = by_label[label]["questions"]

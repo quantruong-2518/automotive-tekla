@@ -1,0 +1,60 @@
+{
+  "schema_version": "0.1",
+  "kind": "find_text",
+  "project_id": "demo-callouts",
+  "query": {
+    "contains": "C1",
+    "file": null,
+    "max_hits": null
+  },
+  "counts": {
+    "hits": 2,
+    "returned": 2,
+    "omitted": 0,
+    "truncated": false,
+    "blocked_entries_not_searchable": 1,
+    "unassigned_entries_not_searched": 0
+  },
+  "files": [
+    {
+      "path": "plans/set.dxf",
+      "status": "searched",
+      "reason": null,
+      "sheets_searched": 3,
+      "entries_searched": 52,
+      "blocked_entries": 1,
+      "unassigned_entries": 0,
+      "hits": 2
+    }
+  ],
+  "hits": [
+    {
+      "file": "plans/set.dxf",
+      "sheet_id": "model#01",
+      "sheet_number": {
+        "value": "S-101",
+        "confidence": "medium"
+      },
+      "entry_id": "T000042",
+      "display_text": "C1",
+      "meaning": "allowed",
+      "blocked_reason": null
+    },
+    {
+      "file": "plans/set.dxf",
+      "sheet_id": "model#02",
+      "sheet_number": {
+        "value": "S-102",
+        "confidence": "medium"
+      },
+      "entry_id": "T000048",
+      "display_text": "C1",
+      "meaning": "allowed",
+      "blocked_reason": null
+    }
+  ],
+  "notes": [
+    "1 blocked entries (unknown, proposed or contradicted font encoding) were matched on their stored text only, which rarely contains a Vietnamese word: this search is incomplete over them; read them with sheet-text and ask the engineer to approve the font row"
+  ],
+  "warnings": []
+}

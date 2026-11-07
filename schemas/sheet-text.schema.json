@@ -2,13 +2,14 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:tekla-harness:schema:sheet-text:0.1",
   "title": "Sheet list and sheet text",
-  "description": "Read-only views over an intake work folder (`sheet_text.py`). 'sheet_list': every detected sheet of every DXF/DWG file with its printed sheet number, frame bbox, text count and the largest texts as title candidates. 'sheet_text': the text entries assigned to ONE sheet (by the sheets document), in reading order, in compact form. Nothing is decoded or interpreted: entries keep the encoding, confidence and flags of the text index. Reading order: rows from the top down (larger y first); an entry joins the current row when its y is within 0.6 x the median text height of the sheet of the row's first entry's y; inside a row left to right; ties by entry id; entries without a position last, row null.",
+  "description": "Read-only views over an intake work folder (`sheet_text.py`). 'find_text': a substring search over every sheet of every file (or one) in one call. 'sheet_list': every detected sheet of every DXF/DWG file with its printed sheet number, frame bbox, text count and the largest texts as title candidates. 'sheet_text': the text entries assigned to ONE sheet (by the sheets document), in reading order, in compact form. Nothing is decoded or interpreted: entries keep the encoding, confidence and flags of the text index. Reading order: rows from the top down (larger y first); an entry joins the current row when its y is within 0.6 x the median text height of the sheet of the row's first entry's y; inside a row left to right; ties by entry id; entries without a position last, row null. Legacy-font gate: every entry carries `meaning` ('allowed' | 'blocked') and `blocked_reason` (src/tekla_harness/text_gate.py, computed on the full text-index entry); a blocked entry is quoted as stored with its entry id and no meaning may be taken from it. Entries are keyed `entry_id` in every tool.",
   "type": "object",
   "required": ["kind"],
-  "properties": { "kind": { "enum": ["sheet_list", "sheet_text"] } },
+  "properties": { "kind": { "enum": ["sheet_list", "sheet_text", "find_text"] } },
   "allOf": [
     { "if": { "required": ["kind"], "properties": { "kind": { "const": "sheet_list" } } }, "then": { "$ref": "#/$defs/sheet_list" } },
-    { "if": { "required": ["kind"], "properties": { "kind": { "const": "sheet_text" } } }, "then": { "$ref": "#/$defs/sheet_text" } }
+    { "if": { "required": ["kind"], "properties": { "kind": { "const": "sheet_text" } } }, "then": { "$ref": "#/$defs/sheet_text" } },
+    { "if": { "required": ["kind"], "properties": { "kind": { "const": "find_text" } } }, "then": { "$ref": "#/$defs/find_text" } }
   ],
   "$defs": {
     "bbox": {
@@ -72,7 +73,7 @@
     },
     "list_sheet": {
       "type": "object",
-      "required": ["sheet_id", "space", "layout", "bbox", "detection_confidence", "sheet_number", "duplicate_of", "text_count", "titles"],
+      "required": ["sheet_id", "space", "layout", "bbox", "detection_confidence", "sheet_number", "duplicate_of", "text_count", "blocked_text_count", "titles"],
       "additionalProperties": false,
       "properties": {
         "sheet_id": { "type": "string", "pattern": "^.+#[0-9]{2,}$", "description": "Detector id, the handle for sheet_text." },
@@ -86,24 +87,28 @@
         "titles": {
           "type": "array",
           "maxItems": 5,
-          "description": "Largest texts of the sheet (height, then id), identical texts once: candidates for the drawing title, NOT a decision.",
+          "description": "Title candidates, at most five: texts containing a title keyword first (Vietnamese or English, see matched_keyword), then the others; each group by height (largest first), then entry id. Identical texts once. Grid labels (1-3 letters or digits), bare numbers and years are never listed. A blocked entry never gets a keyword. Candidates, NOT a decision.",
           "items": {
             "type": "object",
-            "required": ["entry_id", "display_text", "height", "truncated"],
+            "required": ["entry_id", "display_text", "meaning", "blocked_reason", "matched_keyword", "height", "truncated"],
             "additionalProperties": false,
             "properties": {
               "entry_id": { "type": "string" },
               "display_text": { "type": "string", "description": "Whitespace collapsed, cut at 120 characters (then '…' is appended)." },
               "height": { "type": "number" },
-              "truncated": { "type": "boolean" }
+              "truncated": { "type": "boolean" },
+              "meaning": { "$ref": "#/$defs/meaning" },
+              "blocked_reason": { "$ref": "#/$defs/blocked_reason" },
+              "matched_keyword": { "type": ["string", "null"], "description": "The first title keyword (in the fixed ranking order) found in display_text; null when none." }
             }
           }
-        }
+        },
+        "blocked_text_count": { "type": "integer", "minimum": 0, "description": "Entries of the sheet whose meaning is blocked (legacy-font gate)." }
       }
     },
     "sheet_text": {
       "type": "object",
-      "required": ["schema_version", "kind", "project_id", "file", "sheet", "query", "counts", "entries", "warnings"],
+      "required": ["schema_version", "kind", "project_id", "file", "sheet", "query", "counts", "legacy_font_gate", "entries", "warnings"],
       "additionalProperties": false,
       "properties": {
         "schema_version": { "const": "0.1" },
@@ -129,7 +134,7 @@
           "additionalProperties": false,
           "properties": {
             "contains": { "type": ["string", "null"], "description": "Case-insensitive substring (NFC + casefold, diacritics significant); null = no filter." },
-            "max_entries": { "type": "integer", "minimum": 1 }
+            "max_entries": { "type": ["integer", "null"], "minimum": 1, "description": "Effective cap: --max, else 400, else null (unbounded) when contains filters." }
           }
         },
         "counts": {
@@ -146,18 +151,40 @@
           }
         },
         "entries": { "type": "array", "items": { "$ref": "#/$defs/entry" } },
-        "warnings": { "type": "array", "items": { "type": "string" } }
+        "warnings": { "type": "array", "items": { "type": "string" } },
+        "legacy_font_gate": {
+          "type": "object",
+          "description": "Legacy-font gate over ALL entries assigned to the sheet, not only the returned ones.",
+          "required": ["blocked_entries", "by_reason", "styles", "question_ids"],
+          "additionalProperties": false,
+          "properties": {
+            "blocked_entries": { "type": "integer", "minimum": 0 },
+            "by_reason": {
+              "type": "object",
+              "propertyNames": { "enum": ["knowledge_conflict", "encoding_proposed", "encoding_contradiction", "encoding_unknown"] },
+              "additionalProperties": { "type": "integer", "minimum": 1 }
+            },
+            "styles": { "type": "array", "items": { "type": "string" }, "description": "Sorted names of the text styles of the blocked entries ('' = no style)." },
+            "question_ids": {
+              "type": "array",
+              "items": { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/question_id" },
+              "description": "Non-obsolete questions of this file (question-registry.json) with code font_encoding_proposed, font_encoding_conflict, text_encoding_hint or encoding_unknown_non_ascii: the engineer's answers unblock the gate."
+            }
+          }
+        }
       }
     },
     "entry": {
       "type": "object",
-      "description": "Compact view of a text-index entry. display_text is exactly the index's (decoded where the encoding is known, %%c already expanded); unknown encodings are returned as stored, with their flags.",
-      "required": ["id", "row", "display_text", "encoding", "confidence", "flags", "layer", "style", "x", "y", "height", "rotation", "entity_type"],
+      "description": "Compact view of a text-index entry. display_text is exactly the index's (decoded where the encoding is known, %%c already expanded); a blocked entry is returned as stored, with its flags.",
+      "required": ["entry_id", "row", "display_text", "meaning", "blocked_reason", "encoding", "confidence", "flags", "layer", "style", "x", "y", "height", "rotation", "entity_type"],
       "additionalProperties": false,
       "properties": {
-        "id": { "type": "string", "pattern": "^T[0-9]{6,}$" },
+        "entry_id": { "type": "string", "pattern": "^T[0-9]{6,}$" },
         "row": { "type": ["integer", "null"], "minimum": 0, "description": "Reading-order row; null for an entry without a position." },
         "display_text": { "type": "string" },
+        "meaning": { "$ref": "#/$defs/meaning" },
+        "blocked_reason": { "$ref": "#/$defs/blocked_reason" },
         "encoding": { "enum": ["unicode", "tcvn3", "vni", "unknown", "mixed"], "description": "decode.encoding_used." },
         "confidence": { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/confidence" },
         "flags": { "type": "array", "items": { "type": "string" } },
@@ -171,6 +198,91 @@
         "entity_type": { "enum": ["TEXT", "MTEXT", "ATTRIB", "MULTILEADER", "DIMENSION"] },
         "tag": { "type": ["string", "null"], "description": "ATTRIB only." },
         "block_name": { "type": ["string", "null"], "description": "ATTRIB only." }
+      }
+    },
+    "meaning": {
+      "enum": ["allowed", "blocked"],
+      "description": "Legacy-font gate: 'blocked' = the text's encoding is unknown, proposed (unapproved knowledge row), contradicted or in conflict, so no meaning may be taken from it (quote it verbatim with its entry id). 'allowed' = ASCII, Unicode, or a decoding decided by font name, code points or an approved row."
+    },
+    "blocked_reason": {
+      "enum": ["knowledge_conflict", "encoding_proposed", "encoding_contradiction", "encoding_unknown", null],
+      "description": "null when meaning is 'allowed'; else the first matching reason of text_gate.BLOCK_REASONS."
+    },
+    "find_text": {
+      "type": "object",
+      "required": ["schema_version", "kind", "project_id", "query", "counts", "files", "hits", "notes", "warnings"],
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": { "const": "0.1" },
+        "kind": { "const": "find_text" },
+        "project_id": { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/project_id" },
+        "query": {
+          "type": "object",
+          "required": ["contains", "file", "max_hits"],
+          "additionalProperties": false,
+          "properties": {
+            "contains": { "type": "string", "minLength": 1, "description": "Substring, NFC + casefold on both sides, diacritics significant." },
+            "file": { "type": ["string", "null"], "description": "Inventory path searched; null = every DXF/DWG file." },
+            "max_hits": { "type": ["integer", "null"], "minimum": 1, "description": "Cap on returned hits; null = unbounded." }
+          }
+        },
+        "counts": {
+          "type": "object",
+          "description": "True counts, whatever was returned.",
+          "required": ["hits", "returned", "omitted", "truncated", "blocked_entries_not_searchable", "unassigned_entries_not_searched"],
+          "additionalProperties": false,
+          "properties": {
+            "hits": { "type": "integer", "minimum": 0 },
+            "returned": { "type": "integer", "minimum": 0 },
+            "omitted": { "type": "integer", "minimum": 0 },
+            "truncated": { "type": "boolean" },
+            "blocked_entries_not_searchable": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Blocked entries examined (whether they matched or not). They were matched on their stored text only, which rarely contains a Vietnamese word: the search is INCOMPLETE over them."
+            },
+            "unassigned_entries_not_searched": { "type": "integer", "minimum": 0, "description": "Entries on no sheet or on several sheets (sheets document); not searched." }
+          }
+        },
+        "files": {
+          "type": "array",
+          "description": "One row per DXF/DWG file considered, sorted by path.",
+          "items": {
+            "type": "object",
+            "required": ["path", "status", "reason", "sheets_searched", "entries_searched", "blocked_entries", "unassigned_entries", "hits"],
+            "additionalProperties": false,
+            "properties": {
+              "path": { "type": "string", "minLength": 1 },
+              "status": { "enum": ["searched", "skipped"] },
+              "reason": { "type": ["string", "null"] },
+              "sheets_searched": { "type": "integer", "minimum": 0 },
+              "entries_searched": { "type": "integer", "minimum": 0 },
+              "blocked_entries": { "type": "integer", "minimum": 0 },
+              "unassigned_entries": { "type": ["integer", "null"], "minimum": 0 },
+              "hits": { "type": "integer", "minimum": 0 }
+            }
+          }
+        },
+        "hits": {
+          "type": "array",
+          "description": "File path, sheet, reading order.",
+          "items": {
+            "type": "object",
+            "required": ["file", "sheet_id", "sheet_number", "entry_id", "display_text", "meaning", "blocked_reason"],
+            "additionalProperties": false,
+            "properties": {
+              "file": { "type": "string", "minLength": 1 },
+              "sheet_id": { "type": "string" },
+              "sheet_number": { "$ref": "#/$defs/sheet_number" },
+              "entry_id": { "type": "string", "pattern": "^T[0-9]{6,}$" },
+              "display_text": { "type": "string" },
+              "meaning": { "$ref": "#/$defs/meaning" },
+              "blocked_reason": { "$ref": "#/$defs/blocked_reason" }
+            }
+          }
+        },
+        "notes": { "type": "array", "items": { "type": "string" }, "description": "Why the result may be incomplete (blocked entries)." },
+        "warnings": { "type": "array", "items": { "type": "string" } }
       }
     }
   }

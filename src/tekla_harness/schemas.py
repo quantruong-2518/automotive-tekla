@@ -31,6 +31,8 @@ SCHEMA_NAMES = (
     "grid-system",
     "status",
     "cache-entry",
+    "reader-findings",
+    "marks",
 )
 _REPO_SCHEMAS = Path(__file__).resolve().parents[2] / "schemas"
 

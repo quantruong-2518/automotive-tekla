@@ -272,8 +272,82 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
 - Versioning note: the reading-toolchain schemas above have not been released; they stay `0.1` and their
   changes are recorded here until the first tagged release, from which every change bumps its `$id`
   (AGENTS.md). Pending engineer confirmation.
+- Legacy-font gate (EVAL-1 fix 2): `text_gate.meaning_block_reason(entry)` decides whether meaning may be
+  taken from a text-index entry: pure-ASCII raw text is allowed; other text is blocked
+  (`knowledge_conflict`, `encoding_proposed`, `encoding_contradiction`, `encoding_unknown`) until its
+  encoding is settled by a font name, code-point evidence or an approved knowledge row. Used by
+  sheet-text, find-text, list-sheets, `harness finding` and `harness marks`.
+- Reader tools (EVAL-1 fix 2, F-08..F-11, F-25): every `sheet-text` entry carries `meaning`
+  (`allowed | blocked`) and `blocked_reason`; `sheet-text` reports `legacy_font_gate` (blocked count, by
+  reason, styles, the file's encoding question ids); `list-sheets` titles rank title keywords first
+  (Vietnamese and English), skip grid labels, bare numbers and years, and carry `entry_id`, `meaning`,
+  `matched_keyword`, plus `blocked_text_count` per sheet; `sheet-text` warns on stderr and in `warnings`
+  when it truncates, and `--contains` without `--max` is unbounded. New `harness find-text <work_dir>
+  --contains TEXT [--file F] [--max N]` searches every sheet of every file in one call and counts the
+  blocked entries it could not search reliably (new `find_text` kind in the `sheet-text` schema).
+  Changed: `sheet-text` entries use `entry_id` instead of `id`.
+- `harness finding add | withdraw | list` (`findings.py`, new schema `reader-findings`, EVAL-1 fix 3):
+  the drawing-reader agent records each judgement (sheet class, general-note item, structural-system
+  claim, cross-check) in `work/reader-findings.json`, tied to text-index entries. `add` checks the file,
+  entries, sheet membership, live question ids, note values as verbatim quotes, and the legacy-font gate
+  (a blocked entry backs no finding; the refusal names the font questions to answer first). Confidence
+  is the minimum of the cited entries, may only be lowered, never `high`. Ids `F-001..` are never reused;
+  `withdraw` keeps the finding with its reason; `list` flags findings whose file changed as `stale`; one
+  active `sheet_class` per sheet; an identical active finding returns its id (`already_recorded`).
+- `harness marks <work_dir> [--input-dir DIR]` (`marks.py`, new schema `marks`, EVAL-1 fix 4): member
+  marks (`D1`, `D1.1`, `D1-1`, `D1a`, `mark(b x h)` with b and h as written, never converted), member-type
+  words before a mark (`DẦM D1.1`, `COLUMN C1`) as `title_member_word` evidence (never a prefix meaning),
+  schedule tables from the DXF line grid or text alignment under a whole-cell header keyword, and
+  plan-to-schedule matching by exact key only (NFC + casefold, whitespace removed). Separator or
+  leading-zero variants (`D1.1`/`D1-1`) are never merged: one blocking `mark_notation_equivalence` per
+  file; a plan section that differs from its schedule row raises a blocking `mark_size_conflict`; a
+  keyword table that cannot be read raises a non-blocking `schedule_table_unparsed`. Tables whose header
+  the font gate blocks are reported `header_blocked` and never matched. Writes `marks.json` and
+  `marks-questions.json`; status tracks freshness.
+- Gate-1 question noise (EVAL-1 fix 5, F-04, F-05, F-26): `units_confirm_all` is the only blocking units
+  question per probed file: the probe's `units_conflict` / `units_suspect` / `units_unknown` become its
+  refs (where/found verbatim) and `grid_units_doubt`, `grid_system_units_unconfirmed` are non-blocking
+  evidence; a units check closes only on that question's structured `unit=`. New blocking
+  `units_answer_contradicts_evidence` (grid-system) when the answered unit fails the `units_suspect`
+  magnitude test (`units.dimension_median` now in the probe and inventory); it closes by re-answering, or
+  by confirming the same unit. X/Y is asked once per grid system: `grid_system_axis_unassigned` takes
+  `--value dir1=X|Y --value dir2=X|Y`, is bound by key and blocks only for selected, unassigned systems;
+  `grid_family_axis_assignment` is non-blocking. `grid_system_select` takes `separate=S001,S002`; systems
+  outside `systems=` raise no blocking question; `grid_system_conflict` is one question per pair, closes
+  only via `systems=` or `separate=` (never answer text), and `harness answer` refuses it. Status reasons
+  name the question id to answer. On the eval set, blocking units questions per file went from 5 to 1
+  (267) and 3 to 1 (433, steel).
+- `harness questions-md <work_dir> [--out PATH]` (EVAL-1 fix 1, F-07, F-22, F-24): renders `questions.md`
+  (Vietnamese) deterministically from every question document, the registry, `answers.json`,
+  `grid-systems.json`, `structure-summary.json` and the gate-1 reasons: summary, blocking then
+  non-blocking open questions by topic and file, answered questions, stale answers. Refs verbatim, counts
+  with "hiển thị n/N", the exact `harness answer` command with the values each code needs, proposals
+  labelled "ĐỀ XUẤT — chưa xác nhận". The code-to-Vietnamese table `questions_md_vi.py` is proposed copy
+  pending engineer review; a code without a row prints its English message and is listed in
+  `untranslated_codes`.
+- `harness ask`: `units_answer_contradicts_evidence` is owned by grid-system (exact codes now win over
+  another producer's prefix).
 
 ### Fixed
+- Reading toolchain, after an independent review of the EVAL-1 wave:
+  - `harness marks`: a rotated header keyword (or one that is not a cell text) no longer crashes the run;
+    the table becomes a non-blocking `schedule_table_unparsed`. Questions no longer quote table ids, so a
+    table added to one file does not re-key another file's `mark_*` questions (their answers are asked
+    again once).
+  - Units contradiction also tests the median grid spacing under the ANSWERED unit (0.5 m to 30 m,
+    `grids.implausible_spacing`), not only the median dimension; `grid-systems.json` files carry
+    `grid_spacing_median`; `harness status` mirrors the test.
+  - `harness status` reasons print `harness answer <work_dir> <id> ...` (the work folder was missing),
+    one question per command.
+  - `harness callouts` applies the legacy-font gate: blocked text yields no candidate and is listed in
+    the new `blocked_entries` of `callouts.json` (a literal `4Ø16` in an unknown font was a rebar callout).
+  - `harness answer`: `systems=` must name systems the select question lists.
+  - `grid_system_select` keys include each system's file and its sha256, so systems of two files cannot
+    swap S-ids under one key (existing select answers go stale once).
+  - `harness finding`: a `note_item` quote must start and end at token boundaries; a write error exits 3;
+    a document whose `next_id` is not above every `F-` id is refused.
+  - `harness questions-md` prints reader questions as written (never "chưa có bản dịch"); `harness ask
+    --text` is the Vietnamese question the engineer reads.
 - `guard_tekla_write.py` now exits 2 (the blocking code) on any internal error instead of
   relying on an undocumented `onFailure` setting; the setting was removed.
 - `guard_tekla_write.py` no longer blocks commands that only mention `tekla-cli` as data

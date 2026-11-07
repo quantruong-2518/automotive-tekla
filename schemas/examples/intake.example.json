@@ -16,7 +16,11 @@
         "confidence": "medium",
         "flags": [
           "units_confirm"
-        ]
+        ],
+        "dimension_median": {
+          "value": 6000.0,
+          "count": 42
+        }
       },
       "layouts": [
         "Model",
@@ -68,7 +72,8 @@
         "confidence": "low",
         "flags": [
           "units_unknown"
-        ]
+        ],
+        "dimension_median": null
       },
       "layouts": [
         "Model"

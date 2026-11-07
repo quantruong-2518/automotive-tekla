@@ -433,6 +433,13 @@ def test_a_non_blocking_answer_does_not_change_blocking_open(world):
         ("member_mark_prefix_meaning", {}, False),
         ("grid_gate1_confirmation", {}, True),
         ("grid_gate1_confirmation", {"unit": "mm"}, False),
+        ("units_answer_contradicts_evidence", {"unit": "m"}, True),
+        ("units_answer_contradicts_evidence", {}, False),
+        ("grid_system_axis_unassigned", {"dir1": "X", "dir2": "Y"}, True),
+        ("grid_system_axis_unassigned", {"dir1": "X"}, True),  # the question's directions: harness answer
+        ("grid_system_axis_unassigned", {"dir3": "X"}, False),
+        ("grid_system_axis_unassigned", {"dir1": "Z"}, False),
+        ("grid_system_conflict", {}, True),  # takes no value (and harness answer refuses it: see test_status)
     ],
 )
 def test_structured_values_by_code(code, values, ok):
@@ -450,6 +457,25 @@ def test_structured_values_by_code(code, values, ok):
     }
     doc = {"schema_version": "0.1", "project_id": PROJECT, "answers": [answer]}
     assert (validate("answers", doc) == []) is ok  # the schema says the same as the command
+
+
+@pytest.mark.parametrize("values", [{"dir1": "X", "dir2": "X"}, {}])
+def test_system_axis_values_the_command_refuses_but_the_schema_keeps(values):
+    """Two directions on one axis cannot be said in JSON Schema, and {} is how a words-only answer recorded
+    before values existed looks (it stays loadable, and assigns nothing): harness answer refuses both."""
+    assert check_values("grid_system_axis_unassigned", values) != []
+    answer = {
+        "key": "0123456789abcdef",
+        "question_id": "Q-001",
+        "code": "grid_system_axis_unassigned",
+        "file": "a.dxf",
+        "answer_text": "t",
+        "values": values,
+        "answered_by": "x",
+        "answered_on": "2026-11-06",
+        "status": "active",
+    }
+    assert validate("answers", {"schema_version": "0.1", "project_id": PROJECT, "answers": [answer]}) == []
 
 
 def test_parse_values():

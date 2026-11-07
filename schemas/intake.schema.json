@@ -50,6 +50,18 @@
               "additionalProperties": false,
               "properties": {
                 "value": { "enum": ["mm", "cm", "m", "in", "ft", "unitless", "unknown"], "description": "Declared by the DXF header, never confirmed. 'unknown' also when the probe could not compute units." },
+                "dimension_median": {
+                  "description": "The probe's units.dimension_median (median |length| of the modelspace linear and aligned dimensions in drawing units, and their count); null when the probe skipped it or could not compute units. Always written by harness intake; absent only in an inventory from an older intake, which stays readable: `harness status` then asks for an intake rerun. `harness status` and `harness grid-system` test the engineer's answered unit against it (units_answer_contradicts_evidence).",
+                  "anyOf": [
+                    { "type": "null" },
+                    {
+                      "type": "object",
+                      "required": ["value", "count"],
+                      "additionalProperties": false,
+                      "properties": { "value": { "type": "number", "minimum": 0 }, "count": { "type": "integer", "minimum": 3 } }
+                    }
+                  ]
+                },
                 "confidence": { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/confidence" },
                 "flags": { "type": "array", "description": "Every units_* question code the probe raised for this file, sorted (units_confirm, units_unknown, units_conflict, units_suspect), plus 'units_not_read' when the probe could not compute the units section.", "items": { "type": "string", "pattern": "^units_[a-z_]+$" } }
               }
@@ -345,7 +357,7 @@
     },
     "question": {
       "type": "object",
-      "description": "One question per code, blocking flag and file (file null for a question about the whole project), listing the places it applies to. Probe question codes, encoding_unknown_non_ascii and callout / structure questions list at most 50 refs (10 per member mark prefix): then truncated is true and count is the true total; an extractor that capped its own questions per code says so in its warnings (kept in structure-summary.json), so count can still be below the true number of occurrences in that case. encoding_unknown_non_ascii (non-blocking) has one ref per text style that holds non-ASCII text of unknown encoding, built from the text index; font_encoding_proposed (non-blocking) is a probe question: one ref per proposed knowledge row, its evidence in 'found'. units_confirm_all (one ref: the file's header units) replaces the non-blocking units_confirm probe question, which is therefore not repeated. `key` is the stable identity (question-registry): sha256 over code, file, the file's sha256 and the canonical sorted refs (where, found, sheet), first 16 hex. `answer` is the active answer from answers.json, or null.",
+      "description": "One question per code, blocking flag and file (file null for a question about the whole project), listing the places it applies to. Probe question codes, encoding_unknown_non_ascii and callout / structure questions list at most 50 refs (10 per member mark prefix): then truncated is true and count is the true total; an extractor that capped its own questions per code says so in its warnings (kept in structure-summary.json), so count can still be below the true number of occurrences in that case. encoding_unknown_non_ascii (non-blocking) has one ref per text style that holds non-ASCII text of unknown encoding, built from the text index; font_encoding_proposed (non-blocking) is a probe question: one ref per proposed knowledge row, its evidence in 'found'. units_confirm_all is the file's ONLY blocking units question: its first ref is the file's header units (unit, confidence, flags), then one ref per probe units_conflict / units_suspect / units_unknown question with that question's where and found verbatim and `message` '<code>: <probe message>'; those codes are not asked apart, nor is the non-blocking units_confirm probe question. It needs an answer with a structured unit (answers.schema.json). `key` is the stable identity (question-registry): sha256 over code, file, the file's sha256 and the canonical sorted refs (where, found, sheet), first 16 hex. `answer` is the active answer from answers.json, or null.",
       "required": ["id", "key", "code", "blocking", "file", "message", "count", "truncated", "refs", "answer"],
       "additionalProperties": false,
       "properties": {
@@ -360,7 +372,7 @@
         "refs": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/ref" } },
         "subjects": {
           "type": "array",
-          "description": "callouts-questions.json only: what the refs are about when one question covers several things. callout_ambiguous: one per notation (name = notation id); member_mark_prefix_meaning: one per prefix (name = prefix), the answer's `values` keys.",
+          "description": "What the refs are about when one question covers several things (callouts-questions.json and grid-system-questions.json). callout_ambiguous: one per notation (name = notation id); member_mark_prefix_meaning: one per prefix (name = prefix), the answer's `values` keys; grid_system_axis_unassigned: one per direction of the system (name dir1, dir2 as in the ref's found; count = families of that direction), exactly the answer's `values` keys.",
           "items": {
             "type": "object",
             "required": ["name", "count"],
@@ -397,7 +409,7 @@
         "found": { "type": "string" },
         "sheet": { "type": "string", "minLength": 1, "description": "structure-questions.json, callouts-questions.json and grid-system-questions.json only: the detector sheet id (model#01, <layout>#01; see the sheets schema) the extractor attached to the question. Not a printed sheet number." },
         "message": { "type": "string", "description": "Only when this ref's wording differs from the group's message (for example because it carries a count)." },
-        "unit": { "type": "string", "description": "units_confirm_all only: the unit declared by the header." },
+        "unit": { "type": "string", "description": "units_confirm_all only, first ref: the unit declared by the header." },
         "confidence": { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/confidence" },
         "flags": { "type": "array", "items": { "type": "string" }, "description": "units_confirm_all only: the units_* flags of the file." }
       }

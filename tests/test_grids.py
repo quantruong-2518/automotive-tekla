@@ -136,7 +136,11 @@ def test_line_with_empty_bubble_is_a_missing_label(grid_set):
 def test_tekla_axis_assignment_and_gate1_are_always_asked(grid_set):
     for code in ("grid_family_axis_assignment", "grid_gate1_confirmation"):
         q = questions(grid_set, code)
-        assert len(q) == 1 and q[0]["blocking"]
+        assert len(q) == 1
+    assert questions(grid_set, "grid_gate1_confirmation")[0]["blocking"]
+    # X/Y blocks once per grid system (grid-system's grid_system_axis_unassigned), not per family here
+    family_axes = questions(grid_set, "grid_family_axis_assignment")[0]
+    assert family_axes["blocking"] is False and "grid_system_axis_unassigned" in family_axes["message"]
     assert not questions(grid_set, "grid_units_doubt")  # 6000 mm is a plausible spacing
 
 
@@ -229,7 +233,9 @@ def test_duplicate_label_in_one_view(tmp_path):
 def test_implausible_spacing_for_declared_unit(tmp_path):
     result = run(_plain(tmp_path, _simple_grid, insunits=6))  # metres declared, 6000 drawn
     q = questions(result, "grid_units_doubt")
-    assert len(q) == 1 and q[0]["blocking"] and "= 6000.0 m" in q[0]["found"]
+    # evidence for intake's units_confirm_all, the file's one blocking units question
+    assert len(q) == 1 and not q[0]["blocking"] and "= 6000.0 m" in q[0]["found"]
+    assert "units_confirm_all" in q[0]["message"]
     assert family(result, "unknown", "1 2 3")["proposal"]["unit_confidence"] == "low"
 
 

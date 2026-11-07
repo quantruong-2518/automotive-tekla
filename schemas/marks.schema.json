@@ -1,0 +1,464 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:tekla-harness:schema:marks:0.1",
+  "title": "Member marks, schedule tables and plan-to-schedule matching of an intake work folder",
+  "description": "Written by `harness marks` (marks.py). Plan marks are texts whose whole line is a member mark (D1, D1.1, D1-1, D1a, with an optional section '(b x h)') or a member-type word plus a mark (DẦM D1.1, COLUMN C1). Schedule tables come from the line grid of the DXF or, without one, from text alignment under a mark-column header keyword. Matching compares keys (NFC + casefold + whitespace removed) for exact equality only; marks with the same letters and numbers but another notation are `notation_variants`, never merged. Only text the legacy-font gate allows (text_gate.py) can be a plan mark, a header keyword or a matched schedule mark; blocked text is quoted verbatim with its entry id and never interpreted. Nothing is computed beyond comparison: no quantity, length, weight or unit conversion. Confidence is never 'high'. The questions are in marks-questions.json (intake schema, kind 'questions'); `question_counts` only says how many things are asked per code.",
+  "type": "object",
+  "required": ["schema_version", "kind", "project_id", "inventory_sha256", "files", "skipped_sheets", "plan_marks", "tables", "unparsed_tables", "blocked_marks", "matching", "question_counts", "summary", "warnings"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": "0.1" },
+    "kind": { "const": "marks" },
+    "project_id": { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/project_id" },
+    "inventory_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$", "description": "Hash of the inventory.json bytes this was built from (harness status compares it)." },
+    "files": { "type": "array", "description": "DXF/DWG inventory rows, sorted by path.", "items": { "$ref": "#/$defs/file" } },
+    "skipped_sheets": {
+      "type": "array",
+      "description": "Sheets that are exact copies of an earlier sheet: not scanned.",
+      "items": {
+        "type": "object",
+        "required": ["file", "sheet", "duplicate_of", "text_entries"],
+        "additionalProperties": false,
+        "properties": {
+          "file": { "type": "string", "minLength": 1 },
+          "sheet": { "type": "string", "minLength": 1 },
+          "duplicate_of": { "type": "string", "minLength": 1 },
+          "text_entries": { "type": "integer", "minimum": 0 }
+        }
+      }
+    },
+    "plan_marks": { "type": "array", "description": "Mark occurrences outside every detected table, in scan order (files by path, entries in index order, lines).", "items": { "$ref": "#/$defs/plan_mark" } },
+    "tables": { "type": "array", "items": { "$ref": "#/$defs/table" } },
+    "unparsed_tables": { "type": "array", "description": "A mark-column keyword whose table could not be read; asked as schedule_table_unparsed (not blocking).", "items": { "$ref": "#/$defs/unparsed_table" } },
+    "blocked_marks": { "type": "array", "description": "Mark-shaped cells of header-blocked tables and blocked cells of a mark column: listed verbatim with the reason, never matched.", "items": { "$ref": "#/$defs/blocked_mark" } },
+    "matching": { "type": "array", "description": "One entry per scanned file.", "items": { "$ref": "#/$defs/matching" } },
+    "question_counts": {
+      "type": "object",
+      "description": "Per question code, how many things are asked: variant groups, size conflicts, unparsed tables. Codes with none are absent.",
+      "propertyNames": { "enum": ["mark_notation_equivalence", "mark_size_conflict", "schedule_table_unparsed"] },
+      "additionalProperties": { "type": "integer", "minimum": 1 }
+    },
+    "summary": { "$ref": "#/$defs/summary" },
+    "warnings": { "type": "array", "items": { "type": "string" } }
+  },
+  "$defs": {
+    "confidence_not_high": { "enum": ["medium", "low"] },
+    "bbox": { "type": "array", "items": { "type": "number" }, "minItems": 4, "maxItems": 4, "description": "x0, y0, x1, y1 in the drawing units of `space`." },
+    "sheet_number": {
+      "anyOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "required": ["value", "confidence"],
+          "additionalProperties": false,
+          "properties": {
+            "value": { "type": "string", "minLength": 1 },
+            "confidence": { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/confidence" }
+          }
+        }
+      ]
+    },
+    "entry_id": { "type": "string", "pattern": "^T[0-9]{6,}$" },
+    "table_id": { "type": "string", "pattern": "^S[0-9]{3,}$" },
+    "plan_id": { "type": "string", "pattern": "^P[0-9]{6,}$" },
+    "number": { "type": "number", "minimum": 0 },
+    "file": {
+      "type": "object",
+      "required": ["path", "status", "reason", "text_entries", "line_grid", "plan_marks", "tables", "unparsed_tables", "blocked_marks"],
+      "additionalProperties": false,
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "status": { "enum": ["scanned", "skipped"] },
+        "reason": { "type": ["string", "null"] },
+        "text_entries": { "type": ["integer", "null"], "minimum": 0 },
+        "line_grid": {
+          "type": "object",
+          "required": ["status", "reason", "skipped"],
+          "additionalProperties": false,
+          "description": "Whether the DXF lines were read for line grids. 'unavailable': text alignment only (the reason says why, also in warnings).",
+          "properties": {
+            "status": { "enum": ["read", "unavailable"] },
+            "reason": { "type": ["string", "null"] },
+            "skipped": { "type": "object", "description": "Geometry that could not be read, per reason.", "additionalProperties": { "type": "integer", "minimum": 1 } }
+          }
+        },
+        "plan_marks": { "type": "integer", "minimum": 0 },
+        "tables": { "type": "integer", "minimum": 0 },
+        "unparsed_tables": { "type": "integer", "minimum": 0 },
+        "blocked_marks": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "lexical": {
+      "type": "object",
+      "description": "The mark split into characters, not a reading: no part has a verified meaning.",
+      "required": ["prefix", "numbers", "separators", "suffix"],
+      "additionalProperties": false,
+      "properties": {
+        "prefix": { "type": "string", "minLength": 1 },
+        "numbers": { "type": "array", "items": { "type": "string", "pattern": "^[0-9]+$" }, "minItems": 1, "maxItems": 2, "description": "As written (leading zeros kept)." },
+        "separators": { "type": "array", "items": { "type": "string" }, "minItems": 1, "maxItems": 2, "description": "Before the first number ('' when none) and between the numbers." },
+        "suffix": { "type": "string" }
+      }
+    },
+    "plan_mark": {
+      "type": "object",
+      "required": ["id", "file", "sheet", "sheet_number", "space", "text_ref", "display_text", "position", "mark", "key", "lexical", "size", "form", "title_member_word", "in_callouts", "confidence", "flags", "provenance"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/plan_id" },
+        "file": { "type": "string", "minLength": 1 },
+        "sheet": { "type": ["string", "null"], "description": "Detector sheet id; null when the text lies on no sheet." },
+        "sheet_number": { "$ref": "#/$defs/sheet_number" },
+        "space": { "type": "string", "minLength": 1 },
+        "text_ref": {
+          "type": "object",
+          "required": ["file", "entry_id"],
+          "additionalProperties": false,
+          "properties": { "file": { "type": "string", "minLength": 1 }, "entry_id": { "$ref": "#/$defs/entry_id" } }
+        },
+        "display_text": { "type": "string", "minLength": 1, "description": "The line as written, whitespace collapsed." },
+        "position": {
+          "type": "object",
+          "required": ["x", "y"],
+          "additionalProperties": false,
+          "properties": { "x": { "type": ["number", "null"] }, "y": { "type": ["number", "null"] } }
+        },
+        "mark": { "type": "string", "minLength": 1, "description": "The mark as written, without the section." },
+        "key": { "type": "string", "minLength": 1, "description": "NFC + casefold + whitespace removed: what matching compares." },
+        "lexical": { "$ref": "#/$defs/lexical" },
+        "size": {
+          "anyOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "required": ["b", "h", "text"],
+              "additionalProperties": false,
+              "description": "The two numbers of '(b x h)' as written, in drawing units, never converted.",
+              "properties": { "b": { "$ref": "#/$defs/number" }, "h": { "$ref": "#/$defs/number" }, "text": { "type": "string", "minLength": 3 } }
+            }
+          ]
+        },
+        "form": { "enum": ["plain", "sub_number", "with_size", "title"] },
+        "title_member_word": {
+          "anyOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "required": ["word", "confidence"],
+              "additionalProperties": false,
+              "description": "Evidence only: a member-type word in front of the mark (DẦM, CỘT, BEAM...). Not a prefix meaning; prefix meanings come only from member_mark_prefix_meaning answers.",
+              "properties": { "word": { "type": "string", "minLength": 1 }, "confidence": { "$ref": "#/$defs/confidence_not_high" } }
+            }
+          ]
+        },
+        "in_callouts": { "type": "boolean", "description": "callouts.json also lists this text as a member_mark candidate (the prefix question is asked there)." },
+        "confidence": { "$ref": "#/$defs/confidence_not_high" },
+        "flags": { "type": "array", "items": { "type": "string" } },
+        "provenance": {
+          "allOf": [
+            { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/provenance" },
+            { "properties": { "method": { "const": "derived" } }, "required": ["derived_from"] }
+          ]
+        }
+      },
+      "allOf": [
+        { "if": { "properties": { "form": { "const": "title" } } }, "then": { "properties": { "title_member_word": { "type": "object" } } }, "else": { "properties": { "title_member_word": { "type": "null" } } } }
+      ]
+    },
+    "cell": {
+      "type": "object",
+      "required": ["column", "entry_id", "display_text", "meaning", "block_reason"],
+      "additionalProperties": false,
+      "properties": {
+        "column": { "type": ["integer", "null"], "minimum": 0, "description": "Index into `columns`; null when the text centre is in no column." },
+        "entry_id": { "$ref": "#/$defs/entry_id" },
+        "display_text": { "type": "string", "description": "Verbatim (whitespace collapsed, cut at 200 characters)." },
+        "meaning": { "enum": ["allowed", "blocked"], "description": "blocked: no meaning may be taken from this cell (legacy-font gate, or its table's header is blocked)." },
+        "block_reason": { "type": ["string", "null"], "description": "A text_gate reason, or 'header_blocked'." }
+      },
+      "allOf": [
+        { "if": { "properties": { "meaning": { "const": "blocked" } } }, "then": { "properties": { "block_reason": { "type": "string", "minLength": 1 } } } }
+      ]
+    },
+    "schedule_mark": {
+      "type": "object",
+      "required": ["entry_id", "text", "key", "shape", "confidence"],
+      "additionalProperties": false,
+      "properties": {
+        "entry_id": { "$ref": "#/$defs/entry_id" },
+        "text": { "type": "string", "minLength": 1 },
+        "key": { "type": "string", "minLength": 1 },
+        "shape": { "enum": ["mark", "other"], "description": "other: the cell is not mark-shaped; its whole text is the key." },
+        "confidence": { "$ref": "#/$defs/confidence_not_high" }
+      }
+    },
+    "table": {
+      "type": "object",
+      "required": ["id", "file", "sheet", "sheet_number", "space", "bbox", "detection", "anchor_entry_id", "header_blocked", "header_block_reasons", "header", "columns", "mark_column", "rows", "confidence", "provenance"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/table_id" },
+        "file": { "type": "string", "minLength": 1 },
+        "sheet": { "type": ["string", "null"] },
+        "sheet_number": { "$ref": "#/$defs/sheet_number" },
+        "space": { "type": "string", "minLength": 1, "description": "Space of the texts and lines ('model' also for a paper sheet that shows model space)." },
+        "bbox": { "$ref": "#/$defs/bbox" },
+        "detection": { "enum": ["line_grid", "text_alignment"] },
+        "anchor_entry_id": { "$ref": "#/$defs/entry_id", "description": "The header keyword, or (header-blocked tables) the mark-shaped text the grid was found from." },
+        "header_blocked": { "type": "boolean" },
+        "header_block_reasons": { "type": "array", "items": { "type": "string" } },
+        "header": { "type": "array", "items": { "$ref": "#/$defs/cell" } },
+        "columns": {
+          "type": "array",
+          "minItems": 2,
+          "items": {
+            "type": "object",
+            "required": ["index", "x0", "x1", "role"],
+            "additionalProperties": false,
+            "properties": {
+              "index": { "type": "integer", "minimum": 0 },
+              "x0": { "type": "number" },
+              "x1": { "type": "number" },
+              "role": { "enum": ["mark", "b", "h", "bxh", null], "description": "From an allowed header keyword; null otherwise." }
+            }
+          }
+        },
+        "mark_column": { "type": ["integer", "null"], "minimum": 0, "description": "Null when the header is blocked." },
+        "rows": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["index", "bbox", "cells", "marks", "size"],
+            "additionalProperties": false,
+            "properties": {
+              "index": { "type": "integer", "minimum": 1 },
+              "bbox": { "$ref": "#/$defs/bbox" },
+              "cells": { "type": "array", "items": { "$ref": "#/$defs/cell" } },
+              "marks": { "type": "array", "description": "Allowed cells of the mark column (empty for a header-blocked table).", "items": { "$ref": "#/$defs/schedule_mark" } },
+              "size": {
+                "anyOf": [
+                  { "type": "null" },
+                  {
+                    "type": "object",
+                    "required": ["b", "h", "entry_ids"],
+                    "additionalProperties": false,
+                    "properties": {
+                      "b": { "$ref": "#/$defs/number" },
+                      "h": { "$ref": "#/$defs/number" },
+                      "entry_ids": { "type": "array", "items": { "$ref": "#/$defs/entry_id" }, "minItems": 1 }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "confidence": { "$ref": "#/$defs/confidence_not_high" },
+        "provenance": {
+          "allOf": [
+            { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/provenance" },
+            { "properties": { "method": { "const": "table" } } }
+          ]
+        }
+      },
+      "allOf": [
+        { "if": { "properties": { "header_blocked": { "const": true } } }, "then": { "properties": { "mark_column": { "type": "null" }, "confidence": { "const": "low" }, "header_block_reasons": { "minItems": 1 } } }, "else": { "properties": { "mark_column": { "type": "integer" }, "header_block_reasons": { "maxItems": 0 } } } }
+      ]
+    },
+    "unparsed_table": {
+      "type": "object",
+      "required": ["file", "sheet", "sheet_number", "space", "bbox", "detection", "anchor_entry_id", "anchor_text", "reason"],
+      "additionalProperties": false,
+      "properties": {
+        "file": { "type": "string", "minLength": 1 },
+        "sheet": { "type": ["string", "null"] },
+        "sheet_number": { "$ref": "#/$defs/sheet_number" },
+        "space": { "type": "string", "minLength": 1 },
+        "bbox": { "$ref": "#/$defs/bbox", "description": "The table as far as it was found, else the keyword's box." },
+        "detection": { "enum": ["line_grid", "text_alignment"] },
+        "anchor_entry_id": { "$ref": "#/$defs/entry_id" },
+        "anchor_text": { "type": "string" },
+        "reason": { "type": "string", "minLength": 1 }
+      }
+    },
+    "blocked_mark": {
+      "type": "object",
+      "required": ["file", "sheet", "table", "row", "entry_id", "display_text", "reason"],
+      "additionalProperties": false,
+      "properties": {
+        "file": { "type": "string", "minLength": 1 },
+        "sheet": { "type": ["string", "null"] },
+        "table": { "$ref": "#/$defs/table_id" },
+        "row": { "type": "integer", "minimum": 1 },
+        "entry_id": { "$ref": "#/$defs/entry_id" },
+        "display_text": { "type": "string", "description": "Verbatim, never interpreted." },
+        "reason": { "type": "string", "minLength": 1, "description": "A text_gate reason, or 'header_blocked:<reasons>'." }
+      }
+    },
+    "schedule_ref": {
+      "type": "object",
+      "required": ["table", "row", "entry_id"],
+      "additionalProperties": false,
+      "properties": { "table": { "$ref": "#/$defs/table_id" }, "row": { "type": "integer", "minimum": 1 }, "entry_id": { "$ref": "#/$defs/entry_id" } }
+    },
+    "matching": {
+      "type": "object",
+      "required": ["file", "schedule_tables", "matched", "schedule_only", "plan_only", "notation_variants", "size_conflicts"],
+      "additionalProperties": false,
+      "properties": {
+        "file": { "type": "string", "minLength": 1 },
+        "schedule_tables": { "type": "integer", "minimum": 0, "description": "Tables of this file whose header is not blocked. plan_only is listed only when this is at least 1." },
+        "matched": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["key", "mark", "plan_marks", "schedule", "confidence"],
+            "additionalProperties": false,
+            "properties": {
+              "key": { "type": "string", "minLength": 1 },
+              "mark": { "type": "string", "minLength": 1 },
+              "plan_marks": { "type": "array", "items": { "$ref": "#/$defs/plan_id" }, "minItems": 1 },
+              "schedule": { "type": "array", "items": { "$ref": "#/$defs/schedule_ref" }, "minItems": 1 },
+              "confidence": { "$ref": "#/$defs/confidence_not_high" }
+            }
+          }
+        },
+        "schedule_only": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["key", "mark", "schedule"],
+            "additionalProperties": false,
+            "properties": {
+              "key": { "type": "string", "minLength": 1 },
+              "mark": { "type": "string", "minLength": 1 },
+              "schedule": { "type": "array", "items": { "$ref": "#/$defs/schedule_ref" }, "minItems": 1 }
+            }
+          }
+        },
+        "plan_only": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["key", "mark", "plan_marks"],
+            "additionalProperties": false,
+            "properties": {
+              "key": { "type": "string", "minLength": 1 },
+              "mark": { "type": "string", "minLength": 1 },
+              "plan_marks": { "type": "array", "items": { "$ref": "#/$defs/plan_id" }, "minItems": 1 }
+            }
+          }
+        },
+        "notation_variants": {
+          "type": "array",
+          "description": "Groups of keys with the same structure (prefix, numbers as integers, suffix; case-insensitive). Never merged: asked as mark_notation_equivalence.",
+          "items": {
+            "type": "object",
+            "required": ["structure", "marks"],
+            "additionalProperties": false,
+            "properties": {
+              "structure": {
+                "type": "object",
+                "required": ["prefix", "numbers", "suffix"],
+                "additionalProperties": false,
+                "properties": {
+                  "prefix": { "type": "string", "minLength": 1 },
+                  "numbers": { "type": "array", "items": { "type": "integer", "minimum": 0 }, "minItems": 1 },
+                  "suffix": { "type": "string" }
+                }
+              },
+              "marks": {
+                "type": "array",
+                "minItems": 2,
+                "items": {
+                  "type": "object",
+                  "required": ["key", "mark", "plan_marks", "schedule"],
+                  "additionalProperties": false,
+                  "properties": {
+                    "key": { "type": "string", "minLength": 1 },
+                    "mark": { "type": "string", "minLength": 1 },
+                    "plan_marks": { "type": "array", "items": { "$ref": "#/$defs/plan_id" } },
+                    "schedule": { "type": "array", "items": { "$ref": "#/$defs/schedule_ref" } }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "size_conflicts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["key", "mark", "plan_mark", "plan_entry_id", "plan_text", "plan_size", "table", "row", "schedule_entry_id", "schedule_size"],
+            "additionalProperties": false,
+            "properties": {
+              "key": { "type": "string", "minLength": 1 },
+              "mark": { "type": "string", "minLength": 1 },
+              "plan_mark": { "$ref": "#/$defs/plan_id" },
+              "plan_entry_id": { "$ref": "#/$defs/entry_id" },
+              "plan_text": { "type": "string", "minLength": 1 },
+              "plan_size": {
+                "type": "object",
+                "required": ["b", "h"],
+                "additionalProperties": false,
+                "properties": { "b": { "$ref": "#/$defs/number" }, "h": { "$ref": "#/$defs/number" } }
+              },
+              "table": { "$ref": "#/$defs/table_id" },
+              "row": { "type": "integer", "minimum": 1 },
+              "schedule_entry_id": { "$ref": "#/$defs/entry_id" },
+              "schedule_size": {
+                "type": "object",
+                "required": ["b", "h", "entry_ids"],
+                "additionalProperties": false,
+                "properties": {
+                  "b": { "$ref": "#/$defs/number" },
+                  "h": { "$ref": "#/$defs/number" },
+                  "entry_ids": { "type": "array", "items": { "$ref": "#/$defs/entry_id" }, "minItems": 1 }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "counts": {
+      "type": "object",
+      "required": ["plan_marks", "tables", "header_blocked_tables", "rows", "unparsed_tables", "blocked_marks", "matched", "schedule_only", "plan_only", "notation_variants", "size_conflicts"],
+      "properties": {
+        "plan_marks": { "type": "integer", "minimum": 0 },
+        "tables": { "type": "integer", "minimum": 0 },
+        "header_blocked_tables": { "type": "integer", "minimum": 0 },
+        "rows": { "type": "integer", "minimum": 0 },
+        "unparsed_tables": { "type": "integer", "minimum": 0 },
+        "blocked_marks": { "type": "integer", "minimum": 0 },
+        "matched": { "type": "integer", "minimum": 0 },
+        "schedule_only": { "type": "integer", "minimum": 0 },
+        "plan_only": { "type": "integer", "minimum": 0 },
+        "notation_variants": { "type": "integer", "minimum": 0 },
+        "size_conflicts": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "summary": {
+      "allOf": [
+        { "$ref": "#/$defs/counts" },
+        {
+          "type": "object",
+          "required": ["files_scanned", "files_skipped", "by_file"],
+          "properties": {
+            "files_scanned": { "type": "integer", "minimum": 0 },
+            "files_skipped": { "type": "integer", "minimum": 0 },
+            "by_file": {
+              "type": "array",
+              "items": {
+                "allOf": [
+                  { "$ref": "#/$defs/counts" },
+                  { "type": "object", "required": ["file"], "properties": { "file": { "type": "string", "minLength": 1 } } }
+                ]
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

@@ -14,7 +14,8 @@ document kind as the other `*questions.json`.
     the registry under another producer, plus the known codes and code families in `OTHER_OWNERS` (exit 2,
     the owner is named). Codes starting with `reader_` are always the reader's (e.g.
     `reader_level_storey_selection`): use that namespace for a gap whose natural code a producer owns.
-  * `--text` is the English question; the Vietnamese rendering belongs to questions.md, not here.
+  * `--text` is the question as the engineer will read it in questions.md: Vietnamese (AGENTS.md:
+    human-facing deliverables are Vietnamese); questions-md prints it verbatim.
   * A reader question is never obsoleted by another producer's run. `--withdraw Q-id --reason "..."`
     marks one obsolete (kept in the registry with its reason, dropped from reader-questions.json; an
     active answer to it goes stale). Withdrawing twice is a no-op. A withdrawn place cannot be asked again
@@ -74,7 +75,7 @@ OTHER_OWNERS: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
         ),
         ("units_",),
     ),
-    "grid-system": ((), ("grid_system_",)),
+    "grid-system": (("units_answer_contradicts_evidence",), ("grid_system_",)),
     "structure": (("grid_family_axis_assignment", "grid_units_doubt"), ("grid_", "level_", "sheet_")),
     "callouts": (
         ("member_mark_prefix_meaning", "grade_legacy_mapping"),
@@ -90,6 +91,9 @@ READER_NAMESPACE = "reader_"
 def static_owner(code: str) -> str | None:
     if code.startswith(READER_NAMESPACE):
         return None
+    for producer, (exact, _) in OTHER_OWNERS.items():  # exact codes first: they beat another's prefix
+        if code in exact:
+            return producer
     for producer, (exact, prefixes) in OTHER_OWNERS.items():
         if code in exact or code.startswith(prefixes):
             return producer
@@ -184,7 +188,7 @@ def ask_question(
     if not where.strip():
         raise QuestionsError(EXIT_USAGE, "--where is empty: say where in the drawing the question applies")
     if not text.strip():
-        raise QuestionsError(EXIT_USAGE, "--text is empty: write the question in English")
+        raise QuestionsError(EXIT_USAGE, "--text is empty: write the question in Vietnamese")
     if file is not None and not file.strip():
         raise QuestionsError(EXIT_USAGE, "--file is empty: omit it for a project-level question")
     if sheet is not None and not sheet.strip():

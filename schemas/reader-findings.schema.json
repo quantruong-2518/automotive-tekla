@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:tekla-harness:schema:reader-findings:0.1",
+  "title": "Reader findings",
+  "description": "reader-findings.json in the work folder: the judgements of the drawing-reader agent (what kind of drawing a sheet is, what a general-note item says, how the structure is organised, where two sources disagree), each tied to the text-index entries it rests on. Written only by `harness finding`; a report may print a number or a claim only when a finding (or another named artefact) carries it. A finding is accepted only when every cited entry exists, sits on the cited sheet and is not blocked by the legacy-font gate (text_gate.py: meaning is never taken from text whose encoding is unknown, proposed or contradicted); a blocked entry can only be quoted in a reader question (`harness ask`). `entries[].display_text` is copied verbatim from the text index when the finding is recorded. `confidence` is the minimum of the cited entries' confidence, optionally lowered by the reader, and is never 'high' (only an engineer answer is). `file_sha256` is the inventory's sha256 of the file at that time: a finding whose file has since changed is 'stale' (`harness finding list` shows it; the stored document does not). Ids F-001.. are allocated in increasing order from `next_id` and never reused; a withdrawn finding stays with its reason. Findings are ordered by id; the document has no timestamps.",
+  "type": "object",
+  "required": ["schema_version", "kind", "project_id", "next_id", "findings"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": "0.1" },
+    "kind": { "const": "reader_findings" },
+    "project_id": { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/project_id" },
+    "next_id": { "type": "integer", "minimum": 1, "description": "N of the next id to allocate (F-N); greater than every allocated id." },
+    "findings": { "type": "array", "items": { "$ref": "#/$defs/finding" } }
+  },
+  "$defs": {
+    "finding_id": { "type": "string", "pattern": "^F-[0-9]{3,}$" },
+    "entry": {
+      "type": "object",
+      "required": ["id", "display_text"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "pattern": "^T[0-9]{6,}$", "description": "Text-index entry id." },
+        "display_text": { "type": "string", "description": "The entry's display_text, copied verbatim when the finding was recorded." }
+      }
+    },
+    "finding": {
+      "type": "object",
+      "required": ["id", "kind", "status", "file", "file_sha256", "sheet", "entries", "value", "fields", "questions", "confidence"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/finding_id" },
+        "kind": {
+          "enum": ["sheet_class", "note_item", "structural_system", "cross_check"],
+          "description": "sheet_class: the kind of drawing a sheet is (value from the closed list below; 'mixed' = one sheet holding several drawings; 'other' needs a note). note_item: a verbatim quote from a general note, fields.topic says which topic. structural_system: the reader's claim about the structure, fields.aspect says which aspect. cross_check: a mismatch between sources, with at least two entries and at least one question."
+        },
+        "status": { "enum": ["active", "withdrawn"] },
+        "file": { "type": "string", "minLength": 1, "description": "Inventory path of the drawing file." },
+        "file_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$", "description": "The inventory's sha256 of `file` when the finding was recorded." },
+        "sheet": { "type": ["string", "null"], "minLength": 1, "description": "Detector sheet id (model#01, <layout>#01) every cited entry is assigned to; null when the finding is not tied to one sheet (allowed for every kind but sheet_class)." },
+        "entries": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/entry" }, "description": "The cited entries, in the order given." },
+        "value": { "type": "string", "minLength": 1 },
+        "fields": {
+          "type": "object",
+          "description": "note_item: topic (design_code, concrete_class, rebar_grade, steel_grade, bolt_grade, weld, cover, lap, convention, other). structural_system: aspect (frame_type, foundation_type, lateral_system, floors, typical_floors). Other keys are free (lowercase snake_case), values are strings.",
+          "propertyNames": { "pattern": "^[a-z][a-z0-9_]*$" },
+          "additionalProperties": { "type": "string" }
+        },
+        "questions": { "type": "array", "items": { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/question_id" }, "description": "Registry question ids the finding relates to (required for cross_check)." },
+        "confidence": { "enum": ["low", "medium"], "description": "Minimum of the cited entries' confidence, optionally lowered; never 'high'." },
+        "note": { "type": "string", "minLength": 1 },
+        "withdrawn_reason": { "type": "string", "minLength": 1, "description": "Only when status is 'withdrawn'." }
+      },
+      "allOf": [
+        { "if": { "properties": { "status": { "const": "withdrawn" } } }, "then": { "required": ["withdrawn_reason"] }, "else": { "not": { "required": ["withdrawn_reason"] } } },
+        {
+          "if": { "properties": { "kind": { "const": "sheet_class" } } },
+          "then": {
+            "required": ["sheet"],
+            "properties": {
+              "sheet": { "type": "string" },
+              "value": { "enum": ["general_notes", "setting_out", "foundation", "foundation_details", "floor_framing", "column_details", "beam_details", "slab_details", "stairs", "schedules", "steel_details", "mixed", "other"] }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "kind": { "const": "note_item" } } },
+          "then": {
+            "properties": {
+              "fields": {
+                "required": ["topic"],
+                "properties": { "topic": { "enum": ["design_code", "concrete_class", "rebar_grade", "steel_grade", "bolt_grade", "weld", "cover", "lap", "convention", "other"] } }
+              }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "kind": { "const": "structural_system" } } },
+          "then": {
+            "properties": {
+              "fields": {
+                "required": ["aspect"],
+                "properties": { "aspect": { "enum": ["frame_type", "foundation_type", "lateral_system", "floors", "typical_floors"] } }
+              }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "kind": { "const": "cross_check" } } },
+          "then": { "properties": { "entries": { "minItems": 2 }, "questions": { "minItems": 1 } } }
+        }
+      ]
+    }
+  }
+}

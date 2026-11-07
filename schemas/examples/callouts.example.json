@@ -388,6 +388,15 @@
       }
     }
   ],
+  "blocked_entries": [
+    {
+      "file": "plans/set.dxf",
+      "sheet": "model#01",
+      "entry_id": "T000099",
+      "display_text": "4Ø16",
+      "reason": "encoding_unknown"
+    }
+  ],
   "question_counts": {
     "callout_ambiguous": 2,
     "member_mark_prefix_meaning": 1
@@ -446,7 +455,8 @@
     ],
     "member_mark_prefixes": 1,
     "files_scanned": 1,
-    "files_skipped": 0
+    "files_skipped": 0,
+    "blocked_entries": 1
   },
   "warnings": [
     "plans/set.dxf: structure/plans/set.dxf.grids.json is missing: its texts are not excluded from member marks",

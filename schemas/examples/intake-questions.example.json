@@ -9,7 +9,7 @@
       "code": "units_confirm_all",
       "blocking": true,
       "file": "S-101.dwg",
-      "message": "Header units are unreliable on real drawings and are not accepted automatically. Confirm the drawing unit of this DXF (against a known dimension, a PDF or your own knowledge) before any extraction. Replaces the non-blocking units_confirm probe question.",
+      "message": "Header units are unreliable on real drawings and are not accepted automatically. Confirm the drawing unit of this DXF (against a known dimension, a PDF or your own knowledge) before any extraction: answer with --value unit=mm|cm|m|in|ft. This is the file's only blocking units question; the probe's units evidence (header unit vs measurement system, implausible dimensions, unknown unit) is listed in its refs. Replaces the non-blocking units_confirm probe question.",
       "count": 1,
       "truncated": false,
       "refs": [
@@ -32,8 +32,8 @@
       "code": "units_confirm_all",
       "blocking": true,
       "file": "S-102.dxf",
-      "message": "Header units are unreliable on real drawings and are not accepted automatically. Confirm the drawing unit of this DXF (against a known dimension, a PDF or your own knowledge) before any extraction. Replaces the non-blocking units_confirm probe question.",
-      "count": 1,
+      "message": "Header units are unreliable on real drawings and are not accepted automatically. Confirm the drawing unit of this DXF (against a known dimension, a PDF or your own knowledge) before any extraction: answer with --value unit=mm|cm|m|in|ft. This is the file's only blocking units question; the probe's units evidence (header unit vs measurement system, implausible dimensions, unknown unit) is listed in its refs. Replaces the non-blocking units_confirm probe question.",
+      "count": 2,
       "truncated": false,
       "refs": [
         {
@@ -45,6 +45,12 @@
           "flags": [
             "units_unknown"
           ]
+        },
+        {
+          "file": "S-102.dxf",
+          "where": "header $INSUNITS",
+          "found": "0",
+          "message": "units_unknown: The DXF header does not give usable drawing units ($INSUNITS missing, 0, invalid or outside mm/cm/m/in/ft). In which unit are the coordinates drawn? Metres are not assumed."
         }
       ],
       "answer": {
@@ -60,24 +66,6 @@
         "answered_on": "2026-11-03",
         "status": "active"
       }
-    },
-    {
-      "id": "Q-003",
-      "key": "888281b0e47e4a65",
-      "code": "units_unknown",
-      "blocking": true,
-      "file": "S-102.dxf",
-      "message": "The DXF header does not give usable drawing units ($INSUNITS missing, 0, invalid or outside mm/cm/m/in/ft). In which unit are the coordinates drawn? Metres are not assumed.",
-      "count": 1,
-      "truncated": false,
-      "refs": [
-        {
-          "file": "S-102.dxf",
-          "where": "header $INSUNITS",
-          "found": "0"
-        }
-      ],
-      "answer": null
     },
     {
       "id": "Q-009",
@@ -181,9 +169,9 @@
     }
   ],
   "summary": {
-    "questions": 8,
-    "blocking_questions": 4,
+    "questions": 7,
+    "blocking_questions": 3,
     "answered": 1,
-    "blocking_open": 3
+    "blocking_open": 2
   }
 }

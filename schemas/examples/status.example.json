@@ -139,7 +139,7 @@
           "grid-systems.json",
           "grid-system-questions.json"
         ],
-        "reason": "grid-systems.json was built before the latest units / axis answers",
+        "reason": "grid-systems.json was built before the latest answers it reads (units, axes, selection)",
         "rerun": "harness grid-system work"
       }
     },
@@ -167,7 +167,7 @@
   "gate1": {
     "ready_for_gate1": false,
     "reasons": [
-      "units: other.dxf has no active units answer (harness answer <id> ... --value unit=mm)",
+      "units: other.dxf is not confirmed: harness answer Q-001 --text \"...\" --by \"...\" --value unit=mm|cm|m|in|ft (units_confirm_all)",
       "grid systems: not checked, the grid-system outputs are stale",
       "levels: Q-017 level_finished_vs_structural (other.dxf) is not answered",
       "levels: Q-018 level_finished_vs_structural (set.dxf) is not answered",
@@ -175,7 +175,7 @@
       "read-structure: 16 blocking question(s) open (Q-005, Q-006, Q-007, Q-008, Q-009, Q-010, Q-011, Q-012, Q-013, Q-014 and 6 more)",
       "grid-system: 4 blocking question(s) open (Q-023, Q-024, Q-025, Q-026)",
       "callouts: outputs missing (callouts.json, callouts-questions.json not found); rerun harness callouts work",
-      "grid-system: outputs stale (grid-systems.json was built before the latest units / axis answers); rerun harness grid-system work"
+      "grid-system: outputs stale (grid-systems.json was built before the latest answers it reads (units, axes, selection)); rerun harness grid-system work"
     ]
   }
 }

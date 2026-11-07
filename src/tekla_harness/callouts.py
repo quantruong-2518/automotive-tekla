@@ -28,6 +28,9 @@ designations"):
     encoding_unknown_non_ascii, unicode_evidence_contradicts_font, knowledge_conflict,
     codepage_reencode_failed, mif_escape_not_decoded, unknown_special_code, mixed_fonts,
     inline_font_unknown.
+  * Legacy-font gate (`text_gate.meaning_block_reason`): an entry whose meaning is blocked (non-ASCII text in
+    an unknown, proposed or contradicted encoding) yields no candidate, not even a literal `4Ø16`. An entry
+    that would have yielded one is listed verbatim in `blocked_entries` (entry id, reason), never read.
   * Sheets that are exact copies of an earlier sheet (`duplicate_of`) are not scanned (their texts would be
     counted twice); they are listed in `skipped_sheets`.
   * Texts another extractor claimed (title-block fields, grid bubble labels, level values) are never member
@@ -83,6 +86,7 @@ from tekla_harness.sheet_text import (
     stale_warning,
 )
 from tekla_harness.sheets import text_box
+from tekla_harness.text_gate import meaning_block_reason
 
 MAX_REFS = 50  # refs listed per question; `count` is always the true total
 MAX_PREFIX_REFS = 10
@@ -664,7 +668,9 @@ def _check(doc: dict[str, Any]) -> dict[str, Any]:
     return doc
 
 
-def _summary(candidates: list[dict[str, Any]], files: list[dict[str, Any]]) -> dict[str, Any]:
+def _summary(
+    candidates: list[dict[str, Any]], files: list[dict[str, Any]], blocked: list[dict[str, Any]]
+) -> dict[str, Any]:
     by_file: dict[str, Counter[str]] = {}
     by_sheet: dict[tuple[str, str | None], tuple[dict[str, str] | None, Counter[str]]] = {}
     for c in candidates:
@@ -694,6 +700,7 @@ def _summary(candidates: list[dict[str, Any]], files: list[dict[str, Any]]) -> d
         "member_mark_prefixes": len({c["lexical"]["prefix"] for c in candidates if c.get("lexical")}),
         "files_scanned": sum(1 for f in files if f["status"] == "scanned"),
         "files_skipped": sum(1 for f in files if f["status"] == "skipped"),
+        "blocked_entries": len(blocked),
     }
 
 
@@ -709,6 +716,7 @@ def extract_callouts(work_dir: Path | str, *, check_inputs: bool = False) -> dic
     files: list[dict[str, Any]] = []
     skipped_sheets: list[dict[str, Any]] = []
     candidates: list[dict[str, Any]] = []
+    blocked: list[dict[str, Any]] = []
     for row in sorted(inv.doc["files"], key=lambda r: r["path"]):
         if row["format"] not in ("dwg", "dxf"):
             continue
@@ -750,7 +758,21 @@ def extract_callouts(work_dir: Path | str, *, check_inputs: bool = False) -> dic
                 continue
             info["scanned"] += 1
             sheet = sheet_of.get(entry["id"])
-            for line, hit in _entry_hits(entry, entry["id"] not in claimed_ids):
+            hits = _entry_hits(entry, entry["id"] not in claimed_ids)
+            reason = meaning_block_reason(entry)
+            if reason is not None:  # legacy-font gate: no meaning from this text, only a verbatim listing
+                if hits:
+                    blocked.append(
+                        {
+                            "file": loaded.rel,
+                            "sheet": None if sheet is None else sheet["sheet_id"],
+                            "entry_id": entry["id"],
+                            "display_text": " ".join(entry["display_text"].split())[:LINE_CHARS],
+                            "reason": reason,
+                        }
+                    )
+                continue
+            for line, hit in hits:
                 span = line[hit.start : hit.end]
                 flags = list(entry["flags"])
                 if entry["decode"]["case_uncertain"]:
@@ -793,8 +815,9 @@ def extract_callouts(work_dir: Path | str, *, check_inputs: bool = False) -> dic
         "files": files,
         "skipped_sheets": skipped_sheets,
         "candidates": candidates,
+        "blocked_entries": blocked,
         "question_counts": question_counts(candidates),
-        "summary": _summary(candidates, files),
+        "summary": _summary(candidates, files, blocked),
         "warnings": warnings,
     }
     return _check(doc)
