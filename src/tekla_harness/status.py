@@ -50,6 +50,7 @@ PRODUCERS = (
     ("intake", "intake"),
     ("read-structure", "structure"),
     ("callouts", "callouts"),
+    ("marks", "marks"),
     ("grid-system", "grid-system"),
     ("reader", "reader"),
 )
@@ -145,6 +146,7 @@ def _outputs(
         "intake": ["inventory.json", "questions.json"],
         "read-structure": ["structure-summary.json", "structure-questions.json"],
         "callouts": ["callouts.json", "callouts-questions.json"],
+        "marks": ["marks.json", "marks-questions.json"],
         "grid-system": ["grid-systems.json", "grid-system-questions.json"],
     }[label]
     status, reason = "fresh", None

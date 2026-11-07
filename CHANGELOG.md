@@ -238,6 +238,16 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
   (outputs `n/a`) and gate 1 waits for its blocking open questions. Schemas changed (still `0.1`):
   `question-registry` (producer `reader`, `withdrawn_reason`), `intake` (ref `file` may be null in a
   project-level reader question), `status` (5 producers, outputs `n/a`).
+- EVAL-1 wave groundwork: registry producer `marks` (`harness marks`, documents `marks.json` and
+  `marks-questions.json`; like callouts, its blocking questions block lot specs, not gate 1; status checks
+  its outputs' `inventory_sha256`); `harness ask` accepts any code in the `reader_` namespace (no producer
+  owns it), and the owner table now lists `grid_family_axis_assignment` and `grid_units_doubt` under
+  read-structure, which raises them (EVAL-1 F-20, F-21); `harness marks`, `harness questions-md` and
+  `harness finding` registered as stubs that exit 3 until their modules land. Schemas changed:
+  `question-registry`, `status` (6 producers).
+- Versioning note: the reading-toolchain schemas above have not been released; they stay `0.1` and their
+  changes are recorded here until the first tagged release, from which every change bumps its `$id`
+  (AGENTS.md). Pending engineer confirmation.
 
 ### Fixed
 - `guard_tekla_write.py` now exits 2 (the blocking code) on any internal error instead of

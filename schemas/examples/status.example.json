@@ -93,6 +93,29 @@
       }
     },
     {
+      "producer": "marks",
+      "command": "harness marks",
+      "questions": {
+        "total": 0,
+        "blocking": 0,
+        "blocking_unknown": 0,
+        "blocking_open": 0,
+        "answered": 0,
+        "obsolete": 0
+      },
+      "blocking_open_ids": [],
+      "stale_answers": [],
+      "outputs": {
+        "status": "missing",
+        "files": [
+          "marks.json",
+          "marks-questions.json"
+        ],
+        "reason": "marks.json, marks-questions.json not found",
+        "rerun": "harness marks work"
+      }
+    },
+    {
       "producer": "grid-system",
       "command": "harness grid-system",
       "questions": {

@@ -12,7 +12,8 @@ document kind as the other `*questions.json`.
     does not list is refused (exit 1).
   * `--code` is lowercase snake_case and must not be a code another producer owns: the codes already in
     the registry under another producer, plus the known codes and code families in `OTHER_OWNERS` (exit 2,
-    the owner is named).
+    the owner is named). Codes starting with `reader_` are always the reader's (e.g.
+    `reader_level_storey_selection`): use that namespace for a gap whose natural code a producer owns.
   * `--text` is the English question; the Vietnamese rendering belongs to questions.md, not here.
   * A reader question is never obsoleted by another producer's run. `--withdraw Q-id --reason "..."`
     marks one obsolete (kept in the registry with its reason, dropped from reader-questions.json; an
@@ -73,16 +74,22 @@ OTHER_OWNERS: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
         ),
         ("units_",),
     ),
-    "grid-system": (("grid_family_axis_assignment", "grid_units_doubt"), ("grid_system_",)),
-    "structure": ((), ("grid_", "level_", "sheet_")),
+    "grid-system": ((), ("grid_system_",)),
+    "structure": (("grid_family_axis_assignment", "grid_units_doubt"), ("grid_", "level_", "sheet_")),
     "callouts": (
         ("member_mark_prefix_meaning", "grade_legacy_mapping"),
         ("callout_", "steel_grade", "rebar_"),
     ),
+    "marks": ((), ("mark_", "schedule_")),
 }
+# Codes in this namespace are always the reader's own: no producer may own them, so the reader can ask
+# about grids, levels, sheets or rebar without colliding with a producer's prefix.
+READER_NAMESPACE = "reader_"
 
 
 def static_owner(code: str) -> str | None:
+    if code.startswith(READER_NAMESPACE):
+        return None
     for producer, (exact, prefixes) in OTHER_OWNERS.items():
         if code in exact or code.startswith(prefixes):
             return producer
@@ -116,6 +123,8 @@ def _inventory_sha(work: Path, file: str) -> str:
 
 
 def _owner_of(ledger: Ledger, code: str) -> str | None:
+    if code.startswith(READER_NAMESPACE):
+        return None
     for entry in ledger.registry["questions"].values():
         if entry["code"] == code and entry["producer"] != READER:
             return entry["producer"]

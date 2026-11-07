@@ -130,7 +130,16 @@ def test_unknown_file_is_refused_with_exit_1_and_writes_nothing(world, capsys):
 
 @pytest.mark.parametrize(
     ("code", "owner"),
-    [("units_unknown", "intake"), ("grid_system_select", "grid-system"), ("level_none_found", "structure")],
+    [
+        ("units_unknown", "intake"),
+        ("grid_system_select", "grid-system"),
+        ("level_none_found", "structure"),
+        # raised by read-structure, so owned by it (EVAL-1 F-21 listed them under grid-system)
+        ("grid_family_axis_assignment", "structure"),
+        ("grid_units_doubt", "structure"),
+        ("mark_unmatched", "marks"),
+        ("schedule_row_unparsed", "marks"),
+    ],
 )
 def test_a_code_owned_by_another_producer_is_refused_with_exit_2(world, capsys, code, owner):
     _, work = world
@@ -139,6 +148,13 @@ def test_a_code_owned_by_another_producer_is_refused_with_exit_2(world, capsys, 
     )
     assert rc == 2 and owner in err
     assert static_owner(code) == owner
+
+
+@pytest.mark.parametrize("code", ["reader_level_storey_selection", "reader_grid_extra_line", "reader_units"])
+def test_the_reader_namespace_is_never_owned_by_a_producer(world, code):
+    _, work = world
+    assert static_owner(code) is None
+    assert ask(work, code=code)["status"] == "new"
 
 
 def test_a_code_already_in_the_registry_under_another_producer_is_refused(world, capsys):

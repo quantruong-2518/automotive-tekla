@@ -12,7 +12,7 @@ import json
 import sys
 from pathlib import Path
 
-from tekla_harness import __version__
+from tekla_harness import __version__, findings, marks, questions_md
 from tekla_harness.answers import parse_values, record_answer
 from tekla_harness.ask import ask_question, withdraw_question
 from tekla_harness.callouts import run_callouts
@@ -533,6 +533,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_ask.add_argument("--withdraw", metavar="Q-ID", help="retire this reader question (needs --reason)")
     p_ask.add_argument("--reason", help="why the question is withdrawn")
     p_ask.set_defaults(func=_cmd_ask)
+
+    # Commands whose module owns its arguments and its run (add_arguments / run / COMMAND / HELP).
+    for module in (marks, questions_md, findings):
+        p_mod = sub.add_parser(module.COMMAND, help=module.HELP)
+        module.add_arguments(p_mod)
+        p_mod.set_defaults(func=module.run)
 
     p_env = sub.add_parser("env-check", help="report whether this machine can run the harness")
     p_env.set_defaults(func=_cmd_env_check)

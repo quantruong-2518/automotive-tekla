@@ -15,8 +15,9 @@ identity that does not depend on the position:
             re-bound to another key.
 
 One question is one (code, blocking flag, file) with its refs (file null = a question about the whole
-project). Five producers share the registry and own disjoint code sets: `intake` (harness intake),
-`structure` (harness read-structure), `callouts` (harness callouts), `grid-system` (harness grid-system) and
+project). Six producers share the registry and own disjoint code sets: `intake` (harness intake),
+`structure` (harness read-structure), `callouts` (harness callouts), `marks` (harness marks: member marks
+and schedules), `grid-system` (harness grid-system) and
 `reader` (harness ask, the drawing-reader agent's own questions, see ask.py: one question per
 (code, blocking, file, where), added one at a time, never obsoleted by another producer's run).
 A producer only obsoletes keys of its own producer. Every registry entry also records the question's
@@ -52,12 +53,13 @@ SCHEMA_VERSION = "0.1"
 REGISTRY_FILE = "question-registry.json"
 ANSWERS_FILE = "answers.json"
 KEY_LENGTH = 16
-PRODUCERS = ("intake", "structure", "callouts", "grid-system", "reader")
+PRODUCERS = ("intake", "structure", "callouts", "marks", "grid-system", "reader")
 # the command that (re)runs each producer, for messages
 PRODUCER_COMMANDS = {
     "intake": "harness intake",
     "structure": "harness read-structure",
     "callouts": "harness callouts",
+    "marks": "harness marks",
     "grid-system": "harness grid-system",
     "reader": "harness ask",
 }
@@ -66,6 +68,7 @@ QUESTION_DOCUMENTS = (
     "questions.json",
     "structure-questions.json",
     "callouts-questions.json",
+    "marks-questions.json",
     "grid-system-questions.json",
     "reader-questions.json",
 )

@@ -6,6 +6,7 @@ grid-system. Tests that change something work on a copy of it.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import shutil
@@ -52,10 +53,18 @@ def by_label(status: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return {p["producer"]: p for p in status["producers"]}
 
 
+def write_marks_outputs(work: Path) -> None:
+    """Stand-in for `harness marks` until it exists: status reads only `inventory_sha256` (TEMPORARY)."""
+    inventory_sha = hashlib.sha256((work / "inventory.json").read_bytes()).hexdigest()
+    (work / "marks.json").write_text(json.dumps({"inventory_sha256": inventory_sha}), encoding="utf-8")
+    (work / "marks-questions.json").write_text("{}", encoding="utf-8")
+
+
 def rerun_all(root: Path, work: Path) -> None:
     run_intake(root, work, PROJECT)
     read_structure(work, root)
     run_callouts(work, root)
+    write_marks_outputs(work)
     run_grid_systems(work)
 
 
@@ -330,7 +339,7 @@ def test_status_counts_come_from_the_registry_and_answers_not_from_the_question_
     status = build_status(work)
     assert validate("status", status) == []
     labels = by_label(status)
-    assert list(labels) == ["intake", "read-structure", "callouts", "grid-system", "reader"]
+    assert list(labels) == ["intake", "read-structure", "callouts", "marks", "grid-system", "reader"]
     docs = {
         "intake": "questions.json",
         "read-structure": "structure-questions.json",
