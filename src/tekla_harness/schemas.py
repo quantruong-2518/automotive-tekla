@@ -13,7 +13,24 @@ from typing import Any
 from jsonschema import Draft202012Validator
 from referencing import Registry, Resource
 
-SCHEMA_NAMES = ("common", "spec", "project-state", "read-log")
+SCHEMA_NAMES = (
+    "common",
+    "spec",
+    "project-state",
+    "read-log",
+    "dxf-probe",
+    "intake",
+    "text-index",
+    "sheets",
+    "grids",
+    "levels",
+    "sheet-text",
+    "callouts",
+    "answers",
+    "question-registry",
+    "grid-system",
+    "status",
+)
 _REPO_SCHEMAS = Path(__file__).resolve().parents[2] / "schemas"
 
 

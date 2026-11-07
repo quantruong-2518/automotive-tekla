@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:tekla-harness:schema:question-registry:0.1",
+  "title": "Question registry",
+  "description": "question-registry.json in the work folder: the one place that allocates question ids. A question is identified by its stable `key`: the first 16 hex characters of sha256 over its code, its file, that file's sha256 (from the inventory) and its canonical sorted refs (where, found, sheet). The same drawing content gives the same key on every run; changed content gives a new key, which is asked again. Ids Q-001.. are allocated in increasing order (`next_id`) and are NEVER reused: a key that its producer no longer raises becomes 'obsolete' and stays in the registry with its id. Each producer (intake, read-structure, callouts, grid-system, reader) owns a disjoint set of codes and only obsoletes its own keys. `runs` counts producer runs; first_seen_run and last_seen_run refer to it. Each entry also records the question's `blocking` flag and the sha256 of its file at the time the question was raised (`file_sha256`, the inventory's value): `harness status` counts blocking questions from the registry alone, and `harness answer` refuses a question whose file's current inventory sha256 differs (the file changed since the question was raised). Both are set on every run that raises the key; an entry written before they existed has neither until its producer reruns (status then counts it as blocking). Written by the producers and by `harness answer` (status 'answered'); contains no timestamps.",
+  "type": "object",
+  "required": ["schema_version", "project_id", "next_id", "runs", "questions"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": "0.1" },
+    "project_id": { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/project_id" },
+    "next_id": { "type": "integer", "minimum": 1, "description": "N of the next id to allocate (Q-N); greater than every allocated id." },
+    "runs": { "type": "integer", "minimum": 0, "description": "Producer runs so far." },
+    "questions": {
+      "type": "object",
+      "description": "key -> entry.",
+      "propertyNames": { "pattern": "^[0-9a-f]{16}$" },
+      "additionalProperties": { "$ref": "#/$defs/entry" }
+    }
+  },
+  "$defs": {
+    "entry": {
+      "type": "object",
+      "required": ["id", "code", "file", "producer", "status", "first_seen_run", "last_seen_run"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/question_id" },
+        "code": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+        "file": { "type": ["string", "null"], "minLength": 1, "description": "Input-relative path; null for a project-level question." },
+        "producer": { "enum": ["intake", "structure", "callouts", "grid-system", "reader"], "description": "Which command raises this question: intake (harness intake), structure (harness read-structure), callouts (harness callouts), grid-system (harness grid-system), reader (harness ask: the drawing-reader agent's own questions, never obsoleted by another producer, retired only by harness ask --withdraw)." },
+        "status": { "enum": ["open", "answered", "obsolete"], "description": "answered: an active answer exists in answers.json. obsolete: the producer's latest run did not raise it." },
+        "first_seen_run": { "type": "integer", "minimum": 1 },
+        "last_seen_run": { "type": "integer", "minimum": 1 },
+        "blocking": { "type": "boolean", "description": "The question's blocking flag as of the latest run that raised it. Absent in an entry written before this field existed." },
+        "withdrawn_reason": { "type": "string", "minLength": 1, "description": "reader questions only: why `harness ask --withdraw` made the entry obsolete." },
+        "file_sha256": { "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$", "description": "sha256 of `file` (inventory.json) when the latest run raised the question; null for a project-level question. Absent in an entry written before this field existed." }
+      }
+    }
+  }
+}

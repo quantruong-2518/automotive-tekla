@@ -19,6 +19,7 @@ import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from ezdxf.document import Drawing
 from ezdxf.filemanagement import readfile
 
 from tekla_harness.readlog import Attempt, timed_attempt
@@ -29,6 +30,8 @@ _PATH_NAMES = {ODA_TOOL: "ODAFileConverter", LIBREDWG_TOOL: "dwg2dxf"}
 CONFIDENCE_CAP = {ODA_TOOL: "high", LIBREDWG_TOOL: "medium"}
 ODA_OUTPUT_VERSION = "ACAD2018"
 DEFAULT_TIMEOUT_S = 300
+EMPTY_CHECK_MIN_DWG_BYTES = 10 * 1024  # below this an empty drawing is plausible
+_LOWER_CAP = {"high": "medium", "medium": "medium", "low": "low"}
 
 
 class NoConverterError(RuntimeError):
@@ -43,6 +46,19 @@ class ConversionResult:
     confidence_cap: str | None
     attempts: list[Attempt] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    stderr_tail: str = ""
+    stderr_error_lines: int = 0
+    stderr_warning_lines: int = 0
+
+
+@dataclass
+class _Probe:
+    """What one successful run revealed beyond 'a DXF exists'."""
+
+    stderr_tail: str = ""
+    error_lines: int = 0
+    warning_lines: int = 0
+    empty: bool = False
 
 
 def _split_command(value: str) -> list[str]:
@@ -78,8 +94,17 @@ def _tail(text: str, limit: int = 300) -> str:
     return text if len(text) <= limit else "…" + text[-limit:]
 
 
-def _try(tool: str, exe: list[str], dwg: Path, timeout: float) -> tuple[Attempt, Path | None, Path]:
-    """Run one converter in its own temp folder. Returns (attempt, dxf or None, temp dir)."""
+def _count_prefixed(text: str, prefix: str) -> int:
+    return sum(1 for line in text.splitlines() if line.startswith(prefix))
+
+
+def _entity_count(doc: Drawing) -> int:
+    return sum(len(layout) for layout in doc.layouts)
+
+
+def _try(tool: str, exe: list[str], dwg: Path, timeout: float) -> tuple[Attempt, Path | None, Path, _Probe]:
+    """Run one converter in its own temp folder. Returns (attempt, dxf or None, temp dir, probe)."""
+    probe = _Probe()
     work = Path(tempfile.mkdtemp(prefix=f"{tool}-"))
     src_dir, out_dir = work / "in", work / "out"
     src_dir.mkdir()
@@ -91,24 +116,52 @@ def _try(tool: str, exe: list[str], dwg: Path, timeout: float) -> tuple[Attempt,
             proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, check=False)
         except (FileNotFoundError, PermissionError) as exc:
             attempt.fail(f"converter not found or not executable: {exc}")
-            return attempt, None, work
+            return attempt, None, work, probe
         except subprocess.TimeoutExpired:
             attempt.fail(f"timed out after {timeout:g} s")
-            return attempt, None, work
+            return attempt, None, work, probe
         if proc.returncode != 0:
             attempt.fail(f"exit code {proc.returncode}: {_tail(proc.stderr or proc.stdout)}")
-            return attempt, None, work
+            return attempt, None, work, probe
         if not out.is_file() or out.stat().st_size == 0:
             attempt.fail(
                 f"exit code 0 but no DXF written ({_tail(proc.stderr or proc.stdout) or 'no output'})"
             )
-            return attempt, None, work
+            return attempt, None, work, probe
+        stderr = proc.stderr or ""
+        probe.stderr_tail = _tail(stderr)
+        probe.error_lines = _count_prefixed(stderr, "ERROR")
+        probe.warning_lines = _count_prefixed(stderr, "Warning")
         try:
-            readfile(out)
+            doc = readfile(out)
         except Exception as exc:  # ezdxf raises more than DXFError on corrupt files (e.g. StopIteration)
             attempt.fail(f"exit code 0 but the DXF cannot be opened by ezdxf: {type(exc).__name__}: {exc}")
-            return attempt, None, work
-    return attempt, out, work
+            return attempt, None, work, probe
+        if _entity_count(doc) == 0 and dwg.stat().st_size > EMPTY_CHECK_MIN_DWG_BYTES:
+            probe.empty = True
+            attempt.fail("DXF opened but contains no entities in any layout", status="partial")
+    return attempt, out, work, probe
+
+
+def _apply_probe(result: ConversionResult, tool: str, probe: _Probe) -> None:
+    result.stderr_tail = probe.stderr_tail
+    result.stderr_error_lines = probe.error_lines
+    result.stderr_warning_lines = probe.warning_lines
+    if probe.error_lines > 0:
+        result.warnings.append(
+            f"converter reported {probe.error_lines} ERROR lines; "
+            "some objects/strings may be missing or truncated"
+        )
+        lowered = _LOWER_CAP[CONFIDENCE_CAP[tool]]
+        if lowered != result.confidence_cap:
+            result.confidence_cap = lowered
+            result.warnings.append(f"confidence cap lowered to {lowered} because of converter ERROR lines")
+    if probe.empty:
+        result.confidence_cap = "low"
+        result.warnings.append(
+            "DXF opened but contains no entities in any layout although the DWG is not tiny: "
+            "treat as a failed parse unless the engineer confirms the sheet is empty"
+        )
 
 
 def dwg_to_dxf(
@@ -132,7 +185,7 @@ def dwg_to_dxf(
         if tool not in converters:
             result.warnings.append(f"{tool} not configured; skipped")
             continue
-        attempt, produced, work = _try(tool, converters[tool], dwg, timeout)
+        attempt, produced, work, probe = _try(tool, converters[tool], dwg, timeout)
         result.attempts.append(attempt)
         try:
             if produced is not None:
@@ -143,6 +196,7 @@ def dwg_to_dxf(
                     result.warnings.append(
                         f"fallback converter {tool} used: confidence capped at {CONFIDENCE_CAP[tool]}"
                     )
+                _apply_probe(result, tool, probe)
                 return result
         finally:
             shutil.rmtree(work, ignore_errors=True)

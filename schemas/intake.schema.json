@@ -1,0 +1,406 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:tekla-harness:schema:intake:0.1",
+  "title": "Intake outputs",
+  "description": "The documents written by `harness intake` besides read-log.json, and by `harness read-structure` on top of them, told apart by `kind`: 'inventory' (inventory.json: one row per input file plus a summary), 'questions' (questions.json from intake, structure-questions.json from read-structure, callouts-questions.json from callouts, grid-system-questions.json from grid-system, reader-questions.json from harness ask (the drawing-reader agent: one question per code, blocking flag, file and where, one ref each): the open questions for the engineer, one per code and file, each with its stable key, its id from question-registry.json and its answer from answers.json) and 'structure_summary' (structure-summary.json: what read-structure extracted per file). None of the documents contains timestamps, durations or temporary paths: the same input folder, registry and answers give byte-identical documents. Paths are relative: file paths to the input folder, probe and converted paths to the work folder.",
+  "type": "object",
+  "required": ["kind"],
+  "properties": { "kind": { "enum": ["inventory", "questions", "structure_summary"] } },
+  "allOf": [
+    { "if": { "required": ["kind"], "properties": { "kind": { "const": "inventory" } } }, "then": { "$ref": "#/$defs/inventory" } },
+    { "if": { "required": ["kind"], "properties": { "kind": { "const": "questions" } } }, "then": { "$ref": "#/$defs/questions" } },
+    { "if": { "required": ["kind"], "properties": { "kind": { "const": "structure_summary" } } }, "then": { "$ref": "#/$defs/structure_summary" } }
+  ],
+  "$defs": {
+    "inventory": {
+      "type": "object",
+      "required": ["schema_version", "kind", "project_id", "files", "summary"],
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": { "const": "0.1" },
+        "kind": { "const": "inventory" },
+        "project_id": { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/project_id" },
+        "files": { "type": "array", "description": "Sorted by path.", "items": { "$ref": "#/$defs/inventory_file" } },
+        "summary": { "$ref": "#/$defs/summary" }
+      }
+    },
+    "inventory_file": {
+      "type": "object",
+      "description": "Every property is always present. null means 'not available for this file' (for example no probe for a PDF), which is different from an empty list or 0 ('read, none found').",
+      "required": [
+        "path", "sha256", "format", "dwg_version", "converter", "confidence_cap", "outcome", "units",
+        "layouts", "modelspace_entity_total", "text_encoding_hints", "unreadable_objects",
+        "dimension_override_differs", "probe", "text_index", "text", "converted", "conversion"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "path": { "type": "string", "minLength": 1, "description": "POSIX path relative to the input folder." },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$", "description": "Hash of the input file itself." },
+        "format": { "enum": ["dwg", "dxf", "pdf", "image", "docx", "xlsx", "other"], "description": "Detected from the bytes (detect_file), not the extension. 'pdf' is not yet split into vector/scan/mixed; read-log.json records it as pdf_mixed because that enum has no undetermined value." },
+        "dwg_version": { "type": ["string", "null"], "description": "Header version string, e.g. 'AC1032'. Null unless format is dwg." },
+        "converter": { "enum": ["oda", "libredwg", "none", null], "description": "Tool that produced the DXF that was probed: 'none' for a DXF supplied as such; null when no DXF was probed (conversion failed, or not a CAD file)." },
+        "confidence_cap": { "anyOf": [{ "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/confidence" }, { "type": "null" }], "description": "Same as max_confidence in read-log.json: the most restrictive of the conversion cap and the probe's file cap. Null when the file was not read." },
+        "outcome": { "enum": ["read", "partial", "unreadable"], "description": "As in read-log.json. 'partial': conversion partial (empty layouts) or with converter ERROR lines, or probe status 'partial'. 'unreadable': conversion or DXF open failed, or no reader exists yet for the format." },
+        "units": {
+          "anyOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "required": ["value", "confidence", "flags"],
+              "additionalProperties": false,
+              "properties": {
+                "value": { "enum": ["mm", "cm", "m", "in", "ft", "unitless", "unknown"], "description": "Declared by the DXF header, never confirmed. 'unknown' also when the probe could not compute units." },
+                "confidence": { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/confidence" },
+                "flags": { "type": "array", "description": "Every units_* question code the probe raised for this file, sorted (units_confirm, units_unknown, units_conflict, units_suspect), plus 'units_not_read' when the probe could not compute the units section.", "items": { "type": "string", "pattern": "^units_[a-z_]+$" } }
+              }
+            }
+          ],
+          "description": "Null when no DXF was probed or the probe could not open it."
+        },
+        "layouts": { "type": ["array", "null"], "items": { "type": "string" }, "description": "Layout names in the probe's order (model space first)." },
+        "modelspace_entity_total": { "type": ["integer", "null"], "minimum": 0 },
+        "text_encoding_hints": {
+          "type": ["array", "null"],
+          "description": "Text styles that look like a legacy Vietnamese font (encoding.font_hint, or an approved knowledge-table row). A hint, not a fact; one row per style.",
+          "items": {
+            "type": "object",
+            "required": ["style", "encoding_hint"],
+            "additionalProperties": false,
+            "properties": { "style": { "type": "string" }, "encoding_hint": { "enum": ["tcvn3", "vni"] } }
+          }
+        },
+        "unreadable_objects": {
+          "type": ["array", "null"],
+          "items": {
+            "type": "object",
+            "required": ["kind", "dxftype", "count"],
+            "additionalProperties": false,
+            "properties": {
+              "kind": { "enum": ["proxy", "acad_table", "ole", "acis", "unknown"] },
+              "dxftype": { "type": "string" },
+              "count": { "type": "integer", "minimum": 1 }
+            }
+          }
+        },
+        "dimension_override_differs": { "type": ["integer", "null"], "minimum": 0, "description": "True number of dimensions whose typed-over text differs from the geometry (not capped by the probe's row or question limits)." },
+        "probe": { "type": ["string", "null"], "description": "dxf-probe document, relative to the work folder: probe/<path>.json." },
+        "text_index": { "type": ["string", "null"], "description": "text-index document, relative to the work folder: text/<path>.json. Null when no DXF was probed or the text index could not be computed." },
+        "text": {
+          "anyOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "description": "Summary of the text index of this file.",
+              "required": ["entries", "by_encoding_used", "low_confidence"],
+              "additionalProperties": false,
+              "properties": {
+                "entries": { "type": "integer", "minimum": 0, "description": "Text entries indexed (summary.total_entries of the text index)." },
+                "by_encoding_used": { "type": "object", "description": "Entries per decode.encoding_used (unicode, tcvn3, vni, unknown, mixed); encodings with no entry are absent.", "additionalProperties": { "type": "integer", "minimum": 1 } },
+                "low_confidence": { "type": "integer", "minimum": 0, "description": "Entries with confidence 'low' (unknown encoding with non-ASCII text, uncertain case, unmapped characters...)." }
+              }
+            }
+          ],
+          "description": "Null when no DXF was probed or the text index could not be computed."
+        },
+        "converted": { "type": ["string", "null"], "description": "DXF produced from a DWG, relative to the work folder: converted/<path with .dxf>." },
+        "conversion": {
+          "anyOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "description": "Converter stderr signals of a successful conversion (ADR-0005 addendum).",
+              "required": ["stderr_error_lines", "stderr_warning_lines", "stderr_tail"],
+              "additionalProperties": false,
+              "properties": {
+                "stderr_error_lines": { "type": "integer", "minimum": 0 },
+                "stderr_warning_lines": { "type": "integer", "minimum": 0 },
+                "stderr_tail": { "type": "string" }
+              }
+            }
+          ],
+          "description": "Null unless a DWG was converted to a DXF."
+        }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "required": ["files", "by_format", "by_outcome", "questions", "blocking_questions", "changes", "stale_answers"],
+      "additionalProperties": false,
+      "properties": {
+        "files": { "type": "integer", "minimum": 0 },
+        "by_format": { "type": "object", "additionalProperties": { "type": "integer", "minimum": 1 } },
+        "by_outcome": { "type": "object", "additionalProperties": { "type": "integer", "minimum": 1 } },
+        "questions": { "type": "integer", "minimum": 0, "description": "Number of questions in questions.json." },
+        "blocking_questions": { "type": "integer", "minimum": 0 },
+        "stale_answers": {
+          "type": "array",
+          "description": "Every answer in answers.json whose status is 'stale' after this run (kept, never re-bound): the engineer must answer these questions again. Derived from answers.json, so a rerun on the same input gives the same list.",
+          "items": {
+            "type": "object",
+            "required": ["question_id", "key", "code", "file", "reason"],
+            "additionalProperties": false,
+            "properties": {
+              "question_id": { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/question_id", "description": "The id the question had when it was answered (now obsolete)." },
+              "key": { "type": "string", "pattern": "^[0-9a-f]{16}$" },
+              "code": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+              "file": { "type": ["string", "null"], "minLength": 1 },
+              "reason": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
+        "changes": {
+          "type": "object",
+          "description": "The input folder compared with the previous inventory.json of the same work folder, by sha256 per path; all three lists are empty on the first run in a work folder (nothing to compare) and when nothing changed, so rerunning intake on the same input gives the same inventory. Answers whose question is about a removed or changed file become 'stale' in answers.json (kept, never re-bound).",
+          "required": ["added", "removed", "changed"],
+          "additionalProperties": false,
+          "properties": {
+            "added": { "type": "array", "items": { "type": "string", "minLength": 1 }, "description": "Sorted paths not in the previous inventory." },
+            "removed": { "type": "array", "items": { "type": "string", "minLength": 1 }, "description": "Sorted paths of the previous inventory that are gone." },
+            "changed": { "type": "array", "items": { "type": "string", "minLength": 1 }, "description": "Sorted paths present in both with a different sha256." }
+          }
+        }
+      }
+    },
+    "structure_summary": {
+      "type": "object",
+      "description": "structure-summary.json written by `harness read-structure`: one row per inventory file, in the inventory's order (sorted by path). Every property of a row is always present; null means 'not available' (a skipped file has no extraction). The full results are in the files named in `outputs`; this is the overview a skill reads first. Counts are true counts; the lists are capped (families 100, levels 100) and say so.",
+      "required": ["schema_version", "kind", "project_id", "inventory_sha256", "files", "summary"],
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": { "const": "0.1" },
+        "kind": { "const": "structure_summary" },
+        "project_id": { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/project_id" },
+        "inventory_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$", "description": "Hash of the inventory.json bytes this was built from. Intake does not clear the structure files when it reruns: a different hash means this document is stale." },
+        "files": { "type": "array", "items": { "$ref": "#/$defs/structure_file" } },
+        "summary": {
+          "type": "object",
+          "required": ["files", "processed", "skipped", "questions", "blocking_questions"],
+          "additionalProperties": false,
+          "properties": {
+            "files": { "type": "integer", "minimum": 0 },
+            "processed": { "type": "integer", "minimum": 0 },
+            "skipped": { "type": "integer", "minimum": 0 },
+            "questions": { "type": "integer", "minimum": 0, "description": "Questions in structure-questions.json." },
+            "blocking_questions": { "type": "integer", "minimum": 0 }
+          }
+        }
+      }
+    },
+    "structure_file": {
+      "type": "object",
+      "required": ["path", "sha256", "status", "reason", "outputs", "sheets", "grids", "levels", "questions", "warnings"],
+      "additionalProperties": false,
+      "properties": {
+        "path": { "type": "string", "minLength": 1, "description": "As in inventory.json: relative to the input folder." },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$", "description": "Hash of the input file, as in inventory.json." },
+        "status": { "enum": ["processed", "skipped"] },
+        "reason": { "type": ["string", "null"], "description": "Why the file was skipped (not a DXF/DWG, no DXF produced, DXF did not open, no text index); null when processed." },
+        "outputs": {
+          "anyOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "required": ["sheets", "grids", "levels"],
+              "additionalProperties": false,
+              "properties": {
+                "sheets": { "type": "string", "description": "Relative to the work folder: structure/<path>.sheets.json." },
+                "grids": { "type": "string" },
+                "levels": { "type": "string" }
+              }
+            }
+          ]
+        },
+        "sheets": {
+          "anyOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "required": ["count", "by_method", "sheet_numbers"],
+              "additionalProperties": false,
+              "properties": {
+                "count": { "type": "integer", "minimum": 0 },
+                "by_method": { "type": "object", "additionalProperties": { "type": "integer", "minimum": 0 } },
+                "sheet_numbers": {
+                  "type": "object",
+                  "description": "Printed sheet numbers read from the title blocks (sheets.json title_block.sheet_number): found vs missing, found ones counted by confidence (confidences with no sheet are absent).",
+                  "required": ["found", "missing", "by_confidence"],
+                  "additionalProperties": false,
+                  "properties": {
+                    "found": { "type": "integer", "minimum": 0 },
+                    "missing": { "type": "integer", "minimum": 0 },
+                    "by_confidence": { "type": "object", "additionalProperties": { "type": "integer", "minimum": 1 } }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "grids": {
+          "anyOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "required": ["groups", "families_total", "families", "families_truncated"],
+              "additionalProperties": false,
+              "properties": {
+                "groups": { "type": "integer", "minimum": 0 },
+                "families_total": { "type": "integer", "minimum": 0 },
+                "families": { "type": "array", "description": "At most 100, in grids.json order.", "items": { "$ref": "#/$defs/grid_family" } },
+                "families_truncated": { "type": "boolean" }
+              }
+            }
+          ]
+        },
+        "levels": {
+          "anyOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "required": ["candidates", "levels_total", "levels", "levels_truncated"],
+              "additionalProperties": false,
+              "properties": {
+                "candidates": { "type": "integer", "minimum": 0 },
+                "levels_total": { "type": "integer", "minimum": 0 },
+                "levels": { "type": "array", "description": "At most 100, in levels.json order (ascending value).", "items": { "$ref": "#/$defs/level_count" } },
+                "levels_truncated": { "type": "boolean" }
+              }
+            }
+          ]
+        },
+        "questions": {
+          "anyOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "description": "Questions the three extractors raised for this file, before consolidation.",
+              "required": ["sheets", "grids", "levels", "total", "blocking"],
+              "additionalProperties": false,
+              "properties": {
+                "sheets": { "type": "integer", "minimum": 0 },
+                "grids": { "type": "integer", "minimum": 0 },
+                "levels": { "type": "integer", "minimum": 0 },
+                "total": { "type": "integer", "minimum": 0 },
+                "blocking": { "type": "integer", "minimum": 0 }
+              }
+            }
+          ]
+        },
+        "warnings": { "type": "array", "items": { "type": "string" }, "description": "Warnings of the three extractors, each prefixed 'sheets: ', 'grids: ' or 'levels: '. Includes any extractor-side cap on its own questions." }
+      }
+    },
+    "grid_family": {
+      "type": "object",
+      "description": "One grid family (grids.json) with its Tekla coordinate-string PROPOSAL. A proposal only: relative spacings in the declared drawing unit, not converted, not confirmed; which family is Tekla X or Y is a separate question.",
+      "required": ["sheet", "group_id", "family_id", "axes", "labels", "coordinates", "unit", "confidence", "complete"],
+      "additionalProperties": false,
+      "properties": {
+        "sheet": { "type": "string", "description": "Detector sheet id of the view the family belongs to." },
+        "group_id": { "type": "string" },
+        "family_id": { "type": "string" },
+        "axes": { "type": "integer", "minimum": 0 },
+        "labels": { "type": "string", "description": "proposal.labels: space separated, '?' for an axis with no label (built from the axes when there is no proposal)." },
+        "coordinates": { "type": ["string", "null"], "description": "proposal.coordinates, Tekla style: '0 3*6000 4500'. Null for a family of one axis (grids.json has no proposal for it)." },
+        "unit": { "enum": ["mm", "cm", "m", "in", "ft", "unknown", null], "description": "Declared header unit, NOT confirmed. Null when there is no proposal." },
+        "confidence": { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/confidence", "description": "The lowest confidence among the family's axes and spacing values." },
+        "complete": { "type": ["boolean", "null"], "description": "proposal.complete: false when a label is missing, duplicated or mixed, an axis is skewed or low confidence. Null when there is no proposal." }
+      }
+    },
+    "level_count": {
+      "type": "object",
+      "required": ["value", "value_text", "count", "confidence"],
+      "additionalProperties": false,
+      "properties": {
+        "value": { "type": "number", "description": "Metres as written." },
+        "value_text": { "type": "string" },
+        "count": { "type": "integer", "minimum": 1, "description": "Candidates (text occurrences) with this value, on all sheets of the file." },
+        "confidence": { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/confidence" }
+      }
+    },
+    "questions": {
+      "type": "object",
+      "required": ["schema_version", "kind", "project_id", "questions", "summary"],
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": { "const": "0.1" },
+        "kind": { "const": "questions" },
+        "project_id": { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/project_id" },
+        "questions": {
+          "type": "array",
+          "description": "One question per code, blocking flag and file. questions.json (intake) order: units_confirm_all; probe question codes (blocking first, then by code); encoding_unknown_non_ascii; conversion_empty, converter_errors, read_failed, no_reader_implemented; inside a code by file. structure-questions.json and callouts-questions.json order: blocking first, then by code, then by file. Ids come from question-registry.json (one counter for the three documents, never reused), so they are NOT necessarily ascending in this order: a rerun keeps the id of every unchanged question and appends new ids. Engineer-facing text is English here; the Vietnamese rendering is a later reporter step.",
+          "items": { "$ref": "#/$defs/question" }
+        },
+        "summary": { "$ref": "#/$defs/questions_summary" }
+      }
+    },
+    "questions_summary": {
+      "type": "object",
+      "required": ["questions", "blocking_questions", "answered", "blocking_open"],
+      "additionalProperties": false,
+      "properties": {
+        "questions": { "type": "integer", "minimum": 0 },
+        "blocking_questions": { "type": "integer", "minimum": 0 },
+        "answered": { "type": "integer", "minimum": 0, "description": "Questions that have an active answer." },
+        "blocking_open": { "type": "integer", "minimum": 0, "description": "Blocking questions WITHOUT an active answer: what still stops the process." }
+      }
+    },
+    "question": {
+      "type": "object",
+      "description": "One question per code, blocking flag and file (file null for a question about the whole project), listing the places it applies to. Probe question codes, encoding_unknown_non_ascii and callout / structure questions list at most 50 refs (10 per member mark prefix): then truncated is true and count is the true total; an extractor that capped its own questions per code says so in its warnings (kept in structure-summary.json), so count can still be below the true number of occurrences in that case. encoding_unknown_non_ascii (non-blocking) has one ref per text style that holds non-ASCII text of unknown encoding, built from the text index; font_encoding_proposed (non-blocking) is a probe question: one ref per proposed knowledge row, its evidence in 'found'. units_confirm_all (one ref: the file's header units) replaces the non-blocking units_confirm probe question, which is therefore not repeated. `key` is the stable identity (question-registry): sha256 over code, file, the file's sha256 and the canonical sorted refs (where, found, sheet), first 16 hex. `answer` is the active answer from answers.json, or null.",
+      "required": ["id", "key", "code", "blocking", "file", "message", "count", "truncated", "refs", "answer"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/question_id" },
+        "key": { "type": "string", "pattern": "^[0-9a-f]{16}$" },
+        "code": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+        "blocking": { "type": "boolean" },
+        "file": { "type": ["string", "null"], "minLength": 1, "description": "Path relative to the input folder; null for a question about the whole project." },
+        "message": { "type": "string", "minLength": 1 },
+        "count": { "type": "integer", "minimum": 1, "description": "Total number of refs, including any not listed." },
+        "truncated": { "type": "boolean", "description": "True when count is greater than the number of refs listed." },
+        "refs": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/ref" } },
+        "subjects": {
+          "type": "array",
+          "description": "callouts-questions.json only: what the refs are about when one question covers several things. callout_ambiguous: one per notation (name = notation id); member_mark_prefix_meaning: one per prefix (name = prefix), the answer's `values` keys.",
+          "items": {
+            "type": "object",
+            "required": ["name", "count"],
+            "additionalProperties": false,
+            "properties": {
+              "name": { "type": "string", "minLength": 1 },
+              "count": { "type": "integer", "minimum": 1 },
+              "examples": {
+                "type": "array",
+                "description": "member_mark_prefix_meaning: the most frequent marks of the prefix.",
+                "items": {
+                  "type": "object",
+                  "required": ["mark", "count"],
+                  "additionalProperties": false,
+                  "properties": { "mark": { "type": "string", "minLength": 1 }, "count": { "type": "integer", "minimum": 1 } }
+                }
+              }
+            }
+          }
+        },
+        "answer": {
+          "anyOf": [{ "type": "null" }, { "$ref": "urn:tekla-harness:schema:answers:0.1#/$defs/answer" }],
+          "description": "The active answer (answers.json) to this key, or null."
+        }
+      }
+    },
+    "ref": {
+      "type": "object",
+      "required": ["file", "where", "found"],
+      "additionalProperties": false,
+      "properties": {
+        "file": { "type": ["string", "null"], "minLength": 1, "description": "Path relative to the input folder. null only in a project-level question of reader-questions.json (harness ask without --file)." },
+        "where": { "type": "string", "minLength": 1 },
+        "found": { "type": "string" },
+        "sheet": { "type": "string", "minLength": 1, "description": "structure-questions.json, callouts-questions.json and grid-system-questions.json only: the detector sheet id (model#01, <layout>#01; see the sheets schema) the extractor attached to the question. Not a printed sheet number." },
+        "message": { "type": "string", "description": "Only when this ref's wording differs from the group's message (for example because it carries a count)." },
+        "unit": { "type": "string", "description": "units_confirm_all only: the unit declared by the header." },
+        "confidence": { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/confidence" },
+        "flags": { "type": "array", "items": { "type": "string" }, "description": "units_confirm_all only: the units_* flags of the file." }
+      }
+    }
+  }
+}

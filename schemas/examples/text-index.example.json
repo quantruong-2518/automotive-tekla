@@ -1,0 +1,453 @@
+{
+  "schema_version": "0.1",
+  "status": "ok",
+  "file": {
+    "path": "drawing.dxf",
+    "sha256": "aa3cd98b17eb640c0f66a796c431bf33aecd884692d62168115020030cf1b050",
+    "ezdxf_version": "1.4.5",
+    "dxf_version": "AC1032",
+    "converter": "none",
+    "confidence_cap": "high",
+    "handles_reliable": true,
+    "codepage": "utf8"
+  },
+  "attempts": [
+    {
+      "tool": "ezdxf",
+      "status": "ok",
+      "started_at": "2026-01-01T00:00:00+00:00",
+      "tool_version": "1.4.5",
+      "duration_ms": 5
+    }
+  ],
+  "entries": [
+    {
+      "id": "T000001",
+      "entity_type": "ATTRIB",
+      "space": "model",
+      "layout": "Model",
+      "coordinate_frame": "wcs",
+      "layer": "0",
+      "definition_layer": null,
+      "layer_state": "on",
+      "style": "Standard",
+      "font_file": "txt",
+      "position": {
+        "x": 0.0,
+        "y": 0.0,
+        "basis": "insert"
+      },
+      "alignment": "LEFT",
+      "height": 3.0,
+      "rotation": 0.0,
+      "handle": "3A",
+      "definition_handle": null,
+      "block_path": [],
+      "insert_handles": [],
+      "tag": "X",
+      "block_name": "GRIDBUBBLE",
+      "insert_handle": "38",
+      "invisible": false,
+      "text_rule": null,
+      "raw_text": "A",
+      "plain_text": "A",
+      "decoded_text": "A",
+      "display_text": "A",
+      "special_codes": [],
+      "decode": {
+        "encoding_used": "unknown",
+        "source": "none",
+        "capital_font": null,
+        "case_uncertain": false,
+        "ambiguous_count": 0,
+        "unmapped_count": 0,
+        "nfd_damaged": false,
+        "runs": 1,
+        "mixed_fonts": false,
+        "run_details": [
+          {
+            "font": null,
+            "font_source": "none",
+            "encoding": "unknown",
+            "capital_font": null,
+            "knowledge_pattern": null
+          }
+        ],
+        "knowledge_patterns": []
+      },
+      "confidence": "medium",
+      "provenance": {
+        "file": "drawing.dxf",
+        "sheet": "unknown",
+        "method": "dxf_entity"
+      },
+      "flags": []
+    },
+    {
+      "id": "T000002",
+      "entity_type": "TEXT",
+      "space": "model",
+      "layout": "Model",
+      "coordinate_frame": "wcs",
+      "layer": "S-ANNO-TEXT",
+      "definition_layer": null,
+      "layer_state": "on",
+      "style": "Arial",
+      "font_file": "arial.ttf",
+      "position": {
+        "x": 1000.0,
+        "y": 500.0,
+        "basis": "insert"
+      },
+      "alignment": "LEFT",
+      "height": 2.5,
+      "rotation": 0.0,
+      "handle": "3B",
+      "definition_handle": null,
+      "block_path": [],
+      "insert_handles": [],
+      "tag": null,
+      "block_name": null,
+      "insert_handle": null,
+      "invisible": null,
+      "text_rule": null,
+      "raw_text": "2%%c16",
+      "plain_text": "2%%c16",
+      "decoded_text": "2%%c16",
+      "display_text": "2Ø16",
+      "special_codes": [
+        "%%c"
+      ],
+      "decode": {
+        "encoding_used": "unicode",
+        "source": "style_font",
+        "capital_font": null,
+        "case_uncertain": false,
+        "ambiguous_count": 0,
+        "unmapped_count": 0,
+        "nfd_damaged": false,
+        "runs": 1,
+        "mixed_fonts": false,
+        "run_details": [
+          {
+            "font": null,
+            "font_source": "style_font",
+            "encoding": "unicode",
+            "capital_font": null,
+            "knowledge_pattern": null
+          }
+        ],
+        "knowledge_patterns": []
+      },
+      "confidence": "high",
+      "provenance": {
+        "file": "drawing.dxf",
+        "sheet": "unknown",
+        "method": "dxf_entity"
+      },
+      "flags": []
+    },
+    {
+      "id": "T000003",
+      "entity_type": "TEXT",
+      "space": "model",
+      "layout": "Model",
+      "coordinate_frame": "wcs",
+      "layer": "S-ANNO-TEXT",
+      "definition_layer": null,
+      "layer_state": "on",
+      "style": ".VnTimeH",
+      "font_file": "vntimeh.ttf",
+      "position": {
+        "x": 2000.0,
+        "y": 500.0,
+        "basis": "insert"
+      },
+      "alignment": "LEFT",
+      "height": 3.0,
+      "rotation": 0.0,
+      "handle": "3C",
+      "definition_handle": null,
+      "block_path": [],
+      "insert_handles": [],
+      "tag": null,
+      "block_name": null,
+      "insert_handle": null,
+      "invisible": null,
+      "text_rule": null,
+      "raw_text": "§µT1",
+      "plain_text": "§µT1",
+      "decoded_text": "ĐÀT1",
+      "display_text": "ĐÀT1",
+      "special_codes": [],
+      "decode": {
+        "encoding_used": "tcvn3",
+        "source": "style_font",
+        "capital_font": true,
+        "case_uncertain": false,
+        "ambiguous_count": 0,
+        "unmapped_count": 0,
+        "nfd_damaged": false,
+        "runs": 1,
+        "mixed_fonts": false,
+        "run_details": [
+          {
+            "font": null,
+            "font_source": "style_font",
+            "encoding": "tcvn3",
+            "capital_font": true,
+            "knowledge_pattern": null
+          }
+        ],
+        "knowledge_patterns": []
+      },
+      "confidence": "medium",
+      "provenance": {
+        "file": "drawing.dxf",
+        "sheet": "unknown",
+        "method": "dxf_entity"
+      },
+      "flags": []
+    },
+    {
+      "id": "T000004",
+      "entity_type": "MTEXT",
+      "space": "model",
+      "layout": "Model",
+      "coordinate_frame": "wcs",
+      "layer": "S-ANNO-TEXT",
+      "definition_layer": null,
+      "layer_state": "on",
+      "style": "Arial",
+      "font_file": "arial.ttf",
+      "position": {
+        "x": 3000.0,
+        "y": 500.0,
+        "basis": "insert"
+      },
+      "alignment": "TOP_LEFT",
+      "height": 2.5,
+      "rotation": 0.0,
+      "handle": "3D",
+      "definition_handle": null,
+      "block_path": [],
+      "insert_handles": [],
+      "tag": null,
+      "block_name": null,
+      "insert_handle": null,
+      "invisible": null,
+      "text_rule": null,
+      "raw_text": "Slab {\\f.VnTime|b0|i0|c0|p34;mÆt} %%c10",
+      "plain_text": "Slab mÆt %%c10",
+      "decoded_text": "Slab mặt %%c10",
+      "display_text": "Slab mặt Ø10",
+      "special_codes": [
+        "%%c"
+      ],
+      "decode": {
+        "encoding_used": "mixed",
+        "source": "mtext_inline_font",
+        "capital_font": false,
+        "case_uncertain": false,
+        "ambiguous_count": 0,
+        "unmapped_count": 0,
+        "nfd_damaged": false,
+        "runs": 3,
+        "mixed_fonts": true,
+        "run_details": [
+          {
+            "font": null,
+            "font_source": "style_font",
+            "encoding": "unicode",
+            "capital_font": null,
+            "knowledge_pattern": null
+          },
+          {
+            "font": ".VnTime",
+            "font_source": "mtext_inline_font",
+            "encoding": "tcvn3",
+            "capital_font": false,
+            "knowledge_pattern": null
+          },
+          {
+            "font": null,
+            "font_source": "style_font",
+            "encoding": "unicode",
+            "capital_font": null,
+            "knowledge_pattern": null
+          }
+        ],
+        "knowledge_patterns": []
+      },
+      "confidence": "medium",
+      "provenance": {
+        "file": "drawing.dxf",
+        "sheet": "unknown",
+        "method": "dxf_entity"
+      },
+      "flags": [
+        "mixed_fonts"
+      ]
+    },
+    {
+      "id": "T000005",
+      "entity_type": "TEXT",
+      "space": "Layout1",
+      "layout": "Layout1",
+      "coordinate_frame": "paper",
+      "layer": "0",
+      "definition_layer": null,
+      "layer_state": "on",
+      "style": "Arial",
+      "font_file": "arial.ttf",
+      "position": {
+        "x": 20.0,
+        "y": 20.0,
+        "basis": "insert"
+      },
+      "alignment": "LEFT",
+      "height": 5.0,
+      "rotation": 0.0,
+      "handle": "3E",
+      "definition_handle": null,
+      "block_path": [],
+      "insert_handles": [],
+      "tag": null,
+      "block_name": null,
+      "insert_handle": null,
+      "invisible": null,
+      "text_rule": null,
+      "raw_text": "SHEET",
+      "plain_text": "SHEET",
+      "decoded_text": "SHEET",
+      "display_text": "SHEET",
+      "special_codes": [],
+      "decode": {
+        "encoding_used": "unicode",
+        "source": "style_font",
+        "capital_font": null,
+        "case_uncertain": false,
+        "ambiguous_count": 0,
+        "unmapped_count": 0,
+        "nfd_damaged": false,
+        "runs": 1,
+        "mixed_fonts": false,
+        "run_details": [
+          {
+            "font": null,
+            "font_source": "style_font",
+            "encoding": "unicode",
+            "capital_font": null,
+            "knowledge_pattern": null
+          }
+        ],
+        "knowledge_patterns": []
+      },
+      "confidence": "high",
+      "provenance": {
+        "file": "drawing.dxf",
+        "sheet": "unknown",
+        "method": "dxf_entity"
+      },
+      "flags": []
+    }
+  ],
+  "attdefs": [
+    {
+      "space": "block:GRIDBUBBLE",
+      "coordinate_frame": "block_definition",
+      "block": "GRIDBUBBLE",
+      "tag": "X",
+      "prompt": "",
+      "default_text": "?",
+      "layer": "0",
+      "style": "Standard",
+      "position": {
+        "x": 0.0,
+        "y": 0.0
+      },
+      "height": 3.0,
+      "invisible": false,
+      "constant": false,
+      "handle": "37"
+    }
+  ],
+  "summary": {
+    "total_entries": 5,
+    "by_entity_type": {
+      "ATTRIB": 1,
+      "MTEXT": 1,
+      "TEXT": 3
+    },
+    "by_space": {
+      "total_distinct": 2,
+      "top": [
+        {
+          "name": "model",
+          "count": 4
+        },
+        {
+          "name": "Layout1",
+          "count": 1
+        }
+      ],
+      "truncated": false
+    },
+    "by_layer": {
+      "total_distinct": 2,
+      "top": [
+        {
+          "name": "S-ANNO-TEXT",
+          "count": 3
+        },
+        {
+          "name": "0",
+          "count": 2
+        }
+      ],
+      "truncated": false
+    },
+    "by_encoding_used": {
+      "mixed": 1,
+      "tcvn3": 1,
+      "unicode": 2,
+      "unknown": 1
+    },
+    "by_confidence": {
+      "high": 2,
+      "medium": 3
+    },
+    "unknown_or_mixed_encoding_by_style": {
+      "total_distinct": 2,
+      "top": [
+        {
+          "name": "Arial",
+          "count": 1
+        },
+        {
+          "name": "Standard",
+          "count": 1
+        }
+      ],
+      "truncated": false
+    },
+    "case_uncertain_count": 0,
+    "in_block_count": 0,
+    "depth_limit_count": 0,
+    "max_block_depth": 16,
+    "cycle_count": 0,
+    "xref_inserts_skipped": 0,
+    "missing_block_inserts": 0,
+    "empty_text_skipped": 0,
+    "dimensions_without_override": 0,
+    "not_extracted": {},
+    "transform_skipped": {
+      "count": 0,
+      "by_entity_type": {},
+      "listed": []
+    },
+    "errors_total": 0,
+    "errors": []
+  },
+  "warnings": []
+}

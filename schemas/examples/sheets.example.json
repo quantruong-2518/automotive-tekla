@@ -1,0 +1,542 @@
+{
+  "schema_version": "0.1",
+  "file": {
+    "path": "structural-set.dxf",
+    "sha256": "c76afa09326ecec1b0df61e03a3f87471f14df8456548e08e177368d6748fbd6",
+    "confidence_cap": "high",
+    "declared_units": {
+      "insunits": 4,
+      "name": "mm"
+    }
+  },
+  "sheets": [
+    {
+      "sheet_id": "model#01",
+      "space": "model",
+      "layout": "Model",
+      "coordinate_frame": "wcs",
+      "bbox": [
+        0.0,
+        0.0,
+        84100.0,
+        59400.0
+      ],
+      "detection": {
+        "method": "frame_rectangle",
+        "confidence": "medium",
+        "evidence": [
+          "closed axis-aligned rectangle 84100.0 x 59400.0 on layer '0'",
+          "21 text entries inside",
+          "2 frame(s) of this size in model",
+          "inside INSERT path TB_FRAME",
+          "1 inner rectangle(s) merged"
+        ],
+        "frame_handle": "A2",
+        "frame_block": "TB_FRAME",
+        "frame_layer": "0",
+        "inner_frames": 1
+      },
+      "model_windows": [],
+      "text_ids": [
+        "T000001",
+        "T000002",
+        "T000003",
+        "T000004",
+        "T000005",
+        "T000006",
+        "T000007",
+        "T000008",
+        "T000009",
+        "T000010",
+        "T000011",
+        "T000012",
+        "T000013",
+        "T000014",
+        "T000015",
+        "T000016",
+        "T000017",
+        "T000018",
+        "T000019",
+        "T000020",
+        "T000021"
+      ],
+      "title_block": {
+        "sheet_number": {
+          "value": "S-101",
+          "provenance": {
+            "file": "structural-set.dxf",
+            "sheet": "model#01",
+            "method": "dxf_entity",
+            "region": {
+              "bbox": [
+                74100.0,
+                3000.0,
+                75325.0,
+                3350.0
+              ]
+            }
+          },
+          "confidence": "medium"
+        },
+        "revision": {
+          "value": "A",
+          "provenance": {
+            "file": "structural-set.dxf",
+            "sheet": "model#01",
+            "method": "dxf_entity",
+            "region": {
+              "bbox": [
+                74100.0,
+                4000.0,
+                74345.0,
+                4350.0
+              ]
+            }
+          },
+          "confidence": "medium"
+        },
+        "candidates": [
+          {
+            "field": "revision",
+            "value": "A",
+            "evidence": {
+              "kind": "attrib_tag",
+              "key": "REV",
+              "value_text_id": "T000002",
+              "label_text_id": null,
+              "position": [
+                74100.0,
+                4000.0
+              ]
+            },
+            "confidence": "medium",
+            "provenance": {
+              "file": "structural-set.dxf",
+              "sheet": "model#01",
+              "method": "dxf_entity",
+              "region": {
+                "bbox": [
+                  74100.0,
+                  4000.0,
+                  74345.0,
+                  4350.0
+                ]
+              }
+            }
+          },
+          {
+            "field": "scale",
+            "value": "1:100",
+            "evidence": {
+              "kind": "adjacent_label",
+              "key": "SCALE",
+              "value_text_id": "T000008",
+              "label_text_id": "T000007",
+              "position": [
+                72100.0,
+                6000.0
+              ]
+            },
+            "confidence": "low",
+            "provenance": {
+              "file": "structural-set.dxf",
+              "sheet": "model#01",
+              "method": "dxf_entity",
+              "region": {
+                "bbox": [
+                  72100.0,
+                  6000.0,
+                  73325.0,
+                  6350.0
+                ]
+              }
+            }
+          },
+          {
+            "field": "sheet_number",
+            "value": "S-101",
+            "evidence": {
+              "kind": "attrib_tag",
+              "key": "SHEET_NO",
+              "value_text_id": "T000001",
+              "label_text_id": null,
+              "position": [
+                74100.0,
+                3000.0
+              ]
+            },
+            "confidence": "medium",
+            "provenance": {
+              "file": "structural-set.dxf",
+              "sheet": "model#01",
+              "method": "dxf_entity",
+              "region": {
+                "bbox": [
+                  74100.0,
+                  3000.0,
+                  75325.0,
+                  3350.0
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "duplicate_of": null
+    },
+    {
+      "sheet_id": "model#02",
+      "space": "model",
+      "layout": "Model",
+      "coordinate_frame": "wcs",
+      "bbox": [
+        90000.0,
+        0.0,
+        174100.0,
+        59400.0
+      ],
+      "detection": {
+        "method": "frame_rectangle",
+        "confidence": "medium",
+        "evidence": [
+          "closed axis-aligned rectangle 84100.0 x 59400.0 on layer '0'",
+          "17 text entries inside",
+          "2 frame(s) of this size in model",
+          "inside INSERT path TB_FRAME",
+          "1 inner rectangle(s) merged"
+        ],
+        "frame_handle": "EA",
+        "frame_block": "TB_FRAME",
+        "frame_layer": "0",
+        "inner_frames": 1
+      },
+      "model_windows": [],
+      "text_ids": [
+        "T000022",
+        "T000023",
+        "T000024",
+        "T000025",
+        "T000026",
+        "T000027",
+        "T000028",
+        "T000029",
+        "T000030",
+        "T000031",
+        "T000032",
+        "T000033",
+        "T000034",
+        "T000035",
+        "T000036",
+        "T000037",
+        "T000038"
+      ],
+      "title_block": {
+        "sheet_number": {
+          "value": "S-102",
+          "provenance": {
+            "file": "structural-set.dxf",
+            "sheet": "model#02",
+            "method": "dxf_entity",
+            "region": {
+              "bbox": [
+                164100.0,
+                3000.0,
+                165325.0,
+                3350.0
+              ]
+            }
+          },
+          "confidence": "medium"
+        },
+        "revision": {
+          "value": "A",
+          "provenance": {
+            "file": "structural-set.dxf",
+            "sheet": "model#02",
+            "method": "dxf_entity",
+            "region": {
+              "bbox": [
+                164100.0,
+                4000.0,
+                164345.0,
+                4350.0
+              ]
+            }
+          },
+          "confidence": "medium"
+        },
+        "candidates": [
+          {
+            "field": "revision",
+            "value": "A",
+            "evidence": {
+              "kind": "attrib_tag",
+              "key": "REV",
+              "value_text_id": "T000023",
+              "label_text_id": null,
+              "position": [
+                164100.0,
+                4000.0
+              ]
+            },
+            "confidence": "medium",
+            "provenance": {
+              "file": "structural-set.dxf",
+              "sheet": "model#02",
+              "method": "dxf_entity",
+              "region": {
+                "bbox": [
+                  164100.0,
+                  4000.0,
+                  164345.0,
+                  4350.0
+                ]
+              }
+            }
+          },
+          {
+            "field": "scale",
+            "value": "1:100",
+            "evidence": {
+              "kind": "adjacent_label",
+              "key": "SCALE",
+              "value_text_id": "T000029",
+              "label_text_id": "T000028",
+              "position": [
+                162100.0,
+                6000.0
+              ]
+            },
+            "confidence": "low",
+            "provenance": {
+              "file": "structural-set.dxf",
+              "sheet": "model#02",
+              "method": "dxf_entity",
+              "region": {
+                "bbox": [
+                  162100.0,
+                  6000.0,
+                  163325.0,
+                  6350.0
+                ]
+              }
+            }
+          },
+          {
+            "field": "sheet_number",
+            "value": "S-102",
+            "evidence": {
+              "kind": "attrib_tag",
+              "key": "SHEET_NO",
+              "value_text_id": "T000022",
+              "label_text_id": null,
+              "position": [
+                164100.0,
+                3000.0
+              ]
+            },
+            "confidence": "medium",
+            "provenance": {
+              "file": "structural-set.dxf",
+              "sheet": "model#02",
+              "method": "dxf_entity",
+              "region": {
+                "bbox": [
+                  164100.0,
+                  3000.0,
+                  165325.0,
+                  3350.0
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "duplicate_of": null
+    },
+    {
+      "sheet_id": "Plot#01",
+      "space": "Plot",
+      "layout": "Plot",
+      "coordinate_frame": "paper",
+      "bbox": [
+        100.0,
+        19.00134,
+        740.584059,
+        400.0
+      ],
+      "detection": {
+        "method": "layout",
+        "confidence": "medium",
+        "evidence": [
+          "paper-space layout 'Plot' with 1 non-viewport entities and 1 viewport(s); no frame found"
+        ],
+        "frame_handle": null,
+        "frame_block": null,
+        "frame_layer": null,
+        "inner_frames": 0
+      },
+      "model_windows": [
+        {
+          "viewport_handle": "11F",
+          "bbox": [
+            296000.0,
+            -1000.0,
+            304000.0,
+            3000.0
+          ]
+        }
+      ],
+      "text_ids": [
+        "T000039",
+        "T000040",
+        "T000041",
+        "T000042"
+      ],
+      "title_block": {
+        "sheet_number": {
+          "value": "S-201",
+          "provenance": {
+            "file": "structural-set.dxf",
+            "sheet": "Plot#01",
+            "method": "dxf_entity",
+            "region": {
+              "bbox": [
+                700.0,
+                20.0,
+                712.25,
+                23.5
+              ]
+            }
+          },
+          "confidence": "medium"
+        },
+        "revision": {
+          "value": "B",
+          "provenance": {
+            "file": "structural-set.dxf",
+            "sheet": "Plot#01",
+            "method": "dxf_entity",
+            "region": {
+              "bbox": [
+                700.0,
+                30.0,
+                702.45,
+                33.5
+              ]
+            }
+          },
+          "confidence": "medium"
+        },
+        "candidates": [
+          {
+            "field": "revision",
+            "value": "B",
+            "evidence": {
+              "kind": "attrib_tag",
+              "key": "REV",
+              "value_text_id": "T000041",
+              "label_text_id": null,
+              "position": [
+                700.0,
+                30.0
+              ]
+            },
+            "confidence": "medium",
+            "provenance": {
+              "file": "structural-set.dxf",
+              "sheet": "Plot#01",
+              "method": "dxf_entity",
+              "region": {
+                "bbox": [
+                  700.0,
+                  30.0,
+                  702.45,
+                  33.5
+                ]
+              }
+            }
+          },
+          {
+            "field": "sheet_number",
+            "value": "S-201",
+            "evidence": {
+              "kind": "attrib_tag",
+              "key": "SHEET_NO",
+              "value_text_id": "T000040",
+              "label_text_id": null,
+              "position": [
+                700.0,
+                20.0
+              ]
+            },
+            "confidence": "medium",
+            "provenance": {
+              "file": "structural-set.dxf",
+              "sheet": "Plot#01",
+              "method": "dxf_entity",
+              "region": {
+                "bbox": [
+                  700.0,
+                  20.0,
+                  712.25,
+                  23.5
+                ]
+              }
+            }
+          },
+          {
+            "field": "title",
+            "value": "GENERAL NOTES",
+            "evidence": {
+              "kind": "attrib_tag",
+              "key": "TITLE",
+              "value_text_id": "T000042",
+              "label_text_id": null,
+              "position": [
+                700.0,
+                40.0
+              ]
+            },
+            "confidence": "medium",
+            "provenance": {
+              "file": "structural-set.dxf",
+              "sheet": "Plot#01",
+              "method": "dxf_entity",
+              "region": {
+                "bbox": [
+                  700.0,
+                  40.0,
+                  731.85,
+                  43.5
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "duplicate_of": null
+    }
+  ],
+  "unassigned": {
+    "text_ids": [],
+    "ambiguous_text_ids": []
+  },
+  "drawing_list": {
+    "status": "not_searched"
+  },
+  "summary": {
+    "sheet_count": 3,
+    "by_method": {
+      "frame_rectangle": 2,
+      "layout": 1
+    },
+    "text_entries": 42,
+    "assigned": 42,
+    "unassigned": 0,
+    "ambiguous": 0,
+    "frame_candidates_rejected": 0
+  },
+  "questions": [],
+  "warnings": []
+}

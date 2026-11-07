@@ -1,0 +1,552 @@
+"""`harness grid-system`, `harness status` and the `harness answer` file guard, over a real work folder.
+
+The world: an input folder with two synthetic DXF drawings, taken through intake, read-structure, callouts and
+grid-system. Tests that change something work on a copy of it.
+"""
+
+from __future__ import annotations
+
+import json
+import re
+import shutil
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+from _dxf_fixtures import build_set
+from tekla_harness.answers import record_answer
+from tekla_harness.callouts import run_callouts
+from tekla_harness.cli import main
+from tekla_harness.grid_system import GridSystemError, run_grid_systems
+from tekla_harness.intake import run_intake
+from tekla_harness.questions import AXIS_CODE, SELECT_CODE, UNIT_CODES, QuestionsError
+from tekla_harness.schemas import validate
+from tekla_harness.status import StatusError, build_status
+from tekla_harness.structure import read_structure
+
+PROJECT = "demo-status"
+QUESTION_FILES = ("questions.json", "structure-questions.json", "grid-system-questions.json")
+
+
+def load(path: Path) -> Any:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def run_cli(capsys, *argv: str) -> tuple[int, Any, str]:
+    code = main(list(argv))
+    cap = capsys.readouterr()
+    return code, (json.loads(cap.out) if cap.out.strip() else None), cap.err
+
+
+def questions_of(work: Path, name: str) -> list[dict[str, Any]]:
+    return load(work / name)["questions"]
+
+
+def find(questions: list[dict[str, Any]], code: str, file: str | None = None) -> dict[str, Any]:
+    (q,) = [q for q in questions if q["code"] == code and (file is None or q["file"] == file)]
+    return q
+
+
+def by_label(status: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    return {p["producer"]: p for p in status["producers"]}
+
+
+def rerun_all(root: Path, work: Path) -> None:
+    run_intake(root, work, PROJECT)
+    read_structure(work, root)
+    run_callouts(work, root)
+    run_grid_systems(work)
+
+
+@pytest.fixture(scope="module")
+def base_world(tmp_path_factory) -> Path:
+    base = tmp_path_factory.mktemp("status")
+    root = base / "input"
+    root.mkdir()
+    build_set(root, "set.dxf")
+    build_set(root, "other.dxf", sheet2_number="S-777")
+    rerun_all(root, base / "work")
+    return base
+
+
+@pytest.fixture
+def world(base_world, tmp_path) -> tuple[Path, Path]:
+    """(input folder, work folder) of a private copy."""
+    target = tmp_path / "w"
+    shutil.copytree(base_world, target)
+    return target / "input", target / "work"
+
+
+def values_for(q: dict[str, Any]) -> dict[str, str]:
+    """Structured values an answer to this question needs (the answers are test data, not engineering)."""
+    if q["code"] in UNIT_CODES:
+        return {"unit": "mm"}
+    if q["code"] == AXIS_CODE:
+        dirs = re.findall(r"(F\d+): dir \(([-\d.]+), ", q["refs"][0]["found"])
+        return {fid: ("X" if float(x) == 0.0 else "Y") for fid, x in dirs}
+    return {}
+
+
+def answer_blocking(work: Path, names: tuple[str, ...], skip: tuple[str, ...] = ()) -> None:
+    for name in names:
+        for q in questions_of(work, name):
+            if q["blocking"] and q["answer"] is None and q["code"] not in skip:
+                record_answer(work, q["id"], "test answer", "tester", values_for(q))
+
+
+@pytest.fixture(scope="module")
+def ready_world(base_world, tmp_path_factory) -> Path:
+    """Every blocking question answered, grid-system and callouts rerun: gate 1 is ready."""
+    target = tmp_path_factory.mktemp("ready") / "w"
+    shutil.copytree(base_world, target)
+    work = target / "work"
+    answer_blocking(work, ("questions.json", "structure-questions.json"))
+    run_grid_systems(work)  # now reads the units and axis answers
+    answer_blocking(work, ("grid-system-questions.json",))
+    return target
+
+
+@pytest.fixture
+def ready(ready_world, tmp_path) -> tuple[Path, Path]:
+    target = tmp_path / "r"
+    shutil.copytree(ready_world, target)
+    return target / "input", target / "work"
+
+
+# --- the registry records blocking and the file hash ----------------------------------------------------
+
+
+def test_registry_entries_record_blocking_and_file_sha256(world):
+    _, work = world
+    registry = load(work / "question-registry.json")
+    assert validate("question-registry", registry) == []
+    inventory = {r["path"]: r["sha256"] for r in load(work / "inventory.json")["files"]}
+    docs = {q["key"]: q for name in QUESTION_FILES for q in questions_of(work, name)}
+    assert docs
+    for key, q in docs.items():
+        entry = registry["questions"][key]
+        assert entry["blocking"] is q["blocking"]
+        assert entry["file_sha256"] == (inventory[q["file"]] if q["file"] else None)
+    assert {e["producer"] for e in registry["questions"].values()} == {"intake", "structure", "grid-system"}
+
+
+# --- harness grid-system --------------------------------------------------------------------------------
+
+
+def test_grid_system_command_writes_documents_drawings_and_numbered_questions(world, capsys):
+    _, work = world
+    for stale in (work / "grid-systems.json", work / "grid-system-questions.json"):
+        stale.unlink()
+    shutil.rmtree(work / "structure" / "grid-systems")
+    code, summary, err = run_cli(capsys, "grid-system", str(work))
+    assert code == 0 and err == "", err
+    doc = load(work / "grid-systems.json")
+    assert validate("grid-system", doc) == []
+    assert doc["inventory_sha256"] == build_status(work)["inventory_sha256"]
+    drawings = sorted(p.name for p in (work / "structure" / "grid-systems").glob("*.svg"))
+    assert drawings == [f"{s['system_id']}.svg" for s in doc["systems"]] and drawings
+    qdoc = load(work / "grid-system-questions.json")
+    assert validate("intake", qdoc) == []
+    qs = qdoc["questions"]
+    keys = [(not q["blocking"], q["code"], q["file"] or "") for q in qs]
+    assert keys == sorted(keys)
+    assert len({(q["code"], q["blocking"], q["file"]) for q in qs}) == len(
+        qs
+    )  # one per (code, blocking, file)
+    select = find(qs, SELECT_CODE)
+    assert select["file"] is None and select["blocking"]
+    assert [r["where"] for r in select["refs"]] == [s["system_id"] for s in doc["systems"]]
+    assert all(r["file"] for r in select["refs"])
+    assert {q["code"] for q in qs} <= {
+        "grid_system_select",
+        "grid_system_conflict",
+        "grid_system_units_unconfirmed",
+        "grid_system_axis_unassigned",
+    }
+    registry = load(work / "question-registry.json")["questions"]
+    assert {registry[q["key"]]["producer"] for q in qs} == {"grid-system"}
+    assert registry[select["key"]]["file"] is None
+    assert summary["questions"] == len(qs) == qdoc["summary"]["questions"]
+    assert summary["blocking_open"] == qdoc["summary"]["blocking_open"] == sum(q["blocking"] for q in qs)
+    assert summary["outputs"]["questions"] == str(work / "grid-system-questions.json")
+    assert summary["grid_systems"][0]["svg"] == doc["systems"][0]["svg"]
+
+
+def test_grid_system_rerun_keeps_ids_and_documents(world):
+    _, work = world
+    before = {n: (work / n).read_bytes() for n in ("grid-systems.json", "grid-system-questions.json")}
+    ids = {q["key"]: q["id"] for q in questions_of(work, "grid-system-questions.json")}
+    run_grid_systems(work)
+    assert {n: (work / n).read_bytes() for n in before} == before
+    assert {q["key"]: q["id"] for q in questions_of(work, "grid-system-questions.json")} == ids
+
+
+def test_grid_system_no_svg_clears_old_drawings(world, capsys):
+    _, work = world
+    assert any((work / "structure" / "grid-systems").glob("*.svg"))
+    code, summary, _ = run_cli(capsys, "grid-system", str(work), "--no-svg")
+    assert code == 0 and not (work / "structure" / "grid-systems").exists()
+    assert summary["outputs"]["svg_dir"] is None and summary["grid_systems"][0]["svg"] is None
+    assert (work / "grid-systems.json").is_file()
+
+
+def test_grid_system_answers_flow_through_the_ledger(world, capsys):
+    _, work = world
+    units = [q for q in questions_of(work, "questions.json") if q["code"] == "units_confirm_all"]
+    for q in units:
+        record_answer(work, q["id"], "mm", "tester", {"unit": "mm"})
+    code, summary, _ = run_cli(capsys, "grid-system", str(work))
+    assert code == 0
+    doc = load(work / "grid-systems.json")
+    assert all(s["units"]["status"] == "confirmed" for s in doc["systems"])  # the answers were read
+    assert "grid_system_units_unconfirmed" not in {
+        q["code"] for q in questions_of(work, "grid-system-questions.json")
+    }
+    select = find(questions_of(work, "grid-system-questions.json"), SELECT_CODE)
+    before = summary["blocking_open"]
+    result = record_answer(work, select["id"], "S001 is the warehouse", "tester", {"systems": "S001"})
+    assert result["answer"]["values"] == {"systems": ["S001"]}
+    assert "grid-system-questions.json" in result["refreshed"]  # harness answer refreshes this document too
+    assert find(questions_of(work, "grid-system-questions.json"), SELECT_CODE)["answer"] is not None
+    assert load(work / "grid-system-questions.json")["summary"]["blocking_open"] == before - 1
+    run_grid_systems(work)  # the answer is kept: same question, same key
+    assert find(questions_of(work, "grid-system-questions.json"), SELECT_CODE)["answer"] is not None
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["systems=S1", "systems=S001,S001", "systems=", "other=S001", "systems=S001;S002"],
+)
+def test_select_answer_values_are_checked(world, capsys, value):
+    _, work = world
+    select = find(questions_of(work, "grid-system-questions.json"), SELECT_CODE)
+    code, out, err = run_cli(
+        capsys, "answer", str(work), select["id"], "--text", "x", "--by", "me", "--value", value
+    )
+    assert code == 1 and out is None and "systems" in err
+    assert not (work / "answers.json").exists()
+    other = find(questions_of(work, "grid-system-questions.json"), "grid_system_conflict")
+    code, _, err = run_cli(
+        capsys, "answer", str(work), other["id"], "--text", "x", "--by", "me", "--value", "systems=S001"
+    )
+    assert code == 1 and "take no value" in err
+
+
+def test_grid_system_needs_the_earlier_steps(tmp_path, world):
+    _, work = world
+    with pytest.raises(GridSystemError) as caught:
+        run_grid_systems(tmp_path / "missing")
+    assert caught.value.exit_code == 2
+    bare = tmp_path / "bare"
+    bare.mkdir()
+    with pytest.raises(GridSystemError) as caught:
+        run_grid_systems(bare)
+    assert caught.value.exit_code == 2 and "question-registry.json" in str(caught.value)
+    (work / "structure-summary.json").unlink()
+    snapshot = {p.name: p.read_bytes() for p in work.glob("*.json")}
+    with pytest.raises(GridSystemError, match="read-structure") as caught:
+        run_grid_systems(work)
+    assert caught.value.exit_code == 2
+    assert {p.name: p.read_bytes() for p in work.glob("*.json")} == snapshot  # nothing written
+
+
+def test_grid_system_refuses_a_stale_read_structure(world, capsys):
+    root, work = world
+    build_set(root, "set.dxf", sheet2_number="S-888")
+    run_intake(root, work, PROJECT)  # inventory.json changed, structure-summary.json did not
+    snapshot = {p.name: p.read_bytes() for p in work.glob("*.json")}
+    code, out, err = run_cli(capsys, "grid-system", str(work))
+    assert code == 1 and out is None and "rerun `harness read-structure`" in err
+    assert {p.name: p.read_bytes() for p in work.glob("*.json")} == snapshot
+
+
+# --- harness answer: the file guard ---------------------------------------------------------------------
+
+
+def test_answer_is_refused_when_the_questions_file_changed_since_it_was_raised(world, capsys):
+    root, work = world
+    structure_q = find(
+        questions_of(work, "structure-questions.json"), "grid_family_axis_assignment", "set.dxf"
+    )
+    intake_q = find(questions_of(work, "questions.json"), "units_confirm_all", "set.dxf")
+    build_set(root, "set.dxf", sheet2_number="S-888")  # the drawing changed ...
+    run_intake(root, work, PROJECT)  # ... and intake saw it; read-structure has not rerun yet
+    snapshot = {p.name: p.read_bytes() for p in work.glob("*.json")}
+    code, out, err = run_cli(
+        capsys, "answer", str(work), structure_q["id"], "--text", "x", "--by", "me", "--value", "F001=X"
+    )
+    assert code == 1 and out is None
+    assert "file changed since this question was raised" in err and "rerun `harness read-structure`" in err
+    assert "set.dxf" in err
+    assert {p.name: p.read_bytes() for p in work.glob("*.json")} == snapshot  # nothing written
+    # intake's own question was obsoleted by the intake rerun: the older, clearer refusal comes first
+    code, _, err = run_cli(
+        capsys, "answer", str(work), intake_q["id"], "--text", "x", "--by", "me", "--value", "unit=mm"
+    )
+    assert code == 2 and "obsolete" in err
+    # an untouched file's question is still accepted
+    other = find(questions_of(work, "structure-questions.json"), "grid_family_axis_assignment", "other.dxf")
+    code, _, _ = run_cli(
+        capsys, "answer", str(work), other["id"], "--text", "x", "--by", "me", "--value", "F001=X"
+    )
+    assert code == 0
+
+
+def test_answer_names_the_producer_command_and_a_removed_file(world):
+    root, work = world
+    callouts_like = find(questions_of(work, "grid-system-questions.json"), "grid_system_conflict")
+    (root / callouts_like["file"]).unlink()
+    run_intake(root, work, PROJECT)
+    with pytest.raises(QuestionsError, match="rerun `harness grid-system`") as caught:
+        record_answer(work, callouts_like["id"], "x", "me")
+    assert caught.value.exit_code == 1 and "removed" in str(caught.value)
+
+
+def test_answer_guard_skips_project_questions_legacy_entries_and_folders_without_inventory(world):
+    _, work = world
+    select = find(questions_of(work, "grid-system-questions.json"), SELECT_CODE)
+    structure_q = find(questions_of(work, "structure-questions.json"), "grid_label_missing", "set.dxf")
+    registry = load(work / "question-registry.json")
+    del registry["questions"][structure_q["key"]]["file_sha256"]  # an entry from before the field existed
+    registry["questions"][structure_q["key"]]["blocking"] = True
+    (work / "question-registry.json").write_text(json.dumps(registry), encoding="utf-8")
+    inventory = load(work / "inventory.json")
+    inventory["files"][0]["sha256"] = "0" * 64  # every file differs from what the questions were raised on
+    inventory["files"][1]["sha256"] = "1" * 64
+    (work / "inventory.json").write_text(json.dumps(inventory), encoding="utf-8")
+    record_answer(work, select["id"], "x", "me")  # file null: not checked
+    record_answer(work, structure_q["id"], "x", "me")  # nothing recorded: not checked
+    (work / "inventory.json").unlink()
+    other = find(questions_of(work, "structure-questions.json"), "grid_label_missing", "other.dxf")
+    record_answer(work, other["id"], "x", "me")  # no inventory.json at all: not checked
+
+
+# --- harness status -------------------------------------------------------------------------------------
+
+
+def test_status_counts_come_from_the_registry_and_answers_not_from_the_question_files(world):
+    _, work = world
+    status = build_status(work)
+    assert validate("status", status) == []
+    labels = by_label(status)
+    assert list(labels) == ["intake", "read-structure", "callouts", "grid-system", "reader"]
+    docs = {
+        "intake": "questions.json",
+        "read-structure": "structure-questions.json",
+        "grid-system": "grid-system-questions.json",
+    }
+    for label, name in docs.items():
+        qs = questions_of(work, name)
+        counts = labels[label]["questions"]
+        assert counts["total"] == len(qs) and counts["blocking"] == sum(q["blocking"] for q in qs)
+        assert counts["blocking_open"] == load(work / name)["summary"]["blocking_open"]
+        assert counts["blocking_unknown"] == 0 and counts["answered"] == 0
+        assert len(labels[label]["blocking_open_ids"]) == counts["blocking_open"]
+    q = find(questions_of(work, "structure-questions.json"), "grid_label_missing", "set.dxf")
+    record_answer(work, q["id"], "ok", "me")
+    for name in QUESTION_FILES:  # question documents that are wrong or gone change nothing
+        (work / name).write_text("{}", encoding="utf-8")
+    after = by_label(build_status(work))["read-structure"]["questions"]
+    assert (
+        after["answered"] == 1
+        and after["blocking_open"] == labels["read-structure"]["questions"]["blocking_open"] - 1
+    )
+
+
+def test_status_outputs_are_fresh_stale_or_missing_with_the_command_that_fixes_them(world):
+    root, work = world
+    labels = by_label(build_status(work))
+    assert {p["outputs"]["status"] for k, p in labels.items() if k != "reader"} == {"fresh"}
+    assert labels["reader"]["outputs"] == {"status": "n/a", "files": [], "reason": None, "rerun": None}
+    assert all(p["outputs"]["rerun"] is None for p in labels.values())
+    (work / "callouts.json").unlink()
+    callouts = by_label(build_status(work))["callouts"]["outputs"]
+    assert callouts["status"] == "missing" and callouts["rerun"] == f"harness callouts {work}"
+    run_callouts(work, root)
+    build_set(root, "set.dxf", sheet2_number="S-888")
+    run_intake(root, work, PROJECT)  # a new inventory.json: everything built from the old one is stale
+    labels = by_label(build_status(work))
+    assert labels["intake"]["outputs"]["status"] == "fresh"
+    assert {labels[k]["outputs"]["status"] for k in ("read-structure", "callouts", "grid-system")} == {
+        "stale"
+    }
+    assert (
+        labels["read-structure"]["outputs"]["rerun"]
+        == f"harness read-structure {work} --input-dir <input_dir>"
+    )
+    assert labels["grid-system"]["outputs"]["rerun"] == f"harness grid-system {work}"
+    assert len(labels["intake"]["stale_answers"]) == 0
+
+
+def test_status_sees_answers_given_after_grid_system_ran(ready):
+    _, work = ready
+    assert build_status(work)["producers"][3]["outputs"]["status"] == "fresh"
+    unit = next(a for a in load(work / "answers.json")["answers"] if a["code"] in UNIT_CODES)
+    record_answer(work, unit["question_id"], "now cm", "me", {"unit": "cm"})
+    out = by_label(build_status(work))["grid-system"]["outputs"]
+    assert out["status"] == "stale" and "answers" in out["reason"]
+
+
+def test_status_lists_stale_answers_under_their_producer(world):
+    root, work = world
+    q = find(questions_of(work, "structure-questions.json"), "grid_family_axis_assignment", "set.dxf")
+    record_answer(work, q["id"], "x", "me", {"F001": "X"})
+    build_set(root, "set.dxf", sheet2_number="S-888")
+    run_intake(root, work, PROJECT)
+    labels = by_label(build_status(work))
+    (stale,) = labels["read-structure"]["stale_answers"]
+    assert stale["question_id"] == q["id"] and stale["code"] == "grid_family_axis_assignment"
+    assert all(not labels[k]["stale_answers"] for k in ("intake", "callouts", "grid-system"))
+
+
+def test_status_counts_registry_entries_without_a_blocking_flag_as_blocking(world):
+    _, work = world
+    registry = load(work / "question-registry.json")
+    entry = next(
+        e for e in registry["questions"].values() if e["producer"] == "intake" and e["status"] == "open"
+    )
+    was_blocking = entry.pop("blocking")
+    (work / "question-registry.json").write_text(json.dumps(registry), encoding="utf-8")
+    counts = by_label(build_status(work))["intake"]["questions"]
+    assert counts["blocking_unknown"] == 1 and counts["blocking"] >= 1
+    status = build_status(work)
+    reason = next(r for r in status["gate1"]["reasons"] if r.startswith("intake: ") and "blocking" in r)
+    assert "no recorded blocking flag" in reason and "harness intake" in reason
+    assert was_blocking in (True, False)
+
+
+def test_gate1_is_not_ready_with_every_reason_named(world):
+    _, work = world
+    gate = build_status(work)["gate1"]
+    assert gate["ready_for_gate1"] is False
+    text = "\n".join(gate["reasons"])
+    for needle in (
+        "units: set.dxf has no active units answer",
+        "units: other.dxf has no active units answer",
+        "grid_system_select",
+        "intake: 2 blocking question(s) open",
+        "read-structure: ",
+        "grid-system: ",
+    ):
+        assert needle in text, needle
+    assert "callouts: " not in text  # callouts' blocking questions do not stop gate 1
+
+
+def test_gate1_is_ready_when_everything_is_answered_and_fresh(ready):
+    _, work = ready
+    status = build_status(work)
+    assert status["gate1"] == {"ready_for_gate1": True, "reasons": []}
+    for p in status["producers"]:
+        assert p["outputs"]["status"] == ("n/a" if p["producer"] == "reader" else "fresh")
+    assert by_label(status)["callouts"]["questions"]["blocking_open"] == 0  # none raised by this world
+
+
+def test_gate1_needs_the_select_answer_and_every_used_system_axis_assigned(ready):
+    _, work = ready
+    answers = load(work / "answers.json")
+    select_answer = next(a for a in answers["answers"] if a["code"] == SELECT_CODE)
+    # naming a system the latest grid-systems.json does not have
+    record_answer(work, select_answer["question_id"], "S009", "me", {"systems": "S009"})
+    reasons = build_status(work)["gate1"]["reasons"]
+    assert any("S009" in r and "not in the latest grid-systems.json" in r for r in reasons)
+    # no select answer at all
+    answers["answers"] = [a for a in answers["answers"] if a["code"] != SELECT_CODE]
+    (work / "answers.json").write_text(json.dumps(answers), encoding="utf-8")
+    assert any(
+        f"{SELECT_CODE} (Q-" in r and "not answered" in r for r in build_status(work)["gate1"]["reasons"]
+    )
+
+
+def test_gate1_needs_axis_assignment_not_just_a_word_answer(ready):
+    _, work = ready
+    answers = load(work / "answers.json")
+    answers["answers"] = [a for a in answers["answers"] if a["code"] != AXIS_CODE]
+    (work / "answers.json").write_text(json.dumps(answers), encoding="utf-8")
+    status = build_status(work)  # the axis answers are gone: grid-systems.json is stale AND unassigned
+    assert status["gate1"]["ready_for_gate1"] is False
+    run_grid_systems(work)
+    status = build_status(work)
+    text = "\n".join(status["gate1"]["reasons"])
+    assert "has no Tekla X/Y" in text and "grid_family_axis_assignment" in text
+    # the new grid_system_axis_unassigned question answered in words does not assign anything
+    for q in questions_of(work, "grid-system-questions.json"):
+        if q["code"] == "grid_system_axis_unassigned":
+            record_answer(work, q["id"], "X is the numbers", "me")
+    assert "has no Tekla X/Y" in "\n".join(build_status(work)["gate1"]["reasons"])
+
+
+def test_gate1_needs_the_level_questions_answered(ready):
+    _, work = ready
+    registry = load(work / "question-registry.json")
+    for number, code in ((900, "level_storey_selection"), (901, "level_finished_vs_structural")):
+        registry["questions"][f"{number:016x}"] = {
+            "id": f"Q-{number}",
+            "code": code,
+            "file": "set.dxf",
+            "producer": "structure",
+            "status": "open",
+            "first_seen_run": 1,
+            "last_seen_run": 1,
+            "blocking": True,
+            "file_sha256": next(
+                r["sha256"] for r in load(work / "inventory.json")["files"] if r["path"] == "set.dxf"
+            ),
+        }
+    registry["next_id"] = 902
+    (work / "question-registry.json").write_text(json.dumps(registry), encoding="utf-8")
+    reasons = build_status(work)["gate1"]["reasons"]
+    assert "levels: Q-900 level_storey_selection (set.dxf) is not answered" in reasons
+    assert "levels: Q-901 level_finished_vs_structural (set.dxf) is not answered" in reasons
+    record_answer(work, "Q-900", "storeys are ...", "me")
+    record_answer(work, "Q-901", "finished", "me")
+    after = build_status(work)["gate1"]
+    assert not [r for r in after["reasons"] if r.startswith("levels:")]
+    assert after == {"ready_for_gate1": True, "reasons": []}  # the added blocking questions are answered too
+
+
+def test_gate1_needs_a_units_answer_for_every_probed_file(ready):
+    _, work = ready
+    answers = load(work / "answers.json")
+    for a in answers["answers"]:
+        if a["code"] == "units_confirm_all" and a["file"] == "other.dxf":
+            a["status"] = "superseded"
+    (work / "answers.json").write_text(json.dumps(answers), encoding="utf-8")
+    reasons = build_status(work)["gate1"]["reasons"]
+    assert "units: other.dxf has no active units answer (harness answer <id> ... --value unit=mm)" in reasons
+    assert not any(r.startswith("units: set.dxf") for r in reasons)
+
+
+def test_status_cli_prints_the_document_and_always_exits_0_for_a_work_folder(world, ready, capsys):
+    _, work = world
+    code, out, err = run_cli(capsys, "status", str(work))
+    assert code == 0 and err == "" and out == build_status(work)
+    assert validate("status", out) == [] and out["gate1"]["ready_for_gate1"] is False
+    _, rwork = ready
+    code, out, _ = run_cli(capsys, "status", str(rwork))
+    assert code == 0 and out["gate1"]["ready_for_gate1"] is True
+
+
+def test_status_exit_codes(tmp_path, capsys, world):
+    code, out, err = run_cli(capsys, "status", str(tmp_path / "missing"))
+    assert code == 2 and out is None and "not a work folder" in err
+    code, out, err = run_cli(capsys, "status", str(tmp_path))
+    assert code == 2 and out is None and "inventory.json" in err and "harness intake" in err
+    with pytest.raises(StatusError) as caught:
+        build_status(tmp_path)
+    assert caught.value.exit_code == 2
+    _, work = world
+    (work / "inventory.json").write_text("{", encoding="utf-8")
+    code, out, err = run_cli(capsys, "status", str(work))
+    assert code == 1 and out is None and "not valid JSON" in err
+
+
+def test_status_writes_nothing(world):
+    _, work = world
+    before = {str(p.relative_to(work)): p.read_bytes() for p in work.rglob("*") if p.is_file()}
+    build_status(work)
+    assert {str(p.relative_to(work)): p.read_bytes() for p in work.rglob("*") if p.is_file()} == before
+
+
+def test_status_example_is_valid(example):
+    assert validate("status", example("status")) == []

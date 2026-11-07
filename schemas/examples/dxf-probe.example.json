@@ -1,0 +1,261 @@
+{
+  "schema_version": "0.1",
+  "status": "ok",
+  "file": {
+    "path": "input/S-101.dxf",
+    "sha256": "9f2c6d8a4b1e0f37c5a2d9e8b7f6a5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8",
+    "ezdxf_version": "1.4.5",
+    "dxf_version": "AC1032",
+    "converter": "libredwg",
+    "confidence_cap": "medium",
+    "handles_reliable": true
+  },
+  "attempts": [
+    {
+      "tool": "ezdxf",
+      "tool_version": "1.4.5",
+      "status": "ok",
+      "started_at": "2026-11-06T09:05:04+07:00",
+      "duration_ms": 850
+    }
+  ],
+  "units": {
+    "value": "unknown",
+    "source": "header",
+    "header_code": 0,
+    "confidence": "low",
+    "evidence": [
+      "header $INSUNITS = 0",
+      "ezdxf unit table: no building unit for this code"
+    ]
+  },
+  "extents": {
+    "min": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "max": [
+      36000.0,
+      18000.0,
+      0.0
+    ],
+    "source": "header"
+  },
+  "layouts": [
+    {
+      "name": "Model",
+      "is_model": true,
+      "entity_total": 3,
+      "entity_counts": {
+        "DIMENSION": 1,
+        "LINE": 2
+      },
+      "viewports": []
+    },
+    {
+      "name": "Layout1",
+      "is_model": false,
+      "entity_total": 1,
+      "entity_counts": {
+        "VIEWPORT": 1
+      },
+      "viewports": [
+        {
+          "handle": "2A1",
+          "id": 2,
+          "is_overall": false,
+          "scale": 0.01,
+          "scale_note": null,
+          "target": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "view_height": 1000.0
+        }
+      ]
+    }
+  ],
+  "layers": [
+    {
+      "name": "S-BEAM",
+      "defined": true,
+      "on": true,
+      "frozen": false,
+      "locked": false,
+      "entities": {
+        "modelspace": 2,
+        "layouts": 0,
+        "blocks": 0
+      }
+    },
+    {
+      "name": "S-ANNO",
+      "defined": true,
+      "on": true,
+      "frozen": false,
+      "locked": false,
+      "entities": {
+        "modelspace": 1,
+        "layouts": 1,
+        "blocks": 0
+      }
+    }
+  ],
+  "blocks": {
+    "named": [
+      {
+        "name": "GRID-BUBBLE",
+        "insert_count": 12,
+        "has_attdef": true,
+        "has_attrib": true,
+        "dynamic_insert_count": 0
+      }
+    ],
+    "named_total": 1,
+    "truncated": false,
+    "anonymous": {
+      "count": 1,
+      "insert_count": 1,
+      "attributed_dynamic": 0,
+      "unresolved_dynamic": 0
+    }
+  },
+  "xrefs": [
+    {
+      "name": "A-PLAN",
+      "path": "C:\\proj\\arch\\A-PLAN.dwg",
+      "resolved": false,
+      "checked": [
+        "A-PLAN.dwg",
+        "A-PLAN.dxf"
+      ]
+    }
+  ],
+  "text_styles": [
+    {
+      "name": "VNTIME",
+      "font": ".VnTime.ttf",
+      "bigfont": "",
+      "family": "",
+      "is_shx_like": false,
+      "capital_font": false
+    }
+  ],
+  "text_encoding_hints": [
+    {
+      "style": "VNTIME",
+      "encoding_hint": "tcvn3",
+      "capital_font": false,
+      "source": "font_hint",
+      "knowledge_pattern": null,
+      "matched": [
+        {
+          "field": "font",
+          "value": ".VnTime.ttf"
+        }
+      ],
+      "kind": "hint"
+    }
+  ],
+  "unreadable_objects": [
+    {
+      "kind": "acad_table",
+      "dxftype": "ACAD_TABLE",
+      "count": 1,
+      "by_layer": {
+        "S-ANNO": 1
+      },
+      "handles": [
+        "3F2"
+      ]
+    }
+  ],
+  "dimension_audit": {
+    "total": 1,
+    "by_status": {
+      "override_differs": 1
+    },
+    "by_text_rule": {
+      "override": 1
+    },
+    "tolerance_rule": "Tolerance is half of the displayed precision: 0.5 * 10^-DIMDEC (DIMADEC for angular, DIMDEC when DIMADEC is -1), and at least DIMRND / 2 when DIMRND is set. Expected value is measured * DIMLFAC (angular: the measured angle in the DIMAUNIT unit: degrees, grads or radians).",
+    "max_rows": 200,
+    "truncated": false,
+    "rows": [
+      {
+        "seq": 1,
+        "handle": "1F4",
+        "layout": "Model",
+        "dim_type": "linear",
+        "text_rule": "override",
+        "text": "6000",
+        "measured": 6050.0,
+        "actual_measurement": 6050.0,
+        "measurement_agrees": true,
+        "expected_text_value": 6050.0,
+        "override_value": 6000.0,
+        "tolerance": 0.005,
+        "status": "override_differs",
+        "note": null
+      }
+    ],
+    "in_blocks": 0
+  },
+  "scales": {
+    "dimscale": [
+      {
+        "value": 1.0,
+        "count": 1,
+        "members": [
+          1.0
+        ]
+      }
+    ],
+    "dimstyles": [
+      {
+        "name": "Standard",
+        "dimscale": 1.0
+      }
+    ],
+    "viewport_scales": [
+      {
+        "value": 0.01,
+        "count": 1,
+        "members": [
+          0.01
+        ]
+      }
+    ],
+    "multiple_dimscale": false,
+    "multiple_viewport_scales": false,
+    "multiple_scales": false
+  },
+  "questions": [
+    {
+      "code": "units_unknown",
+      "blocking": true,
+      "message": "The DXF header does not give usable drawing units ($INSUNITS missing, 0, or outside mm/cm/m/in/ft). In which unit are the coordinates drawn? Metres are not assumed.",
+      "where": "header $INSUNITS",
+      "found": "0"
+    },
+    {
+      "code": "xref_unresolved",
+      "blocking": true,
+      "message": "External reference 'A-PLAN' was not found next to the DXF. Provide the referenced file or confirm that the drawing is complete without it.",
+      "where": "xref A-PLAN",
+      "found": "C:\\proj\\arch\\A-PLAN.dwg"
+    }
+  ],
+  "warnings": [
+    "DXF produced by the fallback converter (libredwg): confidence capped at medium."
+  ],
+  "unparsed_objects": [
+    {
+      "dxftype": "SCALE",
+      "count": 17
+    }
+  ],
+  "entities_without_layer": 0
+}

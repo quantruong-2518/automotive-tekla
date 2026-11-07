@@ -1,0 +1,96 @@
+{
+  "schema_version": "0.1",
+  "kind": "sheet_text",
+  "project_id": "demo-callouts",
+  "file": "plans/set.dxf",
+  "sheet": {
+    "sheet_id": "model#01",
+    "space": "model",
+    "layout": "Model",
+    "bbox": [
+      0.0,
+      0.0,
+      84100.0,
+      59400.0
+    ],
+    "sheet_number": {
+      "value": "S-101",
+      "confidence": "medium"
+    },
+    "duplicate_of": null
+  },
+  "query": {
+    "contains": "C",
+    "max_entries": 4
+  },
+  "counts": {
+    "assigned": 29,
+    "matched": 5,
+    "returned": 4,
+    "omitted": 1,
+    "truncated": true
+  },
+  "entries": [
+    {
+      "id": "T000043",
+      "row": 4,
+      "display_text": "CB300-V",
+      "encoding": "unknown",
+      "confidence": "medium",
+      "flags": [],
+      "layer": "0",
+      "style": "Standard",
+      "x": 62000.0,
+      "y": 55500.0,
+      "height": 350.0,
+      "rotation": 0.0,
+      "entity_type": "TEXT"
+    },
+    {
+      "id": "T000044",
+      "row": 5,
+      "display_text": "C1",
+      "encoding": "unknown",
+      "confidence": "medium",
+      "flags": [],
+      "layer": "0",
+      "style": "Standard",
+      "x": 62000.0,
+      "y": 55000.0,
+      "height": 350.0,
+      "rotation": 0.0,
+      "entity_type": "TEXT"
+    },
+    {
+      "id": "T000045",
+      "row": 6,
+      "display_text": "C2",
+      "encoding": "unknown",
+      "confidence": "medium",
+      "flags": [],
+      "layer": "0",
+      "style": "Standard",
+      "x": 62000.0,
+      "y": 54500.0,
+      "height": 350.0,
+      "rotation": 0.0,
+      "entity_type": "TEXT"
+    },
+    {
+      "id": "T000015",
+      "row": 10,
+      "display_text": "C",
+      "encoding": "unknown",
+      "confidence": "medium",
+      "flags": [],
+      "layer": "AXIS_BUBBLES",
+      "style": "Standard",
+      "x": 6600.0,
+      "y": 19500.0,
+      "height": 350.0,
+      "rotation": 0.0,
+      "entity_type": "TEXT"
+    }
+  ],
+  "warnings": []
+}

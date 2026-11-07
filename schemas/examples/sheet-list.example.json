@@ -1,0 +1,168 @@
+{
+  "schema_version": "0.1",
+  "kind": "sheet_list",
+  "project_id": "demo-callouts",
+  "files": [
+    {
+      "path": "plans/set.dxf",
+      "status": "listed",
+      "reason": null,
+      "text_entries": 51,
+      "unassigned_text": 0,
+      "sheets": [
+        {
+          "sheet_id": "model#01",
+          "space": "model",
+          "layout": "Model",
+          "bbox": [
+            0.0,
+            0.0,
+            84100.0,
+            59400.0
+          ],
+          "detection_confidence": "medium",
+          "sheet_number": {
+            "value": "S-101",
+            "confidence": "medium"
+          },
+          "duplicate_of": null,
+          "text_count": 29,
+          "titles": [
+            {
+              "entry_id": "T000001",
+              "display_text": "S-101",
+              "height": 350.0,
+              "truncated": false
+            },
+            {
+              "entry_id": "T000002",
+              "display_text": "A",
+              "height": 350.0,
+              "truncated": false
+            },
+            {
+              "entry_id": "T000003",
+              "display_text": "SHEET NO.",
+              "height": 350.0,
+              "truncated": false
+            },
+            {
+              "entry_id": "T000004",
+              "display_text": "REV",
+              "height": 350.0,
+              "truncated": false
+            },
+            {
+              "entry_id": "T000005",
+              "display_text": "DATE",
+              "height": 350.0,
+              "truncated": false
+            }
+          ]
+        },
+        {
+          "sheet_id": "model#02",
+          "space": "model",
+          "layout": "Model",
+          "bbox": [
+            90000.0,
+            0.0,
+            174100.0,
+            59400.0
+          ],
+          "detection_confidence": "medium",
+          "sheet_number": {
+            "value": "S-102",
+            "confidence": "medium"
+          },
+          "duplicate_of": null,
+          "text_count": 18,
+          "titles": [
+            {
+              "entry_id": "T000022",
+              "display_text": "S-102",
+              "height": 350.0,
+              "truncated": false
+            },
+            {
+              "entry_id": "T000023",
+              "display_text": "A",
+              "height": 350.0,
+              "truncated": false
+            },
+            {
+              "entry_id": "T000024",
+              "display_text": "SHEET NO.",
+              "height": 350.0,
+              "truncated": false
+            },
+            {
+              "entry_id": "T000025",
+              "display_text": "REV",
+              "height": 350.0,
+              "truncated": false
+            },
+            {
+              "entry_id": "T000026",
+              "display_text": "DATE",
+              "height": 350.0,
+              "truncated": false
+            }
+          ]
+        },
+        {
+          "sheet_id": "Plot#01",
+          "space": "Plot",
+          "layout": "Plot",
+          "bbox": [
+            100.0,
+            19.00134,
+            740.584059,
+            400.0
+          ],
+          "detection_confidence": "medium",
+          "sheet_number": {
+            "value": "S-201",
+            "confidence": "medium"
+          },
+          "duplicate_of": null,
+          "text_count": 4,
+          "titles": [
+            {
+              "entry_id": "T000039",
+              "display_text": "GENERAL NOTE",
+              "height": 350.0,
+              "truncated": false
+            },
+            {
+              "entry_id": "T000049",
+              "display_text": "S-201",
+              "height": 3.5,
+              "truncated": false
+            },
+            {
+              "entry_id": "T000050",
+              "display_text": "B",
+              "height": 3.5,
+              "truncated": false
+            },
+            {
+              "entry_id": "T000051",
+              "display_text": "GENERAL NOTES",
+              "height": 3.5,
+              "truncated": false
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "files": 1,
+    "listed": 1,
+    "skipped": 0,
+    "sheets": 3,
+    "text_entries": 51
+  },
+  "warnings": []
+}

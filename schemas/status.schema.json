@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:tekla-harness:schema:status:0.1",
+  "title": "Work folder status",
+  "description": "Printed by `harness status <work_dir>` (nothing is written): where a work folder stands, recomputed from question-registry.json, answers.json, inventory.json and the producers' output documents, never from the possibly stale question documents. PER PRODUCER (intake, read-structure = registry producer 'structure', callouts, grid-system, reader = the drawing-reader agent's questions from harness ask): `questions` counts the registry entries that are not obsolete (`total`), those that block (`blocking`, an entry without a recorded blocking flag counts as blocking and in `blocking_unknown`: rerun its producer), `blocking_open` (blocking and no active answer) and `answered`; `stale_answers` lists the answers whose file changed or whose question is no longer raised; `outputs` says whether the producer's documents are fresh: read-structure, callouts and grid-system record the sha256 of the inventory.json they were built from (grid-system also the fingerprint of the answers it read) and are `stale` when it differs from the current one, `missing` when a document does not exist; `rerun` is the command that fixes it. GATE 1 READINESS (`gate1.ready_for_gate1`) is true only when `reasons` is empty: every probed DXF/DWG has an active units answer; grid systems exist, grid_system_select is answered and every system the project uses (the answer's `systems` value, else every system in grid-systems.json) is axis-assigned in grid-systems.json (by grid_family_axis_assignment answers; answering grid_system_axis_unassigned in words alone does not assign an axis); every raised, non-obsolete level_storey_selection and level_finished_vs_structural question is answered (the selected files are not recorded in a free-text answer, so every file that raises them counts); no blocking question is open in intake, read-structure, grid-system or reader; every producer's outputs are fresh (reader: n/a). Ready does not mean the Tekla grid is built: tekla_grid is null until units and X/Y are answered, and the engineer still confirms at gate 1. Not detected: a read-structure rerun that wiped structure/grid-systems/*.svg, and changed input files that intake has not re-read (status does not see the input folder).",
+  "type": "object",
+  "required": ["schema_version", "kind", "project_id", "inventory_sha256", "producers", "gate1"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": "0.1" },
+    "kind": { "const": "status" },
+    "project_id": { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/project_id" },
+    "inventory_sha256": { "$ref": "#/$defs/sha256", "description": "sha256 of the current inventory.json bytes." },
+    "producers": {
+      "type": "array",
+      "description": "intake, read-structure, callouts, grid-system, reader, in this order.",
+      "minItems": 5,
+      "maxItems": 5,
+      "items": { "$ref": "#/$defs/producer" }
+    },
+    "gate1": {
+      "type": "object",
+      "required": ["ready_for_gate1", "reasons"],
+      "additionalProperties": false,
+      "properties": {
+        "ready_for_gate1": { "type": "boolean" },
+        "reasons": { "type": "array", "items": { "type": "string", "minLength": 1 }, "description": "What still stops gate 1; empty exactly when ready_for_gate1 is true." }
+      }
+    }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "producer": {
+      "type": "object",
+      "required": ["producer", "command", "questions", "blocking_open_ids", "stale_answers", "outputs"],
+      "additionalProperties": false,
+      "properties": {
+        "producer": { "enum": ["intake", "read-structure", "callouts", "grid-system", "reader"] },
+        "command": { "type": "string", "minLength": 1, "description": "The command that (re)runs the producer." },
+        "questions": {
+          "type": "object",
+          "required": ["total", "blocking", "blocking_unknown", "blocking_open", "answered", "obsolete"],
+          "additionalProperties": false,
+          "properties": {
+            "total": { "type": "integer", "minimum": 0, "description": "Registry entries of the producer that are not obsolete." },
+            "blocking": { "type": "integer", "minimum": 0, "description": "Of those, the blocking ones (including blocking_unknown)." },
+            "blocking_unknown": { "type": "integer", "minimum": 0, "description": "Entries written before the registry recorded the blocking flag: counted as blocking; rerun the producer." },
+            "blocking_open": { "type": "integer", "minimum": 0, "description": "Blocking entries without an active answer." },
+            "answered": { "type": "integer", "minimum": 0, "description": "Entries with an active answer, blocking or not." },
+            "obsolete": { "type": "integer", "minimum": 0, "description": "Entries the producer no longer raises (not counted in total)." }
+          }
+        },
+        "blocking_open_ids": {
+          "type": "array",
+          "maxItems": 50,
+          "items": { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/question_id" },
+          "description": "The ids behind blocking_open, at most 50."
+        },
+        "stale_answers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["question_id", "key", "code", "file", "reason"],
+            "additionalProperties": false,
+            "properties": {
+              "question_id": { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/question_id" },
+              "key": { "type": "string", "pattern": "^[0-9a-f]{16}$" },
+              "code": { "type": "string", "minLength": 1 },
+              "file": { "type": ["string", "null"] },
+              "reason": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
+        "outputs": {
+          "type": "object",
+          "required": ["status", "files", "reason", "rerun"],
+          "additionalProperties": false,
+          "properties": {
+            "status": { "enum": ["fresh", "stale", "missing", "n/a"], "description": "n/a: the reader produces no document from the inputs (its questions are raised one at a time by harness ask), so it has no freshness." },
+            "files": { "type": "array", "items": { "type": "string" }, "description": "The documents checked, relative to the work folder." },
+            "reason": { "type": ["string", "null"], "description": "Why not fresh; null when fresh." },
+            "rerun": { "type": ["string", "null"], "description": "The command line that fixes it; null when fresh." }
+          }
+        }
+      }
+    }
+  }
+}

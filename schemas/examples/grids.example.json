@@ -1,0 +1,1752 @@
+{
+  "schema_version": "0.1",
+  "file": {
+    "path": "structural-set.dxf",
+    "sha256": "c76afa09326ecec1b0df61e03a3f87471f14df8456548e08e177368d6748fbd6",
+    "confidence_cap": "high",
+    "declared_units": {
+      "insunits": 4,
+      "name": "mm"
+    }
+  },
+  "groups": [
+    {
+      "group_id": "V001",
+      "sheet": "model#01",
+      "space": "model",
+      "bbox": [
+        7000.0,
+        7000.0,
+        33691.546754,
+        22500.0
+      ],
+      "families": [
+        {
+          "family_id": "F001",
+          "direction": [
+            1.0,
+            0.0
+          ],
+          "normal": [
+            0.0,
+            1.0
+          ],
+          "angle_deg": 0.0,
+          "axes": [
+            {
+              "axis_id": "G0001",
+              "label": {
+                "value": "A",
+                "provenance": {
+                  "file": "structural-set.dxf",
+                  "sheet": "model#01",
+                  "method": "dxf_entity",
+                  "region": {
+                    "bbox": [
+                      6477.5,
+                      9825.0,
+                      6722.5,
+                      10175.0
+                    ]
+                  }
+                },
+                "confidence": "medium"
+              },
+              "offset": 0.0,
+              "line": {
+                "start": [
+                  7000.0,
+                  10000.0
+                ],
+                "end": [
+                  31000.0,
+                  10000.0
+                ],
+                "handle": "B7",
+                "layer": "S-GRID",
+                "linetype": "DASHDOT",
+                "block_path": []
+              },
+              "bubbles": [
+                {
+                  "center": [
+                    6600.0,
+                    10000.0
+                  ],
+                  "radius": 400.0,
+                  "label": "A",
+                  "label_source": "text",
+                  "tag": null,
+                  "text_id": "T000013",
+                  "block_path": [],
+                  "sheet": "model#01"
+                }
+              ],
+              "pairing": "line",
+              "angle_deviation_deg": 0.0,
+              "confidence": "medium"
+            },
+            {
+              "axis_id": "G0002",
+              "label": {
+                "value": "B",
+                "provenance": {
+                  "file": "structural-set.dxf",
+                  "sheet": "model#01",
+                  "method": "dxf_entity",
+                  "region": {
+                    "bbox": [
+                      6477.5,
+                      14825.0,
+                      6722.5,
+                      15175.0
+                    ]
+                  }
+                },
+                "confidence": "medium"
+              },
+              "offset": 5000.0,
+              "line": {
+                "start": [
+                  7000.0,
+                  15000.0
+                ],
+                "end": [
+                  31000.0,
+                  15000.0
+                ],
+                "handle": "BA",
+                "layer": "S-GRID",
+                "linetype": "DASHDOT",
+                "block_path": []
+              },
+              "bubbles": [
+                {
+                  "center": [
+                    6600.0,
+                    15000.0
+                  ],
+                  "radius": 400.0,
+                  "label": "B",
+                  "label_source": "text",
+                  "tag": null,
+                  "text_id": "T000014",
+                  "block_path": [],
+                  "sheet": "model#01"
+                }
+              ],
+              "pairing": "line",
+              "angle_deviation_deg": 0.0,
+              "confidence": "medium"
+            },
+            {
+              "axis_id": "G0003",
+              "label": {
+                "value": "C",
+                "provenance": {
+                  "file": "structural-set.dxf",
+                  "sheet": "model#01",
+                  "method": "dxf_entity",
+                  "region": {
+                    "bbox": [
+                      6477.5,
+                      19325.0,
+                      6722.5,
+                      19675.0
+                    ]
+                  }
+                },
+                "confidence": "medium"
+              },
+              "offset": 9500.0,
+              "line": {
+                "start": [
+                  7000.0,
+                  19500.0
+                ],
+                "end": [
+                  31000.0,
+                  19500.0
+                ],
+                "handle": "BD",
+                "layer": "S-GRID",
+                "linetype": "DASHDOT",
+                "block_path": []
+              },
+              "bubbles": [
+                {
+                  "center": [
+                    6600.0,
+                    19500.0
+                  ],
+                  "radius": 400.0,
+                  "label": "C",
+                  "label_source": "text",
+                  "tag": null,
+                  "text_id": "T000015",
+                  "block_path": [],
+                  "sheet": "model#01"
+                }
+              ],
+              "pairing": "line",
+              "angle_deviation_deg": 0.0,
+              "confidence": "medium"
+            }
+          ],
+          "spacings": [
+            {
+              "from_label": "A",
+              "to_label": "B",
+              "measured": 5000.0,
+              "value": {
+                "value": 5000.0,
+                "provenance": {
+                  "file": "structural-set.dxf",
+                  "sheet": "model#01",
+                  "method": "derived",
+                  "region": {
+                    "bbox": [
+                      7000.0,
+                      10000.0,
+                      31000.0,
+                      15000.0
+                    ]
+                  },
+                  "derived_from": [
+                    {
+                      "file": "structural-set.dxf",
+                      "sheet": "model#01",
+                      "method": "dxf_entity",
+                      "region": {
+                        "bbox": [
+                          7000.0,
+                          10000.0,
+                          31000.0,
+                          10000.0
+                        ]
+                      }
+                    },
+                    {
+                      "file": "structural-set.dxf",
+                      "sheet": "model#01",
+                      "method": "dxf_entity",
+                      "region": {
+                        "bbox": [
+                          7000.0,
+                          15000.0,
+                          31000.0,
+                          15000.0
+                        ]
+                      }
+                    }
+                  ]
+                },
+                "confidence": "medium"
+              },
+              "dimension_evidence": [],
+              "evidence": [
+                {
+                  "kind": "other_view",
+                  "agrees": true,
+                  "independent": true,
+                  "ref": "V002/F004 on sheet model#02: agrees"
+                }
+              ]
+            },
+            {
+              "from_label": "B",
+              "to_label": "C",
+              "measured": 4500.0,
+              "value": {
+                "value": 4500.0,
+                "provenance": {
+                  "file": "structural-set.dxf",
+                  "sheet": "model#01",
+                  "method": "derived",
+                  "region": {
+                    "bbox": [
+                      7000.0,
+                      15000.0,
+                      31000.0,
+                      19500.0
+                    ]
+                  },
+                  "derived_from": [
+                    {
+                      "file": "structural-set.dxf",
+                      "sheet": "model#01",
+                      "method": "dxf_entity",
+                      "region": {
+                        "bbox": [
+                          7000.0,
+                          15000.0,
+                          31000.0,
+                          15000.0
+                        ]
+                      }
+                    },
+                    {
+                      "file": "structural-set.dxf",
+                      "sheet": "model#01",
+                      "method": "dxf_entity",
+                      "region": {
+                        "bbox": [
+                          7000.0,
+                          19500.0,
+                          31000.0,
+                          19500.0
+                        ]
+                      }
+                    }
+                  ]
+                },
+                "confidence": "medium"
+              },
+              "dimension_evidence": [],
+              "evidence": [
+                {
+                  "kind": "other_view",
+                  "agrees": true,
+                  "independent": true,
+                  "ref": "V002/F004 on sheet model#02: agrees"
+                }
+              ]
+            }
+          ],
+          "proposal": {
+            "status": "proposal",
+            "coordinates": "0 5000 4500",
+            "labels": "A B C",
+            "unit": "mm",
+            "unit_confidence": "medium",
+            "rounding_step": 1.0,
+            "max_rounding_residual": 0.0,
+            "complete": true,
+            "note": "Proposal only: relative spacings in drawing units (declared unit, not converted). Confirm at gate 1; Tekla X/Y assignment is asked separately."
+          },
+          "unlabelled_lines": []
+        },
+        {
+          "family_id": "F002",
+          "direction": [
+            0.173648,
+            0.984808
+          ],
+          "normal": [
+            0.984808,
+            -0.173648
+          ],
+          "angle_deg": 80.0,
+          "axes": [
+            {
+              "axis_id": "G0004",
+              "label": {
+                "value": "5",
+                "provenance": {
+                  "file": "structural-set.dxf",
+                  "sheet": "model#01",
+                  "method": "dxf_entity",
+                  "region": {
+                    "bbox": [
+                      30808.040729,
+                      6431.076899,
+                      31053.040729,
+                      6781.076899
+                    ]
+                  }
+                },
+                "confidence": "medium"
+              },
+              "offset": 0.0,
+              "line": {
+                "start": [
+                  31000.0,
+                  7000.0
+                ],
+                "end": [
+                  33691.546754,
+                  22264.520172
+                ],
+                "handle": "C0",
+                "layer": "S-GRID",
+                "linetype": "DASHDOT",
+                "block_path": []
+              },
+              "bubbles": [
+                {
+                  "center": [
+                    30930.540729,
+                    6606.076899
+                  ],
+                  "radius": 400.0,
+                  "label": "5",
+                  "label_source": "attrib",
+                  "tag": "AXIS_NO",
+                  "text_id": "T000016",
+                  "block_path": [
+                    "AXIS_BUBBLE"
+                  ],
+                  "sheet": "model#01"
+                }
+              ],
+              "pairing": "line",
+              "angle_deviation_deg": 0.0,
+              "confidence": "medium"
+            }
+          ],
+          "spacings": [],
+          "proposal": null,
+          "unlabelled_lines": []
+        },
+        {
+          "family_id": "F003",
+          "direction": [
+            0.0,
+            1.0
+          ],
+          "normal": [
+            1.0,
+            0.0
+          ],
+          "angle_deg": 90.0,
+          "axes": [
+            {
+              "axis_id": "G0005",
+              "label": {
+                "value": "1",
+                "provenance": {
+                  "file": "structural-set.dxf",
+                  "sheet": "model#01",
+                  "method": "dxf_entity",
+                  "region": {
+                    "bbox": [
+                      9877.5,
+                      6425.0,
+                      10122.5,
+                      6775.0
+                    ]
+                  }
+                },
+                "confidence": "medium"
+              },
+              "offset": 0.0,
+              "line": {
+                "start": [
+                  10000.0,
+                  7000.0
+                ],
+                "end": [
+                  10000.0,
+                  22500.0
+                ],
+                "handle": "A7",
+                "layer": "S-GRID",
+                "linetype": "DASHDOT",
+                "block_path": []
+              },
+              "bubbles": [
+                {
+                  "center": [
+                    10000.0,
+                    6600.0
+                  ],
+                  "radius": 400.0,
+                  "label": "1",
+                  "label_source": "attrib",
+                  "tag": "AXIS_NO",
+                  "text_id": "T000009",
+                  "block_path": [
+                    "AXIS_BUBBLE"
+                  ],
+                  "sheet": "model#01"
+                }
+              ],
+              "pairing": "line",
+              "angle_deviation_deg": 0.0,
+              "confidence": "medium"
+            },
+            {
+              "axis_id": "G0006",
+              "label": {
+                "value": "2",
+                "provenance": {
+                  "file": "structural-set.dxf",
+                  "sheet": "model#01",
+                  "method": "dxf_entity",
+                  "region": {
+                    "bbox": [
+                      15877.5,
+                      6425.0,
+                      16122.5,
+                      6775.0
+                    ]
+                  }
+                },
+                "confidence": "medium"
+              },
+              "offset": 6000.0,
+              "line": {
+                "start": [
+                  16000.0,
+                  7000.0
+                ],
+                "end": [
+                  16000.0,
+                  22500.0
+                ],
+                "handle": "AB",
+                "layer": "S-GRID",
+                "linetype": "DASHDOT",
+                "block_path": []
+              },
+              "bubbles": [
+                {
+                  "center": [
+                    16000.0,
+                    6600.0
+                  ],
+                  "radius": 400.0,
+                  "label": "2",
+                  "label_source": "attrib",
+                  "tag": "AXIS_NO",
+                  "text_id": "T000010",
+                  "block_path": [
+                    "AXIS_BUBBLE"
+                  ],
+                  "sheet": "model#01"
+                }
+              ],
+              "pairing": "line",
+              "angle_deviation_deg": 0.0,
+              "confidence": "medium"
+            },
+            {
+              "axis_id": "G0007",
+              "label": {
+                "value": "3",
+                "provenance": {
+                  "file": "structural-set.dxf",
+                  "sheet": "model#01",
+                  "method": "dxf_entity",
+                  "region": {
+                    "bbox": [
+                      21877.5,
+                      6425.0,
+                      22122.5,
+                      6775.0
+                    ]
+                  }
+                },
+                "confidence": "medium"
+              },
+              "offset": 12000.0,
+              "line": {
+                "start": [
+                  22000.0,
+                  7000.0
+                ],
+                "end": [
+                  22000.0,
+                  22500.0
+                ],
+                "handle": "AF",
+                "layer": "S-GRID",
+                "linetype": "DASHDOT",
+                "block_path": []
+              },
+              "bubbles": [
+                {
+                  "center": [
+                    22000.0,
+                    6600.0
+                  ],
+                  "radius": 400.0,
+                  "label": "3",
+                  "label_source": "attrib",
+                  "tag": "AXIS_NO",
+                  "text_id": "T000011",
+                  "block_path": [
+                    "AXIS_BUBBLE"
+                  ],
+                  "sheet": "model#01"
+                }
+              ],
+              "pairing": "line",
+              "angle_deviation_deg": 0.0,
+              "confidence": "medium"
+            },
+            {
+              "axis_id": "G0008",
+              "label": {
+                "value": "4",
+                "provenance": {
+                  "file": "structural-set.dxf",
+                  "sheet": "model#01",
+                  "method": "dxf_entity",
+                  "region": {
+                    "bbox": [
+                      27877.5,
+                      6425.0,
+                      28122.5,
+                      6775.0
+                    ]
+                  }
+                },
+                "confidence": "medium"
+              },
+              "offset": 18000.0,
+              "line": {
+                "start": [
+                  28000.0,
+                  7000.0
+                ],
+                "end": [
+                  28000.0,
+                  22500.0
+                ],
+                "handle": "B3",
+                "layer": "S-GRID",
+                "linetype": "DASHDOT",
+                "block_path": []
+              },
+              "bubbles": [
+                {
+                  "center": [
+                    28000.0,
+                    6600.0
+                  ],
+                  "radius": 400.0,
+                  "label": "4",
+                  "label_source": "attrib",
+                  "tag": "AXIS_NO",
+                  "text_id": "T000012",
+                  "block_path": [
+                    "AXIS_BUBBLE"
+                  ],
+                  "sheet": "model#01"
+                }
+              ],
+              "pairing": "line",
+              "angle_deviation_deg": 0.0,
+              "confidence": "medium"
+            }
+          ],
+          "spacings": [
+            {
+              "from_label": "1",
+              "to_label": "2",
+              "measured": 6000.0,
+              "value": {
+                "value": 6000.0,
+                "provenance": {
+                  "file": "structural-set.dxf",
+                  "sheet": "model#01",
+                  "method": "derived",
+                  "region": {
+                    "bbox": [
+                      10000.0,
+                      7000.0,
+                      16000.0,
+                      22500.0
+                    ]
+                  },
+                  "derived_from": [
+                    {
+                      "file": "structural-set.dxf",
+                      "sheet": "model#01",
+                      "method": "dxf_entity",
+                      "region": {
+                        "bbox": [
+                          10000.0,
+                          7000.0,
+                          10000.0,
+                          22500.0
+                        ]
+                      }
+                    },
+                    {
+                      "file": "structural-set.dxf",
+                      "sheet": "model#01",
+                      "method": "dxf_entity",
+                      "region": {
+                        "bbox": [
+                          16000.0,
+                          7000.0,
+                          16000.0,
+                          22500.0
+                        ]
+                      }
+                    }
+                  ]
+                },
+                "confidence": "low"
+              },
+              "dimension_evidence": [
+                {
+                  "handle": "C4",
+                  "from_label": "1",
+                  "to_label": "2",
+                  "measured": 6000.0,
+                  "dimlfac": 1.0,
+                  "displayed": 6500.0,
+                  "text": "6500",
+                  "status": "differs"
+                }
+              ],
+              "evidence": [
+                {
+                  "kind": "dimension_adjacent",
+                  "agrees": false,
+                  "independent": true,
+                  "ref": "dimension C4 1-2 text '6500' (differs)"
+                },
+                {
+                  "kind": "other_view",
+                  "agrees": true,
+                  "independent": true,
+                  "ref": "V002/F005 on sheet model#02: agrees"
+                }
+              ]
+            },
+            {
+              "from_label": "2",
+              "to_label": "3",
+              "measured": 6000.0,
+              "value": {
+                "value": 6000.0,
+                "provenance": {
+                  "file": "structural-set.dxf",
+                  "sheet": "model#01",
+                  "method": "derived",
+                  "region": {
+                    "bbox": [
+                      16000.0,
+                      7000.0,
+                      22000.0,
+                      22500.0
+                    ]
+                  },
+                  "derived_from": [
+                    {
+                      "file": "structural-set.dxf",
+                      "sheet": "model#01",
+                      "method": "dxf_entity",
+                      "region": {
+                        "bbox": [
+                          16000.0,
+                          7000.0,
+                          16000.0,
+                          22500.0
+                        ]
+                      }
+                    },
+                    {
+                      "file": "structural-set.dxf",
+                      "sheet": "model#01",
+                      "method": "dxf_entity",
+                      "region": {
+                        "bbox": [
+                          22000.0,
+                          7000.0,
+                          22000.0,
+                          22500.0
+                        ]
+                      }
+                    }
+                  ]
+                },
+                "confidence": "medium"
+              },
+              "dimension_evidence": [
+                {
+                  "handle": "D4",
+                  "from_label": "2",
+                  "to_label": "3",
+                  "measured": 6000.0,
+                  "dimlfac": 1.0,
+                  "displayed": 6000.0,
+                  "text": "<>",
+                  "status": "measured"
+                }
+              ],
+              "evidence": [
+                {
+                  "kind": "dimension_adjacent",
+                  "agrees": true,
+                  "independent": false,
+                  "ref": "dimension D4 2-3 text '<>' (measured)"
+                },
+                {
+                  "kind": "other_view",
+                  "agrees": true,
+                  "independent": true,
+                  "ref": "V002/F005 on sheet model#02: agrees"
+                }
+              ]
+            },
+            {
+              "from_label": "3",
+              "to_label": "4",
+              "measured": 6000.0,
+              "value": {
+                "value": 6000.0,
+                "provenance": {
+                  "file": "structural-set.dxf",
+                  "sheet": "model#01",
+                  "method": "derived",
+                  "region": {
+                    "bbox": [
+                      22000.0,
+                      7000.0,
+                      28000.0,
+                      22500.0
+                    ]
+                  },
+                  "derived_from": [
+                    {
+                      "file": "structural-set.dxf",
+                      "sheet": "model#01",
+                      "method": "dxf_entity",
+                      "region": {
+                        "bbox": [
+                          22000.0,
+                          7000.0,
+                          22000.0,
+                          22500.0
+                        ]
+                      }
+                    },
+                    {
+                      "file": "structural-set.dxf",
+                      "sheet": "model#01",
+                      "method": "dxf_entity",
+                      "region": {
+                        "bbox": [
+                          28000.0,
+                          7000.0,
+                          28000.0,
+                          22500.0
+                        ]
+                      }
+                    }
+                  ]
+                },
+                "confidence": "low"
+              },
+              "dimension_evidence": [],
+              "evidence": [
+                {
+                  "kind": "other_view",
+                  "agrees": false,
+                  "independent": true,
+                  "ref": "V002/F005 on sheet model#02: differs"
+                }
+              ]
+            }
+          ],
+          "proposal": {
+            "status": "proposal",
+            "coordinates": "0 3*6000",
+            "labels": "1 2 3 4",
+            "unit": "mm",
+            "unit_confidence": "medium",
+            "rounding_step": 1.0,
+            "max_rounding_residual": 0.0,
+            "complete": false,
+            "note": "Proposal only: relative spacings in drawing units (declared unit, not converted). Confirm at gate 1; Tekla X/Y assignment is asked separately."
+          },
+          "unlabelled_lines": []
+        }
+      ]
+    },
+    {
+      "group_id": "V002",
+      "sheet": "model#02",
+      "space": "model",
+      "bbox": [
+        97000.0,
+        7000.0,
+        121500.0,
+        22500.0
+      ],
+      "families": [
+        {
+          "family_id": "F004",
+          "direction": [
+            1.0,
+            0.0
+          ],
+          "normal": [
+            0.0,
+            1.0
+          ],
+          "angle_deg": 0.0,
+          "axes": [
+            {
+              "axis_id": "G0009",
+              "label": {
+                "value": "A",
+                "provenance": {
+                  "file": "structural-set.dxf",
+                  "sheet": "model#02",
+                  "method": "dxf_entity",
+                  "region": {
+                    "bbox": [
+                      96477.5,
+                      9825.0,
+                      96722.5,
+                      10175.0
+                    ]
+                  }
+                },
+                "confidence": "medium"
+              },
+              "offset": 0.0,
+              "line": {
+                "start": [
+                  97000.0,
+                  10000.0
+                ],
+                "end": [
+                  121500.0,
+                  10000.0
+                ],
+                "handle": "FF",
+                "layer": "S-GRID",
+                "linetype": "DASHDOT",
+                "block_path": []
+              },
+              "bubbles": [
+                {
+                  "center": [
+                    96600.0,
+                    10000.0
+                  ],
+                  "radius": 400.0,
+                  "label": "A",
+                  "label_source": "attrib",
+                  "tag": "AXIS_NO",
+                  "text_id": "T000034",
+                  "block_path": [
+                    "AXIS_BUBBLE"
+                  ],
+                  "sheet": "model#02"
+                }
+              ],
+              "pairing": "line",
+              "angle_deviation_deg": 0.0,
+              "confidence": "medium"
+            },
+            {
+              "axis_id": "G0010",
+              "label": {
+                "value": "B",
+                "provenance": {
+                  "file": "structural-set.dxf",
+                  "sheet": "model#02",
+                  "method": "dxf_entity",
+                  "region": {
+                    "bbox": [
+                      96477.5,
+                      14825.0,
+                      96722.5,
+                      15175.0
+                    ]
+                  }
+                },
+                "confidence": "medium"
+              },
+              "offset": 5000.0,
+              "line": {
+                "start": [
+                  97000.0,
+                  15000.0
+                ],
+                "end": [
+                  121500.0,
+                  15000.0
+                ],
+                "handle": "103",
+                "layer": "S-GRID",
+                "linetype": "DASHDOT",
+                "block_path": []
+              },
+              "bubbles": [
+                {
+                  "center": [
+                    96600.0,
+                    15000.0
+                  ],
+                  "radius": 400.0,
+                  "label": "B",
+                  "label_source": "attrib",
+                  "tag": "AXIS_NO",
+                  "text_id": "T000035",
+                  "block_path": [
+                    "AXIS_BUBBLE"
+                  ],
+                  "sheet": "model#02"
+                }
+              ],
+              "pairing": "line",
+              "angle_deviation_deg": 0.0,
+              "confidence": "medium"
+            },
+            {
+              "axis_id": "G0011",
+              "label": {
+                "value": "C",
+                "provenance": {
+                  "file": "structural-set.dxf",
+                  "sheet": "model#02",
+                  "method": "dxf_entity",
+                  "region": {
+                    "bbox": [
+                      96477.5,
+                      19325.0,
+                      96722.5,
+                      19675.0
+                    ]
+                  }
+                },
+                "confidence": "medium"
+              },
+              "offset": 9500.0,
+              "line": {
+                "start": [
+                  97000.0,
+                  19500.0
+                ],
+                "end": [
+                  121500.0,
+                  19500.0
+                ],
+                "handle": "107",
+                "layer": "S-GRID",
+                "linetype": "DASHDOT",
+                "block_path": []
+              },
+              "bubbles": [
+                {
+                  "center": [
+                    96600.0,
+                    19500.0
+                  ],
+                  "radius": 400.0,
+                  "label": "C",
+                  "label_source": "attrib",
+                  "tag": "AXIS_NO",
+                  "text_id": "T000036",
+                  "block_path": [
+                    "AXIS_BUBBLE"
+                  ],
+                  "sheet": "model#02"
+                }
+              ],
+              "pairing": "line",
+              "angle_deviation_deg": 0.0,
+              "confidence": "medium"
+            }
+          ],
+          "spacings": [
+            {
+              "from_label": "A",
+              "to_label": "B",
+              "measured": 5000.0,
+              "value": {
+                "value": 5000.0,
+                "provenance": {
+                  "file": "structural-set.dxf",
+                  "sheet": "model#02",
+                  "method": "derived",
+                  "region": {
+                    "bbox": [
+                      97000.0,
+                      10000.0,
+                      121500.0,
+                      15000.0
+                    ]
+                  },
+                  "derived_from": [
+                    {
+                      "file": "structural-set.dxf",
+                      "sheet": "model#02",
+                      "method": "dxf_entity",
+                      "region": {
+                        "bbox": [
+                          97000.0,
+                          10000.0,
+                          121500.0,
+                          10000.0
+                        ]
+                      }
+                    },
+                    {
+                      "file": "structural-set.dxf",
+                      "sheet": "model#02",
+                      "method": "dxf_entity",
+                      "region": {
+                        "bbox": [
+                          97000.0,
+                          15000.0,
+                          121500.0,
+                          15000.0
+                        ]
+                      }
+                    }
+                  ]
+                },
+                "confidence": "medium"
+              },
+              "dimension_evidence": [],
+              "evidence": [
+                {
+                  "kind": "other_view",
+                  "agrees": true,
+                  "independent": true,
+                  "ref": "V001/F001 on sheet model#01: agrees"
+                }
+              ]
+            },
+            {
+              "from_label": "B",
+              "to_label": "C",
+              "measured": 4500.0,
+              "value": {
+                "value": 4500.0,
+                "provenance": {
+                  "file": "structural-set.dxf",
+                  "sheet": "model#02",
+                  "method": "derived",
+                  "region": {
+                    "bbox": [
+                      97000.0,
+                      15000.0,
+                      121500.0,
+                      19500.0
+                    ]
+                  },
+                  "derived_from": [
+                    {
+                      "file": "structural-set.dxf",
+                      "sheet": "model#02",
+                      "method": "dxf_entity",
+                      "region": {
+                        "bbox": [
+                          97000.0,
+                          15000.0,
+                          121500.0,
+                          15000.0
+                        ]
+                      }
+                    },
+                    {
+                      "file": "structural-set.dxf",
+                      "sheet": "model#02",
+                      "method": "dxf_entity",
+                      "region": {
+                        "bbox": [
+                          97000.0,
+                          19500.0,
+                          121500.0,
+                          19500.0
+                        ]
+                      }
+                    }
+                  ]
+                },
+                "confidence": "medium"
+              },
+              "dimension_evidence": [],
+              "evidence": [
+                {
+                  "kind": "other_view",
+                  "agrees": true,
+                  "independent": true,
+                  "ref": "V001/F001 on sheet model#01: agrees"
+                }
+              ]
+            }
+          ],
+          "proposal": {
+            "status": "proposal",
+            "coordinates": "0 5000 4500",
+            "labels": "A B C",
+            "unit": "mm",
+            "unit_confidence": "medium",
+            "rounding_step": 1.0,
+            "max_rounding_residual": 0.0,
+            "complete": true,
+            "note": "Proposal only: relative spacings in drawing units (declared unit, not converted). Confirm at gate 1; Tekla X/Y assignment is asked separately."
+          },
+          "unlabelled_lines": []
+        },
+        {
+          "family_id": "F005",
+          "direction": [
+            0.0,
+            1.0
+          ],
+          "normal": [
+            1.0,
+            0.0
+          ],
+          "angle_deg": 90.0,
+          "axes": [
+            {
+              "axis_id": "G0012",
+              "label": {
+                "value": "1",
+                "provenance": {
+                  "file": "structural-set.dxf",
+                  "sheet": "model#02",
+                  "method": "dxf_entity",
+                  "region": {
+                    "bbox": [
+                      99877.5,
+                      6425.0,
+                      100122.5,
+                      6775.0
+                    ]
+                  }
+                },
+                "confidence": "medium"
+              },
+              "offset": 0.0,
+              "line": {
+                "start": [
+                  100000.0,
+                  7000.0
+                ],
+                "end": [
+                  100000.0,
+                  22500.0
+                ],
+                "handle": "EF",
+                "layer": "S-GRID",
+                "linetype": "DASHDOT",
+                "block_path": []
+              },
+              "bubbles": [
+                {
+                  "center": [
+                    100000.0,
+                    6600.0
+                  ],
+                  "radius": 400.0,
+                  "label": "1",
+                  "label_source": "attrib",
+                  "tag": "AXIS_NO",
+                  "text_id": "T000030",
+                  "block_path": [
+                    "AXIS_BUBBLE"
+                  ],
+                  "sheet": "model#02"
+                }
+              ],
+              "pairing": "line",
+              "angle_deviation_deg": 0.0,
+              "confidence": "medium"
+            },
+            {
+              "axis_id": "G0013",
+              "label": {
+                "value": "2",
+                "provenance": {
+                  "file": "structural-set.dxf",
+                  "sheet": "model#02",
+                  "method": "dxf_entity",
+                  "region": {
+                    "bbox": [
+                      105877.5,
+                      6425.0,
+                      106122.5,
+                      6775.0
+                    ]
+                  }
+                },
+                "confidence": "medium"
+              },
+              "offset": 6000.0,
+              "line": {
+                "start": [
+                  106000.0,
+                  7000.0
+                ],
+                "end": [
+                  106000.0,
+                  22500.0
+                ],
+                "handle": "F3",
+                "layer": "S-GRID",
+                "linetype": "DASHDOT",
+                "block_path": []
+              },
+              "bubbles": [
+                {
+                  "center": [
+                    106000.0,
+                    6600.0
+                  ],
+                  "radius": 400.0,
+                  "label": "2",
+                  "label_source": "attrib",
+                  "tag": "AXIS_NO",
+                  "text_id": "T000031",
+                  "block_path": [
+                    "AXIS_BUBBLE"
+                  ],
+                  "sheet": "model#02"
+                }
+              ],
+              "pairing": "line",
+              "angle_deviation_deg": 0.0,
+              "confidence": "medium"
+            },
+            {
+              "axis_id": "G0014",
+              "label": {
+                "value": "3",
+                "provenance": {
+                  "file": "structural-set.dxf",
+                  "sheet": "model#02",
+                  "method": "dxf_entity",
+                  "region": {
+                    "bbox": [
+                      111877.5,
+                      6425.0,
+                      112122.5,
+                      6775.0
+                    ]
+                  }
+                },
+                "confidence": "medium"
+              },
+              "offset": 12000.0,
+              "line": {
+                "start": [
+                  112000.0,
+                  7000.0
+                ],
+                "end": [
+                  112000.0,
+                  22500.0
+                ],
+                "handle": "F7",
+                "layer": "S-GRID",
+                "linetype": "DASHDOT",
+                "block_path": []
+              },
+              "bubbles": [
+                {
+                  "center": [
+                    112000.0,
+                    6600.0
+                  ],
+                  "radius": 400.0,
+                  "label": "3",
+                  "label_source": "attrib",
+                  "tag": "AXIS_NO",
+                  "text_id": "T000032",
+                  "block_path": [
+                    "AXIS_BUBBLE"
+                  ],
+                  "sheet": "model#02"
+                }
+              ],
+              "pairing": "line",
+              "angle_deviation_deg": 0.0,
+              "confidence": "medium"
+            },
+            {
+              "axis_id": "G0015",
+              "label": {
+                "value": "4",
+                "provenance": {
+                  "file": "structural-set.dxf",
+                  "sheet": "model#02",
+                  "method": "dxf_entity",
+                  "region": {
+                    "bbox": [
+                      118377.5,
+                      6425.0,
+                      118622.5,
+                      6775.0
+                    ]
+                  }
+                },
+                "confidence": "medium"
+              },
+              "offset": 18500.0,
+              "line": {
+                "start": [
+                  118500.0,
+                  7000.0
+                ],
+                "end": [
+                  118500.0,
+                  22500.0
+                ],
+                "handle": "FB",
+                "layer": "S-GRID",
+                "linetype": "DASHDOT",
+                "block_path": []
+              },
+              "bubbles": [
+                {
+                  "center": [
+                    118500.0,
+                    6600.0
+                  ],
+                  "radius": 400.0,
+                  "label": "4",
+                  "label_source": "attrib",
+                  "tag": "AXIS_NO",
+                  "text_id": "T000033",
+                  "block_path": [
+                    "AXIS_BUBBLE"
+                  ],
+                  "sheet": "model#02"
+                }
+              ],
+              "pairing": "line",
+              "angle_deviation_deg": 0.0,
+              "confidence": "medium"
+            }
+          ],
+          "spacings": [
+            {
+              "from_label": "1",
+              "to_label": "2",
+              "measured": 6000.0,
+              "value": {
+                "value": 6000.0,
+                "provenance": {
+                  "file": "structural-set.dxf",
+                  "sheet": "model#02",
+                  "method": "derived",
+                  "region": {
+                    "bbox": [
+                      100000.0,
+                      7000.0,
+                      106000.0,
+                      22500.0
+                    ]
+                  },
+                  "derived_from": [
+                    {
+                      "file": "structural-set.dxf",
+                      "sheet": "model#02",
+                      "method": "dxf_entity",
+                      "region": {
+                        "bbox": [
+                          100000.0,
+                          7000.0,
+                          100000.0,
+                          22500.0
+                        ]
+                      }
+                    },
+                    {
+                      "file": "structural-set.dxf",
+                      "sheet": "model#02",
+                      "method": "dxf_entity",
+                      "region": {
+                        "bbox": [
+                          106000.0,
+                          7000.0,
+                          106000.0,
+                          22500.0
+                        ]
+                      }
+                    }
+                  ]
+                },
+                "confidence": "medium"
+              },
+              "dimension_evidence": [],
+              "evidence": [
+                {
+                  "kind": "other_view",
+                  "agrees": true,
+                  "independent": true,
+                  "ref": "V001/F003 on sheet model#01: agrees"
+                }
+              ]
+            },
+            {
+              "from_label": "2",
+              "to_label": "3",
+              "measured": 6000.0,
+              "value": {
+                "value": 6000.0,
+                "provenance": {
+                  "file": "structural-set.dxf",
+                  "sheet": "model#02",
+                  "method": "derived",
+                  "region": {
+                    "bbox": [
+                      106000.0,
+                      7000.0,
+                      112000.0,
+                      22500.0
+                    ]
+                  },
+                  "derived_from": [
+                    {
+                      "file": "structural-set.dxf",
+                      "sheet": "model#02",
+                      "method": "dxf_entity",
+                      "region": {
+                        "bbox": [
+                          106000.0,
+                          7000.0,
+                          106000.0,
+                          22500.0
+                        ]
+                      }
+                    },
+                    {
+                      "file": "structural-set.dxf",
+                      "sheet": "model#02",
+                      "method": "dxf_entity",
+                      "region": {
+                        "bbox": [
+                          112000.0,
+                          7000.0,
+                          112000.0,
+                          22500.0
+                        ]
+                      }
+                    }
+                  ]
+                },
+                "confidence": "medium"
+              },
+              "dimension_evidence": [],
+              "evidence": [
+                {
+                  "kind": "other_view",
+                  "agrees": true,
+                  "independent": true,
+                  "ref": "V001/F003 on sheet model#01: agrees"
+                }
+              ]
+            },
+            {
+              "from_label": "3",
+              "to_label": "4",
+              "measured": 6500.0,
+              "value": {
+                "value": 6500.0,
+                "provenance": {
+                  "file": "structural-set.dxf",
+                  "sheet": "model#02",
+                  "method": "derived",
+                  "region": {
+                    "bbox": [
+                      112000.0,
+                      7000.0,
+                      118500.0,
+                      22500.0
+                    ]
+                  },
+                  "derived_from": [
+                    {
+                      "file": "structural-set.dxf",
+                      "sheet": "model#02",
+                      "method": "dxf_entity",
+                      "region": {
+                        "bbox": [
+                          112000.0,
+                          7000.0,
+                          112000.0,
+                          22500.0
+                        ]
+                      }
+                    },
+                    {
+                      "file": "structural-set.dxf",
+                      "sheet": "model#02",
+                      "method": "dxf_entity",
+                      "region": {
+                        "bbox": [
+                          118500.0,
+                          7000.0,
+                          118500.0,
+                          22500.0
+                        ]
+                      }
+                    }
+                  ]
+                },
+                "confidence": "low"
+              },
+              "dimension_evidence": [],
+              "evidence": [
+                {
+                  "kind": "other_view",
+                  "agrees": false,
+                  "independent": true,
+                  "ref": "V001/F003 on sheet model#01: differs"
+                }
+              ]
+            }
+          ],
+          "proposal": {
+            "status": "proposal",
+            "coordinates": "0 2*6000 6500",
+            "labels": "1 2 3 4",
+            "unit": "mm",
+            "unit_confidence": "medium",
+            "rounding_step": 1.0,
+            "max_rounding_residual": 0.0,
+            "complete": false,
+            "note": "Proposal only: relative spacings in drawing units (declared unit, not converted). Confirm at gate 1; Tekla X/Y assignment is asked separately."
+          },
+          "unlabelled_lines": [
+            {
+              "offset": 24500.0,
+              "line": {
+                "start": [
+                  124500.0,
+                  7000.0
+                ],
+                "end": [
+                  124500.0,
+                  22500.0
+                ],
+                "handle": "10B",
+                "layer": "S-GRID",
+                "linetype": "DASHDOT",
+                "block_path": []
+              },
+              "empty_bubble": true
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "cross_checks": [
+    {
+      "families": [
+        "F001",
+        "F004"
+      ],
+      "sheets": [
+        "model#01",
+        "model#02"
+      ],
+      "common_labels": [
+        "A",
+        "B",
+        "C"
+      ],
+      "status": "consistent",
+      "ratio": null,
+      "differences": []
+    },
+    {
+      "families": [
+        "F003",
+        "F005"
+      ],
+      "sheets": [
+        "model#01",
+        "model#02"
+      ],
+      "common_labels": [
+        "1",
+        "2",
+        "3",
+        "4"
+      ],
+      "status": "mismatch",
+      "ratio": null,
+      "differences": [
+        {
+          "from_label": "3",
+          "to_label": "4",
+          "first": 6000.0,
+          "second": 6500.0
+        }
+      ]
+    }
+  ],
+  "unpaired_bubbles": {
+    "count": 0,
+    "listed": []
+  },
+  "summary": {
+    "circles": 16,
+    "bubbles_labelled": 15,
+    "bubbles_ambiguous_label": 0,
+    "bubbles_other_text": 0,
+    "bubbles_paired": 15,
+    "axes": 15,
+    "groups": 2,
+    "families": 5,
+    "isolated_axes": 0,
+    "dimensions_linear": 2,
+    "dimensions_matched": 2,
+    "walk_skipped": {}
+  },
+  "questions": [
+    {
+      "code": "grid_axis_skewed",
+      "blocking": true,
+      "message": "A single axis crosses this view at an angle that is neither parallel nor perpendicular to the other axes. Is it a skewed grid line (Tekla needs a separate grid or line)?",
+      "where": "V001/F002 axis 5",
+      "found": "80.0 degrees",
+      "sheet": "model#01"
+    },
+    {
+      "code": "grid_label_missing",
+      "blocking": true,
+      "message": "A grid line of this family ends in an empty bubble: its label is missing. What is the axis label (or is it not an axis)?",
+      "where": "V002/F005 line 10B",
+      "found": "offset 24500.0 from axis 1",
+      "sheet": "model#02"
+    },
+    {
+      "code": "grid_spacing_cross_sheet_mismatch",
+      "blocking": true,
+      "message": "The same axes have different spacings in two views. Which spacing is right?",
+      "where": "V001/F003 (model#01) vs V002/F005 (model#02)",
+      "found": "3-4: 6000.0 vs 6500.0",
+      "sheet": "model#01"
+    },
+    {
+      "code": "grid_family_axis_assignment",
+      "blocking": true,
+      "message": "Which grid family is Tekla X (lines parallel to Y) and which is Y? Directions are given per family.",
+      "where": "F001, F003, F004, F005",
+      "found": "F001: dir (1.0, 0.0) labels A B C; F003: dir (0.0, 1.0) labels 1 2 3 4; F004: dir (1.0, 0.0) labels A B C; F005: dir (0.0, 1.0) labels 1 2 3 4"
+    },
+    {
+      "code": "grid_gate1_confirmation",
+      "blocking": true,
+      "message": "Gate 1: confirm the grid families, labels, spacings and proposed coordinate strings (RTI-0003).",
+      "where": "F001, F003, F004, F005",
+      "found": "4 family(ies) in 2 view(s)"
+    },
+    {
+      "code": "grid_dimension_override_mismatch",
+      "blocking": true,
+      "message": "A dimension between grid axes shows a value different from the drawn axis spacing (overridden text). Which value is right?",
+      "where": "V001/F003 dimension C4",
+      "found": "text '6500' vs drawn 6000 (1-2, DIMLFAC 1.0)",
+      "sheet": "model#01"
+    }
+  ],
+  "question_counts": {
+    "grid_axis_skewed": 1,
+    "grid_dimension_override_mismatch": 1,
+    "grid_family_axis_assignment": 1,
+    "grid_gate1_confirmation": 1,
+    "grid_label_missing": 1,
+    "grid_spacing_cross_sheet_mismatch": 1
+  },
+  "warnings": []
+}

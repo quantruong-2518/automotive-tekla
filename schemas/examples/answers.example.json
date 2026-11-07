@@ -1,0 +1,33 @@
+{
+  "schema_version": "0.1",
+  "project_id": "demo-warehouse",
+  "answers": [
+    {
+      "key": "eacd448968a9251e",
+      "question_id": "Q-001",
+      "code": "units_confirm_all",
+      "file": "S-101.dwg",
+      "answer_text": "mm",
+      "values": {
+        "unit": "mm"
+      },
+      "answered_by": "Nguyen Van A",
+      "answered_on": "2026-10-30",
+      "status": "stale",
+      "stale_reason": "the input file was changed since the answer was given"
+    },
+    {
+      "key": "b9dc54e6a2dffa1b",
+      "question_id": "Q-002",
+      "code": "units_confirm_all",
+      "file": "S-102.dxf",
+      "answer_text": "Dimension between grid 1 and 2 reads 6000 and the scale bar agrees: the drawing is in millimetres.",
+      "values": {
+        "unit": "mm"
+      },
+      "answered_by": "Nguyen Van A",
+      "answered_on": "2026-11-03",
+      "status": "active"
+    }
+  ]
+}
