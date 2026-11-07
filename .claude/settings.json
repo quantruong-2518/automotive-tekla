@@ -74,6 +74,19 @@
             "timeout": 15
           }
         ]
+      },
+      {
+        "matcher": "startup|clear",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python",
+            "args": [
+              "${CLAUDE_PROJECT_DIR}/.claude/hooks/handoff_reminder.py"
+            ],
+            "timeout": 15
+          }
+        ]
       }
     ],
     "PreToolUse": [

@@ -7,6 +7,10 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
 ## [Unreleased]
 
 ### Added
+- SessionStart hook `handoff_reminder.py` (sources `startup` and `clear`): reads the open rows of
+  `.handoff/INDEX.md` in the main checkout (found from a worktree too) and tells Claude to ask the
+  engineer which multi-session handoff to resume before any other work; a row is removed only after the
+  engineer confirms its topic is cleared (AGENTS.md `/handoff` row). Never blocks session start.
 - Step 0 foundation: repository layout, `AGENTS.md` / `CLAUDE.md`, ADRs 0001–0004.
 - Claude Code project config: Vietnamese replies, permission rules, plugins
   (Karpathy guidelines, pyright-lsp, csharp-lsp).
