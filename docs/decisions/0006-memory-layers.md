@@ -17,7 +17,7 @@ Three layers, each measurable and each human-approved where it holds knowledge:
 1. **Read cache** — a content-addressed cache of deterministic reading results (DWG→DXF
    conversion first; DXF extraction and vision reads later). A hit returns a recorded valid
    result of the same action, with its original provenance and confidence cap. The detailed
-   design is ADR-0007, written from `docs/research/read-cache.md`. Step 1, slice S2b.
+   design is ADR-0008, written from `docs/research/read-cache.md`. Step 1, slice S2b.
 2. **Approved knowledge tables** — versioned in git, every row with source and status
    `proposed` → `approved`: drawing-profile → Tekla catalog map, Vietnamese–English glossary,
    `tekla/api-notes.md` per Tekla version, conventions per design office. Engineer answers to

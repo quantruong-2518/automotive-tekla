@@ -30,6 +30,7 @@ SCHEMA_NAMES = (
     "question-registry",
     "grid-system",
     "status",
+    "cache-entry",
 )
 _REPO_SCHEMAS = Path(__file__).resolve().parents[2] / "schemas"
 

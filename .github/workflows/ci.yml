@@ -36,3 +36,4 @@ jobs:
           uv run harness validate spec schemas/examples/spec.example.json
           uv run harness validate project-state schemas/examples/project-state.example.json
           uv run harness validate read-log schemas/examples/read-log.example.json
+          uv run harness validate cache-entry schemas/examples/cache-entry.example.json
