@@ -489,17 +489,21 @@ public sealed class ReviewRegressionTests : IDisposable
     // ---- m3: releasing on another thread
 
     [Fact]
-    public void Lock1_release_on_another_thread_throws_and_does_not_poison_the_process()
+    public void Lock1_release_on_another_thread_throws_and_keeps_the_lock_held()
     {
+        // Found on CI windows-latest: closing the handle from another thread destroyed the named
+        // mutex while its owner still held it, so a second writer could acquire. A cross-thread
+        // release must change nothing; the owner releases later.
         var path = @"C:\Models\review-" + Guid.NewGuid().ToString("N", CultureInfo.InvariantCulture);
         RunLockResult? held = null;
         using var acquired = new ManualResetEventSlim();
-        using var done = new ManualResetEventSlim();
+        using var release = new ManualResetEventSlim();
         var t = new Thread(() =>
         {
             held = NamedMutexRunLock.Instance.TryAcquire(path);
             acquired.Set();
-            done.Wait();
+            release.Wait();
+            held.Dispose(); // the owner thread releases
         });
         t.Start();
         acquired.Wait();
@@ -508,15 +512,21 @@ public sealed class ReviewRegressionTests : IDisposable
             Assert.True(held!.Acquired);
             var e = Assert.Throws<InvalidOperationException>(() => held.Dispose());
             Assert.Equal("The run lock must be released on the thread that acquired it.", e.Message);
-            held.Dispose(); // already released: no-op
+            var e2 = Assert.Throws<InvalidOperationException>(() => held.Dispose()); // still held, still refused
+            Assert.Equal(e.Message, e2.Message);
+
+            // Another writer (simulated by a raw handle on this thread) cannot take the mutex.
+            using (var other = new Mutex(false, NamedMutexRunLock.MutexName(path)!))
+            {
+                Assert.False(other.WaitOne(0));
+            }
+
             using var again = NamedMutexRunLock.Instance.TryAcquire(path);
             Assert.False(again.Acquired);
-            Assert.DoesNotContain("this process", again.Detail, StringComparison.Ordinal);
-            Assert.Contains("another writer", again.Detail, StringComparison.Ordinal);
         }
         finally
         {
-            done.Set();
+            release.Set();
             t.Join();
         }
 

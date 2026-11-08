@@ -41,11 +41,17 @@ public sealed class RunLockResult : IDisposable
     /// <summary>Acquired 0; held by another writer or not obtainable 3; working-copy path unprovable 5.</summary>
     public ExitCode ExitCode { get; }
 
+    /// <summary>
+    /// Releases a held lock. Must run on the thread that acquired it: on another thread it throws
+    /// <see cref="InvalidOperationException"/> and changes nothing, so the lock stays held (and
+    /// exclusive) until the owning thread disposes it or ends. Closing the mutex handle from another
+    /// thread would destroy the named mutex on Windows while its owner still writes.
+    /// </summary>
     public void Dispose()
     {
         var release = _release;
-        _release = null;
         release?.Invoke();
+        _release = null;
     }
 }
 
@@ -123,13 +129,15 @@ public sealed class NamedMutexRunLock : IRunLock
                 ExitCode.Ok,
                 () =>
                 {
+                    // Checked before touching the mutex: a cross-thread release must leave the lock
+                    // held, never close the handle (that would free the name for another writer).
+                    if (Environment.CurrentManagedThreadId != owner)
+                    {
+                        throw new InvalidOperationException("The run lock must be released on the thread that acquired it.");
+                    }
+
                     try
                     {
-                        if (Environment.CurrentManagedThreadId != owner)
-                        {
-                            throw new InvalidOperationException("The run lock must be released on the thread that acquired it.");
-                        }
-
                         held.ReleaseMutex();
                     }
                     finally

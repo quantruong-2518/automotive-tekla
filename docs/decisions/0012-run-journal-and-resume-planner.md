@@ -50,7 +50,8 @@ resume planner in `TeklaCore`. S2 fills the snapshot from the Open API; S4 execu
    normalised working-copy path (named mutex in the `Global\` namespace, so other Windows sessions
    are covered; Tekla serves only the first session, so every CLI on the machine talks to the same
    model). A held lock, or a mutex that cannot be created or opened, refuses (exit `3`). The lock is
-   released on the thread that took it. After taking the lock, the CLI marks every invocation still
+   released on the thread that took it; a release from another thread throws and leaves the lock held
+   (closing the handle there would destroy the named mutex on Windows while its owner still writes). After taking the lock, the CLI marks every invocation still
    `running` as `abandoned` (it crashed) **before** planning; the planner refuses (exit `5`) a
    journal that still has a `running` invocation.
 5. **What refuses before planning** (nothing written):
