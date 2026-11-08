@@ -104,3 +104,47 @@ Severity: `critical` · `major` · `minor`.
      confirmed by the engineer.
 - Regression test: with a model open that lacks the marker or has another path, the integration
   fixture fails before any write; `TeklaCore.Tests` builds and runs with no Tekla installed.
+
+## RTI-0009 — On Windows, an unlocked reader can make a work-folder write fail
+
+- Source: independent review of the tool wave 2 seam (ADR-0011), 2026-11-08
+- Classification: tooling · Severity: minor · Status: **proposed**
+- Root cause: Python opens files on Windows without delete sharing, so while a read-only command
+  (status, sheet-text, find-text) has `answers.json` or the registry open, a writer's
+  `os.replace` in `write_text_atomic` fails with `PermissionError`. The registry may already be
+  written by then, and `harness answer` catches only `QuestionsError`, so the engineer sees a
+  traceback. ADR-0011 leaves readers unlocked by design. The same sharing rule can stop the
+  holder record from being removed (a warning only).
+- Proposed fix: retry the replace a few times with a short back-off on `PermissionError` on
+  Windows; turn a final failure into exit 3 with a "retry" message.
+- Regression test: Windows-only test that holds a read handle on the target while
+  `write_text_atomic` replaces it; it expects retry, then success, or exit 3 with no traceback.
+
+## RTI-0010 — An agent can declare itself the engineer when it records an answer
+
+- Source: independent review of the tool wave 2 seam, 2026-11-08 (finding M1)
+- Classification: safety layer · Severity: major · Status: **proposed** (needs engineer decision)
+- Root cause: gate 1 counts only answers recorded with `--role engineer` (tool wave 2, D4), but the
+  role is whatever the caller types. Any agent can run `harness answer … --role engineer`, or call
+  `record_answer(role="engineer")` from Python, and gate 1 then reports ready on an answer the
+  engineer never gave. Until P3, `status` even printed that command, ready to paste, in its reasons.
+  The engineer still opens every gate (principle 5), so gate readiness alone does not let an agent
+  build, but a wrong "ready" misleads the planner and the engineer.
+- What the tools can and cannot do (Claude Code docs, 2026-11-08): a PreToolUse hook sees every
+  Bash call that the model or a subagent makes, but not `!` commands typed by the engineer. A hook
+  matches command text only, so `sh -c`, a script or a Python call get past it; the permissions
+  page says such a rule "isn't a security boundary around the program". A hook cannot tell who
+  issued a call.
+- Proposed fix (defence in depth, none of it is a boundary on its own):
+  1. P3 (tool wave 2): no gate-1 reason or printed command hands an agent `--role engineer`; the
+     text says the engineer must answer.
+  2. Guard hook: deny any model-issued Bash command that runs `harness answer` with
+     `--role engineer`. The engineer records their answers with `! harness answer …` in the
+     session, or from their own terminal.
+  3. AGENTS.md hard rule: an agent never records an answer as the engineer; simulated answers
+     use `--role simulated`.
+  4. Later, if needed: engineer answers carry something an agent cannot produce (for example, an
+     answer file the engineer edits, checked by hash at gate time).
+- Regression test: the guard hook denies `harness answer W Q-1 --text x --by y --role engineer`
+  from the model and allows `--role simulated`; a `status` run after a simulated answer prints no
+  `--role engineer` command addressed to an agent.
