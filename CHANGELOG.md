@@ -395,6 +395,12 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
     `levels.json` `blocked_candidates` (entry id, line, value as stored, reason; count in
     `summary.blocked_candidates`), and `level_none_found` says how many were held back. A literal `±`
     in an unknown-encoding font is non-ASCII, so it is blocked too (`%%p` is read as before).
+  - `harness sheet-text <work> <file> --unassigned` (instead of a sheet id) returns the entries on no sheet
+    or on several as sheet `unassigned` (null layout and bbox; `space` lists their spaces; model space
+    first, rows numbered on across spaces), and `harness find-text --unassigned` searches only those
+    entries (hits with sheet id `unassigned`, `counts.unassigned_entries_searched`): the text of a file
+    without a detected sheet is now reachable. A sheet id together with `--unassigned` is exit 2.
+    `find-text` counts unassigned entries once each (an id both unassigned and ambiguous was counted twice).
 
 ### Fixed
 - Reading toolchain, after an independent review of the EVAL-1 wave:

@@ -13,12 +13,17 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from ezdxf.filemanagement import new
 
 from _callout_fixtures import COLUMN_X, REL, S1_TEXTS, build_work
 from tekla_harness.cli import main
+from tekla_harness.intake import dump_json, run_intake
+from tekla_harness.knowledge import EMPTY_TABLE
 from tekla_harness.schemas import validate
 from tekla_harness.sheet_text import (
+    DEFAULT_MAX_ENTRIES,
     MAX_TITLES,
+    STRUCTURE_DIR,
     ReaderError,
     find_text,
     list_sheets,
@@ -27,6 +32,7 @@ from tekla_harness.sheet_text import (
     sheet_text,
     truncation_warning,
 )
+from tekla_harness.sheets import extract_sheets
 from tekla_harness.text_gate import BLOCK_REASONS
 
 
@@ -730,3 +736,115 @@ def test_cli_find_text(work, capsys):
     ):
         code, out, err = run_cli(capsys, *argv)
         assert code == 2 and out is None and err
+
+
+# --- sheet-less text: --unassigned (tool wave 2, fix 4) ---------------------------------------------------
+
+LOOSE = "loose.dxf"
+
+
+@pytest.fixture(scope="module")
+def loose(tmp_path_factory) -> Path:
+    """A work folder with one drawing on which no sheet is detected: every entry is unassigned."""
+    base = tmp_path_factory.mktemp("loose")
+    root = base / "input"
+    root.mkdir()
+    doc = new("R2018", setup=True)
+    msp = doc.modelspace()
+    msp.add_text("GHI CHU", height=250, dxfattribs={"insert": (0, 1000)})
+    msp.add_text("C1", height=250, dxfattribs={"insert": (0, 0)})
+    msp.add_text("C1 b\xb6n", height=250, dxfattribs={"insert": (3000, 0)})  # unknown encoding: blocked
+    doc.saveas(root / LOOSE)
+    work = base / "work"
+    run_intake(root, work, "demo-loose", knowledge=EMPTY_TABLE)
+    index = load(work / "text" / f"{LOOSE}.json")
+    sheets = extract_sheets(root / LOOSE, index)
+    assert sheets["sheets"] == [] and len(sheets["unassigned"]["text_ids"]) == 3
+    (work / STRUCTURE_DIR).mkdir()
+    (work / STRUCTURE_DIR / f"{LOOSE}.sheets.json").write_text(dump_json(sheets), encoding="utf-8")
+    return work
+
+
+def test_sheet_text_unassigned_reaches_the_text_of_a_sheetless_file(loose):
+    doc = sheet_text(loose, LOOSE, None, unassigned=True, check_inputs=True)
+    assert validate("sheet-text", doc) == []
+    assert doc["sheet"] == {
+        "sheet_id": "unassigned",
+        "space": "model",
+        "layout": None,
+        "bbox": None,
+        "sheet_number": None,
+        "duplicate_of": None,
+    }
+    assert doc["query"] == {"unassigned": True, "contains": None, "max_entries": DEFAULT_MAX_ENTRIES}
+    rows = [(e["row"], e["display_text"]) for e in doc["entries"]]
+    assert rows == [(0, "GHI CHU"), (1, "C1"), (1, "C1 b\xb6n")]
+    assert doc["counts"]["assigned"] == 3 and doc["legacy_font_gate"]["blocked_entries"] == 1
+    assert doc["entries"][2]["meaning"] == "blocked"
+    only_c1 = sheet_text(loose, LOOSE, None, unassigned=True, contains="c1")
+    assert only_c1["counts"]["matched"] == 2 and only_c1["query"]["max_entries"] is None
+
+
+def test_find_text_unassigned_searches_only_the_unassigned_entries(loose, work):
+    doc = find_text(loose, "c1", unassigned=True, check_inputs=True)
+    assert validate("sheet-text", doc) == []
+    assert [(h["sheet_id"], h["sheet_number"], h["display_text"]) for h in doc["hits"]] == [
+        ("unassigned", None, "C1"),
+        ("unassigned", None, "C1 b\xb6n"),
+    ]
+    assert doc["query"] == {"contains": "c1", "file": None, "max_hits": None, "unassigned": True}
+    counts = doc["counts"]
+    assert counts["unassigned_entries_searched"] == 3 and counts["unassigned_entries_not_searched"] == 0
+    assert counts["blocked_entries_not_searchable"] == 1
+    assert doc["files"][0] == {
+        "path": LOOSE,
+        "status": "searched",
+        "reason": None,
+        "sheets_searched": 0,
+        "entries_searched": 3,
+        "blocked_entries": 1,
+        "unassigned_entries": 3,
+        "hits": 2,
+    }
+    # without the flag the same file has nothing to search, as before
+    plain = find_text(loose, "c1")
+    assert plain["hits"] == [] and plain["counts"]["unassigned_entries_not_searched"] == 3
+    assert "unassigned" not in plain["query"] and "unassigned_entries_searched" not in plain["counts"]
+    # a file with sheets: the entries on its sheets are not searched
+    on_sheets = {h["entry_id"] for h in find_text(work, "c1")["hits"]}
+    off_sheets = {h["entry_id"] for h in find_text(work, "c1", unassigned=True)["hits"]}
+    assert on_sheets and not on_sheets & off_sheets
+
+
+def test_unassigned_takes_ambiguous_entries_once_and_skips_unknown_ids(damaged):
+    path = damaged / STRUCTURE_DIR / f"{REL}.sheets.json"
+    sheets = load(path)
+    entries = text_index(damaged)["entries"]
+    ids = [e["id"] for e in entries if e["space"] == "model"]
+    plot = next(e["id"] for e in entries if e["space"] == "Plot")
+    sheets["unassigned"] = {"text_ids": [ids[0], plot, "T999999"], "ambiguous_text_ids": [ids[1], ids[0]]}
+    path.write_text(json.dumps(sheets), encoding="utf-8")
+    doc = sheet_text(damaged, REL, None, unassigned=True)
+    assert [e["entry_id"] for e in doc["entries"]][:2] in ([ids[0], ids[1]], [ids[1], ids[0]])
+    assert doc["counts"]["assigned"] == 3
+    assert doc["sheet"]["space"] == "model, Plot"  # model space first, then the layouts by name
+    model_rows = [e["row"] for e in doc["entries"][:2]]
+    assert doc["entries"][2]["entry_id"] == plot and doc["entries"][2]["row"] == max(model_rows) + 1
+    found = find_text(damaged, "%", unassigned=True)
+    assert found["counts"]["unassigned_entries_searched"] == 3 == found["files"][0]["unassigned_entries"]
+
+
+def test_unassigned_and_a_sheet_id_exclude_each_other(loose):
+    for sheet_id, unassigned in (("model#01", True), (None, False)):
+        with pytest.raises(ReaderError) as err:
+            sheet_text(loose, LOOSE, sheet_id, unassigned=unassigned)
+        assert err.value.exit_code == 2
+
+
+def test_cli_unassigned(loose, capsys):
+    code, doc, _ = run_cli(capsys, "sheet-text", str(loose), LOOSE, "--unassigned")
+    assert code == 0 and doc["sheet"]["sheet_id"] == "unassigned" and doc["counts"]["assigned"] == 3
+    code, doc, _ = run_cli(capsys, "find-text", str(loose), "--contains", "C1", "--unassigned")
+    assert code == 0 and doc["counts"]["hits"] == 2
+    code, out, err = run_cli(capsys, "sheet-text", str(loose), LOOSE, "model#01", "--unassigned")
+    assert code == 2 and out is None and "--unassigned" in err

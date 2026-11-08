@@ -293,9 +293,6 @@ def _cmd_sheet_text(args: argparse.Namespace) -> int:
     except ReaderError as exc:
         print(str(exc), file=sys.stderr)
         return exc.exit_code
-    except NotImplementedError as exc:  # tool wave 2: a package has not landed yet
-        print(str(exc), file=sys.stderr)
-        return EXIT_ENV
     warning = truncation_warning(doc)
     if warning:
         print(warning, file=sys.stderr)
@@ -315,9 +312,6 @@ def _cmd_find_text(args: argparse.Namespace) -> int:
     except ReaderError as exc:
         print(str(exc), file=sys.stderr)
         return exc.exit_code
-    except NotImplementedError as exc:  # tool wave 2: a package has not landed yet
-        print(str(exc), file=sys.stderr)
-        return EXIT_ENV
     counts = doc["counts"]
     if counts["truncated"]:
         print(
@@ -569,7 +563,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_st.add_argument(
         "--unassigned",
         action="store_true",
-        help="instead of a sheet id: the entries on no sheet or on several (sheet id 'unassigned')",
+        help="instead of a sheet id: the entries on no sheet or on several (sheet id 'unassigned'); "
+        "the way to read a file on which list-sheets finds no sheet",
     )
     p_st.add_argument("--contains", help="keep only entries whose text contains this (NFC, case-insensitive)")
     p_st.add_argument(

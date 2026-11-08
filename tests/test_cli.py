@@ -52,10 +52,11 @@ def test_sheet_text_needs_a_sheet_or_unassigned_not_both(tmp_path, capsys):
     assert "--unassigned" in err
 
 
-def test_sheet_text_and_find_text_unassigned_not_implemented_yet(tmp_path, capsys):
-    assert main(["sheet-text", str(tmp_path), "a.dxf", "--unassigned"]) == 3
-    assert main(["find-text", str(tmp_path), "--contains", "x", "--unassigned"]) == 3
-    assert "not implemented yet" in capsys.readouterr().err
+def test_sheet_text_and_find_text_unassigned_reach_the_reader(tmp_path, capsys):
+    # implemented by package P1 (tests in test_sheet_text); an empty folder is now a usage error
+    assert main(["sheet-text", str(tmp_path), "a.dxf", "--unassigned"]) == 2
+    assert main(["find-text", str(tmp_path), "--contains", "x", "--unassigned"]) == 2
+    assert "not implemented yet" not in capsys.readouterr().err
 
 
 def test_answer_role_must_be_known(tmp_path, capsys):

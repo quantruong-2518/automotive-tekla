@@ -8,8 +8,11 @@ encodings keep their flags and stay as stored).
   list_sheets(work_dir)                      one row per detected sheet of every file: detector id, printed
                                              sheet number (with confidence) or null, frame bbox, text count,
                                              blocked text count, title candidates (keyword titles first)
-  sheet_text(work_dir, file_rel, sheet_id)   the entries assigned to that sheet in reading order
+  sheet_text(work_dir, file_rel, sheet_id)   the entries assigned to that sheet in reading order; with
+                                             `unassigned=True` instead of a sheet id, the entries on no
+                                             sheet or on several (sheet id 'unassigned')
   find_text(work_dir, contains)              the entries containing a text, over all sheets of all files
+                                             (or, with `unassigned=True`, over the entries on no sheet)
 
 Legacy-font gate (`text_gate.meaning_block_reason`, computed on the FULL text-index entry): every entry any
 tool returns carries `meaning` ("allowed" | "blocked") and `blocked_reason`. A blocked entry is quoted
@@ -52,6 +55,7 @@ DEFAULT_MAX_ENTRIES = 400
 MAX_TITLES = 5
 TITLE_CHARS = 120
 ROW_TOLERANCE = 0.6  # x median text height
+UNASSIGNED = "unassigned"  # sheet id of the entries on no sheet or on several (--unassigned)
 EXIT_INVALID, EXIT_USAGE = 1, 2
 MAX_LISTED_PROBLEMS = 20
 # registry codes that ask the engineer about the encoding of a file's text (they unblock the gate)
@@ -334,6 +338,33 @@ def _sheet_entries(loaded: LoadedFile, sheet: dict[str, Any]) -> list[dict[str, 
     return [by_id[tid] for tid in sheet["text_ids"] if tid in by_id]
 
 
+def _unassigned_entries(loaded: LoadedFile) -> list[dict[str, Any]]:
+    """The entries on no sheet or on several (sheets document `unassigned`), each once, ids the index lacks
+    left out."""
+    assert loaded.text_index is not None and loaded.sheets is not None
+    by_id = index_by_id(loaded.text_index)
+    off_sheet = loaded.sheets["unassigned"]
+    ids = dict.fromkeys([*off_sheet["text_ids"], *off_sheet["ambiguous_text_ids"]])
+    return [by_id[tid] for tid in ids if tid in by_id]
+
+
+def _space_key(space: str) -> tuple[bool, str]:
+    return space != "model", space
+
+
+def unassigned_order(entries: list[dict[str, Any]]) -> list[tuple[int | None, dict[str, Any]]]:
+    """Reading order of entries from several spaces: model space first, then the layouts by name, each in
+    `reading_order`; row numbers go on from one space to the next, so a row never mixes two spaces."""
+    ordered: list[tuple[int | None, dict[str, Any]]] = []
+    offset = 0
+    for space in sorted({e["space"] for e in entries}, key=_space_key):
+        part = reading_order([e for e in entries if e["space"] == space])
+        rows = [r for r, _ in part if r is not None]
+        ordered.extend((None if r is None else r + offset, e) for r, e in part)
+        offset += max(rows) + 1 if rows else 0
+    return ordered
+
+
 def _title_keyword(text: str) -> str | None:
     norm = " ".join(normalize(text).split())
     return next((kw for kw, pattern in _KEYWORD_PATTERNS if pattern.search(norm)), None)
@@ -479,12 +510,12 @@ def sheet_text(
 
     `max_entries` None: DEFAULT_MAX_ENTRIES, or unbounded when `contains` filters (query.max_entries is the
     effective value, null = unbounded). `legacy_font_gate` covers ALL entries assigned to the sheet.
-    `unassigned` (instead of a sheet id): the entries on no sheet or on several, as sheet `unassigned`
-    (tool wave 2, package P1: not implemented yet)."""
+    `unassigned` (instead of a sheet id; tool wave 2, fix 4): the entries on no sheet or on several, as
+    sheet `unassigned` with null layout and bbox; its `space` names the spaces of those entries (model
+    first, then layouts by name, ', '-separated; 'none' when there is no such entry), and they are read in
+    `unassigned_order`. This is how the text of a file without a detected sheet is reached."""
     if (sheet_id is None) == (not unassigned):
         raise ReaderError(EXIT_USAGE, "give either a sheet id or --unassigned, not both and not neither")
-    if unassigned:
-        raise NotImplementedError("sheet-text --unassigned is not implemented yet (tool wave 2, package P1)")
     if max_entries is not None and max_entries < 1:
         raise ReaderError(EXIT_USAGE, "max_entries must be at least 1")
     inv = load_inventory(work_dir)
@@ -493,14 +524,39 @@ def sheet_text(
         raise ReaderError(EXIT_USAGE, f"{file_rel} has no text to read: {loaded.skip}")
     if loaded.sheets is None:
         raise ReaderError(EXIT_USAGE, f"{file_rel}: " + "; ".join(loaded.warnings))
-    found = [s for s in loaded.sheets["sheets"] if s["sheet_id"] == sheet_id]
-    if not found:
-        ids = [s["sheet_id"] for s in loaded.sheets["sheets"]]
-        shown = ", ".join(ids[:MAX_LISTED_PROBLEMS]) + (" ..." if len(ids) > MAX_LISTED_PROBLEMS else "")
-        raise ReaderError(EXIT_USAGE, f"{file_rel} has no sheet '{sheet_id}' (sheets: {shown or 'none'})")
-    sh = found[0]
-    entries = _sheet_entries(loaded, sh)
-    ordered = reading_order(entries)
+    if unassigned:
+        entries = _unassigned_entries(loaded)
+        ordered = unassigned_order(entries)
+        spaces = sorted({e["space"] for e in entries}, key=_space_key)
+        sheet = {
+            "sheet_id": UNASSIGNED,
+            "space": ", ".join(spaces) or "none",
+            "layout": None,
+            "bbox": None,
+            "sheet_number": None,
+            "duplicate_of": None,
+        }
+    else:
+        found = [s for s in loaded.sheets["sheets"] if s["sheet_id"] == sheet_id]
+        if not found:
+            ids = [s["sheet_id"] for s in loaded.sheets["sheets"]]
+            shown = ", ".join(ids[:MAX_LISTED_PROBLEMS]) + (" ..." if len(ids) > MAX_LISTED_PROBLEMS else "")
+            raise ReaderError(
+                EXIT_USAGE,
+                f"{file_rel} has no sheet '{sheet_id}' (sheets: {shown or 'none'}; "
+                "--unassigned reads the text on no sheet)",
+            )
+        sh = found[0]
+        entries = _sheet_entries(loaded, sh)
+        ordered = reading_order(entries)
+        sheet = {
+            "sheet_id": sh["sheet_id"],
+            "space": sh["space"],
+            "layout": sh["layout"],
+            "bbox": sh["bbox"],
+            "sheet_number": printed_number(sh),
+            "duplicate_of": sh["duplicate_of"],
+        }
     if contains is not None and contains != "":
         needle = normalize(contains)
         matched = [(r, e) for r, e in ordered if needle in normalize(e["display_text"])]
@@ -516,15 +572,12 @@ def sheet_text(
         "kind": "sheet_text",
         "project_id": inv.doc["project_id"],
         "file": file_rel,
-        "sheet": {
-            "sheet_id": sh["sheet_id"],
-            "space": sh["space"],
-            "layout": sh["layout"],
-            "bbox": sh["bbox"],
-            "sheet_number": printed_number(sh),
-            "duplicate_of": sh["duplicate_of"],
+        "sheet": sheet,
+        "query": {
+            "contains": contains,
+            "max_entries": max_entries,
+            **({"unassigned": True} if unassigned else {}),
         },
-        "query": {"contains": contains, "max_entries": max_entries},
         "counts": {
             "assigned": len(ordered),
             "matched": len(matched),
@@ -557,10 +610,8 @@ def find_text(
     the true number. Blocked entries are matched on their stored text only, so the search is incomplete
     over them: `counts.blocked_entries_not_searchable` is how many were examined (matched or not) and
     `notes` says so. Entries on no sheet or on several sheets are not searched (counted separately).
-    `unassigned`: search only those entries, hits with sheet_id 'unassigned' (tool wave 2, package P1: not
-    implemented yet)."""
-    if unassigned:
-        raise NotImplementedError("find-text --unassigned is not implemented yet (tool wave 2, package P1)")
+    `unassigned` (tool wave 2, fix 4): search only those entries instead, in `unassigned_order`; hits carry
+    sheet_id 'unassigned' and a null sheet_number, `counts.unassigned_entries_searched` says how many."""
     if not contains:
         raise ReaderError(EXIT_USAGE, "find-text needs a non-empty --contains")
     if max_hits is not None and max_hits < 1:
@@ -597,11 +648,22 @@ def find_text(
         if loaded.sheets is None:
             summary.update(status="skipped", reason="no sheets document (run `harness read-structure`)")
             continue
-        off_sheet = loaded.sheets["unassigned"]
-        summary["unassigned_entries"] = len(off_sheet["text_ids"]) + len(off_sheet["ambiguous_text_ids"])
-        for sh in loaded.sheets["sheets"]:
-            summary["sheets_searched"] += 1
-            for _, e in reading_order(_sheet_entries(loaded, sh)):
+        off_sheet = _unassigned_entries(loaded)
+        summary["unassigned_entries"] = len(off_sheet)
+        if unassigned:
+            groups = [(UNASSIGNED, None, [e for _, e in unassigned_order(off_sheet)])]
+        else:
+            groups = [
+                (
+                    sh["sheet_id"],
+                    printed_number(sh),
+                    [e for _, e in reading_order(_sheet_entries(loaded, sh))],
+                )
+                for sh in loaded.sheets["sheets"]
+            ]
+            summary["sheets_searched"] = len(groups)
+        for sheet_id, number, entries in groups:
+            for e in entries:
                 reason = meaning_block_reason(e)
                 summary["entries_searched"] += 1
                 summary["blocked_entries"] += reason is not None
@@ -611,8 +673,8 @@ def find_text(
                 hits.append(
                     {
                         "file": loaded.rel,
-                        "sheet_id": sh["sheet_id"],
-                        "sheet_number": printed_number(sh),
+                        "sheet_id": sheet_id,
+                        "sheet_number": number,
                         "entry_id": e["id"],
                         "display_text": e["display_text"],
                         "meaning": "allowed" if reason is None else "blocked",
@@ -620,6 +682,7 @@ def find_text(
                     }
                 )
     blocked = sum(f["blocked_entries"] for f in files)
+    off_sheet_total = sum(f["unassigned_entries"] or 0 for f in files)
     shown = hits if max_hits is None else hits[:max_hits]
     notes = []
     if blocked:
@@ -632,14 +695,20 @@ def find_text(
         "schema_version": SCHEMA_VERSION,
         "kind": "find_text",
         "project_id": inv.doc["project_id"],
-        "query": {"contains": contains, "file": file_rel, "max_hits": max_hits},
+        "query": {
+            "contains": contains,
+            "file": file_rel,
+            "max_hits": max_hits,
+            **({"unassigned": True} if unassigned else {}),
+        },
         "counts": {
             "hits": len(hits),
             "returned": len(shown),
             "omitted": len(hits) - len(shown),
             "truncated": len(shown) < len(hits),
             "blocked_entries_not_searchable": blocked,
-            "unassigned_entries_not_searched": sum(f["unassigned_entries"] or 0 for f in files),
+            "unassigned_entries_not_searched": 0 if unassigned else off_sheet_total,
+            **({"unassigned_entries_searched": off_sheet_total} if unassigned else {}),
         },
         "files": files,
         "hits": shown,
