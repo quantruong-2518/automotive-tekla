@@ -32,8 +32,9 @@ Rules:
     every other code takes no value;
   * grid_system_conflict cannot be answered: a conflict closes only through the grid_system_select answer
     (`systems` without one of the two, or `separate` with both), never through words;
-  * `role` (optional, `answered_by_role`): 'engineer' or 'simulated' (an agent standing in for the engineer);
-    gate 1 counts the engineer's answers only (status.py). Any other role is a usage error;
+  * `role` (`answered_by_role`): 'engineer' or 'simulated' (an agent standing in for the engineer); gate 1
+    counts the engineer's answers only (status.py). `harness answer --role` is required; a library call
+    without a role records none, and gate 1 does not count such an answer. Any other role is a usage error;
   * a second answer to the same key supersedes the first (kept, status 'superseded');
   * nothing is deleted: answers are only appended or change status.
 

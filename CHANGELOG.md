@@ -370,6 +370,9 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
 - `marks` schema: `question_counts` accepts `member_mark_prefix_meaning` (tool wave 2, D6: marks asks the
   plan-mark prefix question instead of callouts); `anchor_entry_id` and `columns.role` descriptions cover
   line-grid tables found from a mark text with no header keyword. `$id` stays `0.1`.
+- Tool wave 2 package P3, answer provenance and reader supplements (EVAL-2 fixes 10 and 7):
+  - `harness answer --role engineer|simulated` is required (exit 2 without it). Every `harness answer`
+    command that `harness status` and `harness questions-md` print names `--role engineer` after `--by`.
 
 ### Changed
 - Question lifecycle (tool wave 2, EVAL-2 fix 5):

@@ -647,8 +647,10 @@ def build_parser() -> argparse.ArgumentParser:
             "that are different buildings, which closes their conflict); grid_system_conflict cannot be "
             "answered: answer grid_system_select instead; every other question takes no value. Rerun "
             "harness grid-system after a units, select or axis answer. A question whose file changed since "
-            "it was raised is refused: rerun the command that raised it. Exit codes: 1 invalid values or "
-            "changed file, 2 unknown or obsolete question, blank text or name."
+            "it was raised is refused: rerun the command that raised it. --role is required: engineer for "
+            "the engineer's own answer, simulated for an agent standing in for the engineer (gate 1 does "
+            "not open on a simulated answer). Exit codes: 1 invalid values or changed file, 2 unknown or "
+            "obsolete question, blank text or name, no --role."
         ),
     )
     p_ans.add_argument("work_dir", help="the --out folder of `harness intake`")
@@ -657,6 +659,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_ans.add_argument("--by", required=True, help="who answered")
     p_ans.add_argument(
         "--role",
+        required=True,
         choices=ROLES,
         help="engineer: the engineer's own words; simulated: an agent standing in for the engineer "
         "(gate 1 counts the engineer's answers only)",

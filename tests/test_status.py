@@ -526,7 +526,7 @@ def test_gate1_is_not_ready_with_every_reason_named(world):
     }
     for needle in (
         f'units: set.dxf is not confirmed: harness answer {work} {ids["set.dxf"]} --text "..." '
-        '--by "..." --value',
+        '--by "..." --role engineer --value',
         "--value unit=mm|cm|m|in|ft (units_confirm_all)",
         f"units: other.dxf is not confirmed: harness answer {work} {ids['other.dxf']} --text",
         "grid_system_select",
@@ -595,8 +595,8 @@ def test_gate1_needs_axis_assignment_not_just_a_word_answer(ready):
     for sid, q in axis.items():  # F-04: the reason names the question id to answer and the values it needs
         assert f"{sid} has no Tekla X/Y" in text
         assert (
-            f'harness answer {work} {q["id"]} --text "..." --by "..." --value dir1=X|Y --value dir2=X|Y'
-            in text
+            f'harness answer {work} {q["id"]} --text "..." --by "..." --role engineer '
+            "--value dir1=X|Y --value dir2=X|Y" in text
         )
     assert "grid_family_axis_assignment" in text
     # words alone are refused: an answer that would assign nothing is not recorded
@@ -660,7 +660,7 @@ def test_gate1_needs_a_units_answer_for_every_probed_file(ready):
     qid = find(questions_of(work, "questions.json"), "units_confirm_all", "other.dxf")["id"]
     expected = (
         f"units: other.dxf is not confirmed: harness answer {work} {qid} "
-        '--text "..." --by "..." --value unit='
+        '--text "..." --by "..." --role engineer --value unit='
     )
     assert any(r.startswith(expected) for r in reasons), reasons
     assert not any(r.startswith("units: set.dxf") for r in reasons)
@@ -877,7 +877,8 @@ def test_a_units_answer_the_drawing_contradicts_is_named_reasked_and_never_close
     reasons = [r for r in build_status(work)["gate1"]["reasons"] if r.startswith("units:")]
     assert (
         len(reasons) == 1
-        and f'harness answer {work} {contra["id"]} --text "..." --by "..." --value unit=m' in reasons[0]
+        and f'harness answer {work} {contra["id"]} --text "..." --by "..." --role engineer --value unit=m'
+        in reasons[0]
     )
     with pytest.raises(QuestionsError, match="only confirms that unit") as caught:
         record_answer(work, contra["id"], "no, millimetres", "me", {"unit": "mm"}, role="engineer")

@@ -299,7 +299,8 @@ def answer_values(item: Item, answered_unit: str | None = None) -> list[str]:
 
 
 def answer_command(item: Item, answered_unit: str | None = None) -> str:
-    parts = [f'uv run harness answer {WORK_PLACEHOLDER} {item.id} --text "..." --by "..."']
+    """The command that records the engineer's answer (`--role engineer`: gate 1 counts no other role)."""
+    parts = [f'uv run harness answer {WORK_PLACEHOLDER} {item.id} --text "..." --by "..." --role engineer']
     for value in answer_values(item, answered_unit):
         parts.append(f"[--value {value[1:]}]" if value.startswith("?") else f"--value {value}")
     return " ".join(parts)

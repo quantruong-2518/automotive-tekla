@@ -595,3 +595,14 @@ def test_reader_supplements_show_under_their_question(world, monkeypatch):
     assert code_span("Ghi chú `đơn vị` là mm.") in block and code_span("góc phải") in block
     assert "tờ `model#01`" in block
     assert code_span("rút lại") not in block
+
+
+# --- answer provenance (P3): the printed command names the engineer role -------------------------------
+
+
+def test_every_printed_answer_command_names_the_engineer_role_once_after_by(world):
+    commands = re.findall(r"- \*\*Lệnh trả lời:\*\* `([^`]+)`", render(world))
+    assert commands
+    for c in commands:
+        assert c.count("--role") == 1, c
+        assert '--by "..." --role engineer' in c, c

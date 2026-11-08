@@ -83,7 +83,8 @@ GATE_ANSWER_PRODUCERS = frozenset(dict(PRODUCERS)[label] for label in GATE_PRODU
 LEGACY_ANSWER_IS_ENGINEER = True
 # an answer to these never closes them: they close through another question's structured values
 NOT_CLOSED_BY_AN_ANSWER = frozenset({CONFLICT_CODE})
-ANSWER = 'harness answer {work_dir} {id} --text "..." --by "..."'
+# every printed command names the role: gate 1 counts the engineer's answers only
+ANSWER = 'harness answer {work_dir} {id} --text "..." --by "..." --role engineer'
 
 
 class StatusError(Exception):
@@ -398,7 +399,7 @@ def _role_reasons(non_engineer: list[dict[str, Any]], work_dir: str) -> list[str
     return [
         f"answers: {a['question_id']} {a['code']} ({a['file'] or 'project'}) was answered by "
         f"{'a ' + a['role'] + ' role' if a['role'] else 'no recorded role'}, not the engineer: the engineer "
-        f"answers it again ({ANSWER.format(work_dir=work_dir, id=a['question_id'])} --role engineer)"
+        f"answers it again ({ANSWER.format(work_dir=work_dir, id=a['question_id'])})"
         for a in non_engineer
     ]
 

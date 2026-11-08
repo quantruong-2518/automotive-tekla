@@ -64,6 +64,11 @@ def test_answer_role_must_be_known(tmp_path, capsys):
     assert main(argv) == 2
 
 
+def test_answer_without_a_role_is_a_usage_error(tmp_path, capsys):
+    assert main(["answer", str(tmp_path), "Q-001", "--text", "x", "--by", "me"]) == 2
+    assert "--role" in capsys.readouterr().err
+
+
 def test_ask_supplement_not_implemented_yet(tmp_path, capsys):
     argv = ["ask", str(tmp_path), "--supplement", "Q-001", "--where", "w", "--found", "", "--text", "t"]
     assert main(argv) == 3

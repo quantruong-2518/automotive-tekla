@@ -526,7 +526,7 @@ def test_answer_refusals_and_exit_codes(world, capsys):
         ),
         (["nope", "--text", "x", "--by", "me", "--role", "engineer"], 2, "unknown question id"),
         ([q["id"], "--text", "   ", "--by", "me", "--role", "engineer", "--value", "unit=mm"], 2, "empty"),
-        ([q["id"], "--text", "x", "--by", " ", "--value", "unit=mm"], 2, "empty"),
+        ([q["id"], "--text", "x", "--by", " ", "--role", "engineer", "--value", "unit=mm"], 2, "empty"),
         (
             [q["id"], "--text", "x", "--by", "me", "--role", "engineer", "--value", "unit=furlong"],
             1,
