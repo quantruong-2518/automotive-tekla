@@ -41,7 +41,8 @@ This file is tool-agnostic. Claude-specific notes live in `CLAUDE.md`.
   `1` validation failure, `2` usage error, `3` environment error.
 - Never swallow an error. A fallback is logged (`read-log.json`) and lowers confidence.
 - Every JSON artefact validates against a schema in `schemas/`. A schema change bumps its
-  `$id` version and adds a CHANGELOG entry.
+  `$id` version and adds a CHANGELOG entry. Before the first release, `$id` stays 0.1 and every
+  schema change is recorded in CHANGELOG (engineer, 2026-11-07).
 - Tests: `uv run pytest`. A bug fix ships with a regression test.
 - Commits follow Conventional Commits (`feat:`, `fix:`, `docs:`, `chore:`, `test:`).
 - Smallest change that solves the task. No drive-by refactors.
