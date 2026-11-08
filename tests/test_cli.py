@@ -69,11 +69,11 @@ def test_answer_without_a_role_is_a_usage_error(tmp_path, capsys):
     assert "--role" in capsys.readouterr().err
 
 
-def test_ask_supplement_not_implemented_yet(tmp_path, capsys):
+def test_ask_supplement_without_a_registry_is_a_usage_error(tmp_path, capsys):
     argv = ["ask", str(tmp_path), "--supplement", "Q-001", "--where", "w", "--found", "", "--text", "t"]
-    assert main(argv) == 3
-    assert "not implemented yet" in capsys.readouterr().err
-    assert main(["ask", str(tmp_path), "--withdraw-supplement", "0123456789abcdef", "--reason", "r"]) == 3
+    assert main(argv) == 2
+    assert main(["ask", str(tmp_path), "--withdraw-supplement", "0123456789abcdef", "--reason", "r"]) == 2
+    assert "not implemented" not in capsys.readouterr().err
 
 
 def test_ask_supplement_refuses_code_and_blocking(tmp_path, capsys):

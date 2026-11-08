@@ -752,12 +752,13 @@ def render_questions_md(work_dir: Path | str, out: Path | str | None = None) -> 
     try:
         status = build_status(work)
         ledger = load_ledger(work, status["project_id"], create=False)
+        supplement_rows = supplements.load_supplements(work)
     except (StatusError, QuestionsError) as exc:
         raise QuestionsMdError(exc.exit_code, str(exc)) from exc
     items, missing = load_items(work, ledger.registry, ledger.answers)
     closures = accepted_closures(work, ledger)
     by_target: dict[str, list[dict[str, Any]]] = {}
-    for row in supplements.load_supplements(work):
+    for row in supplement_rows:
         by_target.setdefault(row["target_key"], []).append(row)
     for item in items:
         item.closed_by = closures.get(item.key)

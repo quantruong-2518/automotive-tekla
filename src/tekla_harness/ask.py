@@ -21,6 +21,8 @@ document kind as the other `*questions.json`.
     active answer to it goes stale). Withdrawing twice is a no-op. A withdrawn place cannot be asked again
     (exit 2): ask about another `where`.
   * Answers work unchanged (`harness answer`).
+  * Evidence for a PRODUCER's question is not a new question: `--supplement Q-id` adds it to that question
+    (supplements.py, `reader-supplements.json`), never changing its blocking flag or answer.
 
 Stdout: {"id", "key", "status": "new" | "already_asked"}, or {"id", "key", "status": "withdrawn" |
 "already_withdrawn"}. Registry first, then the document (questions.py).

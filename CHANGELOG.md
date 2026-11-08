@@ -385,6 +385,12 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
     `grid_system_conflict`; units_answered: read-structure `grid_units_doubt`; rejected_systems_only:
     read-structure `grid_*`), the question is not the reader's, and it names a live question with an
     active engineer answer. A refused closure leaves the question open and is a `closures:` gate-1 reason.
+  - `harness ask --supplement Q-id --where --found --text [--file --sheet]` adds the reader's evidence to a
+    producer's question in `reader-supplements.json` (key = target key, file, file sha256, where; prints
+    `new` or `already_supplemented`); exit 2 for an unknown, obsolete or reader-owned target, a withdrawn
+    place, or `--code` / `--blocking`. `--withdraw-supplement KEY --reason R` keeps it as withdrawn. A
+    supplement whose target goes obsolete reads as `stale`; questions.md shows active ones under the
+    question. The target's blocking flag, answer and refs never change.
 
 ### Changed
 - Question lifecycle (tool wave 2, EVAL-2 fix 5):
