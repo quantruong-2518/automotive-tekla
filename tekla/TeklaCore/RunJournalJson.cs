@@ -157,11 +157,21 @@ internal static class RunJournalJson
         Get(inv, "committed", out var committedValue);
         var committed = committedValue as JsonBool ?? throw Invalid("'" + at + "committed' must be a boolean");
 
+        // S4 updates one entry per SPEC_ID in place (inserting → inserted → tagged): a second entry
+        // for the same SPEC_ID in one invocation is a malformed journal (review m6).
         var objects = new List<JournalObject>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
         var items = Array(inv, "objects", at);
         for (var i = 0; i < items.Count; i++)
         {
-            objects.Add(ReadObject(items[i], at + "objects[" + Index(i) + "]."));
+            var entryAt = at + "objects[" + Index(i) + "].";
+            var entry = ReadObject(items[i], entryAt);
+            if (!seen.Add(entry.SpecId))
+            {
+                throw Invalid("'" + entryAt + "spec_id' repeats " + entry.SpecId + " within one invocation");
+            }
+
+            objects.Add(entry);
         }
 
         JournalFailure? failure = null;

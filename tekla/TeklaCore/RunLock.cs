@@ -50,10 +50,14 @@ public sealed class RunLockResult : IDisposable
 }
 
 /// <summary>
-/// The lock as a named mutex <c>Local\tekla-harness-run-&lt;sha256&gt;</c>, keyed on the working-copy
+/// The lock as a named mutex <c>Global\tekla-harness-run-&lt;sha256&gt;</c> (one namespace for every
+/// logon session, decision 4: every CLI on the machine talks to the same model), keyed on the working-copy
 /// path normalised as safety rule 1 reads it (drive and ASCII letters folded to upper case,
 /// separators unified, no trailing separator), so every spelling the path guard accepts as the
-/// same folder takes the same lock. A mutex belongs to a thread: acquire and dispose on one thread.
+/// same folder takes the same lock. A mutex belongs to a thread: acquire and dispose on one thread;
+/// disposing on another thread throws <see cref="InvalidOperationException"/> but still forgets the
+/// lock in this process (the mutex stays owned until the acquiring thread ends). A mutex that cannot
+/// be created or opened (for example its ACL denies this user) refuses with exit 3.
 /// </summary>
 public sealed class NamedMutexRunLock : IRunLock
 {
@@ -63,7 +67,7 @@ public sealed class NamedMutexRunLock : IRunLock
     {
     }
 
-    private const string NamePrefix = @"Local\tekla-harness-run-";
+    private const string NamePrefix = @"Global\tekla-harness-run-";
 
     private const string HexDigits = "0123456789abcdef";
 
@@ -109,6 +113,7 @@ public sealed class NamedMutexRunLock : IRunLock
             }
 
             var held = mutex;
+            var owner = Environment.CurrentManagedThreadId;
             return new RunLockResult(
                 acquired: true,
                 previousHolderCrashed: crashed,
@@ -118,8 +123,19 @@ public sealed class NamedMutexRunLock : IRunLock
                 ExitCode.Ok,
                 () =>
                 {
-                    held.ReleaseMutex();
-                    Forget(name, held);
+                    try
+                    {
+                        if (Environment.CurrentManagedThreadId != owner)
+                        {
+                            throw new InvalidOperationException("The run lock must be released on the thread that acquired it.");
+                        }
+
+                        held.ReleaseMutex();
+                    }
+                    finally
+                    {
+                        Forget(name, held);
+                    }
                 });
         }
         catch (Exception e) when (e is UnauthorizedAccessException or IOException or WaitHandleCannotBeOpenedException)

@@ -301,6 +301,11 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
   `ResumePlanner`: skip, retag, create or conflict per member, refusals before planning (spec hash,
   model path, header, any rollback, untrusted lookups), matching within 0.1 mm (+1e-6 rounding
   allowance), kind, rotation 0.01° and class.
+  After independent review: lookups and tags that disagree in either direction refuse (exit 3);
+  a `running` invocation or an invocation on another model refuses (5); the journal replace keeps a
+  `.bak` and a leftover temp/backup without its journal refuses (5); `ResumePlan.Executable` and
+  `MemberAction.Blocked` stop a plan with conflicts from being partly executed; the lock uses
+  `Global\` and refuses a release on another thread.
 - Versioning note: the reading-toolchain schemas above have not been released; they stay `0.1` and their
   changes are recorded here until the first tagged release, from which every change bumps its `$id`
   (AGENTS.md). Pending engineer confirmation.

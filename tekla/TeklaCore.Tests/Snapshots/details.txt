@@ -14,75 +14,81 @@ plan absent but listed: SnapshotIncomplete exit 3 | The snapshot says journal GU
 plan missed by LOT: LookupUntrusted exit 3 | Object 00000000-0000-0000-0000-000000000001 carries this LOT but the LOT lookup did not return it: the filter cannot be trusted.
 plan missed by RUN_ID: LookupUntrusted exit 3 | Object 00000000-0000-0000-0000-000000000001 carries this RUN_ID but the RUN_ID lookup did not return it: the filter cannot be trusted.
 plan missed by SPEC_ID: LookupUntrusted exit 3 | Object 00000000-0000-0000-0000-000000000001 carries this SPEC_ID but the SPEC_ID lookup did not return it: the filter cannot be trusted.
-plan fresh: None exit 0 | Plan: 0 skip, 0 retag, 3 create, 0 conflict; 0 conflict(s) in all.
+plan LOT hit, tag absent: LookupUntrusted exit 3 | Object 00000000-0000-0000-0000-000000000001: the LOT lookup returned it, but its LOT tag is (absent): the filter cannot be trusted.
+plan SPEC_ID hit, foreign tag: LookupUntrusted exit 3 | Object 00000000-0000-0000-0000-000000000002: the SPEC_ID lookup returned it, but its SPEC_ID tag is 'L1-GONE': the filter cannot be trusted.
+plan no lookup: LookupUntrusted exit 3 | Object 00000000-0000-0000-0000-000000000002 was returned by no lookup: the snapshot cannot be trusted.
+plan journal flag missing: LookupUntrusted exit 3 | Object 00000000-0000-0000-0000-000000000001: the journal GUID lookup flag says no but the journal says yes: the snapshot cannot be trusted.
+plan still running: InvocationStillRunning exit 5 | The run journal still has a running invocation: a write command takes the run lock, then calls RunJournal.MarkRunningAbandoned (the lock was free, so that invocation crashed), then plans.
+plan invocation elsewhere: ModelPathMismatch exit 5 | The run journal was written for model 'D:\Other', but the open working copy is 'C:\Models\demo-copy'.
+plan fresh: None executable exit 0 | Plan: 0 skip, 0 retag, 3 create, 0 conflict; 0 conflict(s) in all.
   L1-C-A1 Create -
   L1-C-A2 Create -
   L1-B-A12 Create -
-plan resume: None exit 0 | Plan: 1 skip, 1 retag, 1 create, 0 conflict; 0 conflict(s) in all.
+plan resume: None executable exit 0 | Plan: 1 skip, 1 retag, 1 create, 0 conflict; 0 conflict(s) in all.
   L1-C-A1 Skip 00000000-0000-0000-0000-000000000001
   L1-C-A2 Retag 00000000-0000-0000-0000-000000000002
   L1-B-A12 Create - recreated absent 00000000-0000-0000-0000-000000000003/Tagged
-plan name note: None exit 0 | Plan: 1 skip, 0 retag, 0 create, 0 conflict; 0 conflict(s) in all.
+plan name note: None executable exit 0 | Plan: 1 skip, 0 retag, 0 create, 0 conflict; 0 conflict(s) in all.
   N Skip 00000000-0000-0000-0000-000000000001 | note: Name (unreadable) differs from the spec name 'BEAM-A'.
-plan mismatch every field: None exit 1 | Plan: 0 skip, 0 retag, 0 create, 1 conflict; 1 conflict(s) in all.
+plan mismatch every field: None exit 1 | Plan: 0 skip, 0 retag, 0 create, 1 conflict; 1 conflict(s) in all. Not executable: members without a conflict of their own are blocked.
   N Conflict - | note: Name 'BEAM-B' differs from the spec name 'BEAM-A'.
   ! Mismatch N 00000000-0000-0000-0000-000000000001 | Object 00000000-0000-0000-0000-000000000001 differs from spec item N: start unreadable (spec (0, 0, 0)); end (1000.5, 0, 0) is 0.5 mm from the spec (1000, 0, 0); profile 'X\u0001' (spec 'HEA300'); material (unreadable) (spec 'S355JR'); kind 'other' (spec type 'beam'); rotation unreadable (spec 0 deg); class (unreadable) (spec '3').
-plan mismatch numbers: None exit 1 | Plan: 0 skip, 0 retag, 0 create, 1 conflict; 1 conflict(s) in all.
+plan mismatch numbers: None exit 1 | Plan: 0 skip, 0 retag, 0 create, 1 conflict; 1 conflict(s) in all. Not executable: members without a conflict of their own are blocked.
   N Conflict -
-  ! Mismatch N 00000000-0000-0000-0000-000000000001 | Object 00000000-0000-0000-0000-000000000001 differs from spec item N: start (0, 0.25, 0) is 0.25 mm from the spec (0, 0, 0); rotation 1.5 deg (spec 0 deg); class '4' (spec '3').
-plan intent: None exit 1 | Plan: 0 skip, 0 retag, 2 create, 1 conflict; 1 conflict(s) in all.
+  ! Mismatch N 00000000-0000-0000-0000-000000000001 | Object 00000000-0000-0000-0000-000000000001 differs from spec item N: start (0.03, 0.04, -0.12) is 0.13 mm from the spec (0, 0, 0); rotation 1.5 deg (spec 0 deg); class '4' (spec '3').
+plan intent: None exit 1 | Plan: 0 skip, 0 retag, 2 create, 1 conflict; 1 conflict(s) in all. Not executable: members without a conflict of their own are blocked.
   L1-C-A1 Conflict -
-  L1-C-A2 Create -
-  L1-B-A12 Create -
+  L1-C-A2 Blocked(Create) -
+  L1-B-A12 Blocked(Create) -
   ! IntentUnresolved L1-C-A1 - | The journal still has an insert intent for SPEC_ID L1-C-A1: an untagged object may exist. Check the model, then roll the run back or remove the stray object and start a new RUN_ID.
-plan duplicate: None exit 1 | Plan: 0 skip, 0 retag, 2 create, 1 conflict; 1 conflict(s) in all.
+plan duplicate: None exit 1 | Plan: 0 skip, 0 retag, 2 create, 1 conflict; 1 conflict(s) in all. Not executable: members without a conflict of their own are blocked.
   L1-C-A1 Conflict -
-  L1-C-A2 Create -
-  L1-B-A12 Create -
+  L1-C-A2 Blocked(Create) -
+  L1-B-A12 Blocked(Create) -
   ! DuplicateSpecId L1-C-A1 - | Several objects stand for SPEC_ID L1-C-A1: 00000000-0000-0000-0000-000000000001, 00000000-0000-0000-0000-000000000002.
-plan not the latest: None exit 1 | Plan: 0 skip, 0 retag, 2 create, 1 conflict; 1 conflict(s) in all.
+plan not the latest: None exit 1 | Plan: 0 skip, 0 retag, 2 create, 1 conflict; 1 conflict(s) in all. Not executable: members without a conflict of their own are blocked.
   L1-C-A1 Conflict - absent 00000000-0000-0000-0000-000000000002/Tagged
-  L1-C-A2 Create -
-  L1-B-A12 Create -
+  L1-C-A2 Blocked(Create) -
+  L1-B-A12 Blocked(Create) -
   ! TagContradiction L1-C-A1 00000000-0000-0000-0000-000000000001 | Object 00000000-0000-0000-0000-000000000001 stands for SPEC_ID L1-C-A1, but the journal's latest object for it is 00000000-0000-0000-0000-000000000002.
-plan one guid two members: None exit 1 | Plan: 0 skip, 0 retag, 1 create, 2 conflict; 2 conflict(s) in all.
+plan one guid two members: None exit 1 | Plan: 0 skip, 0 retag, 1 create, 2 conflict; 2 conflict(s) in all. Not executable: members without a conflict of their own are blocked.
   L1-C-A1 Conflict - absent 00000000-0000-0000-0000-000000000001/Inserted
   L1-C-A2 Conflict - absent 00000000-0000-0000-0000-000000000001/Inserted
-  L1-B-A12 Create -
+  L1-B-A12 Blocked(Create) -
   ! TagContradiction L1-C-A1 00000000-0000-0000-0000-000000000001 | The journal records object 00000000-0000-0000-0000-000000000001 for several SPEC_IDs: L1-C-A1, L1-C-A2.
   ! TagContradiction L1-C-A2 00000000-0000-0000-0000-000000000001 | The journal records object 00000000-0000-0000-0000-000000000001 for several SPEC_IDs: L1-C-A1, L1-C-A2.
-plan tags contradict: None exit 1 | Plan: 0 skip, 0 retag, 1 create, 2 conflict; 2 conflict(s) in all.
+plan tags contradict: None exit 1 | Plan: 0 skip, 0 retag, 1 create, 2 conflict; 2 conflict(s) in all. Not executable: members without a conflict of their own are blocked.
   L1-C-A1 Conflict -
   L1-C-A2 Conflict -
-  L1-B-A12 Create -
+  L1-B-A12 Blocked(Create) -
   ! TagContradiction L1-C-A1 00000000-0000-0000-0000-000000000001 | Object 00000000-0000-0000-0000-000000000001 is recorded in the journal for SPEC_ID L1-C-A1 but carries LOT '2', RUN_ID (absent), SPEC_ID 'L1-C-A2'.
   ! TagContradiction L1-C-A2 00000000-0000-0000-0000-000000000001 | Object 00000000-0000-0000-0000-000000000001 is recorded in the journal for SPEC_ID L1-C-A1 but carries LOT '2', RUN_ID (absent), SPEC_ID 'L1-C-A2'.
-plan other run: None exit 1 | Plan: 0 skip, 0 retag, 2 create, 1 conflict; 1 conflict(s) in all.
+plan other run: None exit 1 | Plan: 0 skip, 0 retag, 2 create, 1 conflict; 1 conflict(s) in all. Not executable: members without a conflict of their own are blocked.
   L1-C-A1 Conflict -
-  L1-C-A2 Create -
-  L1-B-A12 Create -
+  L1-C-A2 Blocked(Create) -
+  L1-B-A12 Blocked(Create) -
   ! SpecIdInOtherRun L1-C-A1 00000000-0000-0000-0000-000000000005 | Object 00000000-0000-0000-0000-000000000005 carries SPEC_ID L1-C-A1 under another run: LOT '1', RUN_ID 'R-OLD', SPEC_ID 'L1-C-A1'.
-plan other lot: None exit 1 | Plan: 0 skip, 0 retag, 2 create, 1 conflict; 2 conflict(s) in all.
+plan other lot: None exit 1 | Plan: 0 skip, 0 retag, 2 create, 1 conflict; 2 conflict(s) in all. Not executable: members without a conflict of their own are blocked.
   L1-C-A1 Conflict -
-  L1-C-A2 Create -
-  L1-B-A12 Create -
+  L1-C-A2 Blocked(Create) -
+  L1-B-A12 Blocked(Create) -
   ! RunInOtherLot L1-C-A1 00000000-0000-0000-0000-000000000007 | Object 00000000-0000-0000-0000-000000000007 carries RUN_ID R20261108-01 in another lot: LOT '2', RUN_ID 'R20261108-01', SPEC_ID 'L1-C-A1'.
   ! RunInOtherLot - 00000000-0000-0000-0000-000000000008 | Object 00000000-0000-0000-0000-000000000008 carries RUN_ID R20261108-01 in another lot: LOT '2', RUN_ID 'R20261108-01', SPEC_ID (absent).
-plan unknown spec id: None exit 1 | Plan: 0 skip, 0 retag, 3 create, 0 conflict; 1 conflict(s) in all.
-  L1-C-A1 Create -
-  L1-C-A2 Create -
-  L1-B-A12 Create -
+plan unknown spec id: None exit 1 | Plan: 0 skip, 0 retag, 3 create, 0 conflict; 1 conflict(s) in all. Not executable: members without a conflict of their own are blocked.
+  L1-C-A1 Blocked(Create) -
+  L1-C-A2 Blocked(Create) -
+  L1-B-A12 Blocked(Create) -
   ! UnknownSpecId L1-GONE 00000000-0000-0000-0000-000000000008 | Object 00000000-0000-0000-0000-000000000008 is tagged with this lot and run, but SPEC_ID L1-GONE is not in the spec.
-plan unknown in journal: None exit 1 | Plan: 0 skip, 0 retag, 3 create, 0 conflict; 2 conflict(s) in all.
-  L1-C-A1 Create -
-  L1-C-A2 Create -
-  L1-B-A12 Create -
+plan unknown in journal: None exit 1 | Plan: 0 skip, 0 retag, 3 create, 0 conflict; 2 conflict(s) in all. Not executable: members without a conflict of their own are blocked.
+  L1-C-A1 Blocked(Create) -
+  L1-C-A2 Blocked(Create) -
+  L1-B-A12 Blocked(Create) -
   ! UnknownSpecId L1-GONE 00000000-0000-0000-0000-000000000009 | The journal records object 00000000-0000-0000-0000-000000000009 for SPEC_ID L1-GONE, which is not in the spec.
   ! UnknownSpecId L1-GONE - | The journal records an insert intent for SPEC_ID L1-GONE, which is not in the spec.
-plan unclassified: None exit 1 | Plan: 0 skip, 0 retag, 2 create, 1 conflict; 2 conflict(s) in all.
-  L1-C-A1 Create -
+plan unclassified: None exit 1 | Plan: 0 skip, 0 retag, 2 create, 1 conflict; 2 conflict(s) in all. Not executable: members without a conflict of their own are blocked.
+  L1-C-A1 Blocked(Create) -
   L1-C-A2 Conflict -
-  L1-B-A12 Create -
+  L1-B-A12 Blocked(Create) -
   ! Unclassified L1-C-A2 00000000-0000-0000-0000-000000000007 | Object 00000000-0000-0000-0000-000000000007 has harness tags no rule classifies: LOT (absent), RUN_ID (absent), SPEC_ID 'L1-C-A2'.
   ! Unclassified - 00000000-0000-0000-0000-000000000006 | Object 00000000-0000-0000-0000-000000000006 has harness tags no rule classifies: LOT '1', RUN_ID (absent), SPEC_ID (absent).
 reader 000 | test journal is not a valid run journal: missing field 'schema_version'.

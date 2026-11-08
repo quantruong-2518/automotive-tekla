@@ -200,12 +200,12 @@ public sealed class RunJournalFileTests : IDisposable
     {
         var rec = new Recorder();
         var bytes = Encoding.UTF8.GetBytes("payload");
-        AtomicFile.Write(JournalPath, bytes, (tmp, target) =>
+        AtomicFile.Write(JournalPath, bytes, (tmp, target, backup) =>
         {
             rec.Temporaries.Add(tmp);
             Assert.Equal(JournalPath, target);
             Assert.Equal(bytes, File.ReadAllBytes(tmp));
-            AtomicFile.PutInPlace(tmp, target);
+            AtomicFile.PutInPlace(tmp, target, backup);
         }, rec.Sleep);
         var temporary = Assert.Single(rec.Temporaries);
         Assert.Equal(Path.GetFullPath(_dir), Path.GetDirectoryName(Path.GetFullPath(temporary)));
@@ -222,7 +222,7 @@ public sealed class RunJournalFileTests : IDisposable
     {
         var rec = new Recorder();
         var failures = 3;
-        AtomicFile.Write(JournalPath, new byte[] { 1 }, (tmp, target) =>
+        AtomicFile.Write(JournalPath, new byte[] { 1 }, (tmp, target, backup) =>
         {
             rec.Temporaries.Add(tmp);
             if (failures-- > 0)
@@ -230,7 +230,7 @@ public sealed class RunJournalFileTests : IDisposable
                 throw new IOException("locked");
             }
 
-            AtomicFile.PutInPlace(tmp, target);
+            AtomicFile.PutInPlace(tmp, target, backup);
         }, rec.Sleep);
         Assert.Equal(4, rec.Temporaries.Count);
         Assert.Single(rec.Temporaries.Distinct());
@@ -244,7 +244,7 @@ public sealed class RunJournalFileTests : IDisposable
     {
         File.WriteAllBytes(JournalPath, new byte[] { 9 });
         var rec = new Recorder();
-        var e = Assert.Throws<IOException>(() => AtomicFile.Write(JournalPath, new byte[] { 1 }, (tmp, _) =>
+        var e = Assert.Throws<IOException>(() => AtomicFile.Write(JournalPath, new byte[] { 1 }, (tmp, _, _) =>
         {
             rec.Temporaries.Add(tmp);
             throw new IOException("locked " + rec.Temporaries.Count.ToString(CultureInfo.InvariantCulture));
@@ -259,21 +259,21 @@ public sealed class RunJournalFileTests : IDisposable
     public void Non_io_failure_is_not_retried()
     {
         var rec = new Recorder();
-        Assert.Throws<UnauthorizedAccessException>(() => AtomicFile.Write(JournalPath, new byte[] { 1 }, (tmp, _) =>
+        Assert.Throws<UnauthorizedAccessException>(() => AtomicFile.Write(JournalPath, new byte[] { 1 }, (tmp, _, _) =>
         {
             rec.Temporaries.Add(tmp);
             throw new UnauthorizedAccessException("denied");
         }, rec.Sleep));
         Assert.Single(rec.Temporaries);
         Assert.Empty(rec.Sleeps);
-        Assert.Empty(FilesInDir());
+        Assert.Equal(new[] { Path.GetFileName(rec.Temporaries[0]) }, FilesInDir()); // no journal yet: kept (review M1)
     }
 
     [Fact]
     public void Missing_folder_fails_before_any_retry()
     {
         var rec = new Recorder();
-        Assert.ThrowsAny<IOException>(() => AtomicFile.Write(Path.Combine(_dir, "gone", "j.json"), new byte[] { 1 }, (tmp, _) => rec.Temporaries.Add(tmp), rec.Sleep));
+        Assert.ThrowsAny<IOException>(() => AtomicFile.Write(Path.Combine(_dir, "gone", "j.json"), new byte[] { 1 }, (tmp, _, _) => rec.Temporaries.Add(tmp), rec.Sleep));
         Assert.Empty(rec.Temporaries);
         Assert.Empty(rec.Sleeps);
     }
@@ -282,14 +282,17 @@ public sealed class RunJournalFileTests : IDisposable
     public void Put_in_place_moves_when_the_target_is_missing_and_replaces_when_it_exists()
     {
         var tmp = Path.Combine(_dir, "a.tmp");
+        var bak = Path.Combine(_dir, "a.bak");
         File.WriteAllBytes(tmp, new byte[] { 1 });
-        AtomicFile.PutInPlace(tmp, JournalPath);
+        AtomicFile.PutInPlace(tmp, JournalPath, bak);
         Assert.False(File.Exists(tmp));
+        Assert.False(File.Exists(bak));
         Assert.Equal(new byte[] { 1 }, File.ReadAllBytes(JournalPath));
         File.WriteAllBytes(tmp, new byte[] { 2 });
-        AtomicFile.PutInPlace(tmp, JournalPath);
+        AtomicFile.PutInPlace(tmp, JournalPath, bak);
         Assert.False(File.Exists(tmp));
         Assert.Equal(new byte[] { 2 }, File.ReadAllBytes(JournalPath));
+        Assert.Equal(new byte[] { 1 }, File.ReadAllBytes(bak));
     }
 
     [Fact]
@@ -298,7 +301,7 @@ public sealed class RunJournalFileTests : IDisposable
         // File.Move refuses an existing target (IOException); the retry then takes the replace path.
         var rec = new Recorder();
         var first = true;
-        AtomicFile.Write(JournalPath, new byte[] { 7 }, (tmp, target) =>
+        AtomicFile.Write(JournalPath, new byte[] { 7 }, (tmp, target, backup) =>
         {
             if (first)
             {
@@ -307,7 +310,7 @@ public sealed class RunJournalFileTests : IDisposable
                 File.Move(tmp, target);
             }
 
-            AtomicFile.PutInPlace(tmp, target);
+            AtomicFile.PutInPlace(tmp, target, backup);
         }, rec.Sleep);
         Assert.Equal(new[] { 100 }, rec.Sleeps);
         Assert.Equal(new byte[] { 7 }, File.ReadAllBytes(JournalPath));

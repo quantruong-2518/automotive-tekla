@@ -44,8 +44,8 @@ public sealed class RunLockTests
         Assert.NotEqual(name, NamedMutexRunLock.MutexName(@"C:\Models\Copy2"));
         Assert.NotEqual(name, NamedMutexRunLock.MutexName(@"D:\Models\Copy"));
         Assert.NotEqual(name, NamedMutexRunLock.MutexName(@"C:\Models\Copy\Sub"));
-        Assert.StartsWith(@"Local\tekla-harness-run-", name, StringComparison.Ordinal);
-        var hash = name!.Substring(@"Local\tekla-harness-run-".Length);
+        Assert.StartsWith(@"Global\tekla-harness-run-", name, StringComparison.Ordinal);
+        var hash = name!.Substring(@"Global\tekla-harness-run-".Length);
         Assert.Equal(64, hash.Length);
         Assert.All(hash, c => Assert.True(c is (>= '0' and <= '9') or (>= 'a' and <= 'f')));
     }
@@ -57,7 +57,7 @@ public sealed class RunLockTests
         using var sha = System.Security.Cryptography.SHA256.Create();
         var digest = sha.ComputeHash(System.Text.Encoding.UTF8.GetBytes(@"C:\MODELS\COPY"));
         var hex = string.Concat(Array.ConvertAll(digest, b => b.ToString("x2", CultureInfo.InvariantCulture)));
-        Assert.Equal(@"Local\tekla-harness-run-" + hex, name);
+        Assert.Equal(@"Global\tekla-harness-run-" + hex, name);
         Assert.Equal(NamedMutexRunLock.MutexName(@"C:\Models\Dự Án"), NamedMutexRunLock.MutexName(@"c:\MODELS\DỰ ÁN"));
     }
 

@@ -26,6 +26,9 @@ public enum PlanRefusal
     /// <summary>The run has a <c>rollback</c> invocation, whatever its outcome (exit 5).</summary>
     RunRolledBack,
 
+    /// <summary>The journal still has a running invocation: mark it abandoned under the run lock first (exit 5).</summary>
+    InvocationStillRunning,
+
     /// <summary>No journal, but objects tagged with this lot and run exist (exit 5).</summary>
     TaggedObjectsWithoutJournal,
 
@@ -56,6 +59,9 @@ public enum MemberAction
 
     /// <summary>Stop (exit 1): see the member's conflicts.</summary>
     Conflict,
+
+    /// <summary>Not executable: the member itself is fine, but the plan has conflicts (see <see cref="MemberPlan.IntendedAction"/>).</summary>
+    Blocked,
 }
 
 /// <summary>A journal GUID of a member that the model no longer has.</summary>
@@ -79,6 +85,7 @@ public sealed class MemberPlan
     internal MemberPlan(
         string specId,
         MemberAction action,
+        MemberAction intendedAction,
         Guid? guid,
         IReadOnlyList<AbsentJournalObject> absentJournalObjects,
         string? nameNote,
@@ -86,6 +93,7 @@ public sealed class MemberPlan
     {
         SpecId = specId;
         Action = action;
+        IntendedAction = intendedAction;
         Guid = guid;
         AbsentJournalObjects = absentJournalObjects;
         NameNote = nameNote;
@@ -94,16 +102,27 @@ public sealed class MemberPlan
 
     public string SpecId { get; }
 
+    /// <summary>
+    /// What to execute. <see cref="MemberAction.Blocked"/> for every member without its own conflict
+    /// when the plan has any conflict: a plan that stops never executes part of itself (review M2).
+    /// </summary>
     public MemberAction Action { get; }
 
-    /// <summary>The object to skip or retag; null for create and conflict.</summary>
+    /// <summary>The action the member would have on its own (skip, retag, create or conflict), for reports.</summary>
+    public MemberAction IntendedAction { get; }
+
+    /// <summary>The object of an intended skip or retag; null otherwise.</summary>
     public Guid? Guid { get; }
 
     /// <summary>Journal GUIDs of this member that the model no longer has, in journal order.</summary>
     public IReadOnlyList<AbsentJournalObject> AbsentJournalObjects { get; }
 
     /// <summary>Decision 8: a create that replaces an object the journal recorded is reported, never silent.</summary>
-    public bool Recreated => Action == MemberAction.Create && AbsentJournalObjects.Count > 0;
+    public bool Recreated => IntendedAction == MemberAction.Create && AbsentJournalObjects.Count > 0;
+
+    /// <summary>The same member, not executable because the plan has conflicts.</summary>
+    internal MemberPlan Blocked()
+        => new(SpecId, Action == MemberAction.Conflict ? MemberAction.Conflict : MemberAction.Blocked, IntendedAction, Guid, AbsentJournalObjects, NameNote, Conflicts);
 
     /// <summary>The object's name differs from the spec's (reported, not a conflict); otherwise null.</summary>
     public string? NameNote { get; }
@@ -124,6 +143,9 @@ public sealed class ResumePlan
     }
 
     public bool Refused => Refusal != PlanRefusal.None;
+
+    /// <summary>True only without a refusal and without any conflict: the only plan S4 may execute.</summary>
+    public bool Executable => !Refused && Conflicts.Count == 0;
 
     public PlanRefusal Refusal { get; }
 
@@ -225,12 +247,15 @@ public static class ResumePlanner
                 return PlanRefusal.SpecHashMismatch;
             }
 
-            if (!WindowsPath.TryParse(journal.ModelPath, out var written, out _)
-                || !WindowsPath.TryParse(openModelPath, out var open, out _)
-                || !WindowsPath.StrictEquals(written!, open!))
+            // The header and every invocation (review m5), compared as safety rule 1 does.
+            WindowsPath.TryParse(openModelPath, out var open, out _);
+            foreach (var written in new[] { journal.ModelPath }.Concat(journal.Invocations.Select(i => i.ModelPath)))
             {
-                detail = "The run journal was written for model '" + journal.ModelPath + "', but the open working copy is '" + openModelPath + "'.";
-                return PlanRefusal.ModelPathMismatch;
+                if (open is null || !WindowsPath.TryParse(written, out var parsed, out _) || !WindowsPath.StrictEquals(parsed!, open))
+                {
+                    detail = "The run journal was written for model '" + written + "', but the open working copy is '" + openModelPath + "'.";
+                    return PlanRefusal.ModelPathMismatch;
+                }
             }
 
             // Any rollback, finished or not (ADR-0012 amended): a resume must never rebuild what the
@@ -242,6 +267,13 @@ public static class ResumePlanner
                     + "): a run that was rolled back, even partly, is never resumed, so nothing the engineer asked to delete is rebuilt."
                     + " Finish the rollback, then build with a new RUN_ID.";
                 return PlanRefusal.RunRolledBack;
+            }
+
+            if (journal.Invocations.Any(i => i.Outcome == InvocationOutcome.Running))
+            {
+                detail = "The run journal still has a running invocation: a write command takes the run lock, then calls"
+                    + " RunJournal.MarkRunningAbandoned (the lock was free, so that invocation crashed), then plans.";
+                return PlanRefusal.InvocationStillRunning;
             }
         }
         else
@@ -292,32 +324,50 @@ public static class ResumePlanner
             }
         }
 
+        // Every lookup flag must agree with the tag it stands for, in both directions (review C1): a hit
+        // whose tag reads otherwise, or a tag no lookup found, means the snapshot cannot be trusted.
         var specIds = new HashSet<string>(spec.Members.Select(m => m.SpecId), StringComparer.Ordinal);
+        var inJournal = new HashSet<Guid>(journalGuids);
         foreach (var o in snapshot.Objects)
         {
-            string? missedBy = null;
-            if (o.Lot.Is(lotTag) && (o.FoundBy & SnapshotLookup.Lot) == 0)
+            var id = Text.Id(o.Guid);
+            if (o.FoundBy == SnapshotLookup.None)
             {
-                missedBy = "LOT";
-            }
-            else if (o.RunId.Is(runId) && (o.FoundBy & SnapshotLookup.RunId) == 0)
-            {
-                missedBy = "RUN_ID";
-            }
-            else if (o.SpecId.State == TagState.Value && specIds.Contains(o.SpecId.Value!) && (o.FoundBy & SnapshotLookup.SpecId) == 0)
-            {
-                missedBy = "SPEC_ID";
+                detail = "Object " + id + " was returned by no lookup: the snapshot cannot be trusted.";
+                return PlanRefusal.LookupUntrusted;
             }
 
-            if (missedBy is not null)
+            detail = Disagreement(id, "LOT", o.FoundBy, SnapshotLookup.Lot, o.Lot, o.Lot.Is(lotTag))
+                ?? Disagreement(id, "RUN_ID", o.FoundBy, SnapshotLookup.RunId, o.RunId, o.RunId.Is(runId))
+                ?? Disagreement(id, "SPEC_ID", o.FoundBy, SnapshotLookup.SpecId, o.SpecId, o.SpecId.State == TagState.Value && specIds.Contains(o.SpecId.Value!))
+                ?? string.Empty;
+            if (detail.Length == 0 && ((o.FoundBy & SnapshotLookup.JournalGuid) != 0) != inJournal.Contains(o.Guid))
             {
-                detail = "Object " + Text.Id(o.Guid) + " carries this " + missedBy + " but the " + missedBy
-                    + " lookup did not return it: the filter cannot be trusted.";
+                detail = "Object " + id + ": the journal GUID lookup flag says " + ((o.FoundBy & SnapshotLookup.JournalGuid) != 0 ? "yes" : "no")
+                    + " but the journal says " + (inJournal.Contains(o.Guid) ? "yes" : "no") + ": the snapshot cannot be trusted.";
+            }
+
+            if (detail.Length > 0)
+            {
                 return PlanRefusal.LookupUntrusted;
             }
         }
 
         return PlanRefusal.None;
+    }
+
+    /// <summary>Null when the lookup flag and the tag agree; otherwise the refusal detail.</summary>
+    private static string? Disagreement(string id, string tagName, SnapshotLookup foundBy, SnapshotLookup flag, TagReading tag, bool tagMatches)
+    {
+        var found = (foundBy & flag) != 0;
+        if (found == tagMatches)
+        {
+            return null;
+        }
+
+        return found
+            ? "Object " + id + ": the " + tagName + " lookup returned it, but its " + tagName + " tag is " + Text.Tag(tag) + ": the filter cannot be trusted."
+            : "Object " + id + " carries this " + tagName + " but the " + tagName + " lookup did not return it: the filter cannot be trusted.";
     }
 
     // ---- decision 7
@@ -456,14 +506,20 @@ public static class ResumePlanner
 
             var members = _spec.Members.Select(PlanMember).ToList();
             var conflicts = members.SelectMany(p => p.Conflicts).Concat(_runConflicts).ToList();
+            if (conflicts.Count > 0)
+            {
+                members = members.Select(p => p.Blocked()).ToList();
+            }
+
             var detail = "Plan: " + Count(members, MemberAction.Skip) + " skip, " + Count(members, MemberAction.Retag) + " retag, "
                 + Count(members, MemberAction.Create) + " create, " + Count(members, MemberAction.Conflict) + " conflict; "
-                + conflicts.Count.ToString(CultureInfo.InvariantCulture) + " conflict(s) in all.";
+                + conflicts.Count.ToString(CultureInfo.InvariantCulture) + " conflict(s) in all."
+                + (conflicts.Count > 0 ? " Not executable: members without a conflict of their own are blocked." : string.Empty);
             return new ResumePlan(PlanRefusal.None, detail, members, conflicts);
         }
 
         private static string Count(List<MemberPlan> members, MemberAction action)
-            => members.Count(p => p.Action == action).ToString(CultureInfo.InvariantCulture);
+            => members.Count(p => p.IntendedAction == action).ToString(CultureInfo.InvariantCulture);
 
         /// <summary>Journal entries for spec ids outside the spec, and GUIDs recorded for several spec ids.</summary>
         private void CheckJournalEntries()
@@ -599,16 +655,16 @@ public static class ResumePlanner
 
             if (conflicts.Count > 0)
             {
-                return new MemberPlan(m.SpecId, MemberAction.Conflict, null, absent, nameNote, conflicts);
+                return new MemberPlan(m.SpecId, MemberAction.Conflict, MemberAction.Conflict, null, absent, nameNote, conflicts);
             }
 
             if (target is null)
             {
-                return new MemberPlan(m.SpecId, MemberAction.Create, null, absent, null, conflicts);
+                return new MemberPlan(m.SpecId, MemberAction.Create, MemberAction.Create, null, absent, null, conflicts);
             }
 
-            var fullyTagged = target.Lot.Is(_lotTag) && target.RunId.Is(_runId) && target.SpecId.Is(m.SpecId);
-            return new MemberPlan(m.SpecId, fullyTagged ? MemberAction.Skip : MemberAction.Retag, target.Guid, absent, nameNote, conflicts);
+            var action = target.Lot.Is(_lotTag) && target.RunId.Is(_runId) && target.SpecId.Is(m.SpecId) ? MemberAction.Skip : MemberAction.Retag;
+            return new MemberPlan(m.SpecId, action, action, target.Guid, absent, nameNote, conflicts);
         }
 
         private void Add(bool member, string? specTag, ConflictKind kind, Guid guid, string detail)
@@ -648,7 +704,31 @@ public static class ResumePlanner
     {
         public static string Id(Guid g) => g.ToString("D", CultureInfo.InvariantCulture);
 
-        public static string Number(double x) => x.ToString("R", CultureInfo.InvariantCulture);
+        /// <summary>
+        /// Six decimals at most, the same text on .NET Framework 4.8 and .NET (review m1): "R" and the
+        /// sign of a negative zero differ between them. Beyond 1e15 the value is absurd and shown with
+        /// an exponent.
+        /// </summary>
+        public static string Number(double x)
+        {
+            if (double.IsNaN(x))
+            {
+                return "NaN";
+            }
+
+            if (double.IsInfinity(x))
+            {
+                return x > 0 ? "Infinity" : "-Infinity";
+            }
+
+            if (Math.Abs(x) >= 1e15)
+            {
+                return x.ToString("0.######E+0", CultureInfo.InvariantCulture);
+            }
+
+            var rounded = Math.Round(x, 6);
+            return rounded == 0 ? "0" : rounded.ToString("0.######", CultureInfo.InvariantCulture);
+        }
 
         public static string Point(Point3 p) => "(" + Number(p.X) + ", " + Number(p.Y) + ", " + Number(p.Z) + ")";
 

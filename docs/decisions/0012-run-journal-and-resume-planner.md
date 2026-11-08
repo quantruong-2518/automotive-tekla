@@ -34,22 +34,31 @@ resume planner in `TeklaCore`. S2 fills the snapshot from the Open API; S4 execu
    `model_path`, `outcome` (`running`, `ok`, `stopped`, `conflict`, `refused`, `abandoned`),
    `exit_code`, `committed`, `objects[]`, `failure` and `conflicts[]`. An object entry is `spec_id`,
    `guid` (null until known), `action` (`created`, `retagged`) and `state` (`inserting`, `inserted`,
-   `tagged`).
+   `tagged`). Within one invocation there is one entry per `SPEC_ID`, updated in place
+   (`inserting` → `inserted` → `tagged`); two entries for one `SPEC_ID` in one invocation make the
+   journal malformed.
 3. **Write policy.** The whole file is rewritten atomically (temporary file in the same folder,
-   flushed to disk, then replace; up to 3 retries 100 ms apart for a locked target) at invocation
+   flushed to disk, then `File.Replace` **with a backup file**, deleted only after success; the
+   temporary file is never deleted while the journal is missing; up to 3 retries 100 ms apart for a
+   locked target). A missing journal next to a leftover temporary or backup file for that `RUN_ID`
+   refuses (exit `5`): a write may have been interrupted. Writes happen at invocation
    start (`running`), **before each `Insert`** (intent: `state: inserting`, no GUID), after it
    (`inserted` + GUID), after tagging (`tagged`), and at the end. If a journal write fails the run
    stops before the next `Insert`; an object whose GUID is known is still tagged, every GUID made is
    printed in the stdout JSON, and the exit code is `4`.
 4. **One writer per model.** A write command holds an exclusive lock for its whole run, keyed on the
-   normalised working-copy path (named mutex; Tekla serves only the first session, so every CLI on
-   the machine talks to the same model). A held lock refuses (exit `3`). An invocation still
-   `running` in a journal when the lock was free crashed: it is marked `abandoned`.
+   normalised working-copy path (named mutex in the `Global\` namespace, so other Windows sessions
+   are covered; Tekla serves only the first session, so every CLI on the machine talks to the same
+   model). A held lock, or a mutex that cannot be created or opened, refuses (exit `3`). The lock is
+   released on the thread that took it. After taking the lock, the CLI marks every invocation still
+   `running` as `abandoned` (it crashed) **before** planning; the planner refuses (exit `5`) a
+   journal that still has a `running` invocation.
 5. **What refuses before planning** (nothing written):
    - journal exists but is not strict JSON or not schema-shaped → `5`; journal I/O error → `3`;
    - journal `spec_sha256` ≠ the receipt's → `5` (a changed spec is `update` in S4, or `rollback` of
      this run and a build with a new `RUN_ID`, decided by the engineer);
-   - journal `model_path` ≠ the open working copy (same comparison as safety rule 1) → `5`;
+   - journal `model_path` (header or any invocation) ≠ the open working copy (same comparison as
+     safety rule 1) → `5`;
    - the journal header's `project_id`, `lot` or `run_id` differs from this run → `5`;
    - the run has any `rollback` invocation, whatever its outcome → `5` (a partial rollback is never
      followed by a resume that rebuilds what the engineer asked to delete);
@@ -60,16 +69,20 @@ resume planner in `TeklaCore`. S2 fills the snapshot from the Open API; S4 execu
    those lookups found it, kind (`beam`/`column`/... in the spec's `type` vocabulary, or `other`),
    each of the three tags as value / absent / unreadable, start, end, profile, material, rotation,
    class, name. Per journal GUID: present, absent (only when the lookup of that very GUID says "not
-   found") or error. Refusals: an unreadable tag or a GUID lookup error → `3`/`4`; any object that
-   carries this `LOT`, this `RUN_ID` or a `SPEC_ID` of the spec but was not returned by that lookup
-   → `3` (the filter cannot be trusted).
+   found") or error. Refusals: an unreadable tag or a GUID lookup error → `3`/`4`; lookups and tags
+   that disagree in **either direction** → `3` (the filter cannot be trusted): an object carrying
+   this `LOT`, this `RUN_ID` or a `SPEC_ID` of the spec that its lookup did not return, an object a
+   lookup returned whose tag does not hold that value, an object no lookup returned, or a
+   journal-GUID flag that disagrees with the journal.
 7. **"Differs"** (ADR-0007 §2, widened by the engineer on 2026-11-08): an object matches its spec
    item only when the start and the end are each within 0.1 mm (Euclidean, `d <= 0.1 + 1e-6`: the
    1e-6 mm absorbs binary rounding, so 6000 against 6000.1 matches; a non-finite point never
    matches; start with start, end with end), profile and material are equal (ordinal),
    the kind equals the spec `type`, the rotation is within 0.01° (+ 1e-9° rounding allowance) modulo 360 (absent in the spec =
    0), and the class is equal when the spec gives one. A different name is reported, not a conflict.
-8. **Plan per spec member** — exactly one action:
+8. **Plan per spec member** — exactly one action. A plan is executable only when there is no
+   refusal and no conflict; the plan type enforces it (no executable actions are exposed
+   otherwise), so S4 cannot write part of a lot while the planner reported a conflict:
    - `skip`: one object tagged with this lot, run and `SPEC_ID` that matches; if the journal has a
      GUID for this `SPEC_ID`, it must be that object;
    - `retag`: no tagged object, a present journal GUID for this `SPEC_ID` with missing tags (none

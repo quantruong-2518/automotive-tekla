@@ -38,8 +38,11 @@ public sealed class ResumePlannerTests
 
     private static void AssertAction(ResumePlan plan, MemberSpec m, MemberAction action, Guid? guid = null)
     {
+        // M2: when the plan has any conflict, every non-conflict member is Blocked (not executable).
         var p = For(plan, m);
-        Assert.Equal(action, p.Action);
+        Assert.Equal(action, p.IntendedAction);
+        Assert.Equal(action == MemberAction.Conflict || plan.Executable ? action : MemberAction.Blocked, p.Action);
+        Assert.Equal(plan.Conflicts.Count == 0 && !plan.Refused, plan.Executable);
         Assert.Equal(guid, p.Guid);
         if (action == MemberAction.Conflict)
         {
@@ -58,6 +61,8 @@ public sealed class ResumePlannerTests
         Assert.Equal(ExitCode.ValidationFailure, plan.ExitCode);
         var p = For(plan, m);
         Assert.Equal(MemberAction.Conflict, p.Action);
+        Assert.Equal(MemberAction.Conflict, p.IntendedAction);
+        Assert.False(plan.Executable);
         Assert.Null(p.Guid);
         var c = Assert.Single(p.Conflicts, x => x.Kind == kind);
         Assert.Equal(m.SpecId, c.SpecId);
@@ -99,11 +104,11 @@ public sealed class ResumePlannerTests
     }
 
     [Fact]
-    public void Untagged_object_outside_the_journal_is_ignored()
+    public void Untagged_object_outside_the_journal_cannot_be_in_the_snapshot()
     {
+        // No lookup returns it (review C1): the snapshot itself is wrong.
         var plan = Plan(null, Obj(A, G(1)));
-        AssertAction(plan, A, MemberAction.Create);
-        Assert.Equal(ExitCode.Ok, plan.ExitCode);
+        AssertRefused(plan, PlanRefusal.LookupUntrusted, ExitCode.EnvironmentError);
     }
 
     // ---- decision 8: crash sequences
@@ -324,7 +329,8 @@ public sealed class ResumePlannerTests
     {
         var plan = Plan(null, Obj(A, G(7)).Tags("2", Run, "L2-X"));
         AssertRunConflict(plan, ConflictKind.RunInOtherLot, G(7), "L2-X");
-        Assert.All(plan.Members, p => Assert.Equal(MemberAction.Create, p.Action));
+        Assert.All(plan.Members, p => Assert.Equal(MemberAction.Create, p.IntendedAction));
+        Assert.All(plan.Members, p => Assert.Equal(MemberAction.Blocked, p.Action));
     }
 
     [Fact]
@@ -394,10 +400,10 @@ public sealed class ResumePlannerTests
     }
 
     [Fact]
-    public void Object_of_another_lot_and_run_without_our_spec_ids_is_unclassified()
+    public void Object_of_another_lot_and_run_without_our_spec_ids_cannot_be_in_the_snapshot()
     {
         var plan = Plan(Journal(), Obj(A, G(6)).Tags("2", "R-OLD", null));
-        AssertRunConflict(plan, ConflictKind.Unclassified, G(6), null);
+        AssertRefused(plan, PlanRefusal.LookupUntrusted, ExitCode.EnvironmentError);
     }
 
     [Fact]
@@ -440,7 +446,7 @@ public sealed class ResumePlannerTests
     private static ResumePlan PlanOne(MemberSpec m, Action<PlanFixtures.ObjectBuilder> change)
     {
         var journal = Journal(Inv(JO(m, G(1), ObjectState.Tagged)));
-        return Plan(Spec(m), journal, Snap(journal, Tagged(m, G(1)).With(change)));
+        return Plan(Spec(m), journal, SnapFor(Spec(m), journal, Tagged(m, G(1)).With(change)));
     }
 
     private static void AssertMatches(MemberSpec m, Action<PlanFixtures.ObjectBuilder> change)
@@ -682,7 +688,7 @@ public sealed class ResumePlannerTests
     {
         var m = Member("M", "beam", new Point3(0, 0, 0), new Point3(1000, 0, 0), name: "BEAM-A");
         var journal = Journal(Inv(JO(m, G(1), ObjectState.Inserted)));
-        var plan = Plan(Spec(m), journal, Snap(journal, Obj(m, G(1)).With(o => o.Name = "BEAM")));
+        var plan = Plan(Spec(m), journal, SnapFor(Spec(m), journal, Obj(m, G(1)).With(o => o.Name = "BEAM")));
         AssertAction(plan, m, MemberAction.Retag, G(1));
         Assert.NotNull(For(plan, m).NameNote);
     }
@@ -954,13 +960,13 @@ public sealed class ResumePlannerTests
             var journal = Journal(Inv(JO(m, G(1), ObjectState.Tagged)));
             var lotTen = new LotSpec("0.1", Project, 1000, new[] { m }, Sha, 1);
             var tagged = Tagged(m, G(1)).With(o => (o.Rotation, o.End, o.Name) = (0.004, new Point3(1000.55, 0, 0), "dam"));
-            var p1 = Plan(Spec(m), journal, Snap(journal, tagged));
+            var p1 = Plan(Spec(m), journal, SnapFor(Spec(m), journal, tagged));
             var off = Tagged(m, G(1)).With(o => (o.Rotation, o.End) = (1.5, new Point3(1000.75, 0, 0)));
-            var p2 = Plan(Spec(m), journal, Snap(journal, off));
+            var p2 = Plan(Spec(m), journal, SnapFor(Spec(m), journal, off));
             var lotJournal = new RunJournal(Project, 1000, Run, "spec.json", Sha, ModelPath, Array.Empty<JournalInvocation>());
             var gone = Obj(m, G(2)).Tags("1000", Run, "GONE").With(o => o.FoundBy = SnapshotLookup.Lot | SnapshotLookup.RunId);
             var p3 = ResumePlanner.Plan(lotTen, Run, ModelPath, lotJournal, Snap(lotJournal, gone));
-            return string.Join("|", p1.Members[0].Action, p1.Members[0].NameNote, p2.Conflicts[0].Detail, p3.Conflicts[0].Kind, p3.Members[0].Action);
+            return string.Join("|", p1.Members[0].Action, p1.Members[0].NameNote, p2.Conflicts[0].Detail, p3.Conflicts[0].Kind, p3.Members[0].IntendedAction);
         }
 
         var saved = Thread.CurrentThread.CurrentCulture;
@@ -1041,15 +1047,16 @@ public sealed class ResumePlannerTests
             Assert.Equal(targets.Count, targets.Distinct().Count());
             foreach (var p in plan.Members)
             {
-                Assert.Equal(p.Action is MemberAction.Skip or MemberAction.Retag, p.Guid.HasValue);
-                Assert.Equal(p.Action == MemberAction.Conflict, p.Conflicts.Count > 0);
-                if (p.Action == MemberAction.Create)
+                Assert.Equal(p.IntendedAction is MemberAction.Skip or MemberAction.Retag, p.Guid.HasValue);
+                Assert.Equal(p.IntendedAction == MemberAction.Conflict, p.Conflicts.Count > 0);
+                Assert.Equal(plan.Executable || p.IntendedAction == MemberAction.Conflict ? p.IntendedAction : MemberAction.Blocked, p.Action);
+                if (p.IntendedAction == MemberAction.Create)
                 {
                     Assert.DoesNotContain(objects, o => o.SpecTag.Value == p.SpecId);
                     Assert.DoesNotContain(entries, e => e.SpecId == p.SpecId && (e.Guid is null || objects.Any(o => o.Guid == e.Guid)));
                 }
 
-                if (p.Action is MemberAction.Skip or MemberAction.Retag)
+                if (p.IntendedAction is MemberAction.Skip or MemberAction.Retag)
                 {
                     var target = objects.Single(o => o.Guid == p.Guid);
                     var member = members.Single(m => m.SpecId == p.SpecId);

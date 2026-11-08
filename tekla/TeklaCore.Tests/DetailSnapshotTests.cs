@@ -22,11 +22,12 @@ public sealed class DetailSnapshotTests
 
     private static void Describe(List<string> lines, string name, ResumePlan plan)
     {
-        lines.Add("plan " + name + ": " + plan.Refusal + " exit " + ((int)plan.ExitCode).ToString(CultureInfo.InvariantCulture) + " | " + plan.Detail);
+        lines.Add("plan " + name + ": " + plan.Refusal + (plan.Executable ? " executable" : string.Empty) + " exit " + ((int)plan.ExitCode).ToString(CultureInfo.InvariantCulture) + " | " + plan.Detail);
         foreach (var m in plan.Members)
         {
             var absent = string.Join(",", m.AbsentJournalObjects.Select(a => Id(a.Guid) + "/" + a.LastState));
-            lines.Add("  " + m.SpecId + " " + m.Action + " " + Id(m.Guid) + (m.Recreated ? " recreated" : string.Empty)
+            var action = m.Action == m.IntendedAction ? m.Action.ToString() : m.Action + "(" + m.IntendedAction + ")";
+            lines.Add("  " + m.SpecId + " " + action + " " + Id(m.Guid) + (m.Recreated ? " recreated" : string.Empty)
                 + (absent.Length > 0 ? " absent " + absent : string.Empty) + (m.NameNote is null ? string.Empty : " | note: " + m.NameNote));
         }
 
@@ -63,6 +64,14 @@ public sealed class DetailSnapshotTests
         yield return ("missed by LOT", Plan(Abc, tagged, S(tagged, Tagged(A, G(1)).With(o => o.FoundBy = SnapshotLookup.RunId | SnapshotLookup.SpecId))));
         yield return ("missed by RUN_ID", Plan(Abc, tagged, S(tagged, Tagged(A, G(1)).With(o => o.FoundBy = SnapshotLookup.Lot | SnapshotLookup.SpecId))));
         yield return ("missed by SPEC_ID", Plan(Abc, tagged, S(tagged, Tagged(A, G(1)).With(o => o.FoundBy = SnapshotLookup.Lot | SnapshotLookup.RunId))));
+        yield return ("LOT hit, tag absent", Plan(Abc, tagged, S(tagged, Tagged(A, G(1)).With(o => o.Lot = TagReading.Absent).With(o => o.FoundBy = SnapshotLookup.Lot | SnapshotLookup.RunId | SnapshotLookup.SpecId | SnapshotLookup.JournalGuid))));
+        yield return ("SPEC_ID hit, foreign tag", Plan(Abc, Journal(), S(Journal(), Obj(A, G(2)).Tags(LotText, Run, "L1-GONE").With(o => o.FoundBy = SnapshotLookup.Lot | SnapshotLookup.RunId | SnapshotLookup.SpecId))));
+        yield return ("no lookup", Plan(Abc, Journal(), S(Journal(), Obj(A, G(2)))));
+        yield return ("journal flag missing", Plan(Abc, tagged, S(tagged, Tagged(A, G(1)).With(o => o.FoundBy = SnapshotLookup.Lot | SnapshotLookup.RunId | SnapshotLookup.SpecId))));
+        var running = Journal(Inv(InvocationOutcome.Running, JournalCommand.Build));
+        yield return ("still running", Plan(Abc, running, Snap(running)));
+        var elsewhere = Journal(new JournalInvocation(JournalCommand.Build, "2026-11-08T09:00:00Z", null, "2024.0", @"D:\Other", InvocationOutcome.Stopped, 4, false, Array.Empty<JournalObject>(), null, Array.Empty<JournalConflict>()));
+        yield return ("invocation elsewhere", Plan(Abc, elsewhere, Snap(elsewhere)));
 
         // decision 8 plans
         yield return ("fresh", Plan(Abc, null, Snap(null)));
@@ -70,8 +79,8 @@ public sealed class DetailSnapshotTests
         yield return ("resume", Plan(Abc, resume, S(resume, Tagged(A, G(1)), Obj(B, G(2)).Tags(LotText, null, null))));
         var named = Member("N", "beam", new Point3(0, 0, 0), new Point3(1000, 0, 0), name: "BEAM-A", memberClass: "3");
         var namedJournal = Journal(Inv(JO(named, G(1), ObjectState.Tagged)));
-        yield return ("name note", Plan(Spec(named), namedJournal, S(namedJournal, Tagged(named, G(1)).With(o => o.Name = null))));
-        yield return ("mismatch every field", Plan(Spec(named), namedJournal, S(namedJournal, Tagged(named, G(1)).With(o =>
+        yield return ("name note", Plan(Spec(named), namedJournal, SnapFor(Spec(named), namedJournal, Tagged(named, G(1)).With(o => o.Name = null))));
+        yield return ("mismatch every field", Plan(Spec(named), namedJournal, SnapFor(Spec(named), namedJournal, Tagged(named, G(1)).With(o =>
         {
             o.Start = null;
             o.End = new Point3(1000.5, 0, 0);
@@ -82,9 +91,9 @@ public sealed class DetailSnapshotTests
             o.Class = null;
             o.Name = "BEAM-B";
         }))));
-        yield return ("mismatch numbers", Plan(Spec(named), namedJournal, S(namedJournal, Tagged(named, G(1)).With(o =>
+        yield return ("mismatch numbers", Plan(Spec(named), namedJournal, SnapFor(Spec(named), namedJournal, Tagged(named, G(1)).With(o =>
         {
-            o.Start = new Point3(0, 0.25, 0);
+            o.Start = new Point3(0.03, 0.04, -0.12);
             o.Rotation = 1.5;
             o.Class = "4";
             o.Name = "BEAM-A";

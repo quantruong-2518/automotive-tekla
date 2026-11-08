@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Security;
 using TeklaHarness.Core.Json;
@@ -19,6 +20,9 @@ public enum JournalReadStatus
 
     /// <summary>I/O error on the path: access denied, sharing violation, missing folder (exit 3).</summary>
     ReadError,
+
+    /// <summary>No journal, but a temporary or backup file of it: a write may have been interrupted (exit 5).</summary>
+    InterruptedWrite,
 }
 
 /// <summary>Result of <see cref="RunJournalFile.Read"/>.</summary>
@@ -39,10 +43,10 @@ public sealed class JournalReadResult
     /// <summary>The journal when <see cref="JournalReadStatus.Found"/>; otherwise null.</summary>
     public RunJournal? Journal { get; }
 
-    /// <summary>Decision 5: invalid 5, I/O error 3; found or missing are not refusals (0).</summary>
+    /// <summary>Decision 5: invalid or interrupted write 5, I/O error 3; found or missing are not refusals (0).</summary>
     public ExitCode ExitCode => Status switch
     {
-        JournalReadStatus.Invalid => ExitCode.RefusedBySafetyRule,
+        JournalReadStatus.Invalid or JournalReadStatus.InterruptedWrite => ExitCode.RefusedBySafetyRule,
         JournalReadStatus.ReadError => ExitCode.EnvironmentError,
         _ => ExitCode.Ok,
     };
@@ -59,6 +63,7 @@ public static class RunJournalFile
     {
         var what = "Run journal '" + path + "'";
         byte[] bytes;
+        IReadOnlyList<string> leftovers;
         try
         {
             using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
@@ -75,10 +80,11 @@ public static class RunJournalFile
             }
 
             bytes = buffer.ToArray();
+            leftovers = AtomicFile.Leftovers(path);
         }
         catch (FileNotFoundException)
         {
-            return new JournalReadResult(JournalReadStatus.Missing, "No run journal at '" + path + "'.", null);
+            return Missing(path, what);
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException or SecurityException)
         {
@@ -86,7 +92,32 @@ public static class RunJournalFile
             return new JournalReadResult(JournalReadStatus.ReadError, what + " cannot be read: " + e.Message, null);
         }
 
-        return Parse(bytes, what);
+        var result = Parse(bytes, what);
+        return result.Status == JournalReadStatus.Found && leftovers.Count > 0
+            ? new JournalReadResult(JournalReadStatus.Found, result.Detail + " Leftover file(s) next to it: " + string.Join(", ", leftovers) + ".", result.Journal)
+            : result;
+    }
+
+    /// <summary>No journal file: "no journal yet", unless a write of it was interrupted (review M1).</summary>
+    private static JournalReadResult Missing(string path, string what)
+    {
+        IReadOnlyList<string> leftovers;
+        try
+        {
+            leftovers = AtomicFile.Leftovers(path);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException or SecurityException)
+        {
+            return new JournalReadResult(JournalReadStatus.ReadError, what + " cannot be checked for leftovers: " + e.Message, null);
+        }
+
+        return leftovers.Count == 0
+            ? new JournalReadResult(JournalReadStatus.Missing, "No run journal at '" + path + "'.", null)
+            : new JournalReadResult(
+                JournalReadStatus.InterruptedWrite,
+                "No run journal at '" + path + "', but " + string.Join(", ", leftovers)
+                + " lie next to it: a journal write may have been interrupted. Check the folder before anything else.",
+                null);
     }
 
     /// <summary>

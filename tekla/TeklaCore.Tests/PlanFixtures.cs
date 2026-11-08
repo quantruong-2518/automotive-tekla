@@ -67,10 +67,12 @@ internal static class PlanFixtures
 
     /// <summary>
     /// Snapshot of <paramref name="objects"/>; every journal GUID is Present when an object has it,
-    /// else Absent, unless <paramref name="presence"/> overrides it.
+    /// else Absent, unless <paramref name="presence"/> overrides it. Lookup flags follow the tags as
+    /// S2 would set them: SPEC_ID only for ids of <paramref name="spec"/> (default <see cref="Abc"/>).
     /// </summary>
-    public static ModelSnapshot Snap(RunJournal? journal, IEnumerable<ObjectBuilder> objects, IDictionary<Guid, GuidPresence>? presence = null)
+    public static ModelSnapshot Snap(RunJournal? journal, IEnumerable<ObjectBuilder> objects, IDictionary<Guid, GuidPresence>? presence = null, LotSpec? spec = null)
     {
+        var specIds = new HashSet<string>((spec ?? Abc).Members.Select(m => m.SpecId), StringComparer.Ordinal);
         var journalGuids = journal is null
             ? new HashSet<Guid>()
             : new HashSet<Guid>(journal.Invocations.SelectMany(i => i.Objects).Where(o => o.Guid.HasValue).Select(o => o.Guid!.Value));
@@ -89,10 +91,13 @@ internal static class PlanFixtures
             }
         }
 
-        return new ModelSnapshot(list.Select(o => o.Build(journalGuids.Contains(o.Guid))), map);
+        return new ModelSnapshot(list.Select(o => o.Build(journalGuids.Contains(o.Guid), specIds)), map);
     }
 
     public static ModelSnapshot Snap(RunJournal? journal, params ObjectBuilder[] objects) => Snap(journal, objects, null);
+
+    /// <summary>Snapshot for a spec other than <see cref="Abc"/>.</summary>
+    public static ModelSnapshot SnapFor(LotSpec spec, RunJournal? journal, params ObjectBuilder[] objects) => Snap(journal, objects, null, spec);
 
     public static ResumePlan Plan(LotSpec spec, RunJournal? journal, ModelSnapshot snapshot) => ResumePlanner.Plan(spec, Run, ModelPath, journal, snapshot);
 
@@ -156,7 +161,9 @@ internal static class PlanFixtures
             return this;
         }
 
-        public SnapshotObject Build(bool isJournalGuid)
+        public SnapshotObject Build(bool isJournalGuid) => Build(isJournalGuid, new HashSet<string>(Abc.Members.Select(m => m.SpecId), StringComparer.Ordinal));
+
+        public SnapshotObject Build(bool isJournalGuid, ISet<string> specIds)
         {
             var found = SnapshotLookup.None;
             if (Lot.State == TagState.Value && Lot.Value == LotText)
@@ -169,7 +176,7 @@ internal static class PlanFixtures
                 found |= SnapshotLookup.RunId;
             }
 
-            if (SpecTag.State == TagState.Value)
+            if (SpecTag.State == TagState.Value && specIds.Contains(SpecTag.Value!))
             {
                 found |= SnapshotLookup.SpecId;
             }
