@@ -34,7 +34,9 @@ Tool wave 2:
   * an active answer to a live gate-relevant question (producers intake, read-structure, grid-system,
     reader: every question gate 1 reads) that the engineer did not give (`answered_by_role` 'simulated', or
     no role at all: an answer recorded before roles existed) is a gate-1 reason naming its question id and
-    is listed in `gate1.non_engineer_answers`. Both lists appear only when not empty.
+    is listed in `gate1.non_engineer_answers`. So is a non-engineer active answer whose question is not live
+    (no registry entry, or obsolete) when a gate check still reads its code from every active answer (units,
+    grid-system: GATE_READ_CODES); its reason names the answer's key. Both lists appear only when not empty.
 
 Exit codes (AGENTS.md): 0 for any readable work folder (status is information, not a verdict), 1 an
 unreadable or invalid document, 2 not a work folder.
@@ -48,7 +50,12 @@ from pathlib import Path
 from typing import Any
 
 from tekla_harness import lifecycle
-from tekla_harness.grid_system import consumed_answers_digest, units_by_file, units_evidence
+from tekla_harness.grid_system import (
+    CONSUMED_CODES,
+    consumed_answers_digest,
+    units_by_file,
+    units_evidence,
+)
 from tekla_harness.questions import (
     CONFLICT_CODE,
     CONTRADICTION_CODE,
@@ -89,6 +96,10 @@ GATE_ANSWER_PRODUCERS = frozenset(dict(PRODUCERS)[label] for label in GATE_PRODU
 LEGACY_ANSWER_IS_ENGINEER = False
 # an answer to these never closes them: they close through another question's structured values
 NOT_CLOSED_BY_AN_ANSWER = frozenset({CONFLICT_CODE})
+# codes a gate check reads from every active answer, whatever its question's registry state: units_by_file
+# (units) and harness grid-system (CONSUMED_CODES). A non-engineer answer of these to a question that is not
+# live is a gate-1 reason too (_retired_answers)
+GATE_READ_CODES = UNIT_CODES | CONSUMED_CODES
 # closure contract (check_closures): units_answered closes this read-structure code only, and
 # rejected_systems_only closes read-structure codes of this prefix only (grids.py, refs with `families`)
 UNITS_DOUBT_CODE = "grid_units_doubt"
@@ -422,6 +433,41 @@ def _non_engineer_answers(
     return sorted(out, key=lambda a: _id_number(a["question_id"]))
 
 
+def _retired_answers(registry: dict[str, Any], active: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+    """Active answers whose question is not live (no registry entry, or obsolete) but whose code a gate check
+    still reads from every active answer (units_by_file, grid-system), that the engineer did not give. Each
+    keeps its key (`key`) and why it is retired (`retired`); sorted by key."""
+    out = []
+    for key, answer in sorted(active.items()):
+        entry = registry["questions"].get(key)
+        if entry is not None and entry["status"] != "obsolete":
+            continue
+        if answer["code"] not in GATE_READ_CODES or _by_engineer(answer):
+            continue
+        out.append(
+            {
+                "question_id": answer["question_id"],
+                "code": answer["code"],
+                "file": answer["file"],
+                "role": answer.get("answered_by_role"),
+                "key": key,
+                "retired": "not in the registry" if entry is None else "obsolete",
+            }
+        )
+    return out
+
+
+def _retired_reasons(retired: list[dict[str, Any]]) -> list[str]:
+    return [
+        f"answers: {a['question_id']} {a['code']} ({a['file'] or 'project'}), answer key {a['key']}, was "
+        f"answered by {'a ' + a['role'] + ' role' if a['role'] else 'no recorded role'}, not the engineer, "
+        f"and its question is {a['retired']}; gate checks still read it, so gate 1 does not count it: rerun "
+        "the command that raises this code (the answer goes stale), then the engineer answers the live "
+        "question themselves"
+        for a in retired
+    ]
+
+
 def _by_engineer(answer: dict[str, Any]) -> bool:
     role = answer.get("answered_by_role")
     return role == "engineer" or (role is None and LEGACY_ANSWER_IS_ENGINEER)
@@ -567,6 +613,9 @@ def build_status(work_dir: str | Path) -> dict[str, Any]:
     reasons += _level_reasons(registry, active)
     non_engineer = _non_engineer_answers(registry, active)
     reasons += _role_reasons(non_engineer, shown)
+    retired = _retired_answers(registry, active)
+    reasons += _retired_reasons(retired)
+    non_engineer += [{k: a[k] for k in ("question_id", "code", "file", "role")} for a in retired]
     reasons += refused_closures
     for label in GATE_PRODUCERS:
         q = by_label[label]["questions"]

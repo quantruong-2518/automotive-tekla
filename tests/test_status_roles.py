@@ -192,6 +192,62 @@ def values_of(work: Path, question_id: str) -> dict[str, str]:
     return {}
 
 
+# --- answers to retired questions that a gate check still reads (units, grid-system) --------------------
+
+
+def orphan(work: Path, code: str, values: dict[str, Any], role: str | None, *, key: str = "e" * 16) -> None:
+    """An active answer whose key is in no registry entry (hand-edited, or left from another run)."""
+    doc = load(work / "answers.json")
+    doc["answers"].append(
+        {
+            "key": key, "question_id": "Q-990", "code": code, "file": "set.dxf", "answer_text": "x",
+            "values": values, "answered_by": "x", "answered_on": "2026-11-08", "status": "active",
+            **({"answered_by_role": role} if role is not None else {}),
+        }
+    )  # fmt: skip
+    (work / "answers.json").write_text(json.dumps(doc), encoding="utf-8")
+
+
+def answer_reasons(work: Path) -> list[str]:
+    return [r for r in build_status(work)["gate1"]["reasons"] if r.startswith("answers:")]
+
+
+@pytest.mark.parametrize("role", ["simulated", None])
+def test_a_non_engineer_answer_to_no_registry_question_is_named_by_its_key(ready, role):
+    _, work = ready
+    orphan(work, "units_confirm_all", {"unit": "mm"}, role)
+    gate1 = build_status(work)["gate1"]
+    assert gate1["ready_for_gate1"] is False
+    assert validate("status", build_status(work)) == []
+    assert {"question_id": "Q-990", "code": "units_confirm_all", "file": "set.dxf", "role": role} in gate1[
+        "non_engineer_answers"
+    ]
+    (reason,) = answer_reasons(work)
+    assert "e" * 16 in reason and "not in the registry" in reason, reason
+
+
+def test_a_non_engineer_answer_to_an_obsolete_question_still_read_by_a_gate_check_is_named(ready):
+    _, work = ready
+    q = find(questions_of(work, "questions.json"), "units_confirm_all", "set.dxf")
+    registry = load(work / "question-registry.json")
+    registry["questions"][q["key"]]["status"] = "obsolete"  # its active answer is still read by units_by_file
+    (work / "question-registry.json").write_text(json.dumps(registry), encoding="utf-8")
+    doc = load(work / "answers.json")
+    for a in doc["answers"]:
+        if a["key"] == q["key"] and a["status"] == "active":
+            a["answered_by_role"] = "simulated"
+    (work / "answers.json").write_text(json.dumps(doc), encoding="utf-8")
+    (reason,) = answer_reasons(work)
+    assert q["key"] in reason and "obsolete" in reason, reason
+
+
+def test_retired_answers_by_the_engineer_or_not_read_by_gate_1_are_no_reason(ready):
+    _, work = ready
+    orphan(work, "units_confirm_all", {"unit": "mm"}, "engineer")
+    orphan(work, "level_name_conflict", {}, "simulated", key="d" * 16)  # gate 1 reads levels by live key
+    assert answer_reasons(work) == []
+
+
 # --- review M2: status accepts a lifecycle closure only under the closure contract --------------------
 
 
