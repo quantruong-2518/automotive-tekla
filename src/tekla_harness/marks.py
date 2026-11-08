@@ -78,7 +78,8 @@ compared; a difference is a blocking `mark_size_conflict` quoting both entry ids
 `size_not_compared_reason`: the plan marks have no size, or per row the table has no size column, the
 header cells that could name one are blocked, the size cells are blocked, or they are not numbers
 (`summary.size_comparisons` counts both). `plan_only` is listed only for a file with at least one
-matchable schedule.
+matchable schedule. `summary.by_sheet` counts plan marks, tables, rows, unparsed tables and blocked marks
+per detector sheet (sheet null: on no sheet).
 
 Confidence is never high: plan marks, titles and tables are at most medium (callouts' rule: min(cap,
 entry confidence), low for case-uncertain text, unmapped characters or unknown-encoding flags); a
@@ -1507,6 +1508,7 @@ def _summary(doc: dict[str, Any]) -> dict[str, Any]:
     out["files_scanned"] = sum(1 for f in doc["files"] if f["status"] == "scanned")
     out["files_skipped"] = sum(1 for f in doc["files"] if f["status"] == "skipped")
     out["by_file"] = by_file
+    out["by_sheet"] = _by_sheet(doc)
     matches = [m for f in doc["matching"] for m in f["matched"]]
     out["size_comparisons"] = {
         "compared": sum(1 for m in matches if m["size_compared"]),
@@ -1516,6 +1518,36 @@ def _summary(doc: dict[str, Any]) -> dict[str, Any]:
         ),
     }
     return out
+
+
+_SHEET_COUNTS = ("plan_marks", "tables", "header_blocked_tables", "rows", "unparsed_tables", "blocked_marks")
+
+
+def _by_sheet(doc: dict[str, Any]) -> list[dict[str, Any]]:
+    """Counts per (file, detector sheet); sheet None = on no sheet. Only sheets with something to count."""
+    rows: dict[tuple[str, str | None], dict[str, Any]] = {}
+
+    def row(file: str, sheet: str | None, number: dict[str, str] | None) -> dict[str, Any]:
+        found = rows.get((file, sheet))
+        if found is None:
+            found = rows[(file, sheet)] = {"file": file, "sheet": sheet, "sheet_number": number}
+            found.update(dict.fromkeys(_SHEET_COUNTS, 0))
+        return found
+
+    for p in doc["plan_marks"]:
+        row(p["file"], p["sheet"], p["sheet_number"])["plan_marks"] += 1
+    tables = {t["id"]: t for t in doc["tables"]}
+    for t in doc["tables"]:
+        r = row(t["file"], t["sheet"], t["sheet_number"])
+        r["tables"] += 1
+        r["header_blocked_tables"] += t["header_blocked"]
+        r["rows"] += len(t["rows"])
+    for u in doc["unparsed_tables"]:
+        row(u["file"], u["sheet"], u["sheet_number"])["unparsed_tables"] += 1
+    for b in doc["blocked_marks"]:
+        t = tables[b["table"]]
+        row(t["file"], t["sheet"], t["sheet_number"])["blocked_marks"] += 1
+    return [rows[k] for k in sorted(rows, key=lambda k: (k[0], k[1] is None, k[1] or ""))]
 
 
 @dataclass
@@ -1566,7 +1598,7 @@ def run_marks(
     s = doc["summary"]
     summary = {
         "project_id": doc["project_id"],
-        **{k: v for k, v in s.items() if k != "by_file"},
+        **{k: v for k, v in s.items() if k not in ("by_file", "by_sheet")},
         **qdoc["summary"],
         "stale_answers": ledger.stale_answers(),
         "warnings": doc["warnings"],

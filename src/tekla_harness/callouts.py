@@ -698,6 +698,9 @@ def _summary(
             for f, s in sorted(by_sheet, key=lambda k: (k[0], k[1] is None, k[1] or ""))
         ],
         "member_mark_prefixes": len({c["lexical"]["prefix"] for c in candidates if c.get("lexical")}),
+        "unparsed_by_reason": dict(
+            sorted(Counter(c["unparsed_reason"] for c in candidates if c["parsed"] is None).items())
+        ),
         "files_scanned": sum(1 for f in files if f["status"] == "scanned"),
         "files_skipped": sum(1 for f in files if f["status"] == "skipped"),
         "blocked_entries": len(blocked),

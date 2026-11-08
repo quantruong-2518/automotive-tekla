@@ -518,6 +518,40 @@ def test_summary_counts_size_comparisons(doc, gate):
     assert s["by_reason"] == {NO_PLAN_SIZE: 2, SIZE_CELLS_BLOCKED: 1, SIZE_HEADER_BLOCKED: 1}
 
 
+def test_summary_counts_per_sheet(doc, gate):
+    rows = doc["summary"]["by_sheet"]
+    assert [(r["file"], r["sheet"]) for r in rows] == [(REL, "model#01")]
+    (r,) = rows
+    assert r["sheet_number"]["value"] == "S-101"
+    s = doc["summary"]
+    assert {k: r[k] for k in s["by_file"][0] if k in r} == {
+        k: s[k]
+        for k in ("plan_marks", "tables", "header_blocked_tables", "rows", "unparsed_tables", "blocked_marks")
+    } | {"file": REL}
+    assert (r["header_blocked_tables"], r["unparsed_tables"], r["blocked_marks"]) == (1, 1, 2)
+    (g,) = gate["summary"]["by_sheet"]
+    assert (g["tables"], g["header_blocked_tables"], g["rows"], g["blocked_marks"]) == (3, 1, 7, 2)
+
+
+def test_summary_per_sheet_keeps_marks_on_no_sheet_apart(base, tmp_path):
+    shutil.copytree(base, tmp_path / "w")
+    work = tmp_path / "w" / "work"
+    path = work / "structure" / f"{REL}.sheets.json"
+    sheets = load(path)
+    index = load(work / "text" / f"{REL}.json")
+    off = {e["id"] for e in index["entries"] if e["display_text"] in ("B5", "gm1")}
+    for sh in sheets["sheets"]:
+        sh["text_ids"] = [i for i in sh["text_ids"] if i not in off]
+    path.write_text(json.dumps(sheets), encoding="utf-8")
+    out = extract_marks(work, tmp_path / "w" / "input")
+    rows = {r["sheet"]: r for r in out["summary"]["by_sheet"]}
+    assert list(rows) == ["model#01", None]
+    assert rows[None]["plan_marks"] == 2 and rows[None]["sheet_number"] is None
+    assert rows[None]["tables"] == 0
+    assert sum(r["plan_marks"] for r in rows.values()) == out["summary"]["plan_marks"]
+    assert validate("marks", out) == []
+
+
 def test_a_table_added_to_another_file_does_not_re_key_this_files_questions(doc):
     """Table ids (S001..) number the tables across all files: questions must not quote them, or a table
     added to file A re-keys file B's mark_notation_equivalence / mark_size_conflict."""

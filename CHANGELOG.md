@@ -414,6 +414,9 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
     read. A line-grid table without a keyword is read on the column it was found from (confidence low)
     unless that column's header is blocked. Every matched mark says `size_compared`, else
     `size_not_compared_reason`; `summary.size_comparisons` counts them.
+  - Counts the report asks for (EVAL-2 fix 11): `harness marks` `summary.by_sheet` (plan marks, tables,
+    header-blocked tables, rows, unparsed tables, blocked marks per detector sheet; sheet null for texts on
+    no sheet) and `harness callouts` `summary.unparsed_by_reason` (unparsed candidates per reason).
 
 ### Changed
 - Question lifecycle (tool wave 2, EVAL-2 fix 5):

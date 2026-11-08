@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import shutil
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
@@ -663,6 +664,23 @@ def test_summary_counts_add_up(doc):
     assert s["member_mark_prefixes"] == len(subjects(doc, "member_mark_prefix_meaning"))
     assert (s["files_scanned"], s["files_skipped"]) == (1, 0)
     assert doc["files"][0]["candidates"] == len(cands)
+
+
+def test_summary_counts_unparsed_candidates_per_reason(doc):
+    """Tool wave 2 (fix 11): the report asks how many candidates stayed unparsed and why."""
+    s = doc["summary"]
+    unparsed = [c["unparsed_reason"] for c in doc["candidates"] if c["parsed"] is None]
+    assert s["unparsed_by_reason"] == dict(sorted(Counter(unparsed).items()))
+    assert sum(s["unparsed_by_reason"].values()) == s["unparsed"]
+    assert list(s["unparsed_by_reason"]) == sorted(s["unparsed_by_reason"])
+    assert len(s["unparsed_by_reason"]) > 3
+    assert validate("callouts", doc) == []
+
+
+def test_summary_unparsed_by_reason_is_empty_without_unparsed_candidates(tmp_path):
+    work = build_work(tmp_path, s1=["4%%c16", "CB300-V"], styled=[], s2=[], paper=[])
+    s = extract_callouts(work)["summary"]
+    assert s["unparsed"] == 0 and s["unparsed_by_reason"] == {}
 
 
 def test_duplicate_sheets_are_skipped_and_listed(damaged):
