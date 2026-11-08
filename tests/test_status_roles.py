@@ -304,7 +304,6 @@ def test_a_closure_outside_the_contract_is_refused(ready, monkeypatch, case):
     ("producer", "code", "reason", "closer"),
     [
         ("structure", "grid_label_missing", "rejected_systems_only", "select"),
-        ("structure", "grid_gate1_confirmation", "rejected_systems_only", "select"),
         ("structure", "grid_units_doubt", "units_answered", "units"),
         ("grid-system", "grid_system_conflict", "not_selected", "select"),
         ("grid-system", "grid_system_conflict", "separate", "select"),
@@ -329,6 +328,7 @@ def test_a_closure_under_the_contract_closes_its_question(ready, monkeypatch, pr
     [
         ("structure", "grid_label_missing", "units_answered"),
         ("structure", "level_name_conflict", "rejected_systems_only"),
+        ("structure", "grid_gate1_confirmation", "rejected_systems_only"),  # stays a gate-1 step
         ("intake", "grid_label_missing", "rejected_systems_only"),
         ("structure", "grid_system_conflict", "separate"),
         ("grid-system", "grid_system_select", "not_selected"),

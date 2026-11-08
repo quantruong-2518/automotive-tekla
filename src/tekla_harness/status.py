@@ -92,6 +92,8 @@ NOT_CLOSED_BY_AN_ANSWER = frozenset({CONFLICT_CODE})
 # rejected_systems_only closes read-structure codes of this prefix only (grids.py, refs with `families`)
 UNITS_DOUBT_CODE = "grid_units_doubt"
 GRID_FAMILY_PREFIX = "grid_"
+# confirming the grids stays a gate-1 step: dropping it is the engineer's decision (DESIGN, "NOT taken")
+NOT_REJECTABLE = frozenset({"grid_gate1_confirmation"})
 # A printed answer command is the ENGINEER's step, never an agent's (review M1): it is always introduced by
 # ENGINEER_STEP and names `--role engineer` once, after --by (gate 1 counts the engineer's answers only).
 ENGINEER_STEP = "the engineer runs: "
@@ -425,7 +427,7 @@ def _closure_fits(reason: str, entry: dict[str, Any]) -> bool:
     if reason == "units_answered":  # 5c
         return producer == "structure" and code == UNITS_DOUBT_CODE
     if reason == "rejected_systems_only":  # 5b: a read-structure question citing grid families
-        return producer == "structure" and code.startswith(GRID_FAMILY_PREFIX)
+        return producer == "structure" and code.startswith(GRID_FAMILY_PREFIX) and code not in NOT_REJECTABLE
     return False
 
 
