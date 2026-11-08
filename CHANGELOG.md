@@ -269,11 +269,37 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
   an alias, and links inside either folder or hard-linked files in the copy. Research note
   `docs/research/windows-file-identity.md`. Windows file-system tests run on CI windows-latest
   only (`Category=Windows`); Stryker config `tekla/TeklaCore.Tests/stryker-config.json`.
+- Step 3 S1b contract (ADR-0010 Amendment 1): new schema `spec-receipt`
+  (`urn:tekla-harness:schema:spec-receipt:0.1`) and example — the receipt
+  `<spec file name>.receipt.json` binds the spec's exact bytes (SHA-256), the spec schema `$id`
+  and the validator `rules_version`; `*.receipt.json` is git-ignored. Shared strict-JSON corpus
+  `tests/fixtures/strict-json/` (accept/reject) for the Python and C# readers.
+- Step 3 S1b Python: `harness validate spec` reads each spec once under the strict JSON profile
+  (`tekla_harness.strict_json`: no BOM, duplicate keys, NaN/Infinity, integers beyond ±2^53, lone
+  surrogates or NUL, depth over 64, size over 16 MiB), deletes a stale receipt first (exit 3 if it
+  cannot), and writes `<spec>.receipt.json` atomically next to each valid spec
+  (`SPEC_RULES_VERSION = 1`); each result gains `receipt`. `check_spec` now requires `lot` to be
+  an integer token (not `1.0`) and at most 2147483647.
+  Value parity: canonical dumps `tests/fixtures/strict-json/values/` (IEEE bits, UTF-16 units)
+  for every accept file, plus `accept/number_parity.json` (4049 tokens incl. 1019 that
+  .NET Framework 4.8 `double.Parse` rounds differently); compared by pytest and xunit.
+- Step 3 S1b C#: `TeklaCore.SpecLoader.Load(spec, lot)` builds a `LotSpec` only when
+  `<spec>.receipt.json` matches the spec's exact bytes (SHA-256 of the one buffer it also parses),
+  an accepted spec schema `$id` and `rules_version ≥ 1`; then read-time checks (schema_version vs
+  receipt, units `mm`, lot int32 = `--lot`, unique `spec_id` matching its pattern, profile,
+  material, finite points). Refusals exit 5, I/O errors 3, bad path text 2. Hand-written strict
+  JSON reader (no package) with its own correctly rounded decimal→double conversion
+  (`System.Numerics.BigInteger`): 0 of 150,000 tokens differ from Python on .NET Framework 4.8.
 - Versioning note: the reading-toolchain schemas above have not been released; they stay `0.1` and their
   changes are recorded here until the first tagged release, from which every change bumps its `$id`
   (AGENTS.md). Pending engineer confirmation.
 
 ### Fixed
+- Schema `pattern` now has ECMA-262 meaning in `harness validate` (JSON Schema 2020-12): Python's
+  `$` matched before a final newline, so `"L1-C-A2\n"` passed the `spec_id` pattern; `.` no longer
+  matches `\r`, U+2028 or U+2029. Applies to every schema (ADR-0010 Amendment 1 §10).
+- `harness validate spec`: a file name that a receipt cannot record (backslash, non-UTF-8) is an
+  invalid result instead of a traceback; an existing spec that cannot be read exits 3.
 - `guard_tekla_write.py` now exits 2 (the blocking code) on any internal error instead of
   relying on an undocumented `onFailure` setting; the setting was removed.
 - `guard_tekla_write.py` no longer blocks commands that only mention `tekla-cli` as data

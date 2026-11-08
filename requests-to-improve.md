@@ -104,3 +104,22 @@ Severity: `critical` · `major` · `minor`.
      confirmed by the engineer.
 - Regression test: with a model open that lacks the marker or has another path, the integration
   fixture fails before any write; `TeklaCore.Tests` builds and runs with no Tekla installed.
+
+## RTI-0008 — An agent can forge a spec validation receipt
+
+- Source: independent design review of slice S1b (ADR-0010 Amendment 1), 2026-11-08
+- Classification: safety layer · Severity: minor (the receipt is not a gate; gate approval stays
+  with the engineer) · Status: **proposed**
+- Root cause: the receipt is a plain JSON file holding the spec's SHA-256. Any agent with file
+  write access (`builder` has Write) can create a receipt for a spec that was never validated,
+  and the CLI cannot tell. Signing adds nothing while the key sits on the same machine.
+- Proposed fix: a Claude Code `permissions.deny` rule for Write and Edit on `**/*.receipt.json`
+  (and a guard-hook check for shell redirection into such a file), so only `harness validate spec`
+  produces receipts. Check the current permission-rule syntax in the Claude Code docs first.
+- Regression test: a hook/permission test where `builder` tries to Write `x.json.receipt.json`
+  and is denied, while `uv run harness validate spec` still writes it.
+- Related, also needs approval (agent definition): `.claude/agents/builder.md` step 1 runs
+  `harness validate spec` right before building, so the agent that writes to Tekla produces its
+  own receipt, and the Tekla machine needs Python (ADR-0010 says it should not). Proposed: step 1
+  becomes "the receipt exists and matches", checked by `tekla-cli` itself; validation stays with
+  the planner/doc-reader before the gate.

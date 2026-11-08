@@ -65,3 +65,6 @@ dwg-lab/references/**/*.pdf
 dwg-lab/references/**/*.zip
 dwg-lab/tools/
 dwg-lab/samples/CONVERSION-REPORT.md
+
+# Spec validation receipts (ADR-0010): generated next to each spec, never committed
+*.receipt.json

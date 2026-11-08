@@ -1,0 +1,8 @@
+{
+  "schema_version": "0.1",
+  "spec_file": "spec.example.json",
+  "spec_sha256": "77a1243091e09d63325185ae2a70896726c355f20f78564b57b9429023b91713",
+  "spec_schema_id": "urn:tekla-harness:schema:spec:0.1",
+  "validator": { "name": "tekla_harness", "version": "0.1.0", "rules_version": 1 },
+  "validated_at": "2026-11-07T09:00:00Z"
+}

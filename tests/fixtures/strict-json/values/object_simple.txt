@@ -1,0 +1,10 @@
+object 3
+key 0061
+int 3ff0000000000000
+key 0062
+array 3
+true
+false
+null
+key 0063
+string 0078
