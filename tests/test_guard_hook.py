@@ -180,3 +180,131 @@ def test_script_fails_closed_on_bad_input(stdin):
     assert result.returncode == 2
     assert "blocking the call" in result.stderr
     assert result.stdout == ""
+
+
+# RTI-0008: only `harness validate spec` writes a spec validation receipt. The guard denies a
+# shell command that could write or delete `*.receipt.json`, for every agent, builder included.
+RECEIPT_WRITE_COMMANDS = [
+    "echo '{}' > lots/1/spec.json.receipt.json",
+    "echo x>lots/1/spec.json.receipt.json",  # redirection without spaces
+    "cat forged.json >> lots/1/spec.json.receipt.json",
+    "cat forged.json 2> lots/1/spec.json.receipt.json",
+    "cat forged.json &> lots/1/spec.json.receipt.json",
+    "cd lots/1 && cat > spec.json.receipt.json <<'EOF'\n{}\nEOF",
+    "printf '{}' | tee lots/1/spec.json.receipt.json",
+    "cp /tmp/forged.json lots/1/spec.json.receipt.json",
+    "mv /tmp/forged.json lots/1/spec.json.receipt.json",
+    "ln -s /tmp/forged.json lots/1/spec.json.receipt.json",
+    "rm lots/1/spec.json.receipt.json",
+    "sed -i 's/a/b/' lots/1/spec.json.receipt.json",
+    "python -c \"open('lots/1/spec.json.receipt.json', 'w').write('{}')\"",
+    "uv run python -c \"open('x.json.receipt.json', 'w')\"",
+    "cat $(echo lots/1/spec.json.receipt.json)",  # substitution: never inert
+    "Set-Content lots\\1\\spec.json.receipt.json '{}'",
+    "Get-Content forged.json | Out-File lots\\1\\spec.json.receipt.json",
+    "Copy-Item forged.json lots\\1\\SPEC.JSON.RECEIPT.JSON",
+    "cat lots/1/spec.json.receipt.json > lots/2/spec.json.receipt.json",  # second name redirected
+    # RTI-0009: a newline separates commands; a reader on line 1 must not cover line 2.
+    "cd projects/p/lots/1\ncp /tmp/forged.json spec.json.receipt.json",
+    "cat lots/1/spec.json.receipt.json\ncp /tmp/forged.json lots/1/spec.json.receipt.json",
+    "Get-Content x.receipt.json\r\nCopy-Item forged.json x.receipt.json",
+    "ls lots/1\nrm lots/1/spec.json.receipt.json",
+    "cat forged.json > \\\n  lots/1/spec.json.receipt.json",  # line continuation
+    "cat forged.json >\\\nlots/1/spec.json.receipt.json",
+    "Get-ChildItem lots\\1\\\ncopy-item forged.json lots\\1\\spec.json.receipt.json",
+    "dir projects\\p\\\r\nRemove-Item lots\\1\\spec.json.receipt.json",
+    # A receipt name piped into a writer, also through grouping and later pipeline stages.
+    "ls lots/1/*.receipt.json | xargs -I{} cp forged.json {}",
+    "Get-ChildItem lots\\1\\spec.json.receipt.json | Set-Content -Value '{}'",
+    "ls lots/*/*.receipt.json | grep lots/1 | xargs -I{} cp forged.json {}",
+    "(ls lots/1/*.receipt.json) | xargs -I{} cp forged.json {}",
+    "{ ls lots/1/*.receipt.json; } | xargs -I{} cp forged.json {}",
+    "(Get-ChildItem lots\\1\\spec.json.receipt.json) | Set-Content -Value '{}'",
+    "(ls lots/1/*.receipt.json; true) | xargs rm",
+    # `&` inside `2>&1`, `|&`, `>&2` is not a statement end.
+    "ls lots/1/*.receipt.json 2>&1 | xargs -I{} cp forged.json {}",
+    "ls lots/1/spec.json.receipt.json |& xargs -I{} cp forged.json {}",
+    "Get-ChildItem lots\\1\\spec.json.receipt.json 2>&1 | Set-Content -Value '{}'",
+    "ls lots/1/spec.json.receipt.json >&2 | xargs rm",
+    # git subcommands that are otherwise inert can write a file.
+    "git diff --output=lots/1/spec.json.receipt.json",
+    "git log -1 --format=%H --output lots/1/spec.json.receipt.json",
+    # A reader whose argument runs a command.
+    'Test-Path "$(Copy-Item forged.json lots\\1\\spec.json.receipt.json)"',
+]
+
+RECEIPT_READ_COMMANDS = [
+    "cat lots/1/spec.json.receipt.json",
+    "ls lots/1/*.receipt.json",
+    "grep sha256 lots/1/spec.json.receipt.json",
+    "Get-Content lots\\1\\spec.json.receipt.json",
+    'git log --grep=".receipt.json"',
+    'git commit -m "docs: explain spec.json.receipt.json"',
+    'git commit -m "docs: receipts\n\nspec.json.receipt.json is written by harness"',
+    "uv run harness validate spec lots/1/spec.json",  # the one producer of receipts
+    "uv run harness validate spec lots/1/spec.json && cat lots/1/spec.json.receipt.json",
+    "uv run pytest tests/test_receipt.py",
+    "cat schemas/examples/spec-receipt.example.json",
+    "cat lots/1/spec.json.receipt.json > /tmp/copy.json",  # reading a receipt into another file
+    "cat lots/1/spec.json.receipt.json | jq .sha256",
+    "Get-Content lots\\1\\spec.json.receipt.json | ConvertFrom-Json",
+    "Get-Content lots\\1\\spec.json.receipt.json | ConvertFrom-Json | Select-Object spec_sha256",
+    "Get-Content lots\\1\\spec.json.receipt.json | ConvertFrom-Json | Format-List",
+    "cat lots/1/spec.json.receipt.json | jq -r .spec_sha256 | tr -d x",
+    "ls lots/1/*.receipt.json; cp a.json b.json",  # a new statement is not fed the receipt
+    "ls lots/1/*.receipt.json; ls | xargs echo",
+    "cat lots/1/spec.json.receipt.json 2>&1 | head",
+    # Existence and comparison checks (builder.md step 1).
+    "Test-Path lots\\1\\spec.json.receipt.json",
+    "test -f lots/1/spec.json.receipt.json",
+    "[ -f lots/1/spec.json.receipt.json ]",
+    "stat lots/1/spec.json.receipt.json",
+    "jq . lots/1/spec.json.receipt.json",
+    "diff lots/1/spec.json.receipt.json lots/2/spec.json.receipt.json",
+]
+
+
+@pytest.mark.parametrize("command", RECEIPT_WRITE_COMMANDS)
+@pytest.mark.parametrize("agent", [None, "builder", "doc-reader", "planner"])
+@pytest.mark.parametrize("tool", ["Bash", "PowerShell"])
+def test_receipt_write_denied_for_every_agent(guard, command, agent, tool):
+    assert is_denied(guard.decide(payload(command, agent, tool)))
+
+
+@pytest.mark.parametrize("command", RECEIPT_READ_COMMANDS)
+@pytest.mark.parametrize("agent", [None, "builder", "doc-reader"])
+def test_receipt_read_passes(guard, command, agent):
+    assert guard.decide(payload(command, agent)) is None
+
+
+def test_receipt_reason_names_the_producer(guard):
+    reason = guard.decide(payload("cp a lots/1/spec.json.receipt.json", "builder"))["hookSpecificOutput"][
+        "permissionDecisionReason"
+    ]
+    assert "receipt" in reason and "harness validate spec" in reason
+
+
+def test_receipt_check_runs_before_the_builder_exemption(guard):
+    # A builder command that both runs a CLI write and forges a receipt is denied.
+    command = "echo {} > s.json.receipt.json && tekla-cli build --lot 1 --spec s.json"
+    assert is_denied(guard.decide(payload(command, "builder")))
+
+
+def test_receipt_check_in_end_to_end_script():
+    result = subprocess.run(
+        [sys.executable, str(HOOKS / "guard_tekla_write.py")],
+        input=json.dumps(payload("cp a lots/1/spec.json.receipt.json", "builder")),
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert json.loads(result.stdout)["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+def test_settings_deny_edits_of_receipts():
+    """The Write/Edit/NotebookEdit tools and Bash redirection targets are blocked by this
+    Claude Code deny rule (permissions docs: Edit rules cover every built-in file-editing tool).
+    Claude Code enforces it, not pytest: this test only pins that the rule is configured."""
+    settings = json.loads((HOOKS.parent / "settings.json").read_text(encoding="utf-8"))
+    assert "Edit(**/*.receipt.json)" in settings["permissions"]["deny"]
+    assert not any("receipt" in rule for rule in settings["permissions"]["allow"])

@@ -36,6 +36,7 @@
       "Read(./.env.*)",
       "Edit(**/*.db1)",
       "Edit(**/*.db2)",
+      "Edit(**/*.receipt.json)",
       "Bash(git push --force *)",
       "Bash(git push -f *)",
       "Bash(git reset --hard *)"

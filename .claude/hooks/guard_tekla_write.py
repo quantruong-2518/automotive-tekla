@@ -20,6 +20,14 @@ run code even inside double quotes.
 The CLI is also recognised under its .NET project name (`TeklaCli.exe`), and any
 `dotnet run|exec|watch` counts as a write, because it can start the CLI without naming it
 (RTI-0006, ADR-0007). `dotnet build|restore|clean` stay allowed.
+
+Spec validation receipts (`*.receipt.json`, ADR-0010) are written only by
+`harness validate spec` (RTI-0008). A command that names a receipt is denied for every agent,
+builder included, unless it only reads (_INERT_COMMANDS, _RECEIPT_READERS) with no redirection
+into a receipt; a receipt name piped into another command counts too. The
+`Edit(**/*.receipt.json)` deny rule in settings covers the file tools. This narrows forgery but
+does not close it: a script file, a glob that does not spell `.receipt.json`, or a directory
+copy is not seen here.
 """
 
 from __future__ import annotations
@@ -60,6 +68,19 @@ _INERT_COMMANDS = frozenset(
 # `git <sub>` is inert only for these subcommands, and never with `-c` (aliases can run code).
 _GIT_INERT_SUBCOMMANDS = frozenset({"add", "commit", "diff", "log", "show", "status", "grep", "blame"})
 _SUBSTITUTION = re.compile(r"\$\(|`")
+# A spec validation receipt file name (RTI-0008), case-insensitive for Windows paths.
+_RECEIPT = re.compile(r"\.receipt\.json", re.IGNORECASE)
+RECEIPT_PRODUCER = "uv run harness validate spec <spec>"
+# Commands that only test, compare or parse a receipt; with _INERT_COMMANDS they may name one.
+_RECEIPT_READERS = frozenset(
+    {
+        "test", "[", "stat", "test-path", "jq", "diff", "cmp", "tr", "convertfrom-json",
+        "select-object", "format-list", "format-table", "out-string", "measure-object",
+    }
+)  # fmt: skip
+# Separators that end a statement; a pipeline feeds a receipt name only within one statement.
+# Not `&`: the tokenizer also splits `2>&1`, `>&2` and `|&` at it (fail closed).
+_STATEMENT_ENDS = frozenset({";", "&&", "||"})
 _ENV_ASSIGNMENT = re.compile(r"^[A-Za-z_]\w*=")
 # Shell operators that start a new simple command.
 _SEPARATORS = frozenset({";", "&&", "||", "|", "&", "(", ")", "{", "}", "`", "$("})
@@ -162,30 +183,87 @@ def find_subcommands(command: str) -> list[str | None]:
     return found
 
 
+def _reads_only(segment: list[str], substitution: bool) -> bool:
+    """True if the segment can only read a receipt it names or is piped (see _RECEIPT_READERS)."""
+    if any(tok.lower().startswith("--output") for tok in segment):
+        return False  # git diff/log/show --output=<file> writes a file
+    if _is_inert(segment, substitution):
+        return True
+    word = _command_word(segment)
+    return not substitution and word is not None and word[0] in _RECEIPT_READERS
+
+
+def touches_receipt(command: str) -> bool:
+    """True if the command may write or delete a `*.receipt.json` file (RTI-0008).
+
+    A segment that names a receipt, or follows a `|` after one was named in the same
+    statement, passes only if it reads only and no redirection targets the receipt: the token
+    holds `>` (`x>r.receipt.json`, `2>r…`) or follows one. A statement ends at `;`, `&&` or
+    `||` outside any `(…)` / `{…}` group, so grouping does not hide a pipe.
+    """
+    substitution = bool(_SUBSTITUTION.search(command))
+    segment: list[str] = []
+    named_before = False  # a receipt was named earlier in this statement
+    fed = False  # a `|` follows that naming: later segments receive the receipt
+    depth = 0
+    for tok in [*_split(command), ";"]:
+        if tok not in _SEPARATORS:
+            segment.append(tok)
+            continue
+        if segment:
+            named = [i for i, t in enumerate(segment) if _RECEIPT.search(t)]
+            if (named or fed) and not _reads_only(segment, substitution):
+                return True
+            if any(">" in segment[i] or (i > 0 and segment[i - 1].endswith(">")) for i in named):
+                return True
+            named_before = named_before or bool(named)
+        if tok in ("(", "{", "$("):
+            depth += 1
+        elif tok in (")", "}"):
+            depth = max(depth - 1, 0)
+        elif tok == "|":
+            fed = fed or named_before
+        elif tok in _STATEMENT_ENDS and depth == 0:
+            named_before = fed = False
+        segment = []
+    return False
+
+
+def _deny(reason: str) -> dict:
+    return {
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "deny",
+            "permissionDecisionReason": reason,
+        }
+    }
+
+
 def decide(payload: dict) -> dict | None:
     """Return a PreToolUse deny decision, or None for no decision."""
     if payload.get("tool_name") not in SHELL_TOOLS:
         return None
     command = str((payload.get("tool_input") or {}).get("command") or "")
+    agent = payload.get("agent_type") or "main session"
+    if touches_receipt(command):
+        return _deny(
+            f"Blocked: this command may write or delete a spec validation receipt "
+            f"(*.receipt.json) from '{agent}'. Only `{RECEIPT_PRODUCER}` creates receipts "
+            "(RTI-0008). Read or test a receipt with cat, ls, Test-Path or the Read tool; a "
+            "missing or stale receipt goes back to doc-reader, which validates the spec."
+        )
     writes = [s for s in find_subcommands(command) if s is None or s not in READ_SUBCOMMANDS]
     if not writes:
         return None
-    agent = payload.get("agent_type") or "main session"
     if agent == WRITER_AGENT:
         return None
     shown = ", ".join(s or "<none>" for s in writes)
-    return {
-        "hookSpecificOutput": {
-            "hookEventName": "PreToolUse",
-            "permissionDecision": "deny",
-            "permissionDecisionReason": (
-                f"Blocked: tekla-cli write command ({shown}) from '{agent}'. "
-                f"Only the '{WRITER_AGENT}' subagent may write to Tekla. "
-                "Delegate this lot to the builder agent, or use a read subcommand "
-                f"({', '.join(sorted(s for s in READ_SUBCOMMANDS if not s.startswith('-')))})."
-            ),
-        }
-    }
+    return _deny(
+        f"Blocked: tekla-cli write command ({shown}) from '{agent}'. "
+        f"Only the '{WRITER_AGENT}' subagent may write to Tekla. "
+        "Delegate this lot to the builder agent, or use a read subcommand "
+        f"({', '.join(sorted(s for s in READ_SUBCOMMANDS if not s.startswith('-')))})."
+    )
 
 
 def main() -> int:
