@@ -1128,12 +1128,16 @@ def test_group_42_is_exposed_and_agreeing_values_compare_normally(tmp_path):
     assert row["status"] == "ok"
 
 
-def test_group_42_disagreement_makes_override_rows_not_compared(tmp_path):
+def test_group_42_disagreement_makes_every_row_not_compared(tmp_path):
+    """Whatever the text rule: a measurement group 42 contradicts is never 'ok' (review F2 item 2)."""
     handles: dict[str, str] = {}
 
     def build(doc):
         handles["linear"] = add_dim(doc, text="1000", actual=1500.0)
         handles["plain"] = add_dim(doc, actual=1500.0)
+        handles["with_text"] = add_dim(doc, text="<> TYP", actual=1500.0)
+        handles["suppressed"] = add_dim(doc, text=" ", actual=1500.0)
+        handles["words"] = add_dim(doc, text="SEE PLAN", actual=1500.0)
         handles["angular_deg"] = add_angular(doc, text="90", actual=90.0)  # radians expected, degrees stored
 
     result = probe(make(tmp_path, build))
@@ -1141,10 +1145,14 @@ def test_group_42_disagreement_makes_override_rows_not_compared(tmp_path):
     assert rows[handles["linear"]]["status"] == "not_compared"
     assert "actual" in rows[handles["linear"]]["note"] and "1500" in rows[handles["linear"]]["note"]
     assert rows[handles["linear"]]["measurement_agrees"] is False
+    assert rows[handles["linear"]]["override_value"] == 1000.0  # the typed value is still reported
     assert rows[handles["angular_deg"]]["status"] == "not_compared"
-    assert rows[handles["plain"]]["status"] == "ok"  # nothing is compared on a measured-text row
-    assert rows[handles["plain"]]["measurement_agrees"] is False
-    assert any("group 42" in w and "3" in w for w in result["warnings"])
+    for name in ("plain", "with_text", "suppressed", "words"):
+        assert rows[handles[name]]["measurement_agrees"] is False
+        assert rows[handles[name]]["status"] == "not_compared", name
+        assert "1500" in rows[handles[name]]["note"]
+    assert rows[handles["words"]]["override_value"] is None
+    assert any("group 42" in w and "6" in w for w in result["warnings"])
 
 
 def test_group_42_may_be_geometry_times_a_positive_dimlfac(tmp_path):

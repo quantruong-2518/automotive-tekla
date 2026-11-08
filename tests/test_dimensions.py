@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import shutil
 from pathlib import Path
 from typing import Any
@@ -339,3 +340,81 @@ def test_a_changed_drawing_is_refused(world):
     with pytest.raises(ReaderError) as exc:
         dimensions(work, REL, input_dir=inp)
     assert exc.value.exit_code == 1
+
+
+# --- review fixes: block content is measured on its definition, a disagreement is never 'ok' -----------
+
+ROT_AT = (40000.0, 30000.0)
+ROT_LENGTH = 4000.0
+
+
+def build_rotated_dxf(base: Path) -> Path:
+    """A linear dimension with no stored angle (group 50 absent, as in sample 270's block *U1792) in a
+    block inserted at rotation 90, once directly and once inside an outer block, plus once scaled by 2.
+    The virtual copy of a rotated one measures about 0 (ezdxf projects it on the default angle 0)."""
+    root = base / "input"
+    (root / "plans").mkdir(parents=True)
+    doc = readfile(str(build_set(base, "src.dxf")))
+    block = doc.blocks.new("ROT_DIM")
+    for y, text in ((0.0, "<>"), (1000.0, "4100")):
+        dim = block.add_linear_dim(
+            base=(0, y + 500), p1=(0, y), p2=(ROT_LENGTH, y), text=text, dimstyle="Standard"
+        )
+        dim.render()
+        dim.dimension.dxf.actual_measurement = ROT_LENGTH  # group 42, as 270 stores it
+    outer = doc.blocks.new("ROT_OUTER")
+    outer.add_blockref("ROT_DIM", (0, 0), dxfattribs={"rotation": 90})
+    msp = doc.modelspace()
+    msp.add_blockref("ROT_DIM", ROT_AT, dxfattribs={"rotation": 90})
+    msp.add_blockref("ROT_OUTER", (ROT_AT[0] + 10000, ROT_AT[1]))
+    msp.add_blockref("ROT_DIM", (ROT_AT[0], ROT_AT[1] + 10000), dxfattribs={"xscale": 2, "yscale": 2})
+    # a measured-text dimension whose group 42 contradicts its geometry (270 has 4 such angular ones)
+    bad = msp.add_linear_dim(base=(ROT_AT[0], 20500), p1=(ROT_AT[0], 20000), p2=(ROT_AT[0] + 1000, 20000))
+    bad.render()
+    bad.dimension.dxf.actual_measurement = 1500.0
+    doc.saveas(root / REL)
+    # ezdxf always writes group 50 (angle 0.0) of a rotated dimension; 270 omits it: drop it as 270 does
+    path = root / REL
+    pattern = r"\n 50\n0\.0\n(100\nAcDbRotatedDimension\n)"
+    text, n = re.subn(pattern, r"\n\1", path.read_text(encoding="utf-8"))
+    assert n >= 2
+    path.write_text(text, encoding="utf-8")
+    return root
+
+
+@pytest.fixture(scope="module")
+def rot(tmp_path_factory) -> dict[str, Any]:
+    root = tmp_path_factory.mktemp("rot")
+    inp = build_rotated_dxf(root)
+    work = root / "work"
+    run_intake(inp, work, "demo-rot", knowledge=PROPOSED_FONT_TABLE)
+    write_structure(inp, work)
+    return dimensions(work, REL, input_dir=inp)
+
+
+def test_block_content_is_measured_on_its_definition_not_on_the_rotated_copy(rot):
+    """Review F2 item 2: on 270 the copy of a rotated INSERT measured 2.9e-08 against group 42 = 4000
+    with status 'ok'. The definition is measured; the copy still gives the layout, sheet and layer."""
+    assert validate("dimensions", rot) == []
+    inside = [r for r in rot["dimensions"] if r["block_path"]]
+    assert len(inside) == 6  # two dimensions x three INSERT occurrences
+    for r in inside:
+        assert r["measured"] == pytest.approx(ROT_LENGTH)
+        assert r["measurement_agrees"] is True
+        assert r["handle"] is None  # a placement of the definition, not the definition itself
+        assert r["layout"] == "Model" and r["sheet"] == "model#01"
+    assert {tuple(r["block_path"]) for r in inside} == {("ROT_DIM",), ("ROT_OUTER", "ROT_DIM")}
+    over = [r for r in inside if r["text"] == "4100"]
+    assert {r["status"] for r in over} == {"override_differs"}
+    assert all(r["expected_text_value"] == pytest.approx(ROT_LENGTH) for r in over)
+    assert {r["status"] for r in inside if r["text"] == "<>"} == {"ok"}
+
+
+def test_every_disagreeing_row_is_not_compared_whatever_its_text_rule(rot):
+    """The module docstring's promise: a measurement group 42 contradicts is never reported 'ok'."""
+    (bad,) = [r for r in rot["dimensions"] if r["actual_measurement"] == 1500.0]
+    assert bad["text_rule"] == "measured" and bad["measurement_agrees"] is False
+    assert bad["status"] == "not_compared" and "group 42" in bad["note"]
+    for r in rot["dimensions"]:
+        if r["measurement_agrees"] is False:
+            assert r["status"] == "not_compared" and r["note"]

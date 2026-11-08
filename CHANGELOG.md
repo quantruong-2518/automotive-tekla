@@ -488,6 +488,13 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
     legacy-font gate blocks, on a sheet or not (null for a skipped file).
 
 ### Fixed
+- Tool wave 2, package F2 (review of P4, marks and dimensions):
+  - `harness dimensions` measures block content on its block definition (ezdxf `origin_of_copy`), not on
+    the virtual copy: a linear dimension stored without an angle in an INSERT rotated by 90 degrees
+    measured about 0 (sample 270: 40 rows reported `ok` against group 42 = 4000). The copy still gives
+    the sheet and the layer; an INSERT's scale no longer changes the measured value.
+  - `harness dimensions` and the dxf-probe `dimension_audit`: a row whose group 42 disagrees with the
+    measurement is `not_compared` with a note, whatever its text rule (measured-text rows were `ok`).
 - Reading toolchain, after an independent review of the EVAL-1 wave:
   - `harness marks`: a rotated header keyword (or one that is not a cell text) no longer crashes the run;
     the table becomes a non-blocking `schedule_table_unparsed`. Questions no longer quote table ids, so a

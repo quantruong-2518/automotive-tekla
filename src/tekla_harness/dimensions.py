@@ -6,16 +6,19 @@ Read-only (no work-folder lock, nothing written). Output: schema `dimensions` on
 folder for a DWG, the input file for a native DXF (from `--input-dir`, as `harness marks` resolves it; a
 native DXF without `--input-dir` is a usage error). The DXF must be the one the text index was built from
 (sha256), else exit 1. Every DIMENSION is walked in layout tab order, also inside INSERTs (nested ones too,
-`sheets.Walker`): a dimension inside a block is reported once per INSERT that places it, as ezdxf's virtual
-copy (handle null, `block_path` from the outermost INSERT inwards, `layout` the INSERT's layout).
+`sheets.Walker`): a dimension inside a block is reported once per INSERT that places it (handle null,
+`block_path` from the outermost INSERT inwards, `layout` the INSERT's layout).
 
 Each row is `read_dxf.measure_dimension` (the probe's dimension_audit rules: text rule, measured value,
 group 42, override value, tolerance, status) plus layer, sheet and block path. Values stay in the drawing's
 units as stored, never converted, whatever unit the header declares or the engineer answered: `units`
 only reports both. Angular dimensions keep ezdxf's measurement (degrees) and group 42 (radians). Only a
 dimension placed directly in model space is passed as `is_model` (a negative DIMLFAC may then be proven
-to mean factor 1); block content keeps the conservative default. An INSERT with a scale other than 1
-scales the virtual copy's geometry, so its measurement can disagree with group 42 (status not_compared).
+to mean factor 1); block content keeps the conservative default. Block content is measured on its block
+definition (ezdxf `origin_of_copy`), in the block's own units: an INSERT's rotation or scale does not
+change the value (the printed text does not change either); ezdxf's virtual copy only gives the sheet
+and the layer. A row whose group 42 disagrees with the measurement is `not_compared`, whatever its text
+rule.
 
 Layer: the effective layer. Inside a block, a dimension on layer 0 takes the layer of the INSERT that
 places it, resolved through nested INSERTs (AutoCAD's layer-0 rule); `--layer` filters on it. The schema
@@ -69,6 +72,16 @@ def _effective_layer(stored: Any, owner: int, insert_layers: dict[int, str | Non
     if layer == "0" and owner in insert_layers:
         return insert_layers[owner]
     return layer
+
+
+def _definition(copy: Any) -> Any:
+    """The block-definition DIMENSION a virtual copy comes from (through nested INSERTs), else the copy.
+
+    The copy's own measurement is not used: ezdxf transforms its points, but a linear dimension stored
+    without an angle (group 50 absent, read as 0) keeps measuring along x, so in an INSERT rotated by 90
+    degrees it measures about 0 (sample 270, block *U1792: 2.9e-08 for group 42 = 4000)."""
+    origin = getattr(copy, "origin_of_copy", None)
+    return copy if origin is None else origin
 
 
 def _anchor(dim: Any) -> tuple[float | None, float | None]:
@@ -164,12 +177,14 @@ def dimensions(
                 continue
             block_path = list(placed.block_path)
             row = measure_dimension(
-                dim,
+                _definition(dim) if block_path else dim,
                 layout=str(layout.name),
                 is_model=is_model and not block_path,
                 in_block=bool(block_path),
                 handles_ok=handles_ok,
             )
+            if block_path:
+                row["handle"] = None  # a placement of the definition, not the definition itself
             on: str | None = None
             if locator is not None:
                 x, y = _anchor(dim)

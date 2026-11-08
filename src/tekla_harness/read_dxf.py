@@ -839,26 +839,29 @@ def _audit_dimension(ref: _DimRef, seq: int, handles_ok: bool) -> dict[str, Any]
         agrees = is_raw or is_scaled
         raw_only = bool(is_raw and scaled and not is_scaled)
     row.update(measured=measured, actual_measurement=actual, measurement_agrees=agrees)
+    # a measurement group 42 contradicts is never 'ok', whatever the text rule (an override keeps its value)
+    disagreement = None
+    if agrees is False:
+        disagreement = (
+            f"group 42 actual measurement {actual:g} disagrees with the geometry measurement "
+            f"{measured:g}{' (degrees)' if angular else ''}; the reading is not trusted"
+        )
     if rule != "override":
-        return row
+        return row if disagreement is None else _not_compared(row, disagreement)
 
     stripped = "".join(plain_mtext(text)).strip()
+    value = num(stripped) if _PLAIN_NUMBER.match(stripped) else None
+    row["override_value"] = value
+    if disagreement is not None:
+        return _not_compared(row, disagreement)
     if not _PLAIN_NUMBER.match(stripped):
         row["status"] = "not_numeric"
         return row
-    value = num(stripped)
     if value is None:
         row.update(status="not_numeric", note="the number is out of range")
         return row
-    row["override_value"] = value
     if dimtype == 6 or measured is None:
         return _not_compared(row, "no scalar measurement to compare with")
-    if agrees is False:
-        return _not_compared(
-            row,
-            f"group 42 actual measurement {actual:g} disagrees with the geometry measurement "
-            f"{measured:g}{' (degrees)' if angular else ''}; the reading is not trusted",
-        )
     if raw_only:
         return _not_compared(
             row,
@@ -1006,7 +1009,7 @@ def _dimension_audit(audit: _Audit) -> tuple[dict[str, Any], list[dict[str, Any]
     if disagree:
         warnings.append(
             f"{disagree} dimension(s): group 42 (actual measurement) disagrees with the geometry "
-            "measurement; override text on those dimensions is not compared."
+            "measurement; those dimensions are not compared (status not_compared)."
         )
     if in_blocks:
         warnings.append(
