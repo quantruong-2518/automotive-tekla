@@ -831,7 +831,7 @@ SUSPECT = ["4/g14", "/G10", "1/G16", "BT LO/ST #100", "3 L/}/{/SI %%c6", "chi ti
 CLEAN = ["A", "Z", "D1", "C2", "+3.850", "4500", "%%c8a150", "4%%c16", "1/2", "%%c10a200/150",
          "D1.11(220X450)", "CB300-V", "S355JR", "HEA 300", "Rb = 115 kG/cm2", "q = 2 T/m2", "2800Kg/M2",
          "MPa", "kN/m", "M20", "d1", "Q235B", "2L65x8", "TB-01", "GHI CHU", "cU/pvc/pvc 2X4 e1,5",
-         "Cu/XLPE/PVC 2(1X16)"]  # fmt: skip
+         "Cu/XLPE/PVC 2(1X16)", "ROOF", "BASE PLATE", "CASE A"]  # fmt: skip
 
 
 def suspect_fixture(style: str, *, sibling: str | None = None):
@@ -879,6 +879,18 @@ def test_an_unknown_style_counts_only_with_a_non_ascii_sibling_of_unknown_encodi
 def test_a_unicode_style_is_never_suspect(tmp_path):
     got = flagged(index(build(tmp_path, suspect_fixture("Arial", sibling="b\xb6n v\xcf"))))
     assert not any(got.values())
+
+
+def test_a_run_proved_unicode_is_not_suspect_even_in_a_suspect_style(tmp_path):
+    # the '\\U+1EA1' escape is ASCII as stored but proves the run Unicode: its ASCII is plain ASCII
+    def fn(doc):
+        doc.styles.add("Plain", font="plain.shx")
+        text_at(doc.modelspace(), "/D\xc2/FU COC", "Plain")  # a non-ASCII sibling of unknown encoding
+        text_at(doc.modelspace(), "4/g14%%c\\U+1EA1", "Plain", insert=(0, 9))
+        text_at(doc.modelspace(), "4/g14%%c", "Plain", insert=(0, 18))
+
+    got = flagged(index(build(tmp_path, fn)))
+    assert got == {"4/g14%%c\\U+1EA1": False, "4/g14%%c": True}
 
 
 def test_a_sibling_in_another_style_does_not_count(tmp_path):

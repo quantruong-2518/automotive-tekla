@@ -834,6 +834,11 @@ def test_unassigned_takes_ambiguous_entries_once_and_skips_unknown_ids(damaged):
     assert found["counts"]["unassigned_entries_searched"] == 3 == found["files"][0]["unassigned_entries"]
 
 
+def test_a_sheet_request_carries_no_unassigned_key(work):
+    query = sheet_text(work, REL, "model#01")["query"]
+    assert query == {"contains": None, "max_entries": DEFAULT_MAX_ENTRIES}
+
+
 def test_unassigned_and_a_sheet_id_exclude_each_other(loose):
     for sheet_id, unassigned in (("model#01", True), (None, False)):
         with pytest.raises(ReaderError) as err:
