@@ -31,3 +31,59 @@ would create a second validator that drifts from the first (ADR-0009, Consequenc
 - The Tekla machine needs no Python to build; the receipt travels with the spec.
 - A receipt proves the spec was validated, not who validated it; gate approval stays with the
   engineer (principle 5).
+
+## Amendment 1 (2026-11-07, slice S1b design)
+
+The engineer delegated these choices to the orchestrator ("decide the best options, brainstorm
+with a second agent"). An independent Opus review reached the same design; it also ran the current
+validator and found it accepts `NaN`, `Infinity`, `1e400` (read as infinity), duplicate keys
+(last wins), `lot: 1.0`, lone surrogates and NUL. A receipt over such a file would vouch for values
+the C# reader cannot see the same way. Decisions:
+
+1. **One strict JSON profile on both sides** (RFC 8259 plus restrictions). A spec file and a
+   receipt file are rejected, by Python and by C#, when they contain: a BOM; invalid UTF-8;
+   anything outside RFC 8259 (comments, trailing commas, single quotes, content after the
+   document); a duplicate object key (compared after unescaping); `NaN`/`Infinity` or a number that
+   is not a finite double; an integer token outside ±2^53; a lone surrogate or U+0000 in a string;
+   nesting deeper than 64; a file over 16 MiB. Both read the file's bytes **once**, hash that
+   buffer and parse that same buffer. A shared corpus `tests/fixtures/strict-json/` (accept/reject)
+   runs in pytest and xunit so the two readers cannot drift. Python applies the profile to `spec`
+   validation only.
+2. **C# JSON: a hand-written strict reader in `TeklaCore`, no package.** Reason (closes the
+   ADR-0009 Consequences item): `TSAppConfigPatcherTask` 2.1.3 redirects
+   `System.Runtime.CompilerServices.Unsafe` to the copy in Tekla's `bin` (its `GacDlls` list,
+   `tekla/api-notes.md` §1), and `System.Text.Json` on netstandard2.0 depends on that package, so
+   Tekla would choose its version at run time. Newtonsoft.Json is a dependency of Tekla 2026's
+   Open API and is lenient by default (comments, `NaN`, duplicate keys, date parsing). The strict
+   profile above needs a reader that rejects by default anyway.
+3. **Receipt**: file `<spec file name>.receipt.json` in the spec's folder (`spec.json` →
+   `spec.json.receipt.json`), derived from `--spec`; there is no `--receipt` option. Schema
+   `urn:tekla-harness:schema:spec-receipt:0.1`. Fields: `spec_file` (base name, information only),
+   `spec_sha256` (lowercase hex of the exact bytes), `spec_schema_id`, `validator`
+   (`name`, `version`, `rules_version`) and `validated_at` (UTC, information only, never an
+   expiry). Not bound on purpose: absolute path, host, user (the receipt travels with the spec).
+4. **`rules_version`** is an integer in Python (`SPEC_RULES_VERSION`), bumped whenever
+   `check_spec` or the strict profile becomes stricter; the CLI is built with a minimum and
+   refuses older receipts. This covers validator changes that keep the schema `$id`.
+5. **`harness validate spec` behaviour**: writing is on by default (decision 1 of this ADR). For
+   each file, it first deletes any existing receipt, then validates, then writes the receipt only
+   on success (temporary file + atomic replace, validated against its own schema before writing).
+   A receipt that cannot be deleted is an environment error (exit `3`). `*.receipt.json` is
+   git-ignored; tests validate copies in a temporary folder.
+6. **Exit code `5`, not `1`** for every receipt refusal (missing, unreadable, hash mismatch,
+   unknown schema `$id`, `rules_version` too old), for a spec the C# reader rejects, and for a spec
+   `lot` other than `--lot`. Reason: contract rule 3 is a safety rule and the contract defines `5`
+   as "refused by safety rule"; decision 2 above said `1` and is replaced. Missing arguments stay
+   `2`; an I/O error reading an existing file is `3`.
+7. **Read-time checks in C#** (decision 3) also include: spec `schema_version` matches the
+   receipt's `spec_schema_id`; `lot` is an integer token within int32; `spec_id` unique within
+   the file (contract rule 6 relies on it, so the reader enforces it rather than trusting it).
+
+Accepted limits:
+- A receipt proves the spec bytes have not changed since a validation, not that the validator
+  produced the receipt: any agent with file write access can forge one. Signing adds nothing while
+  the key sits on the same machine. Gate approval stays with the engineer; a write-deny rule for
+  receipts in the Claude Code settings is proposed as an RTI, not part of S1b.
+- Any re-encoding in transit (line endings, BOM added by an editor) breaks the hash: that refuses,
+  which is safe. How specs travel to the Tekla machine is not defined yet (`projects/` is
+  git-ignored).
