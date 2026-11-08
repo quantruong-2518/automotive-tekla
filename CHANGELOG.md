@@ -391,6 +391,10 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
     place, or `--code` / `--blocking`. `--withdraw-supplement KEY --reason R` keeps it as withdrawn. A
     supplement whose target goes obsolete reads as `stale`; questions.md shows active ones under the
     question. The target's blocking flag, answer and refs never change.
+  - `harness finding add` records `decoded_by`: per decode source and knowledge pattern of the cited
+    entries' runs, the knowledge row's status and decision date. `finding list` marks a finding `stale`
+    when that row's status or date changes or the row is gone; such a finding no longer counts as a
+    duplicate or as a sheet's active class.
 
 ### Changed
 - Question lifecycle (tool wave 2, EVAL-2 fix 5):

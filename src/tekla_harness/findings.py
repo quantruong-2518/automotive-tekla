@@ -37,6 +37,12 @@ value, fields and questions as an active one) prints that id with status `alread
 active class: classify it again only after withdrawing the first finding. Each finding records the file's
 sha256 from the inventory; `list` marks a finding `stale` once the inventory sha256 differs.
 
+`decoded_by` (tool wave 2, fix 10) records how the cited entries were decoded: one item per (decode source,
+knowledge pattern) of their runs (text-index `decode.run_details`), with that knowledge row's status and
+decision date in the font-encoding table at the time. `list` also marks a finding `stale` when such a row
+now has another status or date, or is gone. A stale finding is neither a duplicate of a new one nor in the
+way of a new sheet class.
+
 Stdout: add -> {"id", "status": "new" | "already_recorded"}; withdraw -> {"id", "status": "withdrawn" |
 "already_withdrawn"}; list -> the document with a `stale` flag on every finding. Exit codes (AGENTS.md):
 1 a refusal that depends on the work folder, 2 usage (missing or malformed option, unknown finding id, no
@@ -52,6 +58,7 @@ import unicodedata
 from pathlib import Path
 from typing import Any
 
+from tekla_harness.knowledge import FontEncodingTable, KnowledgeError, default_font_encodings
 from tekla_harness.questions import (
     EXIT_INVALID,
     EXIT_USAGE,
@@ -297,6 +304,61 @@ def _usage_checks(
             )
 
 
+def _row_state(table: FontEncodingTable, pattern: str) -> tuple[str | None, str | None]:
+    """(status, decided_on) of the knowledge row with this pattern; (None, None) when the table has none.
+    The text index records the pattern only, not `applies_to`: when two rows share it, the approved one
+    (the only kind that decides a decoding), then the first by line, is taken; the same rule is applied at
+    `add` and at `list`, so a change of either row is still seen."""
+    rows = sorted(
+        (r for r in table.rows if r.pattern == pattern), key=lambda r: (r.status != "approved", r.line)
+    )
+    if not rows:
+        return None, None
+    return rows[0].status, rows[0].decided_on or None
+
+
+def _decoded_by(entries: list[dict[str, Any]], table: FontEncodingTable) -> list[dict[str, Any]]:
+    """One item per (decode source, knowledge pattern) of the cited entries' runs (text-index
+    decode.run_details), in order of first appearance, with the row's status and decision date now."""
+    groups: dict[tuple[str, str | None], list[str]] = {}
+    for e in entries:
+        runs = e["decode"]["run_details"]
+        for pair in dict.fromkeys((r["font_source"], r["knowledge_pattern"]) for r in runs):
+            groups.setdefault(pair, []).append(e["id"])
+    out = []
+    for (source, pattern), ids in groups.items():
+        status, decided_on = _row_state(table, pattern) if pattern is not None else (None, None)
+        out.append(
+            {
+                "source": source,
+                "knowledge_pattern": pattern,
+                "row_status": status,
+                "decided_on": decided_on,
+                "entries": ids,
+            }
+        )
+    return out
+
+
+def _knowledge_changed(finding: dict[str, Any], table: FontEncodingTable) -> bool:
+    """True when a knowledge row that decoded a cited entry has another status or decision date now (or is
+    gone). A finding recorded before decoded_by existed is judged by its file only."""
+    return any(
+        _row_state(table, item["knowledge_pattern"]) != (item["row_status"], item["decided_on"])
+        for item in finding.get("decoded_by") or ()
+        if item["knowledge_pattern"] is not None
+    )
+
+
+def _table(knowledge: FontEncodingTable | None) -> FontEncodingTable:
+    if knowledge is not None:
+        return knowledge
+    try:
+        return default_font_encodings()
+    except KnowledgeError as exc:
+        raise FindingError(EXIT_ENV, f"the font-encoding knowledge table cannot be read: {exc}") from exc
+
+
 def _confidence(entries: list[dict[str, Any]], requested: str | None) -> str:
     computed = min((e["confidence"] for e in entries), key=lambda c: CONFIDENCE_RANK[c])
     computed = "medium" if computed == "high" else computed  # only an engineer answer is high
@@ -356,8 +418,10 @@ def add_finding(
     questions: list[str] | None = None,
     confidence: str | None = None,
     note: str | None = None,
+    knowledge: FontEncodingTable | None = None,
 ) -> dict[str, str]:
-    """Record one finding (see the module docstring). Raises FindingError."""
+    """Record one finding (see the module docstring). `knowledge`: the font-encoding table whose rows are
+    recorded in decoded_by (default: the shipped one). Raises FindingError."""
     if kind not in KINDS:
         raise FindingError(EXIT_USAGE, f"unknown kind '{kind}': choose from {', '.join(KINDS)}")
     if confidence is not None and confidence not in ("low", "medium"):
@@ -420,12 +484,15 @@ def add_finding(
             "paraphrase",
         )
     final_confidence = _confidence(cited, confidence)
+    table = _table(knowledge)
 
     doc = _load_doc(work, inv.doc["project_id"]) or _empty(inv.doc["project_id"])
     sha = row["sha256"]
     cited_record = [{"id": e["id"], "display_text": e["display_text"]} for e in cited]
     for old in doc["findings"]:
         if old["status"] != "active" or old["file"] != file or old["file_sha256"] != sha:
+            continue
+        if _knowledge_changed(old, table):  # stale like a changed file: neither a duplicate nor in the way
             continue
         same = (
             old["kind"] == kind
@@ -458,6 +525,7 @@ def add_finding(
         "fields": field_map,
         "questions": question_ids,
         "confidence": final_confidence,
+        "decoded_by": _decoded_by(cited, table),
     }
     if note is not None:
         finding["note"] = note.strip()
@@ -491,18 +559,24 @@ def withdraw_finding(work_dir: Path | str, finding_id: str, reason: str) -> dict
 
 
 def list_findings(
-    work_dir: Path | str, *, kind: str | None = None, file: str | None = None
+    work_dir: Path | str,
+    *,
+    kind: str | None = None,
+    file: str | None = None,
+    knowledge: FontEncodingTable | None = None,
 ) -> dict[str, Any]:
-    """The document with `stale` on every finding (its file's inventory sha256 changed or the file is gone),
-    optionally filtered. Raises FindingError."""
+    """The document with `stale` on every finding (its file's inventory sha256 changed or the file is gone,
+    or a knowledge row in its decoded_by has another status or decision date in `knowledge`, default the
+    shipped table), optionally filtered. Raises FindingError."""
     if kind is not None and kind not in KINDS:
         raise FindingError(EXIT_USAGE, f"unknown kind '{kind}': choose from {', '.join(KINDS)}")
     inv = _inventory(work_dir)
     doc = _load_doc(inv.work, inv.doc["project_id"]) or _empty(inv.doc["project_id"])
     current = {row["path"]: row["sha256"] for row in inv.doc["files"]}
+    table = _table(knowledge)
     out = dict(doc)
     out["findings"] = [
-        {**f, "stale": current.get(f["file"]) != f["file_sha256"]}
+        {**f, "stale": current.get(f["file"]) != f["file_sha256"] or _knowledge_changed(f, table)}
         for f in doc["findings"]
         if (kind is None or f["kind"] == kind) and (file is None or f["file"] == file)
     ]
