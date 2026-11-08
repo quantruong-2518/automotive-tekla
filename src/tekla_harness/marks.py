@@ -28,9 +28,10 @@ from a sheet that duplicates an earlier one.
 Legacy-font gate (`text_gate.meaning_block_reason`). Only an entry whose meaning is allowed can be a plan
 mark, a header keyword or a matchable schedule mark. The gate works per column (tool wave 2, fix 8): only
 the mark column's header can block a table. A table whose mark column is not named by an allowed keyword
-and whose mark-column header cell holds blocked text is reported with `header_blocked: true`; every cell
-of it carries `meaning: blocked`, and its mark-shaped cells are listed in `blocked_marks` (verbatim, with
-the entry id and the reason), never matched and never part of a notation variant. Any other blocked
+and whose seed column cannot be taken as its mark column (see below) is reported with `header_blocked:
+true`; every cell of it carries `meaning: blocked`, and its mark-shaped cells are listed in
+`blocked_marks` (verbatim, with the entry id and the reason), never matched and never part of a notation
+variant. Any other blocked
 header cell is listed in the table's `blocked_columns`: its column gets no role, the rest of the table is
 read (cells keep their own meaning). A blocked cell in the mark column of an allowed table is listed in
 `blocked_marks` the same way. No question paraphrases blocked text.
@@ -60,11 +61,14 @@ viewports: the table is in the texts' own coordinates, `space` says which):
   * headers without an allowed keyword are found from the line grid only: a mark-shaped text (the seed)
     in a grid cell whose topmost band spans at least two columns, holds blocked text, no allowed keyword
     and no mark-shaped text, with at least two data bands holding a mark-shaped cell in the seed's
-    column. The seed's column is the mark column. When its header cell holds blocked text the table is
-    header-blocked; otherwise the table is read on that column, with confidence low (no keyword names
-    it). Without a grid such a table is not detected (a known miss). A grid of mark-shaped cells whose
-    header has neither a keyword nor blocked text is not reported either: on a plan it is as likely the
-    space between drawn lines.
+    column. The table is read on the seed's column, with confidence low (no keyword names it), only
+    when that column's header cell holds no text at all and at most half of the column's allowed
+    cells are integers; then only its mark-shaped cells are schedule marks. Otherwise (the header cell
+    holds blocked text, or allowed text that is no keyword such as 'STT', or a data row read as the
+    header; or the column holds row numbers) the table is header-blocked (review F2). Without a grid
+    such a table is not detected (a known miss). A grid of mark-shaped cells whose header has neither a
+    keyword nor blocked text is not reported either: on a plan it is as likely the space between drawn
+    lines.
   * a keyword whose table has fewer than two data rows with a mark cell is listed in `unparsed_tables`
     and asked as a non-blocking `schedule_table_unparsed` question; texts inside the part of it that was
     found (line grid) are not plan marks.
@@ -244,6 +248,7 @@ SIZE_CELLS_BLOCKED = "the schedule size cells are blocked"
 SIZE_NOT_NUMBERS = "the schedule size cells are not numbers"
 _SIZE_VALUE = re.compile(r"^\s*(\d+(?:[.,]\d+)?)\s*[xX\u00d7]\s*(\d+(?:[.,]\d+)?)\s*$")
 _NUMBER = re.compile(r"^\s*(\d+(?:[.,]\d+)?)\s*$")
+_INTEGER = re.compile(r"^\s*\d+\s*$")
 
 
 @dataclass
@@ -605,12 +610,31 @@ def _grid_table(lines: Lines, seed: _Text, pool: list[_Text], keyword: bool) -> 
         mark_col = _column(columns, seed.cx)
     if mark_col is None:
         return "the text it was found from lies in no column of the grid"
-    # only the mark column's header can block the table (fix 8); other blocked cells are blocked_columns
-    header_blocked = inferred and any(t.block is not None for c, t in header if c == mark_col)
+    # only the mark column's header can block the table (fix 8); other blocked cells are blocked_columns.
+    # A seed's column is the mark column only when nothing contradicts it (review F2): otherwise the table
+    # is header-blocked as before wave 2 (it is kept only when its header holds blocked text, see
+    # _plausible_blocked_header).
+    header_blocked = inferred and not _inferred_mark_column_ok(header, rows, mark_col)
     table = _Table("line_grid", table_box, columns, header, rows, mark_col, header_blocked, seed)
     table.ids = {t.id for t in inside}
     table.inferred = inferred
     return table
+
+
+def _inferred_mark_column_ok(
+    header: list[tuple[int | None, _Text]],
+    rows: list[tuple[Box, list[tuple[int | None, _Text]]]],
+    mark_col: int,
+) -> bool:
+    """A keyword-less table may be read on the seed's column only when that column's header cell holds no
+    text at all (an allowed non-keyword word such as 'STT' names another column, a blocked one cannot be
+    read, and on sample 461 a data row sat in the header band) and at most half of its allowed cells are
+    integers (row numbers, quantities)."""
+    if any(c == mark_col for c, _ in header):
+        return False
+    cells = [t for _, cells in rows for c, t in cells if c == mark_col and t.block is None]
+    integers = sum(1 for t in cells if _INTEGER.match(t.entry["display_text"]))
+    return 2 * integers <= len(cells)
 
 
 def _upright(entry: dict[str, Any]) -> bool:
@@ -1052,8 +1076,8 @@ def _table_doc(rel: str, sheet: dict[str, Any] | None, space: str, tb: _Table) -
                 if cd["column"] != tb.mark_column or cd["meaning"] != "allowed":
                     continue
                 mark, key = _schedule_mark(cd, t.entry)
-                if not key:
-                    continue
+                if not key or (tb.inferred and mark is None):
+                    continue  # no keyword names the column: only a mark-shaped cell is a mark (review F2)
                 marks.append(
                     {
                         "entry_id": t.id,

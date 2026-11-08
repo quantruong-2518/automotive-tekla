@@ -12,10 +12,21 @@ from typing import Any
 
 import pytest
 
-from _marks_fixtures import BLOCKED_H, BLOCKED_SUB, KINH, PROJECT, build_gate_work, build_marks_work
+from _marks_fixtures import (
+    BLOCKED_H,
+    BLOCKED_SUB,
+    K_NOTE,
+    KINH,
+    PROJECT,
+    build_gate_work,
+    build_inferred_work,
+    build_marks_work,
+)
 from tekla_harness.callouts import run_callouts
 from tekla_harness.cli import main
 from tekla_harness.marks import (
+    _inferred_mark_column_ok,
+    _Text,
     extract_marks,
     header_keyword,
     mark_key,
@@ -465,25 +476,24 @@ def test_a_blocked_header_cell_outside_the_mark_column_goes_to_blocked_columns(g
     assert t["rows"][1]["size"] is None  # its h cell is blocked
 
 
-def test_a_keywordless_grid_with_a_blocked_header_cell_is_read_on_its_mark_column(gate):
-    """Before wave 2 one blocked header cell (KÍNH) blocked the whole table and its marks."""
+def test_a_keywordless_grid_whose_mark_column_header_is_other_text_stays_header_blocked(gate):
+    """Review F2 item 1: a header cell that is allowed text but no keyword ('SỐ HIỆU', 'STT', or 461's
+    'd63-d42' in a data row read as a header) says the column is something else, or that the header band
+    is no header: the seed's column is not taken as the mark column. The table stays header-blocked, as
+    before wave 2, because its header holds blocked text (KÍNH)."""
     t = table_with(gate, "SỐ HIỆU")
-    kinh = header_entry(t, KINH)
-    assert t["header_blocked"] is False and t["mark_column"] == 0
-    assert t["blocked_columns"] == [
-        {"column": 1, "entry_id": kinh["entry_id"], "reason": kinh["block_reason"]}
-    ]
-    assert t["confidence"] == "low"  # the mark column is not named by a keyword
-    assert [c["role"] for c in t["columns"]] == ["mark", None, "b"]
-    assert [[m["text"] for m in r["marks"]] for r in t["rows"]] == [["F1"], ["F2"]]
-    assert all(c["meaning"] == "allowed" for r in t["rows"] for c in r["cells"])
-    assert not [b for b in gate["blocked_marks"] if b["table"] == t["id"]]
-    assert {"f1", "f2"} <= {m["key"] for m in matching(gate)["matched"]}
-    assert matched(gate, "f1")["confidence"] == "low"
+    assert t["header_blocked"] is True and t["mark_column"] is None
+    assert t["header_block_reasons"] == [header_entry(t, KINH)["block_reason"]]
+    assert t["blocked_columns"] == [] and t["confidence"] == "low"
+    assert all(r["marks"] == [] for r in t["rows"])
+    assert [b["display_text"] for b in gate["blocked_marks"] if b["table"] == t["id"]] == ["F1", "F2"]
+    assert not {"f1", "f2"} & {m["key"] for m in matching(gate)["matched"]}
+    assert {"f1", "f2"} <= {p["key"] for p in matching(gate)["plan_only"]}
 
 
 def test_a_blocked_mark_column_header_still_blocks_the_table(gate):
-    (t,) = [t for t in gate["tables"] if t["header_blocked"]]
+    t = table_with(gate, "Abçd")
+    assert t["header_blocked"] is True
     assert {h["display_text"] for h in t["header"]} == {"Abçd", "SL"}
     assert t["mark_column"] is None and t["confidence"] == "low" and t["blocked_columns"] == []
     assert [b["display_text"] for b in gate["blocked_marks"] if b["table"] == t["id"]] == ["G1", "G2"]
@@ -496,20 +506,21 @@ def test_legacy_ascii_suspect_header_cells_gate_like_any_other_block_reason(tmp_
     work = build_gate_work(tmp_path, blocked_word="haFn", g_mark_header="tiESt")
     out = extract_marks(work, tmp_path / "input")
     assert validate("marks", out) == []
-    e, f = table_with(out, "KÝ HIỆU"), table_with(out, "SỐ HIỆU")
-    for t, col in ((e, 3), (f, 1)):
-        suspect = header_entry(t, "haFn")
-        assert suspect["block_reason"] == "legacy_ascii_suspect"
-        assert t["header_blocked"] is False
-        assert t["blocked_columns"] == [
-            {"column": col, "entry_id": suspect["entry_id"], "reason": "legacy_ascii_suspect"}
-        ]
-    assert {m["key"] for m in matching(out)["matched"]} >= {"e1", "f1"}
-    (g,) = [t for t in out["tables"] if t["header_blocked"]]
-    assert g["header_block_reasons"] == ["legacy_ascii_suspect"]
-    assert [b["reason"] for b in out["blocked_marks"] if b["table"] == g["id"]] == [
-        "header_blocked:legacy_ascii_suspect"
-    ] * 2
+    e = table_with(out, "KÝ HIỆU")
+    suspect = header_entry(e, "haFn")
+    assert suspect["block_reason"] == "legacy_ascii_suspect"
+    assert e["header_blocked"] is False
+    assert e["blocked_columns"] == [
+        {"column": 3, "entry_id": suspect["entry_id"], "reason": "legacy_ascii_suspect"}
+    ]
+    assert "e1" in {m["key"] for m in matching(out)["matched"]}
+    blocked = [t for t in out["tables"] if t["header_blocked"]]
+    assert len(blocked) == 2  # G (its mark-column header) and F (its mark column has no keyword)
+    for t in blocked:
+        assert t["header_block_reasons"] == ["legacy_ascii_suspect"]
+        assert [b["reason"] for b in out["blocked_marks"] if b["table"] == t["id"]] == [
+            "header_blocked:legacy_ascii_suspect"
+        ] * 2
 
 
 def test_a_keywordless_grid_without_blocked_header_text_is_no_schedule(gate):
@@ -518,6 +529,86 @@ def test_a_keywordless_grid_without_blocked_header_text_is_no_schedule(gate):
     assert not [t for t in gate["tables"] if any(h["display_text"] == "TT" for h in t["header"])]
     assert len(gate["tables"]) == 3
     assert {"h1", "h2"} <= {p["key"] for p in gate["plan_marks"]}
+
+
+@pytest.fixture(scope="module")
+def inferred(tmp_path_factory) -> dict[str, Any]:
+    root = tmp_path_factory.mktemp("inferred")
+    build_inferred_work(root)
+    return extract_marks(root / "work", root / "input", check_inputs=True)
+
+
+def test_inferred_document_is_schema_valid(inferred):
+    assert validate("marks", inferred) == []
+    assert len(inferred["tables"]) == 3
+
+
+def test_a_keywordless_grid_with_an_empty_mark_header_cell_is_read_on_its_mark_column(inferred):
+    """The wave 2 gain kept: KÍNH blocks only its own column; the seed's column, whose header cell is
+    empty, is the mark column (confidence low). Only mark-shaped cells become keys (review F2 item 1)."""
+    t = table_with(inferred, "b")
+    kinh = header_entry(t, KINH)
+    assert t["header_blocked"] is False and t["mark_column"] == 0 and t["confidence"] == "low"
+    assert t["blocked_columns"] == [
+        {"column": 1, "entry_id": kinh["entry_id"], "reason": kinh["block_reason"]}
+    ]
+    assert [c["role"] for c in t["columns"]] == ["mark", None, "b"]
+    assert K_NOTE in {c["display_text"] for r in t["rows"] for c in r["cells"]}
+    assert [[m["text"] for m in r["marks"]] for r in t["rows"]] == [["K1"], ["K2"]]
+    assert {m["shape"] for r in t["rows"] for m in r["marks"]} == {"mark"}
+    keys = {m["key"] for m in matching(inferred)["matched"]}
+    assert keys == {"k1", "k2"}
+    assert matched(inferred, "k1")["confidence"] == "low"
+    assert not [s for s in matching(inferred)["schedule_only"] if "sl" in s["key"]]
+
+
+def test_a_keywordless_column_of_mostly_integers_is_no_mark_column(inferred):
+    """Row numbers ('1', '2', '3') under an empty header cell: the column is not a mark column even
+    though two of its cells look like marks; the table stays header-blocked (KÍNH)."""
+    t = table_with(inferred, "SL")
+    assert t["header_blocked"] is True and t["mark_column"] is None
+    assert all(r["marks"] == [] for r in t["rows"])
+    assert [b["display_text"] for b in inferred["blocked_marks"] if b["table"] == t["id"]] == ["M1", "M2"]
+    assert not {"m1", "m2", "1", "2", "3"} & {s["key"] for s in matching(inferred)["schedule_only"]}
+
+
+def _cell(text: str, block: str | None = None) -> _Text:
+    return _Text({"display_text": text}, (0.0, 0.0, 1.0, 1.0), 0.5, 0.5, 1.0, block)
+
+
+@pytest.mark.parametrize(
+    ("header_cols", "cells", "ok"),
+    [
+        ([1], ["K1", "K2"], True),  # header text in another column only
+        ([0], ["K1", "K2"], False),  # any header text over the mark column
+        ([1], ["K1", "1"], True),  # exactly half integers: not mostly
+        ([1], ["K1", "1", "2"], False),
+        ([1], ["K1", "2.5", "3.5"], True),  # decimals are not row numbers
+        ([1], ["K1", "3a", "4b"], True),  # an integer is the whole cell
+        ([1], ["K1", "1", "2", ("Abçd", "encoding_unknown"), ("Xyèz", "encoding_unknown")], False),
+        ([1], [], True),
+    ],
+)
+def test_when_a_keywordless_column_may_be_the_mark_column(header_cols, cells, ok):
+    """Unit rule of review F2 item 1 (blocked cells are not counted: their text cannot be read)."""
+    header: list[tuple[int | None, _Text]] = [(c, _cell("x")) for c in header_cols]
+    texts = [_cell(c) if isinstance(c, str) else _cell(*c) for c in cells]
+    box = (0.0, 0.0, 1.0, 1.0)
+    rows: list[tuple[tuple[float, float, float, float], list[tuple[int | None, _Text]]]] = [
+        (box, [(0, t)]) for t in texts
+    ]
+    assert _inferred_mark_column_ok(header, rows, 0) is ok
+
+
+def test_a_data_row_read_as_header_does_not_make_a_schedule(inferred):
+    """Sample 461: a plumbing list whose first data row ('d63-d42', a blocked name, '07') sat in the
+    header band was read as a member schedule on its column, keys d110, d63."""
+    t = table_with(inferred, "d63-d42")
+    assert t["header_blocked"] is True and t["mark_column"] is None
+    m = matching(inferred)
+    assert not {"d110", "d63"} & {s["key"] for s in m["schedule_only"]}
+    assert "d110" not in {x["key"] for x in m["matched"]}
+    assert "d110" in {p["key"] for p in m["plan_only"]}
 
 
 def test_every_match_says_whether_its_size_was_compared(doc, gate):
@@ -532,7 +623,6 @@ def test_every_match_says_whether_its_size_was_compared(doc, gate):
     assert not matching(gate)["size_conflicts"]
     assert matched(gate, "e2")["size_not_compared_reason"] == SIZE_CELLS_BLOCKED
     assert matched(gate, "e3")["size_not_compared_reason"] == NO_PLAN_SIZE
-    assert matched(gate, "f1")["size_not_compared_reason"] == SIZE_HEADER_BLOCKED
 
 
 def test_summary_counts_size_comparisons(doc, gate):
@@ -542,8 +632,8 @@ def test_summary_counts_size_comparisons(doc, gate):
         "by_reason": {NO_PLAN_SIZE: 2, NO_SIZE_COLUMN: 1},
     }
     s = gate["summary"]["size_comparisons"]
-    assert (s["compared"], s["not_compared"]) == (1, 4)
-    assert s["by_reason"] == {NO_PLAN_SIZE: 2, SIZE_CELLS_BLOCKED: 1, SIZE_HEADER_BLOCKED: 1}
+    assert (s["compared"], s["not_compared"]) == (1, 2)
+    assert s["by_reason"] == {NO_PLAN_SIZE: 1, SIZE_CELLS_BLOCKED: 1}
 
 
 def test_summary_counts_per_sheet(doc, gate):
@@ -558,7 +648,7 @@ def test_summary_counts_per_sheet(doc, gate):
     } | {"file": REL}
     assert (r["header_blocked_tables"], r["unparsed_tables"], r["blocked_marks"]) == (1, 1, 2)
     (g,) = gate["summary"]["by_sheet"]
-    assert (g["tables"], g["header_blocked_tables"], g["rows"], g["blocked_marks"]) == (3, 1, 7, 2)
+    assert (g["tables"], g["header_blocked_tables"], g["rows"], g["blocked_marks"]) == (3, 2, 7, 4)
 
 
 def test_summary_per_sheet_keeps_marks_on_no_sheet_apart(base, tmp_path):

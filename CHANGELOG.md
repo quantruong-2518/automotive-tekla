@@ -495,6 +495,11 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
     the sheet and the layer; an INSERT's scale no longer changes the measured value.
   - `harness dimensions` and the dxf-probe `dimension_audit`: a row whose group 42 disagrees with the
     measurement is `not_compared` with a note, whatever its text rule (measured-text rows were `ok`).
+  - `harness marks`: a line-grid table without a keyword is read on the seed's column only when that
+    column's header cell holds no text and at most half of its allowed cells are integers; only its
+    mark-shaped cells become schedule marks. Otherwise it is header-blocked, as before wave 2 (sample 270:
+    bar schedules keyed on the 'STT' row numbers, keys '1'..'11', '(sl:01)'; sample 461: plumbing lists
+    whose first data row sat in the header band, keys 'd110', 'selta').
 - Reading toolchain, after an independent review of the EVAL-1 wave:
   - `harness marks`: a rotated header keyword (or one that is not a cell text) no longer crashes the run;
     the table becomes a non-blocking `schedule_table_unparsed`. Questions no longer quote table ids, so a

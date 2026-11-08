@@ -220,3 +220,54 @@ def build_gate_work(
     run_intake(root, work, PROJECT, knowledge=PROPOSED_FONT_TABLE)
     write_structure(root, work)
     return work
+
+
+# --- keyword-less tables the review of P4 found (review F2 item 1) ----------------------------------------
+# Line-grid tables with no keyword; each header holds blocked text (KÍNH) so it is a candidate schedule.
+# table K: the mark column's header cell is EMPTY: read on that column; row K2's mark cell also holds a
+# quantity note '(SL: 02)' (not mark-shaped: never a key)
+K_X, K_COLS = 2000.0, (3000.0, 2000.0, 2000.0)
+K_HEADER = (("", None), (KINH, BLOCKED_STYLE), ("b", None))
+K_ROWS = ((("K1", None), ("16", None), ("200", None)), (("K2", None), ("18", None), ("220", None)))
+K_NOTE = "(SL: 02)"
+# table M: the mark column's header cell is empty, but most of its cells are integers (row numbers)
+M_X, M_COLS = 14000.0, (3000.0, 2000.0, 2000.0)
+M_HEADER = (("", None), (KINH, BLOCKED_STYLE), ("SL", None))
+M_ROWS = (
+    (("M1", None), ("16", None), ("2", None)),
+    (("M2", None), ("18", None), ("4", None)),
+    (("1", None), ("20", None), ("6", None)),
+    (("2", None), ("22", None), ("8", None)),
+    (("3", None), ("25", None), ("9", None)),
+)
+# table N: as 461's plumbing list: the header band is a data row, its mark-column cell is allowed text
+N_X, N_COLS = 26000.0, (3000.0, 2000.0, 2000.0)
+N_HEADER = (("d63-d42", None), ("Abçd", BLOCKED_STYLE), ("07", None))
+N_ROWS = (
+    (("d110", None), ("Xyèz", BLOCKED_STYLE), ("03", None)),
+    (("d63", None), ("Abçd", BLOCKED_STYLE), ("04", None)),
+)
+INFERRED_PLAN = ("K1(200x300)", "K2", "M1", "M2", "d110")
+
+
+def build_inferred_work(base: Path, plan_texts: tuple[str, ...] = INFERRED_PLAN) -> Path:
+    """Tables K, M, N and `plan_texts` on sheet S-101: `base/input` and `base/work` (intake + sheets).
+    Returns the work folder; the DXF is native (lines need --input-dir)."""
+    root = base / "input"
+    (root / "plans").mkdir(parents=True)
+    doc = readfile(str(build_set(base, "src.dxf")))
+    doc.styles.add(BLOCKED_STYLE, font="vntimeh.shx")
+    msp = doc.modelspace()
+    _styled_table(msp, K_X, K_COLS, K_HEADER, K_ROWS)
+    msp.add_text(K_NOTE, height=TH / 2).set_placement(
+        (K_X + K_COLS[0] / 2, GATE_TOP - GATE_ROW * 2.85), align=TextEntityAlignment.MIDDLE_CENTER
+    )
+    _styled_table(msp, M_X, M_COLS, M_HEADER, M_ROWS)
+    _styled_table(msp, N_X, N_COLS, N_HEADER, N_ROWS)
+    for i, text in enumerate(plan_texts):
+        msp.add_text(text, height=TH, dxfattribs={"insert": (PLAN_X, PLAN_TOP - i * PLAN_STEP)})
+    doc.saveas(root / REL)
+    work = base / "work"
+    run_intake(root, work, PROJECT, knowledge=PROPOSED_FONT_TABLE)
+    write_structure(root, work)
+    return work
