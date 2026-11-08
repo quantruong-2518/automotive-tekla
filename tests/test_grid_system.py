@@ -1054,6 +1054,139 @@ def test_an_answer_to_an_old_style_conflict_key_goes_stale_once(tmp_path, exampl
     assert _one(_gs_questions(work), "grid_system_conflict")["id"] == new["id"]
 
 
+# --- file sets: systems are compared only within one set (fix 5d) --------------------------------------
+
+FILE_SET_KEY, FILE_SET_ID = "e" * 16, "Q-950"
+
+
+def _other_building(gid: str, sheet: str, k: int) -> dict[str, Any]:
+    """A-C x 1-3 with other spacings than plan(): a conflict with it on the shared labels."""
+    return view(
+        gid,
+        sheet,
+        fam(f"F{k:03d}", ["A", "B", "C"], [3600.0, 4800.0], angle=0.0),
+        fam(f"F{k + 1:03d}", NUMBERS, [5400.0, 5400.0], angle=90.0),
+    )
+
+
+def _with_file_set(work: Path) -> Path:
+    """A registry holding the live intake file_set_relation question (as harness intake raises it)."""
+    registry = empty_registry("demo-project")
+    registry["questions"][FILE_SET_KEY] = {
+        "id": FILE_SET_ID,
+        "code": "file_set_relation",
+        "file": None,
+        "producer": "intake",
+        "status": "open",
+        "first_seen_run": 1,
+        "last_seen_run": 1,
+        "blocking": True,
+        "file_sha256": None,
+    }
+    registry["next_id"], registry["runs"] = 951, 1
+    (work / "question-registry.json").write_text(json.dumps(registry), encoding="utf-8")
+    return work
+
+
+def _file_set_answer(**sets: list[str]) -> dict[str, Any]:
+    return {**ans("file_set_relation", None, sets), "key": FILE_SET_KEY, "question_id": FILE_SET_ID}
+
+
+def _two_files(tmp_path: Path, example: Any, second: dict[str, Any] | None = None) -> Path:
+    """a.dxf: plan() twice (A-D x 1-3); b.dxf: `second` twice (default: the conflicting A-C x 1-3)."""
+    w = Work(tmp_path, example)
+    w.add_file("a.dxf", [plan("V001", "model#01", 1), plan("V002", "model#02", 3)])
+    make = (lambda g, s, k: second) if second is not None else _other_building
+    w.add_file("b.dxf", [make("V001", "model#01", 1), make("V002", "model#02", 3)])
+    return w.finish()
+
+
+def _gs_doc(work: Path) -> dict[str, Any]:
+    return json.loads((work / "grid-systems.json").read_text(encoding="utf-8"))
+
+
+def test_a_cross_file_conflict_waits_for_the_file_set_answer_and_keeps_its_id(tmp_path, example):
+    work = _with_file_set(_two_files(tmp_path, example))
+    run_grid_systems(work, svg=False)
+    pending = _one(_gs_questions(work), "grid_system_conflict")
+    assert not pending["blocking"] and "closed_by" not in pending
+    assert pending["message"].startswith(f"Not blocking yet: pending {FILE_SET_ID} (file_set_relation)")
+    doc = _gs_doc(work)
+    assert doc["file_sets"] == {"status": "pending", "sets": None, "question_id": FILE_SET_ID}
+    assert doc["conflicts"][0]["blocking"] is False and doc["conflicts"][0]["closed_by"] is None
+    # one set: the files are one project, the conflict blocks under the same id
+    _set_answers(work, [_file_set_answer(set1=["a.dxf", "b.dxf"])])
+    run_grid_systems(work, svg=False)
+    one = _one(_gs_questions(work), "grid_system_conflict")
+    assert (one["id"], one["key"], one["blocking"]) == (pending["id"], pending["key"], True)
+    assert _gs_doc(work)["file_sets"] == {
+        "status": "answered",
+        "sets": [["a.dxf", "b.dxf"]],
+        "question_id": FILE_SET_ID,
+    }
+
+
+def test_files_of_two_sets_are_never_compared(tmp_path, example):
+    work = _with_file_set(_two_files(tmp_path, example))
+    _set_answers(work, [_file_set_answer(set1=["a.dxf"], set2=["b.dxf"])])
+    run_grid_systems(work, svg=False)
+    doc = _gs_doc(work)
+    assert doc["file_sets"] == {
+        "status": "answered",
+        "sets": [["a.dxf"], ["b.dxf"]],
+        "question_id": FILE_SET_ID,
+    }
+    assert doc["conflicts"] == [] and "grid_system_conflict" not in [q["code"] for q in _gs_questions(work)]
+    assert [s["relations"] for s in doc["systems"]] == [
+        {"compatible_with": [], "conflicts_with": [], "subset_of": []}
+    ] * 2
+
+
+def test_the_same_grid_in_two_sets_stays_two_systems(tmp_path, example):
+    """Two projects drawn on one grid module must not merge into one system (nor confirm each other)."""
+    work = _with_file_set(_two_files(tmp_path, example, second=plan("V001", "model#01", 1)))
+    _set_answers(work, [_file_set_answer(set1=["a.dxf", "b.dxf"])])
+    run_grid_systems(work, svg=False)
+    assert [s["evidence"]["files"] for s in _gs_doc(work)["systems"]] == [2]
+    _set_answers(work, [_file_set_answer(set1=["b.dxf"], set2=["a.dxf"])])
+    run_grid_systems(work, svg=False)
+    doc = _gs_doc(work)
+    assert [s["evidence"]["files"] for s in doc["systems"]] == [1, 1]
+    assert {s["directions"][0]["representative"]["file"] for s in doc["systems"]} == {"a.dxf", "b.dxf"}
+    assert doc["file_sets"]["sets"] == [["b.dxf"], ["a.dxf"]]
+
+
+def test_a_conflict_inside_one_file_blocks_while_the_file_set_answer_is_pending(tmp_path, example):
+    w = Work(tmp_path, example)
+    w.add_file("a.dxf", [plan("V001", "model#01", 1), _other_building("V002", "model#02", 3)])
+    w.add_file("b.dxf", [view("V001", "model#01", fam("F001", ["X", "Y"], [5000.0]))])
+    work = _with_file_set(w.finish())
+    run_grid_systems(work, svg=False)
+    conflict = _one(_gs_questions(work), "grid_system_conflict")
+    assert conflict["blocking"] and "pending" not in conflict["message"]
+
+
+def test_without_a_live_file_set_question_cross_file_conflicts_block(tmp_path, example):
+    """An intake run before fix 5d raised no file_set_relation: nothing would ever release a pending
+    conflict, so it blocks as before."""
+    work = _ledger_work(_two_files(tmp_path, example))
+    run_grid_systems(work, svg=False)
+    assert _one(_gs_questions(work), "grid_system_conflict")["blocking"]
+    assert "file_sets" not in _gs_doc(work)
+
+
+def test_one_readable_drawing_file_is_a_single_file_set(tmp_path, example):
+    work = _ledger_work(_two_buildings(tmp_path, example))
+    run_grid_systems(work, svg=False)
+    assert _gs_doc(work)["file_sets"] == {"status": "single", "sets": None, "question_id": None}
+
+
+def test_the_answers_digest_covers_the_file_set_answer():
+    base = [ans("units_suspect", "a.dxf", {"unit": "cm"})]
+    with_sets = [*base, _file_set_answer(set1=["a.dxf"])]
+    assert consumed_answers_digest(with_sets) != consumed_answers_digest(base)
+
+
 def test_a_units_answer_the_drawing_contradicts_blocks_until_confirmed(tmp_path, example):
     w = Work(tmp_path, example)
     w.add_file("plans.dxf", [plan("V001", "model#01", 1)], median={"value": 6000.0, "count": 5})

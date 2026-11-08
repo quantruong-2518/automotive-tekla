@@ -45,6 +45,11 @@ Rules (deterministic; the thresholds are heuristics, see the schema description)
    to the answer's `file`; family ids restart in every file) that cover every direction of the system
    without contradiction; otherwise null.
 8. Confidence is never above 'medium' (gate 1 decides).
+9. File sets (intake's project-level file_set_relation, two or more readable drawing files): once it is
+   answered (bound by key to the live question), views of two different sets never cluster, never join one
+   system and their systems are never compared (no conflict, no relation). While it is open, a conflict
+   between two systems with no file in common does not block ("pending Q-x"); a conflict inside one file
+   always does. Without a live question (one readable file, or an older intake) nothing changes.
 
 `render_grid_system_svg(system)` draws one system (axes, bubbles, labels, spacing dimensions,
 coordinate strings, units, the PROPOSAL banner) as plain SVG text; spacing labels that would overlap their
@@ -89,6 +94,8 @@ from tekla_harness.questions import (
     AXIS_DIRECTIONS,
     CONFLICT_CODE,
     CONTRADICTION_CODE,
+    FILE_SET_CODE,
+    FILE_SET_KEY,
     SELECT_CODE,
     SYSTEM_AXIS_CODE,
     UNIT_CODES,
@@ -252,6 +259,7 @@ class _Inputs:
     warnings: list[str]
     inventory_units: dict[str, dict[str, Any] | None] = field(default_factory=dict)
     spacing_medians: dict[str, dict[str, Any] | None] = field(default_factory=dict)
+    readable: int = 0  # DXF / DWG files intake read (outcome not 'unreadable'): file_set_relation needs 2+
 
 
 def spacing_median(grids: dict[str, Any]) -> dict[str, Any] | None:
@@ -308,12 +316,14 @@ def _load_inputs(work: Path) -> _Inputs:
     totals: Counter[str] = Counter()
     inventory_units: dict[str, dict[str, Any] | None] = {}
     spacing_medians: dict[str, dict[str, Any] | None] = {}
+    readable = 0
     root = work.resolve()
     for row in sorted(inventory["files"], key=lambda r: r["path"]):
         if row["format"] not in ("dwg", "dxf"):
             continue
         rel = row["path"]
         inventory_units[rel] = row["units"]
+        readable += row["outcome"] != "unreadable"
         base = (root / STRUCTURE_DIR / rel).resolve()
         if root not in base.parents:
             raise GridSystemError(EXIT_INVALID, f"{rel}: path leaves the work folder")
@@ -401,6 +411,7 @@ def _load_inputs(work: Path) -> _Inputs:
         warnings,
         inventory_units,
         spacing_medians,
+        readable,
     )
 
 
@@ -542,13 +553,14 @@ def _components(views: list[_View], ctx: dict[str, _FileCtx]) -> list[int]:
     return [ids.setdefault(find(i), len(ids) + 1) for i in range(len(views))]
 
 
-def _clusters(views: list[_View]) -> list[list[_Member]]:
+def _clusters(views: list[_View], set_of: dict[str, int]) -> list[list[_Member]]:
+    """`set_of`: file -> its file set (the file_set_relation answer); views of two sets never cluster."""
     ordered = sorted(views, key=lambda v: (not v.complete, v.file, v.group_id, v.fams[0].family_id))
     clusters: list[list[_Member]] = []
     for v in ordered:
         for members in clusters:
             rep = members[0].view
-            if len(v.fams) != len(rep.fams):
+            if len(v.fams) != len(rep.fams) or set_of.get(v.file, 0) != set_of.get(rep.file, 0):
                 continue
             dirs = _assign(v.fams, rep.fams, _SAME)
             if dirs is None:
@@ -629,7 +641,14 @@ def _related(a: _System, b: _System) -> bool:
     return any(_compare(fa, fb).relation != "disjoint" for fa in a.rep.fams for fb in b.rep.fams)
 
 
-def _systems(clusters: list[list[_Member]], ctx: dict[str, _FileCtx]) -> list[_System]:
+def _same_set(a: _System, b: _System, set_of: dict[str, int]) -> bool:
+    """Two systems are compared only when they belong to one file set (a system never spans two)."""
+    return set_of.get(a.rep.file, 0) == set_of.get(b.rep.file, 0)
+
+
+def _systems(
+    clusters: list[list[_Member]], ctx: dict[str, _FileCtx], set_of: dict[str, int]
+) -> list[_System]:
     def rank(members: list[_Member]) -> tuple[Any, ...]:
         rep = members[0].view
         indep = len(set(_components([m.view for m in members], ctx)))
@@ -637,7 +656,12 @@ def _systems(clusters: list[list[_Member]], ctx: dict[str, _FileCtx]) -> list[_S
 
     systems: list[_System] = []
     for cluster in sorted(clusters, key=rank):
-        fits = [(i, d) for i, s in enumerate(systems) if (d := _fits_system(cluster, s)) is not None]
+        fits = [
+            (i, d)
+            for i, s in enumerate(systems)
+            if set_of.get(s.rep.file, 0) == set_of.get(cluster[0].view.file, 0)
+            and (d := _fits_system(cluster, s)) is not None
+        ]
         clash = any(
             _system_conflict(systems[i], systems[j]) is not None
             for x, (i, _) in enumerate(fits)
@@ -702,13 +726,14 @@ def units_by_file(
 
 
 # the answers this module reads besides the units answers
-CONSUMED_CODES = frozenset({AXIS_CODE, SYSTEM_AXIS_CODE, SELECT_CODE, CONTRADICTION_CODE})
+CONSUMED_CODES = frozenset({AXIS_CODE, SYSTEM_AXIS_CODE, SELECT_CODE, CONTRADICTION_CODE, FILE_SET_CODE})
 
 
 def consumed_answers_digest(answers: list[dict[str, Any]] | None) -> str:
     """sha256 over the active answers this module reads (units, family and system axis assignment, the
-    grid_system_select answer, units contradiction confirmations): code, file, key, values. `harness status`
-    compares it with the current answers.json to see whether grid-systems.json is stale."""
+    grid_system_select answer, units contradiction confirmations, the file_set_relation answer): code, file,
+    key, values. `harness status` compares it with the current answers.json to see whether grid-systems.json
+    is stale."""
     rows = sorted(
         (
             str(a.get("code")),
@@ -1055,15 +1080,60 @@ def _system_json(
     }
 
 
+def _file_sets(
+    active: list[dict[str, Any]],
+    file_set: tuple[str, str] | None,
+    readable: int,
+    files: list[str],
+    warnings: list[str],
+) -> tuple[dict[str, int], dict[str, Any] | None]:
+    """file -> its set number, and the document's `file_sets`. `file_set`: (key, id) of the live intake
+    file_set_relation question; its answer is bound by key. Without a live question every file is in set 0
+    (one readable file: 'single'; two or more: an intake from before file sets, `file_sets` left out)."""
+    if file_set is None:
+        single = {"status": "single", "sets": None, "question_id": None} if readable < 2 else None
+        return {}, single
+    key, qid = file_set
+    answer = next((a for a in active if a.get("code") == FILE_SET_CODE and a.get("key") == key), None)
+    values = answer.get("values") if answer is not None else None
+    ok = (
+        isinstance(values, dict)
+        and bool(values)
+        and all(FILE_SET_KEY.fullmatch(str(k)) and isinstance(v, list) and v for k, v in values.items())
+    )
+    if answer is not None and not ok:
+        warnings.append(
+            f"{FILE_SET_CODE} answer {key!r} has no set1=... values (values {values!r}): not used"
+        )
+    if answer is None or not ok or not isinstance(values, dict):
+        return {}, {"status": "pending", "sets": None, "question_id": qid}
+    names = sorted(values, key=lambda k: int(str(k)[3:]))
+    set_of = {str(f): int(str(k)[3:]) for k in names for f in values[k]}
+    for k, f in enumerate(sorted(set(files) - set(set_of)), start=1):
+        warnings.append(f"{f} is in no set of the {FILE_SET_CODE} answer: compared with no other file")
+        set_of[f] = -k
+    return set_of, {
+        "status": "answered",
+        "sets": [[str(f) for f in values[k]] for k in names],
+        "question_id": qid,
+    }
+
+
 def build_grid_systems(
-    work_dir: str | Path, *, answers: list[dict[str, Any]] | None = None, write: bool = False
+    work_dir: str | Path,
+    *,
+    answers: list[dict[str, Any]] | None = None,
+    write: bool = False,
+    file_set: tuple[str, str] | None = None,
 ) -> dict[str, Any]:
-    """Grid systems of a read-structure work folder. Raises GridSystemError. See the module docstring."""
+    """Grid systems of a read-structure work folder. Raises GridSystemError. See the module docstring.
+    `file_set`: (registry key, id) of the live intake file_set_relation question, when there is one."""
     work = Path(work_dir)
     inputs = _load_inputs(work)
     warnings = list(inputs.warnings)
     active = _active(answers)
     file_paths = [f["path"] for f in inputs.files if f["status"] == "read"]
+    set_of, file_sets = _file_sets(active, file_set, inputs.readable, file_paths, warnings)
     units = units_by_file(active, file_paths, warnings)
     axes = _axis_answers(active, warnings)
     sha = {f["path"]: f["sha256"] for f in inputs.files}
@@ -1085,7 +1155,7 @@ def build_grid_systems(
             status, unit = units[f.file]
             if status == "answered" and unit is not None:
                 f.factor = UNIT_TO_MM[unit]
-    systems = _systems(_clusters(inputs.views), inputs.ctx)
+    systems = _systems(_clusters(inputs.views, set_of), inputs.ctx, set_of)
     ids = [f"S{k:03d}" for k in range(1, len(systems) + 1)]
 
     # each system's own X/Y question; its answer is bound by this run's key
@@ -1127,8 +1197,13 @@ def build_grid_systems(
     ask = _Ask()
     clashes: list[tuple[str, str, str, str, str]] = []  # where, found, file, sheet, what differs (message)
     pairs: list[tuple[str, str]] = []
+    files_of = [{m.view.file for m in s.members} for s in systems]
+    waiting = file_sets is not None and file_sets["status"] == "pending"
+    pending: list[bool] = []  # per clash: two systems with no file in common while the file sets are asked
     for i in range(len(systems)):
         for j in range(i + 1, len(systems)):
+            if not _same_set(systems[i], systems[j], set_of):
+                continue
             hit = _system_conflict(systems[i], systems[j])
             if hit is not None:
                 docs[i]["relations"]["conflicts_with"].append(ids[j])
@@ -1139,6 +1214,7 @@ def build_grid_systems(
                 what = f"{_where(ids[i], fa)} vs {_where(ids[j], fb)}: {'; '.join(diffs[:20])}"
                 clashes.append((where, found, filed.file, filed.sheet, what))
                 pairs.append((ids[i], ids[j]))
+                pending.append(waiting and not files_of[i] & files_of[j])
             elif _related(systems[i], systems[j]):
                 docs[i]["relations"]["compatible_with"].append(ids[j])
                 docs[j]["relations"]["compatible_with"].append(ids[i])
@@ -1160,7 +1236,7 @@ def build_grid_systems(
             "no grid system: no view has a usable grid family (see the grids documents' questions)"
         )
     conflicts: list[dict[str, Any]] = []
-    for (where, found, file, sheet, what), (a, b) in zip(clashes, pairs, strict=True):
+    for (where, found, file, sheet, what), (a, b), wait in zip(clashes, pairs, pending, strict=True):
         closed_by = (
             "not_selected"
             if a not in selected or b not in selected
@@ -1186,14 +1262,21 @@ def build_grid_systems(
                 f"them out, or with separate={a},{b} when they are different buildings, then rerun "
                 "harness grid-system."
             )
+            if wait and file_sets is not None:
+                message = (
+                    f"Not blocking yet: pending {file_sets['question_id']} ({FILE_SET_CODE}): the two "
+                    "systems come from different drawing files, which may be separate projects; once that "
+                    "question is answered they are compared only when they are in one set. " + message
+                )
             for sid in (a, b):  # the flag asks for action: only while a conflict of the system is open
                 d = docs[ids.index(sid)]
                 d["flags"] = sorted({*d["flags"], "conflict"})
-        raised = ask(CONFLICT_CODE, message, where, found, file, sheet, blocking=closed_by is None)
+        blocking = closed_by is None and not wait
+        raised = ask(CONFLICT_CODE, message, where, found, file, sheet, blocking=blocking)
         conflicts.append(
             {
                 "systems": [a, b],
-                "blocking": closed_by is None,
+                "blocking": blocking,
                 "closed_by": closed_by,
                 "question_key": _own_key(CONFLICT_CODE, file, where, found, sheet, sha) if raised else None,
             }
@@ -1273,6 +1356,7 @@ def build_grid_systems(
             "conflicts": len(clashes),
         },
         "conflicts": conflicts,
+        **({"file_sets": file_sets} if file_sets is not None else {}),
         "questions": ask.questions,
         "question_counts": dict(sorted(ask.counts.items())),
         "warnings": warnings,
@@ -1383,7 +1467,16 @@ def run_grid_systems(work_dir: str | Path, *, svg: bool = True) -> GridSystemsRe
         ledger = load_ledger(work, None, create=False)
     except QuestionsError as exc:
         raise GridSystemError(exc.exit_code, str(exc)) from exc
-    doc = build_grid_systems(work, answers=ledger.answers["answers"])
+    live_sets = sorted(
+        (int(e["id"][2:]), k, e["id"])
+        for k, e in ledger.registry["questions"].items()
+        if e["code"] == FILE_SET_CODE
+        and e["producer"] == "intake"
+        and e["status"] != "obsolete"
+        and e.get("blocking", True)
+    )
+    file_set = (live_sets[-1][1], live_sets[-1][2]) if live_sets else None
+    doc = build_grid_systems(work, answers=ledger.answers["answers"], file_set=file_set)
     problems = validate("grid-system", doc)
     if problems:  # a bug here, not in the drawings: never write an invalid document
         details = "; ".join(f"{p.path or '/'}: {p.message}" for p in problems[:5])

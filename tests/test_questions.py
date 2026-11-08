@@ -127,7 +127,11 @@ def test_questions_carry_key_file_answer_and_the_documented_summary(world):
     doc = load(work / "questions.json")
     assert validate("intake", doc) == []
     for q in doc["questions"]:
-        assert len(q["key"]) == 16 and q["answer"] is None and q["file"] in ("set.dxf", "other.dxf")
+        assert len(q["key"]) == 16 and q["answer"] is None
+        if q["code"] == "file_set_relation":  # the one project-level question: one ref per drawing file
+            assert q["file"] is None and [r["file"] for r in q["refs"]] == ["other.dxf", "set.dxf"]
+            continue
+        assert q["file"] in ("set.dxf", "other.dxf")
         assert all(r["file"] == q["file"] for r in q["refs"])
     assert doc["summary"] == questions_summary(doc["questions"])
     registry = load(work / "question-registry.json")
@@ -158,6 +162,15 @@ def test_a_new_file_keeps_existing_ids_and_appends_new_ones(world):
     build_set(root, "third.dxf", sheet2_number="S-555")
     rerun_all(root, work)
     new_intake, new_struct = ids_by_key(work, "questions.json"), ids_by_key(work, "structure-questions.json")
+    # the project-level file_set_relation lists every drawing file: a new file re-keys it (asked again)
+    (file_set,) = [q["key"] for q in questions_of(work, "questions.json") if q["code"] == "file_set_relation"]
+    old_set = {
+        k
+        for k in old_intake
+        if load(work / "question-registry.json")["questions"][k]["code"] == "file_set_relation"
+    }
+    assert len(old_set) == 1 and file_set not in old_set and old_set.isdisjoint(new_intake)
+    old_intake = {k: v for k, v in old_intake.items() if k not in old_set}
     assert {k: new_intake[k] for k in old_intake} == old_intake
     assert {k: new_struct[k] for k in old_struct} == old_struct
     added = {
@@ -166,7 +179,7 @@ def test_a_new_file_keeps_existing_ids_and_appends_new_ones(world):
     assert added and all(int(i[2:]) > highest for i in added.values())
     assert len(set(added.values())) == len(added)
     third = [q for n in ("questions.json", "structure-questions.json") for q in questions_of(work, n)]
-    assert {q["file"] for q in third if q["id"] in added.values()} == {"third.dxf"}
+    assert {q["file"] for q in third if q["id"] in added.values()} == {"third.dxf", None}  # None: file set
     assert load(work / "inventory.json")["summary"]["changes"] == {
         "added": ["third.dxf"],
         "removed": [],

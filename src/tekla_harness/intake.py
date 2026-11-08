@@ -14,6 +14,10 @@ One deterministic command for the future `drawing-intake` skill. Writes into the
     text/<path>.json        text-index document of each DXF that was probed (extract_text)
     converted/<path>.dxf    DXF produced from each DWG
 
+File sets: with two or more readable drawing files, one blocking project-level `file_set_relation` question
+(one ref per file and its sha256) asks which files form one set (one building, one grid); `harness
+grid-system` compares grids only within a set once it is answered.
+
 Units: every probed file gets ONE blocking units question, `units_confirm_all` (answered with a structured
 `unit=`); the probe's units_conflict / units_suspect / units_unknown questions are not asked apart: their
 where / found / message are refs of that question (FOLDED_UNITS_CODES).
@@ -49,6 +53,7 @@ from tekla_harness.detect import detect_file, iter_input_files
 from tekla_harness.extract_text import extract_text
 from tekla_harness.knowledge import FontEncodingTable, KnowledgeError, default_font_encodings
 from tekla_harness.questions import (
+    FILE_SET_CODE,
     QuestionsError,
     dump_json,
     load_ledger,
@@ -107,6 +112,12 @@ _MESSAGES = {
     "no_reader_implemented": (
         "No reader exists yet for these file formats (roadmap), so nothing was extracted from them. "
         "Provide a DXF or DWG of each listed sheet, or wait for the reader."
+    ),
+    FILE_SET_CODE: (
+        "These drawing files were all read. Which of them belong together (one building or structure, one "
+        "grid)? Answer with --value set1=a.dwg,b.dwg --value set2=c.dwg, naming every listed file exactly "
+        "once. Grid systems are compared only within one set; until this is answered, grid conflicts "
+        "between files do not block and wait for it."
     ),
 }
 
@@ -514,10 +525,22 @@ def _failure_groups(entries: list[_Entry]) -> list[dict[str, Any]]:
     )
 
 
+def _file_set_group(entries: list[_Entry]) -> list[dict[str, Any]]:
+    """With two or more readable drawing files (DXF / DWG the probe opened): one blocking project-level
+    file_set_relation question, one ref per file with its sha256. The key hashes every ref, so a file added,
+    removed or changed asks again (the old answer goes stale)."""
+    readable = [e for e in entries if e.fmt in ("dxf", "dwg") and e.probed]
+    if len(readable) < 2:
+        return []
+    refs = [{"file": e.rel, "where": e.rel, "found": f"sha256 {e.info['sha256']}"} for e in readable]
+    return [question_group(FILE_SET_CODE, True, _MESSAGES[FILE_SET_CODE], refs, file=None)]
+
+
 def _questions(entries: list[_Entry]) -> list[dict[str, Any]]:
-    """Raw questions (no id, key or answer yet), one per code, blocking flag and file, in document order."""
+    """Raw questions (no id, key or answer yet), one per code, blocking flag and file, in document order;
+    the project-level file_set_relation last, so it never shifts a file question's new id."""
     groups = _units_group(entries) + _probe_groups(entries) + _text_groups(entries)
-    return groups + _conversion_groups(entries) + _failure_groups(entries)
+    return groups + _conversion_groups(entries) + _failure_groups(entries) + _file_set_group(entries)
 
 
 def _read_log(project_id: str, entries: list[_Entry]) -> ReadLog:

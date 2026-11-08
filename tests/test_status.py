@@ -99,6 +99,8 @@ def values_for(q: dict[str, Any]) -> dict[str, str]:
     if q["code"] == SYSTEM_AXIS_CODE:  # vertical lines (90 deg) are Tekla X
         dirs = re.findall(r"(dir\d): \S+ labels .*?, angle ([-\d.]+) deg", q["refs"][0]["found"])
         return {name: ("X" if abs(float(angle) - 90.0) < 45.0 else "Y") for name, angle in dirs}
+    if q["code"] == "file_set_relation":  # one project: the grids of both files are compared
+        return {"set1": ",".join(r["file"] for r in q["refs"])}
     return {}
 
 
@@ -528,7 +530,9 @@ def test_gate1_is_not_ready_with_every_reason_named(world):
         "--value unit=mm|cm|m|in|ft (units_confirm_all)",
         f"units: other.dxf is not confirmed: harness answer {work} {ids['other.dxf']} --text",
         "grid_system_select",
-        "intake: 2 blocking question(s) open",
+        # two units questions and the project-level file set question
+        f"intake: 3 blocking question(s) open ({ids['other.dxf']}, {ids['set.dxf']}, "
+        f"{find(questions_of(work, 'questions.json'), 'file_set_relation')['id']})",
         "read-structure: ",
         "grid-system: ",
     ):

@@ -311,11 +311,23 @@ def test_answer_templates_name_the_values_answers_py_requires(world):
         axes = iter("XYXY")  # distinct axes: a system's directions cannot take the same one
         for token in re.findall(r"(?<!\[)--value (\S+)", command):
             key, _, value = token.partition("=")
-            sample = {"<mm|cm|m|in|ft>": "mm", "<X|Y>": next(axes), "<meaning>": "column"}.get(value, value)
+            files = ",".join(r["file"] for r in q["refs"])  # file_set_relation: every file of the question
+            sample = {
+                "<mm|cm|m|in|ft>": "mm",
+                "<X|Y>": next(axes),
+                "<meaning>": "column",
+                "<file>,<file>": files,
+            }
+            sample = sample.get(value, value)
             values[key] = sample
         assert check_values(q["code"], values) == [], (command, questions[q["id"]]["code"])
         checked_codes.add(q["code"])
-    assert {"units_confirm_all", "grid_family_axis_assignment", SELECT_CODE} <= checked_codes
+    assert {
+        "units_confirm_all",
+        "grid_family_axis_assignment",
+        SELECT_CODE,
+        "file_set_relation",
+    } <= checked_codes
 
 
 def test_member_mark_prefix_template_names_every_subject():
