@@ -600,9 +600,13 @@ def test_reader_supplements_show_under_their_question(world, monkeypatch):
 # --- answer provenance (P3): the printed command names the engineer role -------------------------------
 
 
+ENGINEER_COMMAND = "- **Lệnh trả lời (kỹ sư tự chạy, tác tử không chạy thay):** "
+
+
 def test_every_printed_answer_command_names_the_engineer_role_once_after_by(world):
-    commands = re.findall(r"- \*\*Lệnh trả lời:\*\* `([^`]+)`", render(world))
-    assert commands
+    text = render(world)
+    commands = re.findall(re.escape(ENGINEER_COMMAND) + r"`([^`]+)`", text)
+    assert commands and len(commands) == text.count("uv run harness answer")
     for c in commands:
         assert c.count("--role") == 1, c
         assert '--by "..." --role engineer' in c, c

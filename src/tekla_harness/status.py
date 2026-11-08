@@ -83,8 +83,10 @@ GATE_ANSWER_PRODUCERS = frozenset(dict(PRODUCERS)[label] for label in GATE_PRODU
 LEGACY_ANSWER_IS_ENGINEER = False
 # an answer to these never closes them: they close through another question's structured values
 NOT_CLOSED_BY_AN_ANSWER = frozenset({CONFLICT_CODE})
-# every printed command names the role: gate 1 counts the engineer's answers only
-ANSWER = 'harness answer {work_dir} {id} --text "..." --by "..." --role engineer'
+# A printed answer command is the ENGINEER's step, never an agent's (review M1): it is always introduced by
+# ENGINEER_STEP and names `--role engineer` once, after --by (gate 1 counts the engineer's answers only).
+ENGINEER_STEP = "the engineer runs: "
+ANSWER = ENGINEER_STEP + 'harness answer {work_dir} {id} --text "..." --by "..." --role engineer'
 
 
 class StatusError(Exception):
@@ -263,7 +265,7 @@ def _units_reasons(
         command = (
             ANSWER.format(work_dir=work_dir, id=hit[1]["id"])
             if hit
-            else f"harness answer {work_dir} <{UNITS_CONFIRM_CODE} id>"
+            else f"{ENGINEER_STEP}harness answer {work_dir} <{UNITS_CONFIRM_CODE} id>"
         )
         if hit is not None and hit[0] not in active:
             reasons.append(f"units: {f} is not confirmed: {command} {values} ({UNITS_CONFIRM_CODE})")
@@ -306,7 +308,7 @@ def _units_reasons(
             reasons.append(
                 f"units: {f}: the answered unit {unit} contradicts the drawing ({evidence}): answer "
                 f"{hit[1]['id'] if hit else UNITS_CONFIRM_CODE} again with the right unit, or confirm {unit} "
-                f"on purpose with {where}"
+                f"on purpose ({where})"
             )
     return reasons
 
@@ -399,7 +401,8 @@ def _role_reasons(non_engineer: list[dict[str, Any]], work_dir: str) -> list[str
     return [
         f"answers: {a['question_id']} {a['code']} ({a['file'] or 'project'}) was answered by "
         f"{'a ' + a['role'] + ' role' if a['role'] else 'no recorded role'}, not the engineer: the engineer "
-        f"answers it again ({ANSWER.format(work_dir=work_dir, id=a['question_id'])})"
+        "must answer it again themselves; an agent never does "
+        f"({ANSWER.format(work_dir=work_dir, id=a['question_id'])})"
         for a in non_engineer
     ]
 

@@ -488,7 +488,11 @@ def question_lines(item: Item, ctx: Context, level: str = "#####") -> list[str]:
             f"hai toà nhà khác nhau (cả hai phải nằm trong systems); rồi chạy lại {rerun}."
         )
     else:
-        lines.append(f"- **Lệnh trả lời:** {code_span(answer_command(item, answered_unit(item, ctx)))}")
+        # the engineer's own step, never an agent's (review M1): the label says so
+        lines.append(
+            "- **Lệnh trả lời (kỹ sư tự chạy, tác tử không chạy thay):** "
+            f"{code_span(answer_command(item, answered_unit(item, ctx)))}"
+        )
     return lines
 
 

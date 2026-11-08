@@ -30,6 +30,7 @@ from test_status import (  # noqa: F401  (pytest fixtures, used by name)
 )
 
 ROLE = "--role engineer"
+ENGINEER_STEP = "the engineer runs: "
 COMMAND = re.compile(r"harness answer \S+ (?:Q-\d+|<[^>]+>)[^()\n]*")
 
 
@@ -47,6 +48,31 @@ def test_every_printed_answer_command_names_the_engineer_role_once_after_by(worl
         assert f'--by "..." {ROLE}' in c, c
 
 
+def test_every_printed_answer_command_is_the_engineers_step_not_an_agents(world):
+    """Review M1: a reason never hands an agent a ready-to-paste `--role engineer` command."""
+    _, work = world
+    reasons = build_status(work)["gate1"]["reasons"]
+    hits = [r for r in reasons if "harness answer" in r]
+    assert hits
+    for r in hits:
+        assert r.count("harness answer") == r.count(f"{ENGINEER_STEP}harness answer"), r
+
+
+def test_record_answer_needs_a_role_keyword(world):
+    import pytest
+
+    from tekla_harness.questions import QuestionsError
+
+    _, work = world
+    q = find(questions_of(work, "questions.json"), "units_confirm_all", "set.dxf")
+    with pytest.raises(TypeError):
+        record_answer(work, q["id"], "mm", "me", {"unit": "mm"})  # type: ignore[call-arg]
+    with pytest.raises(QuestionsError) as caught:
+        record_answer(work, q["id"], "mm", "me", {"unit": "mm"}, role=None)  # type: ignore[arg-type]
+    assert caught.value.exit_code == 2 and "--role" in str(caught.value)
+    assert not (work / "answers.json").exists()
+
+
 def test_a_simulated_units_answer_keeps_gate1_closed_and_its_reason_names_the_question(ready):
     _, work = ready
     q = find(questions_of(work, "questions.json"), "units_confirm_all", "set.dxf")
@@ -55,6 +81,8 @@ def test_a_simulated_units_answer_keeps_gate1_closed_and_its_reason_names_the_qu
     assert gate1["ready_for_gate1"] is False
     (reason,) = [r for r in gate1["reasons"] if q["id"] in r]
     assert reason.startswith(f"answers: {q['id']} units_confirm_all (set.dxf)") and "simulated" in reason
+    assert "the engineer must answer it again themselves" in reason
+    assert f"({ENGINEER_STEP}harness answer " in reason
     (command,) = answer_commands([reason])
     assert command.count("--role") == 1 and f'--by "..." {ROLE}' in command
 

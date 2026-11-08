@@ -376,6 +376,10 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
   - Gate 1 no longer counts an answer recorded without a role (DESIGN D4): like a `simulated` answer to a
     question of intake, read-structure, grid-system or the reader, it is a gate-1 reason naming its
     question id (`gate1.non_engineer_answers`, role null) until the engineer answers again.
+  - Review M1: every `harness answer` command in a gate-1 reason is introduced as the engineer's own step
+    (`the engineer runs: …`), the role reason says the engineer must answer again themselves, and
+    questions.md labels the command as one the engineer runs and an agent never runs instead.
+    `record_answer` takes `role` as a required keyword (no default; None is a usage error).
 
 ### Changed
 - Question lifecycle (tool wave 2, EVAL-2 fix 5):

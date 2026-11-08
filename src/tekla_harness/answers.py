@@ -33,8 +33,10 @@ Rules:
   * grid_system_conflict cannot be answered: a conflict closes only through the grid_system_select answer
     (`systems` without one of the two, or `separate` with both), never through words;
   * `role` (`answered_by_role`): 'engineer' or 'simulated' (an agent standing in for the engineer); gate 1
-    counts the engineer's answers only (status.py). `harness answer --role` is required; a library call
-    without a role records none, and gate 1 does not count such an answer. Any other role is a usage error;
+    counts the engineer's answers only (status.py). Required (`harness answer --role`, and the keyword
+    `role` of record_answer, which has no default): every new answer records its role. Any other role,
+    None included, is a usage error. An answer recorded before roles existed has none; gate 1 does not
+    count it;
   * a second answer to the same key supersedes the first (kept, status 'superseded');
   * nothing is deleted: answers are only appended or change status.
 
@@ -332,13 +334,13 @@ def record_answer(
     values: dict[str, str] | None = None,
     *,
     today: date | None = None,
-    role: str | None = None,
+    role: str,
 ) -> dict[str, Any]:
     """Append an answer (see the module docstring). Returns what was done. Raises QuestionsError."""
     work = Path(work_dir).resolve()
     if not work.is_dir():
         raise QuestionsError(EXIT_USAGE, f"work folder not found (not a folder): {work_dir}")
-    if role is not None and role not in ROLES:
+    if role not in ROLES:
         raise QuestionsError(EXIT_USAGE, f"--role '{role}' is not one of {', '.join(ROLES)}")
     if not text.strip():
         raise QuestionsError(EXIT_USAGE, "the answer text is empty: write the engineer's words verbatim")
@@ -377,7 +379,7 @@ def record_answer(
         "answer_text": text,
         "values": stored,
         "answered_by": by.strip(),
-        **({"answered_by_role": role} if role is not None else {}),
+        "answered_by_role": role,
         "answered_on": (today or date.today()).isoformat(),
         "status": "active",
     }

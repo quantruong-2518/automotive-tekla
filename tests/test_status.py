@@ -525,10 +525,11 @@ def test_gate1_is_not_ready_with_every_reason_named(world):
         q["file"]: q["id"] for q in questions_of(work, "questions.json") if q["code"] == "units_confirm_all"
     }
     for needle in (
-        f'units: set.dxf is not confirmed: harness answer {work} {ids["set.dxf"]} --text "..." '
-        '--by "..." --role engineer --value',
+        "units: set.dxf is not confirmed: the engineer runs: "
+        f'harness answer {work} {ids["set.dxf"]} --text "..." --by "..." --role engineer --value',
         "--value unit=mm|cm|m|in|ft (units_confirm_all)",
-        f"units: other.dxf is not confirmed: harness answer {work} {ids['other.dxf']} --text",
+        "units: other.dxf is not confirmed: the engineer runs: "
+        f"harness answer {work} {ids['other.dxf']} --text",
         "grid_system_select",
         # two units questions and the project-level file set question
         f"intake: 3 blocking question(s) open ({ids['other.dxf']}, {ids['set.dxf']}, "
@@ -659,7 +660,7 @@ def test_gate1_needs_a_units_answer_for_every_probed_file(ready):
     reasons = build_status(work)["gate1"]["reasons"]
     qid = find(questions_of(work, "questions.json"), "units_confirm_all", "other.dxf")["id"]
     expected = (
-        f"units: other.dxf is not confirmed: harness answer {work} {qid} "
+        f"units: other.dxf is not confirmed: the engineer runs: harness answer {work} {qid} "
         '--text "..." --by "..." --role engineer --value unit='
     )
     assert any(r.startswith(expected) for r in reasons), reasons
@@ -819,7 +820,10 @@ def test_a_unit_answered_on_another_units_code_does_not_close_units_confirm_all(
     (work / "answers.json").write_text(json.dumps(answers), encoding="utf-8")
     qid = find(questions_of(work, "questions.json"), "units_confirm_all", "set.dxf")["id"]
     reasons = build_status(work)["gate1"]["reasons"]
-    assert any(r.startswith(f"units: set.dxf is not confirmed: harness answer {work} {qid}") for r in reasons)
+    assert any(
+        r.startswith(f"units: set.dxf is not confirmed: the engineer runs: harness answer {work} {qid}")
+        for r in reasons
+    )
 
 
 def test_an_inventory_from_an_older_intake_is_read_and_asks_for_an_intake_rerun(world, capsys):
