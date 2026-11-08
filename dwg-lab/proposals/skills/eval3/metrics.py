@@ -20,6 +20,18 @@ Metrics (definitions are part of the EVAL-3 protocol, EVAL-3-PROTOCOL.md §4):
                        `procedural` (table below, fixed before the run); `unclassified` is reported and counts
                        as procedural for the pass bar (conservative).
   M5 questions         registry counts by status and by producer.
+
+Pre-run amendment (2026-11-08, before any EVAL-3 output existed; EVAL-3-PROTOCOL.md §4):
+  M4 status view       the M4 above reads the registry's `blocking` flag, which a producer may set to false
+                       for a closure that `harness status` refuses (every closure is refused when its closing
+                       answer is simulated). `M4_status` counts what status counts: open blocking questions of
+                       the gate-1 producers after status's own closure and answer checks, classed as above.
+                       It is the pass-bar M4. `M4_status_if_engineer` repeats it on a temporary copy of the
+                       work folder whose simulated answers are relabelled engineer: a diagnostic only, to show
+                       what the closures would do with real engineer answers. The registry-based M4 stays,
+                       as `M4_gate1_blockers`, for comparison with the eval-2 dry run.
+  M3 background        `--background-repo` points the background vocabulary at the repo copy whose skills
+                       were under test (rev 5), instead of this script's own repo.
 """
 
 from __future__ import annotations
@@ -324,10 +336,80 @@ def m4_m5_questions(work: Path) -> tuple[dict[str, Any], dict[str, Any]]:
     return m4, m5
 
 
+def _classify(codes: list[tuple[str, str]]) -> dict[str, Any]:
+    classes: dict[str, list[str]] = {"content": [], "procedural": [], "unclassified": []}
+    for qid, code in codes:
+        cls = (
+            "content"
+            if code in CONTENT_CODES
+            else "procedural"
+            if code in PROCEDURAL_CODES
+            else "unclassified"
+        )
+        classes[cls].append(f"{qid}:{code}")
+    total = len(codes)
+    procedural = len(classes["procedural"]) + len(classes["unclassified"])
+    return {
+        "open_blocking": total,
+        "procedural_share": round(procedural / total, 4) if total else None,
+        **{k: {"count": len(v), "ids": v} for k, v in classes.items()},
+    }
+
+
+def m4_status_view(work: Path) -> dict[str, Any]:
+    """Open blocking questions of the gate-1 producers as `harness status` counts them (all ids, no cap)."""
+    from tekla_harness import status
+    from tekla_harness.questions import active_answers, load_ledger
+
+    inventory = _load(work / "inventory.json")
+    ledger = load_ledger(work, inventory["project_id"], create=False)
+    active = active_answers(ledger.answers)
+    state = status.closure_state(work, ledger)
+    closed = frozenset(state.accepted)
+    by_id = {e["id"]: e["code"] for e in ledger.registry["questions"].values()}
+    out: dict[str, Any] = {"by_producer": {}}
+    gate: list[tuple[str, str]] = []
+    labels = dict(status.PRODUCERS)
+    for label in status.GATE_PRODUCERS:
+        _counts, open_ids = status._question_counts(
+            ledger.registry, active, labels[label], closed, state.forced
+        )
+        out["by_producer"][label] = len(open_ids)
+        gate += [(qid, by_id[qid]) for qid in open_ids]
+    out.update(_classify(gate))
+    out["closures_accepted"] = len(state.accepted)
+    out["closures_refused"] = len(state.reasons)
+    return out
+
+
+def m4_status_if_engineer(work: Path) -> dict[str, Any]:
+    """Diagnostic: M4_status on a temporary copy whose simulated answers are relabelled engineer."""
+    import shutil
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        copy = Path(tmp) / "work"
+        shutil.copytree(work, copy, ignore=shutil.ignore_patterns("converted", "probe", ".harness.lock*"))
+        answers_path = copy / "answers.json"
+        if answers_path.exists():
+            doc = _load(answers_path)
+            for answer in doc.get("answers", []):
+                if answer.get("answered_by_role") == "simulated":
+                    answer["answered_by_role"] = "engineer"
+            answers_path.write_text(json.dumps(doc, ensure_ascii=False), encoding="utf-8")
+        return m4_status_view(copy)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
     parser.add_argument("project_dir", type=Path)
     parser.add_argument("--prose", nargs="*", default=None)
+    parser.add_argument(
+        "--background-repo",
+        type=Path,
+        default=Path(__file__).resolve().parents[4],
+        help="repo whose skills were under test (M3 background vocabulary); default: this script's repo",
+    )
     args = parser.parse_args(argv)
     project: Path = args.project_dir
     work = project / "work"
@@ -345,8 +427,11 @@ def main(argv: list[str] | None = None) -> int:
         "prose_missing": missing,
         "M1_blocked_share": m1_blocked_share(indexes),
         "M2_producer_values_from_blocked": m2_producer_values(work, indexes),
-        "M3_prose_leak_candidates": m3_prose_leaks(indexes, prose, Path(__file__).resolve().parents[4]),
+        "M3_prose_leak_candidates": m3_prose_leaks(indexes, prose, args.background_repo),
+        "M3_background_repo": str(args.background_repo),
         "M4_gate1_blockers": m4,
+        "M4_status": m4_status_view(work),
+        "M4_status_if_engineer": m4_status_if_engineer(work),
         "M5_questions": m5,
     }
     json.dump(doc, sys.stdout, ensure_ascii=False, indent=2)

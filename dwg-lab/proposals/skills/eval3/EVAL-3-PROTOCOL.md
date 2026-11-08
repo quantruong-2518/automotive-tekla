@@ -109,6 +109,30 @@ does not fail the eval on its own; it is listed with its cause and must be fixed
 Verdict: PASS (all of 1–7, no regression) → supervised read-only shadow pilot. PASS WITH CONDITIONS (1–4
 hold, 5–7 or the R arm fail) → pilot after the named fixes. FAIL (any of 1–4 fails) → another tool wave.
 
+## 8a. Pre-run amendments (2026-11-08, before any EVAL-3 output existed)
+
+Each is recorded again under "Deviations" in the report. None changes the pass bar's thresholds.
+
+1. **M4 counts what `harness status` counts.** Tool wave 2 lets a producer write `blocking: false` for a
+   closure that status refuses, and status refuses every closure whose closing answer is simulated (D4).
+   The registry-based M4 would then under-count the blockers status sees. Criterion 5 now uses
+   `M4_status` (open blocking questions of the gate-1 producers after status's closure and answer checks).
+   `M4_gate1_blockers` (registry) is still reported for comparison with the eval-2 dry run, and
+   `M4_status_if_engineer` (same, with simulated answers relabelled engineer on a temporary copy) is a
+   diagnostic only: it shows what fixes 5a–5c would remove with real engineer answers.
+2. **M3 background = the skills under test.** `metrics.py --background-repo <scratch repo copy>`, so rev-5
+   wording (e.g. "tiêu đề bị chặn", "mô phỏng") is background, not a leak candidate.
+3. **Runners are not spawned as the repo's `doc-reader` / `planner` agent types** (§6 steps 1, 4, 5): those
+   definitions preload the active rev-4 skills. Runners are fresh general-purpose Opus agents that take
+   the role file `$REPO/.claude/agents/<role>.md` and read the rev-5 SKILL.md files from the scratch repo
+   copy only; they do not call the Skill tool.
+4. **Isolation.** The scratch repo copy is a `git archive` of the frozen commit without
+   `dwg-lab/proposals/skills/eval3/`; drawings are copied per arm into the project's `input/`. The answer
+   key and the probe outputs are made unreadable while runners, report writers and planners run, and
+   readable again for the simulator (H) and the judges; the key's sha256 is re-checked before judging.
+5. **Judges per arm.** J1 and J2 are two fresh Opus judges per arm (four judge agents), each with the full
+   brief; they never see this protocol file.
+
 ## 9. Limits stated up front
 
 - One run per arm: run-to-run variance is not measured. The report says so.
