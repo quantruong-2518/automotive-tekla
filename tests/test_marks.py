@@ -490,6 +490,28 @@ def test_a_blocked_mark_column_header_still_blocks_the_table(gate):
     assert "g1" not in {m["key"] for m in matching(gate)["matched"]}
 
 
+def test_legacy_ascii_suspect_header_cells_gate_like_any_other_block_reason(tmp_path):
+    """P1's legacy_ascii_suspect (ASCII text that looks like TCVN3/VNI written in ASCII) reaches marks
+    through text_gate: a non-mark header cell goes to blocked_columns, a mark-column header still blocks."""
+    work = build_gate_work(tmp_path, blocked_word="haFn", g_mark_header="tiESt")
+    out = extract_marks(work, tmp_path / "input")
+    assert validate("marks", out) == []
+    e, f = table_with(out, "KÝ HIỆU"), table_with(out, "SỐ HIỆU")
+    for t, col in ((e, 3), (f, 1)):
+        suspect = header_entry(t, "haFn")
+        assert suspect["block_reason"] == "legacy_ascii_suspect"
+        assert t["header_blocked"] is False
+        assert t["blocked_columns"] == [
+            {"column": col, "entry_id": suspect["entry_id"], "reason": "legacy_ascii_suspect"}
+        ]
+    assert {m["key"] for m in matching(out)["matched"]} >= {"e1", "f1"}
+    (g,) = [t for t in out["tables"] if t["header_blocked"]]
+    assert g["header_block_reasons"] == ["legacy_ascii_suspect"]
+    assert [b["reason"] for b in out["blocked_marks"] if b["table"] == g["id"]] == [
+        "header_blocked:legacy_ascii_suspect"
+    ] * 2
+
+
 def test_a_keywordless_grid_without_blocked_header_text_is_no_schedule(gate):
     """Mark-shaped texts between drawn lines, under a header with neither a keyword nor blocked text,
     are as likely a plan region: no table, and the texts stay plan marks."""

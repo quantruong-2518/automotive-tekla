@@ -187,20 +187,31 @@ def _styled_table(msp, x0: float, cols: tuple[float, ...], header, rows) -> None
             _cell_text(msp, text, cx, GATE_TOP - GATE_ROW * i - GATE_ROW / 2, style)
 
 
-def build_gate_work(base: Path, plan_texts: tuple[str, ...] = GATE_PLAN) -> Path:
+def _swap(header, old: str, new: str):
+    return tuple((new if text == old else text, style) for text, style in header)
+
+
+def build_gate_work(
+    base: Path,
+    plan_texts: tuple[str, ...] = GATE_PLAN,
+    *,
+    blocked_word: str = KINH,
+    g_mark_header: str = "Abçd",
+) -> Path:
     """Tables E, F, G, H and `plan_texts` on sheet S-101: `base/input` and `base/work` (intake + sheets).
-    Returns the work folder; the DXF is native (lines need --input-dir)."""
+    Returns the work folder; the DXF is native (lines need --input-dir). `blocked_word` replaces KÍNH in
+    the E and F headers and `g_mark_header` table G's mark-column header (both in BLOCKED_STYLE)."""
     root = base / "input"
     (root / "plans").mkdir(parents=True)
     doc = readfile(str(build_set(base, "src.dxf")))
     doc.styles.add(BLOCKED_STYLE, font="vntimeh.shx")
     msp = doc.modelspace()
-    _styled_table(msp, E_X, E_COLS, E_HEADER, E_ROWS)
+    _styled_table(msp, E_X, E_COLS, _swap(E_HEADER, KINH, blocked_word), E_ROWS)
     msp.add_text(BLOCKED_SUB, height=TH / 2, dxfattribs={"style": BLOCKED_STYLE}).set_placement(
         (E_X + E_COLS[0] / 2, GATE_TOP - GATE_ROW * 0.85), align=TextEntityAlignment.MIDDLE_CENTER
     )
-    _styled_table(msp, F_X, F_COLS, F_HEADER, F_ROWS)
-    _styled_table(msp, G_X, G_COLS, G_HEADER, G_ROWS)
+    _styled_table(msp, F_X, F_COLS, _swap(F_HEADER, KINH, blocked_word), F_ROWS)
+    _styled_table(msp, G_X, G_COLS, _swap(G_HEADER, "Abçd", g_mark_header), G_ROWS)
     _styled_table(msp, H_X, H_COLS, H_HEADER, H_ROWS)
     for i, text in enumerate(plan_texts):
         msp.add_text(text, height=TH, dxfattribs={"insert": (PLAN_X, PLAN_TOP - i * PLAN_STEP)})
