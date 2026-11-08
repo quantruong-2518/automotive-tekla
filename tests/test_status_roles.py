@@ -79,7 +79,9 @@ def test_a_simulated_units_answer_keeps_gate1_closed_and_its_reason_names_the_qu
     record_answer(work, q["id"], "mm (simulated)", "agent", {"unit": "mm"}, role="simulated")
     gate1 = build_status(work)["gate1"]
     assert gate1["ready_for_gate1"] is False
-    (reason,) = [r for r in gate1["reasons"] if q["id"] in r]
+    # the question stays open too (F3): only the engineer's answer settles it
+    assert f"intake: 1 blocking question(s) open ({q['id']})" in gate1["reasons"]
+    (reason,) = [r for r in gate1["reasons"] if q["id"] in r and not r.startswith("intake: ")]
     assert reason.startswith(f"answers: {q['id']} units_confirm_all (set.dxf)") and "simulated" in reason
     assert "the engineer must answer it again themselves" in reason
     assert f"({ENGINEER_STEP}harness answer " in reason
@@ -126,7 +128,8 @@ def test_one_legacy_units_answer_blocks_gate1_until_the_engineer_answers_again(r
     gate1 = build_status(work)["gate1"]
     assert gate1["ready_for_gate1"] is False
     assert [a["question_id"] for a in gate1["non_engineer_answers"]] == [q["id"]]
-    (reason,) = gate1["reasons"]
+    reason, still_open = gate1["reasons"]
+    assert still_open == f"intake: 1 blocking question(s) open ({q['id']})"  # not settled either (F3)
     assert reason.startswith(f"answers: {q['id']} units_confirm_all (set.dxf) was answered by no recorded")
     record_answer(work, q["id"], "mm", "the engineer", {"unit": "mm"}, role="engineer")
     assert build_status(work)["gate1"] == ready_gate1(work)

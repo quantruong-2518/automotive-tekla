@@ -557,6 +557,11 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
     when some blocked entry has a reason an encoding answer can lift; a sheet whose blocked entries are all
     `legacy_ascii_suspect`, or that has none, lists no question. Schema descriptions of `question_ids` and
     `legacy_ascii_suspect` updated (no structural change, `$id` stays 0.1).
+- Tool wave 2, package F3 (review of gate 1 and questions.md):
+  - Only the engineer's answer settles a question of intake, read-structure, grid-system or the reader:
+    a simulated or role-less answer leaves it in `blocking_open` / `blocking_open_ids`, out of `answered`,
+    and in questions.md section 2, where the answer is shown labelled "(mô phỏng)" or "(chưa rõ vai
+    trò)". Every non-engineer answer questions.md prints carries that label.
 - `guard_tekla_write.py` now exits 2 (the blocking code) on any internal error instead of
   relying on an undocumented `onFailure` setting; the setting was removed.
 - `guard_tekla_write.py` no longer blocks commands that only mention `tekla-cli` as data

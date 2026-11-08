@@ -9,7 +9,10 @@ Sources (all read-only):
   * every question document of `questions.QUESTION_DOCUMENTS` that exists (intake, read-structure, callouts,
     marks, grid-system, reader): the question text, refs, counts and subjects;
   * `question-registry.json` + `answers.json`: which question is live, its producer and blocking flag, and
-    whether it is answered. The documents' own `answer` fields are NOT used (they can lag behind);
+    whether it is answered. The documents' own `answer` fields are NOT used (they can lag behind). An
+    answer to a question gate 1 reads settles it only when the engineer gave it (status.answer_closes):
+    a simulated or role-less one stays open with the answer shown; every answer that is not the
+    engineer's is labelled "(mô phỏng)" or "(chưa rõ vai trò)";
   * `harness status` (`status.build_status`): the gate-1 reasons and the per-step counts;
   * `grid-systems.json` + its SVGs and `structure-summary.json`: the proposals shown next to the questions
     they inform. A proposal is always labelled "ĐỀ XUẤT — chưa xác nhận" and is never an answer;
@@ -68,6 +71,7 @@ from tekla_harness.schemas import validate
 from tekla_harness.status import (
     NOT_CLOSED_BY_AN_ANSWER,
     StatusError,
+    answer_closes,
     build_status,
     closure_state,
 )
@@ -96,6 +100,9 @@ STEP_TITLES = {
     "reader": "người đọc bản vẽ",
 }
 OUTPUT_TITLES = {"fresh": "mới", "stale": "cũ", "missing": "thiếu", "n/a": "—"}
+# who answered, when it is not the engineer (answers.json answered_by_role; none: recorded before roles)
+ROLE_TITLES = {"simulated": "mô phỏng"}
+NO_ROLE = "chưa rõ vai trò"
 CLOSURE_TITLES = {
     "not_selected": "một trong hai hệ lưới không được chọn",
     "separate": "hai hệ lưới là hai công trình riêng",
@@ -137,10 +144,11 @@ class Item:
     @property
     def is_open(self) -> bool:
         """Open until answered or closed (lifecycle), except that an answer never closes a code no answer
-        closes (the same rules as `harness status`)."""
+        closes, and a gate producer's question needs the engineer's answer (the same rules as `harness
+        status`: status.answer_closes)."""
         if self.closed_by is not None:
             return False
-        return self.answer is None or self.code in NOT_CLOSED_BY_AN_ANSWER
+        return not answer_closes(self.producer, self.code, self.answer)
 
 
 @dataclass
@@ -472,10 +480,17 @@ def question_lines(item: Item, ctx: Context, level: str = "#####") -> list[str]:
     lines += supplement_lines(item)
     if item.answer is None:
         lines.append("- **Trả lời:** _chưa có_")
-    else:  # only a code no answer closes is rendered open with an answer: show it, it closes nothing
+    elif item.code in NOT_CLOSED_BY_AN_ANSWER:  # a code no answer closes: show the answer, it closes nothing
         block = _answer_block(item.answer)
         lines.append(
             "- **Trả lời:** không đóng được câu này" + block[0].replace(" — trả lời", "; câu trả lời cũ", 1)
+        )
+        lines += block[1:]
+    else:  # not the engineer's answer to a question gate 1 reads (status.answer_counts): shown, not counted
+        block = _answer_block(item.answer)
+        lines.append(
+            "- **Trả lời:** chưa tính vì không phải kỹ sư trả lời; kỹ sư tự trả lời lại"
+            + block[0].replace(" — trả lời", "; câu trả lời hiện có", 1)
         )
         lines += block[1:]
     if item.code == CONFLICT_CODE and not item.blocking:
@@ -534,16 +549,25 @@ def _value_text(value: Any) -> str:
     return ",".join(str(v) for v in value) if isinstance(value, list) else str(value)
 
 
+def _role_label(answer: dict[str, Any]) -> str:
+    """' (mô phỏng)' / ' (chưa rõ vai trò)' after a non-engineer answer; nothing after the engineer's."""
+    role = answer.get("answered_by_role")
+    if role == "engineer":
+        return ""
+    return f" ({ROLE_TITLES.get(role, str(role)) if role is not None else NO_ROLE})"
+
+
 def _answer_block(answer: dict[str, Any]) -> list[str]:
     text = answer["answer_text"]
     values = ", ".join(f"{k}={_value_text(v)}" for k, v in sorted(answer["values"].items()))
     tail = f"{answer['answered_by']}, {answer['answered_on']}" + (
         f"; giá trị {code_span(values)}" if values else ""
     )
+    head = " — trả lời" + _role_label(answer)
     if "\n" not in text and "\r" not in text:
-        return [f" — trả lời: {code_span(text)} ({tail})"]
+        return [f"{head}: {code_span(text)} ({tail})"]
     fence = "`" * max(3, max((len(r) for r in re.findall(r"`+", text)), default=0) + 1)
-    return [f" — trả lời ({tail}):", f"  {fence}text", *(f"  {ln}" for ln in text.splitlines()), f"  {fence}"]
+    return [f"{head} ({tail}):", f"  {fence}text", *(f"  {ln}" for ln in text.splitlines()), f"  {fence}"]
 
 
 def _answered_lines(items: list[Item]) -> list[str]:

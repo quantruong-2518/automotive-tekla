@@ -39,6 +39,8 @@ Tool wave 2:
     is listed in `gate1.non_engineer_answers`. So is a non-engineer active answer whose question is not live
     (no registry entry, or obsolete) when a gate check still reads its code from every active answer (units,
     grid-system: GATE_READ_CODES); its reason names the answer's key. Both lists appear only when not empty.
+    Such an answer does not settle its question either (answer_counts): the question stays in
+    `blocking_open` / `blocking_open_ids` and out of `answered`, as in questions.md section 2.
 
 Exit codes (AGENTS.md): 0 for any readable work folder (status is information, not a verdict), 1 an
 unreadable or invalid document, 2 not a work folder.
@@ -149,6 +151,21 @@ def _id_number(question_id: str) -> int:
 # --- questions ------------------------------------------------------------------------------------
 
 
+def answer_counts(producer: str, answer: dict[str, Any] | None) -> bool:
+    """An active answer counts for its question when the question's (registry) producer is not read by gate 1,
+    or when the engineer gave it: a simulated or role-less answer to a gate producer's question leaves the
+    question open (the same rule in `harness status` and questions.md)."""
+    if answer is None:
+        return False
+    return producer not in GATE_ANSWER_PRODUCERS or _by_engineer(answer)
+
+
+def answer_closes(producer: str, code: str, answer: dict[str, Any] | None) -> bool:
+    """The answer takes its question out of the open ones: it counts (answer_counts), and the code is one an
+    answer closes (an answer to a grid_system_conflict question never does)."""
+    return answer_counts(producer, answer) and code not in NOT_CLOSED_BY_AN_ANSWER
+
+
 def _question_counts(
     registry: dict[str, Any],
     active: dict[str, dict[str, Any]],
@@ -162,7 +179,7 @@ def _question_counts(
     live = {k: e for k, e in entries.items() if e["status"] != "obsolete"}
     blocking = {k: e for k, e in live.items() if (e.get("blocking", True) or k in forced) and k not in closed}
     open_ids = sorted(
-        (e["id"] for k, e in blocking.items() if k not in active or e["code"] in NOT_CLOSED_BY_AN_ANSWER),
+        (e["id"] for k, e in blocking.items() if not answer_closes(producer, e["code"], active.get(k))),
         key=_id_number,
     )
     counts = {
@@ -170,7 +187,7 @@ def _question_counts(
         "blocking": len(blocking),
         "blocking_unknown": sum(1 for e in live.values() if "blocking" not in e),
         "blocking_open": len(open_ids),
-        "answered": sum(1 for k in live if k in active),
+        "answered": sum(1 for k in live if answer_counts(producer, active.get(k))),
         "obsolete": len(entries) - len(live),
     }
     return counts, open_ids
