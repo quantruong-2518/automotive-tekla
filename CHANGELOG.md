@@ -269,6 +269,11 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
   an alias, and links inside either folder or hard-linked files in the copy. Research note
   `docs/research/windows-file-identity.md`. Windows file-system tests run on CI windows-latest
   only (`Category=Windows`); Stryker config `tekla/TeklaCore.Tests/stryker-config.json`.
+- Step 3 S1b contract (ADR-0010 Amendment 1): new schema `spec-receipt`
+  (`urn:tekla-harness:schema:spec-receipt:0.1`) and example — the receipt
+  `<spec file name>.receipt.json` binds the spec's exact bytes (SHA-256), the spec schema `$id`
+  and the validator `rules_version`; `*.receipt.json` is git-ignored. Shared strict-JSON corpus
+  `tests/fixtures/strict-json/` (accept/reject) for the Python and C# readers.
 - Versioning note: the reading-toolchain schemas above have not been released; they stay `0.1` and their
   changes are recorded here until the first tagged release, from which every change bumps its `$id`
   (AGENTS.md). Pending engineer confirmation.
