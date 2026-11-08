@@ -1013,20 +1013,7 @@ def test_a_simulated_answer_does_not_open_gate1(ready):
     assert q["id"] in reason and "simulated" in reason and "--role engineer" in reason
 
 
-def test_an_answer_without_a_role_counts_as_the_engineer_until_the_flag_flips(ready, monkeypatch):
-    from tekla_harness import status as status_module
-
-    _, work = ready
-    answers = load(work / "answers.json")
-    for a in answers["answers"]:
-        a.pop("answered_by_role", None)
-    (work / "answers.json").write_text(json.dumps(answers), encoding="utf-8")
-    assert status_module.LEGACY_ANSWER_IS_ENGINEER is True
-    assert build_status(work)["gate1"] == ready_gate1(work)
-    monkeypatch.setattr(status_module, "LEGACY_ANSWER_IS_ENGINEER", False)
-    gate1 = build_status(work)["gate1"]
-    assert gate1["ready_for_gate1"] is False
-    assert gate1["non_engineer_answers"] and {a["role"] for a in gate1["non_engineer_answers"]} == {None}
+# answers without a role (legacy): tests/test_status_roles.py
 
 
 def test_record_answer_refuses_an_unknown_role(world):

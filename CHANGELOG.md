@@ -373,6 +373,9 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
 - Tool wave 2 package P3, answer provenance and reader supplements (EVAL-2 fixes 10 and 7):
   - `harness answer --role engineer|simulated` is required (exit 2 without it). Every `harness answer`
     command that `harness status` and `harness questions-md` print names `--role engineer` after `--by`.
+  - Gate 1 no longer counts an answer recorded without a role (DESIGN D4): like a `simulated` answer to a
+    question of intake, read-structure, grid-system or the reader, it is a gate-1 reason naming its
+    question id (`gate1.non_engineer_answers`, role null) until the engineer answers again.
 
 ### Changed
 - Question lifecycle (tool wave 2, EVAL-2 fix 5):

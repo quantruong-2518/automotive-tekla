@@ -24,13 +24,13 @@ documents (they can be stale after `harness answer` or a producer rerun):
 An entry written to the registry before it recorded the `blocking` flag counts as blocking (never assume a
 question is harmless) and is reported in `blocking_unknown`.
 
-Tool wave 2 seam:
+Tool wave 2:
   * a question `lifecycle.closures` closes (another answer or selection settles it) leaves the `blocking` and
     `blocking_open` counts and is listed in `gate1.closed` with its reason;
-  * an active answer to a gate-relevant question (producers intake, read-structure, grid-system, reader)
-    that the engineer did not give (`answered_by_role` 'simulated') is a gate-1 reason naming its question id
-    and is listed in `gate1.non_engineer_answers`. An answer without a role counts as the engineer's while
-    LEGACY_ANSWER_IS_ENGINEER is True (package P3 flips it). Both lists appear only when not empty.
+  * an active answer to a live gate-relevant question (producers intake, read-structure, grid-system,
+    reader: every question gate 1 reads) that the engineer did not give (`answered_by_role` 'simulated', or
+    no role at all: an answer recorded before roles existed) is a gate-1 reason naming its question id and
+    is listed in `gate1.non_engineer_answers`. Both lists appear only when not empty.
 
 Exit codes (AGENTS.md): 0 for any readable work folder (status is information, not a verdict), 1 an
 unreadable or invalid document, 2 not a work folder.
@@ -78,9 +78,9 @@ PRODUCERS = (
 GATE_PRODUCERS = ("intake", "read-structure", "grid-system", "reader")
 # their registry producers: an answer to one of their questions must be the engineer's
 GATE_ANSWER_PRODUCERS = frozenset(dict(PRODUCERS)[label] for label in GATE_PRODUCERS)
-# An answer recorded before answered_by_role existed counts as the engineer's while this is True (tool wave 2
-# seam). Package P3 sets it to False: such answers then have to be given again by the engineer (DESIGN D4).
-LEGACY_ANSWER_IS_ENGINEER = True
+# An answer recorded without answered_by_role (before roles existed) does not count as the engineer's: the
+# engineer answers it again with --role engineer (DESIGN D4). Kept as a named constant so the rule is visible.
+LEGACY_ANSWER_IS_ENGINEER = False
 # an answer to these never closes them: they close through another question's structured values
 NOT_CLOSED_BY_AN_ANSWER = frozenset({CONFLICT_CODE})
 # every printed command names the role: gate 1 counts the engineer's answers only
