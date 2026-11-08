@@ -75,7 +75,9 @@ the C# reader cannot see the same way. Decisions:
    and for a spec `lot` other than `--lot`. Reason: contract rule 3 is a safety rule and the
    contract defines `5` as "refused by safety rule"; decision 2 above said `1` and is replaced.
    Missing or malformed path arguments stay `2`; an I/O error reading a file that exists (access
-   denied, a folder, a sharing violation) is `3`.
+   denied, a folder, a sharing violation) is `3`. A path with a character Windows does not allow
+   (e.g. `a<b`) may be `2` on .NET Framework (argument check) and `3` on .NET (OS error): both
+   refuse, so the difference is accepted.
 7. **Read-time checks in C#** (decision 3) also include: spec `schema_version` matches the
    receipt's `spec_schema_id`; `lot` is an integer token within int32; `spec_id` unique within
    the file (contract rule 6 relies on it, so the reader enforces it rather than trusting it).

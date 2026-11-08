@@ -14,12 +14,19 @@ namespace TeklaHarness.Core.Json;
 internal static class DecimalToDouble
 {
     /// <summary>
-    /// Significant digits kept. A tie between two doubles has at most 767 significant digits, so
-    /// truncating to more than that and keeping a "non-zero tail" digit never changes the rounding.
+    /// Significant digits kept. A double or a tie between two doubles has at most 768 significant
+    /// digits (e.g. 2^-1021 - 2^-1075 = (2^54 - 1) * 2^-1075). A number with at most 800 significant
+    /// digits in the same decade is a multiple of 10^e, so none lies strictly between D*10^e and
+    /// (D+1)*10^e: truncating to 800 digits and appending a non-zero "sticky" digit never changes the
+    /// rounding.
     /// </summary>
     private const int MaxSignificantDigits = 800;
 
-    /// <summary>Exponents saturate here: any non-zero value is then 0 or infinite anyway.</summary>
+    /// <summary>
+    /// Exponents saturate here: any non-zero value is then 0 or infinite anyway. Precondition: the
+    /// token comes from <see cref="StrictJson"/>, whose 16 MiB input cap keeps the shift from the digit
+    /// layout below about 1.7 * 10^7, far from this cap minus 1124.
+    /// </summary>
     private const long ExponentCap = 1_000_000_000;
 
     /// <summary>Smallest binary exponent: the subnormal unit is 2^-1074.</summary>
