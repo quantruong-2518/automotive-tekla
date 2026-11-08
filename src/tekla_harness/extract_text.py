@@ -9,7 +9,8 @@ interpreted: no title block, no grid, no level. That is the job of later slices 
 Decoding order (the hazard is documented in docs/research/vietnamese-legacy-encodings.md):
   1. split an MTEXT into runs at inline font switches (`\\F`/`\\f`), with ezdxf's MTextParser;
   2. choose each run's encoding. Precedence: code-point evidence, then FONT NAMES via `encoding.font_hint`
-     (inline font, else the text style), then an APPROVED row of the knowledge table (text style runs
+     (inline font, else the text style: its name, font file, then its TrueType family from the ACAD XDATA,
+     source `style_family`), then an APPROVED row of the knowledge table (text style runs
      only, and only when `font_hint` said nothing), else unknown. Evidence: legacy TCVN3/VNI text is one
      byte per character, so a Vietnamese letter above U+00FF (or a tone mark) proves the run is Unicode
      whatever the font name says (`encoding.has_unicode_vietnamese`); it is judged on the text as the
@@ -59,7 +60,7 @@ from tekla_harness.encoding import (
     scrub_surrogates,
 )
 from tekla_harness.knowledge import FontEncodingRow, FontEncodingTable, default_font_encodings
-from tekla_harness.read_dxf import CONVERTER_CAPS, handles_reliable, num
+from tekla_harness.read_dxf import CONVERTER_CAPS, handles_reliable, num, text_style_family
 from tekla_harness.readlog import timed_attempt
 
 SCHEMA_VERSION = "0.1"
@@ -94,6 +95,7 @@ _SOURCE_ORDER = (
     "knowledge_table",
     "mtext_inline_font",
     "style_font",
+    "style_family",
 )  # entry-level source
 
 
@@ -201,7 +203,7 @@ def _has_unknown_code(text: str) -> bool:
 @dataclass(frozen=True)
 class _StyleDecision:
     hint: FontHint
-    source: str = "style_font"  # style_font | knowledge_table
+    source: str = "style_font"  # style_font | style_family | knowledge_table
     pattern: str | None = None  # the approved knowledge row that decided
     conflict: bool = False
     proposed: tuple[FontEncodingRow, ...] = ()
@@ -218,6 +220,7 @@ class _Context:
     layer_state: dict[str, str]
     knowledge: FontEncodingTable = field(default_factory=FontEncodingTable)
     style_cache: dict[str, tuple[str | None, bool]] = field(default_factory=dict)
+    family_cache: dict[str, str | None] = field(default_factory=dict)
     decision_cache: dict[str, _StyleDecision] = field(default_factory=dict)
     proposed_hits: dict[int, tuple[FontEncodingRow, Counter[str]]] = field(default_factory=dict)
     block_info: dict[str, tuple[bool, tuple[str, ...]]] = field(default_factory=dict)
@@ -273,15 +276,17 @@ class _Context:
         return False
 
     def style_decision(self, style: str | None) -> _StyleDecision:
-        """Encoding hint of a text style: `font_hint`, then an approved knowledge row if that says nothing."""
+        """Encoding hint of a text style: `font_hint` (name, font file, TrueType family), then an approved
+        knowledge row if that says nothing."""
         key = style or ""
         if key not in self.decision_cache:
             if not style:
                 self.decision_cache[key] = _StyleDecision(FontHint("unknown", None))
             else:
                 font_file, _exists = self.style_font(style)
-                hint = font_hint(style, font_file)
-                decision = _StyleDecision(hint)
+                hint = font_hint(style, font_file, self.style_family(style))
+                source = "style_family" if hint.decided_by == "family" else "style_font"
+                decision = _StyleDecision(hint, source)
                 if hint.encoding == "unknown":
                     found = self.knowledge.match(style, font_file)
                     decision = _StyleDecision(hint, conflict=bool(found.conflict), proposed=found.proposed)
@@ -307,6 +312,13 @@ class _Context:
             else:
                 self.style_cache[style] = (None, False)
         return self.style_cache[style]
+
+    def style_family(self, style: str) -> str | None:
+        """TrueType family of a text style (read_dxf.text_style_family); None when absent or empty."""
+        if style not in self.family_cache:
+            entry = self.doc.styles.get(style) if self.doc.styles.has_entry(style) else None
+            self.family_cache[style] = (text_style_family(entry) or None) if entry is not None else None
+        return self.family_cache[style]
 
 
 def _decode_run(ctx: _Context, run: _Run, decision: _StyleDecision) -> _RunResult:

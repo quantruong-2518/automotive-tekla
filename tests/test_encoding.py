@@ -454,6 +454,62 @@ def test_font_hint(style, font_file, expected):
     assert font_hint(style, font_file) == expected
 
 
+# --- TrueType family (tool wave 2, fix 2a; capital rule on the family: default D3) -------------------
+
+
+def test_font_hint_reads_the_ttf_family_after_the_name_and_the_file():
+    # EVAL-2: styles whose family is '.VnAvantH' carried most blocked text; the file name says nothing
+    hint = font_hint("kt..1", "VHAVAN_2.TTF", ".VnAvantH")
+    assert hint == FontHint("tcvn3", True) and hint.decided_by == "family"
+
+
+@pytest.mark.parametrize(
+    ("style", "font_file", "family", "expected", "decided_by"),
+    [
+        ("kt..1", "VHAVAN_2.TTF", ".VnArial", FontHint("tcvn3", False), "family"),
+        ("kt..1", "VHAVAN_2.TTF", "@.VnArialH", FontHint("tcvn3", True), "family"),
+        ("kt..1", "x.ttf", "VNI-Times", FontHint("vni", None), "family"),
+        # the style name and the font file come first
+        (".VnTime", None, "VNI-Times", FontHint("tcvn3", False), "name"),
+        ("kt..1", ".VnTime.ttf", "VNI-Times", FontHint("tcvn3", None), "font"),
+        ("Arial", None, ".VnArial", FontHint("unicode", False), "name"),
+        # a Unicode family never decides: a legacy font file may carry a Unicode-looking family, and
+        # 'unicode' would let mojibake through the gate (the knowledge table decides such a style)
+        ("kt..1", "VHARIAL.TTF", "Arial", FontHint("unknown", None), None),
+        # nothing in any field
+        ("kt..1", "VHAVAN_2.TTF", "", FontHint("unknown", None), None),
+        ("kt..1", "VHAVAN_2.TTF", None, FontHint("unknown", None), None),
+        ("kt..1", "VHAVAN_2.TTF", "AvantGarde", FontHint("unknown", None), None),
+    ],
+)
+def test_font_hint_family_order(style, font_file, family, expected, decided_by):
+    hint = font_hint(style, font_file, family)
+    assert hint == expected and hint.decided_by == decided_by
+
+
+@pytest.mark.parametrize(
+    ("style", "family", "capital"),
+    [
+        (".VnTimeH", ".VnTimeH", True),  # both say capital
+        (".VnTime", ".VnTime", False),
+        ("VntimeH", None, True),  # the style name alone, as before
+        ("kt..1", ".vnarialh", None),  # all lowercase family: the H suffix is not readable
+        ("kt..1", "AvantGarde", None),  # not a legacy-looking family: no hint
+        (".VnTime", ".VnTimeH", None),  # name and family disagree: never guess
+        (".VnTimeH", ".VnTime", None),
+        (".VnTimeH", "Arial", True),  # a non-legacy family says nothing about case
+    ],
+)
+def test_capital_hint_from_the_family(style, family, capital):
+    assert font_hint(style, None, family).capital_font is capital
+
+
+def test_decided_by_names_the_field_that_gave_the_encoding():
+    assert font_hint(".VnTime").decided_by == "name"
+    assert font_hint("MyStyle", ".VnTime.ttf").decided_by == "font"
+    assert font_hint("Standard", "txt").decided_by is None
+
+
 # --- Unicode evidence ---------------------------------------------------------------------------
 
 

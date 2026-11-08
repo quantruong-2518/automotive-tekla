@@ -623,13 +623,23 @@ def _style_names(names: list[str]) -> str:
     return shown + (f" (+{len(names) - MAX_STYLES_LISTED} more)" if len(names) > MAX_STYLES_LISTED else "")
 
 
+def text_style_family(style: Any) -> str:
+    """TrueType family of a text style from its ACAD XDATA; '' when there is none.
+
+    ezdxf's `Textstyle.get_extended_font_data()` returns '' without ACAD XDATA, and also when the XDATA
+    holds the family tag (1000) without the flags tag (1071) after it (ezdxf 1.4.5: it reads both or
+    neither). ezdxf calls this data optional and not reliable: it is a naming hint like the others."""
+    return str(style.get_extended_font_data()[0]) if style.has_xdata("ACAD") else ""
+
+
 def _text_styles(
     doc: Drawing, table: FontEncodingTable
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
     """Text styles, one hint row per legacy-looking style, and the questions about them.
 
-    The rules are `encoding.font_hint(style name, font file)` (the same call `extract_text` makes); the
-    knowledge table is consulted only when that returns "unknown", and only approved rows decide.
+    The rules are `encoding.font_hint(style name, font file, TrueType family)` (the same call
+    `extract_text` makes); the knowledge table is consulted only when that returns "unknown", and only
+    approved rows decide.
     """
     styles, hints, questions = [], [], []
     proposed: dict[int, tuple[FontEncodingRow, list[str]]] = {}
@@ -637,14 +647,14 @@ def _text_styles(
         name = str(style.dxf.name)
         font = str(style.dxf.get("font", ""))
         bigfont = str(style.dxf.get("bigfont", ""))
-        family = str(style.get_extended_font_data()[0]) if style.has_xdata("ACAD") else ""
+        family = text_style_family(style)
         shx = any(f.lower().endswith(".shx") for f in (font, bigfont))
-        hint = font_hint(name, font or None)
+        hint = font_hint(name, font or None, family or None)
         capital = hint.capital_font
         encoding, source, pattern = hint.encoding, "font_hint", None
         matched = [
             {"field": field_name, "value": value}
-            for field_name, value in (("name", name), ("font", font))
+            for field_name, value in (("name", name), ("font", font), ("family", family))
             if value and guess_encoding_from_font(value) == encoding
         ]  # empty when the encoding is "unknown"
         if encoding == "unknown":

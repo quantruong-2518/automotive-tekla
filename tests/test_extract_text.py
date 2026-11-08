@@ -749,6 +749,77 @@ def test_a_bad_default_table_raises(tmp_path, monkeypatch):
         extract_text(build(tmp_path))
 
 
+# --- TrueType family of the text style (tool wave 2, fix 2a) -------------------------------------
+
+
+def family_style(doc, name: str, font: str, family: str | None) -> None:
+    style = doc.styles.add(name, font=font)
+    if family is not None:
+        style.set_extended_font_data(family)
+
+
+def test_the_ttf_family_decides_when_the_name_and_the_file_say_nothing(tmp_path):
+    def fn(doc):
+        family_style(doc, "kt..1", "VHAVAN_2.TTF", ".VnAvantH")
+        text_at(doc.modelspace(), "M" + A_DOT_BREVE_TCVN3 + "T", "kt..1")
+
+    e = only(index(build(tmp_path, fn)), entity_type="TEXT")
+    d = e["decode"]
+    assert (d["encoding_used"], d["source"]) == ("tcvn3", "style_family")
+    assert d["run_details"][0]["font_source"] == "style_family" and d["capital_font"] is True
+    assert e["decoded_text"] == "MẶT" and e["confidence"] == "medium"
+    assert "encoding_unknown_non_ascii" not in e["flags"]
+
+
+def test_an_mtext_whose_style_runs_are_decided_by_the_family_has_that_source(tmp_path):
+    def fn(doc):
+        family_style(doc, "kt..1", "VHAVAN_2.TTF", ".VnArial")
+        doc.modelspace().add_mtext("m" + A_DOT_BREVE_TCVN3 + "t", dxfattribs={"style": "kt..1"})
+
+    d = only(index(build(tmp_path, fn)), entity_type="MTEXT")["decode"]
+    assert (d["encoding_used"], d["source"], d["capital_font"]) == ("tcvn3", "style_family", False)
+
+
+def test_styles_without_a_usable_family_are_not_decoded_by_it(tmp_path):
+    def fn(doc):
+        family_style(doc, "noxdata", "VHAVAN_2.TTF", None)  # no ACAD XDATA at all
+        family_style(doc, "empty", "VHAVAN_2.TTF", "")
+        # ACAD XDATA with the family tag only: ezdxf's get_extended_font_data needs the 1071 flags tag
+        # too and returns '' (ezdxf 1.4.5), so such a family is not read
+        doc.styles.add("onetag", font="VHAVAN_2.TTF").set_xdata("ACAD", [(1000, ".VnAvantH")])
+        msp = doc.modelspace()
+        for i, style in enumerate(("noxdata", "empty", "onetag")):
+            text_at(msp, "m" + A_DOT_BREVE_TCVN3 + "t", style, insert=(0, 9 * i))
+
+    for e in index(build(tmp_path, fn))["entries"]:
+        assert e["decode"]["encoding_used"] == "unknown", e["style"]
+        assert "encoding_unknown_non_ascii" in e["flags"]
+
+
+def test_a_unicode_family_never_overrides_an_approved_font_row(tmp_path):
+    table = table_of(tmp_path, approved(pattern="VHARIAL.TTF"))
+
+    def fn(doc):
+        family_style(doc, "kt..1", "VHARIAL.TTF", "Arial")
+        text_at(doc.modelspace(), "m" + A_DOT_BREVE_TCVN3 + "t", "kt..1")
+
+    e = only(index(build(tmp_path, fn), knowledge=table), entity_type="TEXT")
+    assert (e["decode"]["encoding_used"], e["decode"]["source"]) == ("tcvn3", "knowledge_table")
+    assert e["decoded_text"] == "mặt"
+
+
+def test_a_legacy_family_comes_before_the_knowledge_table(tmp_path):
+    table = table_of(tmp_path, approved(pattern="VHAVAN_2.TTF", encoding="vni"))
+
+    def fn(doc):
+        family_style(doc, "kt..1", "VHAVAN_2.TTF", ".VnAvant")
+        text_at(doc.modelspace(), "m" + A_DOT_BREVE_TCVN3 + "t", "kt..1")
+
+    e = only(index(build(tmp_path, fn), knowledge=table), entity_type="TEXT")
+    assert (e["decode"]["encoding_used"], e["decode"]["source"]) == ("tcvn3", "style_family")
+    assert e["decode"]["knowledge_patterns"] == []
+
+
 # --- damaged bytes ------------------------------------------------------------------------------
 
 

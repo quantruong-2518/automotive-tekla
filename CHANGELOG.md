@@ -374,6 +374,15 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
   fonts is now decoded instead of blocked by the legacy-font gate. The engineer also endorsed the
   `.Vn*…H` = TCVN3 capital-font naming convention that `encoding.font_hint` already applies.
   Test fixtures that need a blocked font now pin their own proposed-row table instead of the shipped one.
+- Tool wave 2, package P1 (fonts and text access; EVAL-2 fixes 2a, 2b, 1a, 4, 11):
+  - `encoding.font_hint(style, font_file, family)` also reads the text style's TrueType family (ACAD
+    XDATA), after the style name and the font file: a `.Vn*` family gives TCVN3 and a `VNI-*` family VNI;
+    a Unicode-looking family decides nothing (a legacy font file may carry one; the knowledge table then
+    decides). The `H` capital-font rule applies to the family too (default D3, reversible); when the
+    style name and the family disagree on case, the hint is null. `harness extract-text` records such a
+    decision as `decode.source` / `run_details[].font_source` `style_family`; `harness read-dxf` lists
+    `matched` field `family`. A `.Vn*` family now decides before an approved font-file row, so those
+    styles carry no `knowledge_patterns`.
 
 ### Fixed
 - Reading toolchain, after an independent review of the EVAL-1 wave:

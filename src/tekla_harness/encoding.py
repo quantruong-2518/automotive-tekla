@@ -457,12 +457,19 @@ _FONT_FILE_SUFFIXES = (".ttf", ".otf", ".ttc")
 _LEGACY_STYLE = re.compile(r"\.?vn(?!i-)", re.IGNORECASE)
 
 
+HintField = Literal["name", "font", "family"]
+
+
 @dataclass(frozen=True)
 class FontHint:
-    """Hint from a text style: the encoding and whether it looks like an all-capital font."""
+    """Hint from a text style: the encoding and whether it looks like an all-capital font.
+
+    `decided_by`: which name gave the encoding (style name, font file or TrueType family); None when the
+    encoding is "unknown". Provenance only: it takes no part in equality."""
 
     encoding: FontEncoding
     capital_font: bool | None
+    decided_by: HintField | None = field(default=None, compare=False)
 
 
 def _clean_font_name(font_name: str) -> str:
@@ -494,17 +501,36 @@ def guess_encoding_from_font(font_name: str) -> FontEncoding:
     return "unknown"
 
 
-def font_hint(style_name: str, font_file: str | None = None) -> FontHint:
-    """Hint encoding and capital-font status from a text style name and its font file name.
+def _capital_hint(name: str) -> bool | None:
+    """True for a legacy-looking name (".Vn..." or "Vn...") ending in an uppercase "H", False for one without
+    the suffix, None otherwise (also for an all-lowercase name ending in "h": the suffix is not readable)."""
+    name = _clean_font_name(name)
+    if not _LEGACY_STYLE.match(name):
+        return None
+    if name.endswith("H"):
+        return True
+    if name == name.lower() and name.endswith("h"):
+        return None
+    return False
+
+
+def font_hint(style_name: str, font_file: str | None = None, family: str | None = None) -> FontHint:
+    """Hint encoding and capital-font status from a text style name, its font file and its TrueType family.
 
     `encoding`: `guess_encoding_from_font(style_name)`; only if that is "unknown" the font file
-    name is tried the same way.
+    name is tried the same way, then the TrueType family (the style's ACAD XDATA, read by the caller).
+    The family may only give "tcvn3" or "vni": a "unicode" answer from it is ignored (encoding stays
+    "unknown"), because a legacy font file can carry a Unicode-looking family and "unicode" would let
+    its bytes through the legacy-font gate undecoded; the knowledge table then decides such a style.
+    `decided_by` names the field that gave the encoding.
 
-    `capital_font` comes from the STYLE NAME only: True when it looks like legacy Vietnamese
-    (".Vn..." or "Vn...", dot optional) and ends with an uppercase "H"; False when it looks like
-    that but has no H suffix; None otherwise. An all-lowercase name ending in "h" returns None,
-    because lowercasing destroyed the suffix. So "VntimeH" gives encoding "unknown" (no dot) but
-    capital_font True: the two answers are independent hints.
+    `capital_font` comes from the STYLE NAME and the FAMILY (never the font file): True when the name
+    looks like legacy Vietnamese (".Vn..." or "Vn...", dot optional) and ends with an uppercase "H";
+    False when it looks like that but has no H suffix; None otherwise. An all-lowercase name ending in
+    "h" returns None, because lowercasing destroyed the suffix. The style name and the family are read
+    the same way (default D3, tool wave 2); when both give a hint and they disagree, the result is None
+    (never guess); when only one gives a hint, it is used. So "VntimeH" gives encoding "unknown" (no
+    dot) but capital_font True: the two answers are independent hints.
 
     This is an observed naming convention, NOT verified against any font specification or font
     file: treat the result as a hint and settle it with the engineer.
@@ -516,20 +542,22 @@ def font_hint(style_name: str, font_file: str | None = None) -> FontHint:
     ".VnAvantH". The file names VHAVAN.TTF and vntimeh.shx return "unknown" for the encoding
     (conservative); the engineer may decide to map "VH*" or "vn*.shx" file names. "TKT_TieuDe"
     reads the same vntimeh.shx but carries no H hint in its own name, so it returns None.
+    EVAL-2 (2026-11-07): most blocked text of the held-out set sat in styles such as "kt..1" (font
+    VHAVAN_2.TTF) whose family is ".VnAvantH"; the family now decides them (TCVN3, capital).
     """
     encoding = guess_encoding_from_font(style_name)
+    decided_by: HintField | None = "name"
     if encoding == "unknown" and font_file is not None:
-        encoding = guess_encoding_from_font(font_file)
-    name = _clean_font_name(style_name)
-    capital: bool | None = None
-    if _LEGACY_STYLE.match(name):
-        if name.endswith("H"):
-            capital = True
-        elif name == name.lower() and name.endswith("h"):
-            capital = None
-        else:
-            capital = False
-    return FontHint(encoding, capital)
+        encoding, decided_by = guess_encoding_from_font(font_file), "font"
+    if encoding == "unknown" and family:
+        guess = guess_encoding_from_font(family)
+        if guess in ("tcvn3", "vni"):
+            encoding, decided_by = guess, "family"
+    if encoding == "unknown":
+        decided_by = None
+    hints = {h for h in (_capital_hint(style_name), _capital_hint(family or "")) if h is not None}
+    capital = hints.pop() if len(hints) == 1 else None
+    return FontHint(encoding, capital, decided_by)
 
 
 # --- Unicode evidence -----------------------------------------------------------------------

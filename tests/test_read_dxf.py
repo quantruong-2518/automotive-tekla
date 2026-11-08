@@ -715,8 +715,8 @@ def test_encoding_hint_asks_once_per_style_and_lists_the_matched_fields(tmp_path
 
 
 def test_probe_uses_the_same_rules_as_font_hint(tmp_path):
-    # One source of truth: encoding.font_hint decides, so the family XDATA, the bigfont and the old
-    # 'vni_' / 'vni ' prefixes are not hints (font_hint does not use or accept them).
+    # One source of truth: encoding.font_hint decides, so the bigfont and the old 'vni_' / 'vni '
+    # prefixes are not hints (font_hint does not use or accept them). The TrueType family is (fix 2a).
     def build(doc):
         st = doc.styles.new("VIAFAMILY", dxfattribs={"font": ""})
         st.set_extended_font_data(".VnArial")
@@ -725,8 +725,37 @@ def test_probe_uses_the_same_rules_as_font_hint(tmp_path):
         doc.styles.new("VNI STYLE2", dxfattribs={"font": "romans.shx"})
 
     result = probe(make(tmp_path, build), knowledge=EMPTY_TABLE)
-    assert result["text_encoding_hints"] == []
-    assert not [q for q in result["questions"] if q["code"] == "text_encoding_hint"]
+    assert [h["style"] for h in result["text_encoding_hints"]] == ["VIAFAMILY"]
+    assert [q["where"] for q in result["questions"] if q["code"] == "text_encoding_hint"] == [
+        "text style VIAFAMILY, family"
+    ]
+
+
+def test_the_ttf_family_gives_a_hint_with_its_field(tmp_path):
+    def build(doc):
+        doc.styles.new("kt..1", dxfattribs={"font": "VHAVAN_2.TTF"}).set_extended_font_data(".VnAvantH")
+        doc.styles.new("kt..2", dxfattribs={"font": "VHAVAN_2.TTF"})  # no XDATA
+        doc.styles.new(".VnTime", dxfattribs={"font": ".VnTime.ttf"}).set_extended_font_data(".VnTime")
+        doc.styles.new("kt..3", dxfattribs={"font": "VHARIAL.TTF"}).set_extended_font_data("Arial")
+
+    result = probe(make(tmp_path, build), knowledge=table_of(tmp_path, approved(pattern="VHARIAL.TTF")))
+    hints = {h["style"]: h for h in result["text_encoding_hints"]}
+    assert hints["kt..1"]["encoding_hint"] == "tcvn3" and hints["kt..1"]["source"] == "font_hint"
+    assert hints["kt..1"]["matched"] == [{"field": "family", "value": ".VnAvantH"}]
+    assert hints["kt..1"]["capital_font"] is True
+    assert "kt..2" not in hints
+    assert hints[".VnTime"]["matched"] == [
+        {"field": "name", "value": ".VnTime"},
+        {"field": "font", "value": ".VnTime.ttf"},
+        {"field": "family", "value": ".VnTime"},
+    ]
+    # a Unicode-looking family never decides: the approved font row does
+    assert hints["kt..3"]["source"] == "knowledge_table"
+    assert hints["kt..3"]["matched"] == [{"field": "font", "value": "VHARIAL.TTF"}]
+    styles = {s["name"]: s for s in result["text_styles"]}
+    assert (styles["kt..1"]["family"], styles["kt..1"]["capital_font"]) == (".VnAvantH", True)
+    assert (styles["kt..2"]["family"], styles["kt..2"]["capital_font"]) == ("", None)
+    assert validate("dxf-probe", result) == []
 
 
 def test_capital_font_hint_is_recorded_for_every_style(tmp_path):
