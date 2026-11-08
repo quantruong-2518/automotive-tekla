@@ -15,7 +15,9 @@ file would drop the lock), `msvcrt.locking(LK_NBLCK)` on byte 0 on Windows.
     unlocking (best effort, reported on stderr).
   * Not reentrant: take it once at command entry (cli.main, run_intake), never in library code; a second
     acquisition in the same process conflicts with the first.
-  * WSL and Windows locks do not see each other: use a work folder from one OS.
+  * WSL and Windows locks do not see each other: use a work folder from one OS. As a best-effort check,
+    the holder record names its `platform`, and a record from the other OS refuses the lock (exit 3). Two
+    writers starting at the same instant from both OSes can still miss each other.
 """
 
 from __future__ import annotations
@@ -95,10 +97,23 @@ def read_holder(work: Path) -> dict[str, Any] | None:
     return data if isinstance(data, dict) else None
 
 
+def _foreign_holder(work: Path) -> dict[str, Any] | None:
+    """A holder record another OS wrote (its `platform` differs from this one), else None.
+
+    WSL flock and Windows byte locks do not see each other on one NTFS folder, so the OS lock just taken
+    proves nothing about a writer on the other side; its record is the only trace. A record from this OS,
+    or one without a platform, is stale here: this OS's lock was free."""
+    holder = read_holder(work)
+    if holder is None or holder.get("platform") in (None, sys.platform):
+        return None
+    return holder
+
+
 def _write_holder(work: Path, command: str) -> None:
     record = {
         "pid": os.getpid(),
         "host": socket.gethostname(),
+        "platform": sys.platform,
         "command": command,
         "started": datetime.now(UTC).isoformat(timespec="seconds"),
     }
@@ -137,6 +152,15 @@ def work_lock(work: Path, command: str) -> Iterator[None]:
                 f"cannot lock {path} ({exc}): this filesystem does not support the work-folder lock; "
                 "refusing to write unlocked (ADR-0011). Use a work folder on a local disk"
             ) from exc
+        foreign = _foreign_holder(work)
+        if foreign is not None:  # leave its record; closing fd below releases our OS lock
+            raise WorkLockError(
+                f"work folder {work} has a lock holder record from another OS ({foreign.get('platform')}: "
+                f"`harness {foreign.get('command', '?')}`, pid {foreign.get('pid', '?')} on "
+                f"{foreign.get('host', '?')}, since {foreign.get('started', '?')}). WSL and Windows locks "
+                "do not see each other, so nothing was run. Use this work folder from one OS only; if no "
+                f"harness command is running there, delete {work / HOLDER_FILE} and retry (ADR-0011)"
+            )
         try:
             _write_holder(work, command)
             yield

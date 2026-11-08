@@ -341,9 +341,13 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
   questions-md. A held lock is exit 3 at once, naming the holder (pid, host, command, start time) from
   `.harness.lock.json`, which the holder removes before unlocking; no waiting, no stale-lock rule, the
   lock file is never deleted. A filesystem without lock support is exit 3 (never runs unlocked).
-  Read-only commands (status, list-sheets, sheet-text, find-text, finding list, validate) do not lock; a
-  writer whose work folder does not exist keeps its own usage error. Intake now resolves its converters
-  before it reads the work folder's registry, and creates the work folder just before locking it.
+  Read-only commands (status, list-sheets, sheet-text, find-text, finding list, dimensions) and the
+  path-based tools (validate, detect, dwg2dxf, read-dxf, extract-*, env-check) do not lock; every
+  subcommand must be on one list (`cli.UNLOCKED_COMMANDS`, test-checked). A writer whose work folder does
+  not exist is refused with exit 2 before it runs ("not a folder"). The holder record names its
+  `platform`; a record from the other OS (WSL vs Windows, whose locks do not see each other) refuses the
+  lock with exit 3 and says how to clear a stale one. Intake now resolves its converters before it reads
+  the work folder's registry, and creates the work folder just before locking it.
 - Tool wave 2 seam (EVAL-2 fixes; the packages fill in the behaviour). Schemas, all additive and optional,
   `$id` still `0.1` (engineer, 2026-11-07): `text-index` decode source `style_family` and flag
   `legacy_ascii_suspect`; `dxf-probe` hint `matched.field` `family`; `sheet-text` block reason

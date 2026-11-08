@@ -7,6 +7,7 @@ systems run every test here.
 
 from __future__ import annotations
 
+import argparse
 import errno
 import json
 import os
@@ -106,6 +107,45 @@ def test_holder_record_while_held_and_gone_after(tmp_path):
         assert isinstance(holder["started"], str) and holder["started"]
     assert not (tmp_path / HOLDER_FILE).exists()
     assert not list(tmp_path.glob("*.tmp"))
+
+
+def test_holder_record_names_the_platform(tmp_path):
+    with work_lock(tmp_path, "answer"):
+        holder = json.loads((tmp_path / HOLDER_FILE).read_text(encoding="utf-8"))
+        assert holder["platform"] == sys.platform
+
+
+def test_holder_record_from_another_platform_refuses_the_lock(tmp_path):
+    """WSL flock and Windows byte locks do not see each other (review m1): a live holder record written
+    by the other OS is the only trace, so it refuses the lock instead of running beside that writer."""
+    other = "win32" if sys.platform != "win32" else "linux"
+    record = {"pid": 4242, "host": "h", "command": "marks", "started": "t", "platform": other}
+    (tmp_path / HOLDER_FILE).write_text(json.dumps(record), encoding="utf-8")
+    ran = []
+    with pytest.raises(WorkLockError) as caught, work_lock(tmp_path, "answer"):
+        ran.append(True)
+    assert not ran and not isinstance(caught.value, WorkLockBusy)
+    message = str(caught.value)
+    assert caught.value.exit_code == 3 and other in message and HOLDER_FILE in message
+    assert json.loads((tmp_path / HOLDER_FILE).read_text(encoding="utf-8")) == record  # not removed
+    fd = os.open(tmp_path / LOCK_FILE, os.O_RDWR)  # the refused attempt released the OS lock
+    try:
+        worklock._lock(fd)
+        worklock._unlock(fd)
+    finally:
+        os.close(fd)
+
+
+@pytest.mark.parametrize("platform", [None, "same"])
+def test_leftover_holder_record_from_this_platform_is_replaced(tmp_path, platform):
+    """A crash on this OS leaves a record behind; this OS's lock already proves it stale."""
+    record: dict[str, Any] = {"pid": 4242, "host": "h", "command": "marks", "started": "t"}
+    if platform:
+        record["platform"] = sys.platform
+    (tmp_path / HOLDER_FILE).write_text(json.dumps(record), encoding="utf-8")
+    with work_lock(tmp_path, "answer"):
+        assert json.loads((tmp_path / HOLDER_FILE).read_text(encoding="utf-8"))["pid"] == os.getpid()
+    assert not (tmp_path / HOLDER_FILE).exists()
 
 
 def test_second_open_in_the_same_process_is_refused(tmp_path):
@@ -325,6 +365,58 @@ def test_writer_on_a_missing_work_folder_keeps_its_usage_error(tmp_path, capsys)
     )
     assert code == 2 and out is None and "not a folder" in err
     assert not missing.exists()
+
+
+def test_writer_on_a_missing_work_folder_never_runs_unlocked(tmp_path, capsys, monkeypatch):
+    """main refuses a locked command whose folder is missing itself (review m3): the command never runs
+    without the lock, even if the folder appears between the check and the command's own check."""
+    import tekla_harness.cli as cli
+
+    ran = []
+    monkeypatch.setattr(cli, "_cmd_answer", lambda args: ran.append(args) or 0)
+    parser = cli.build_parser()
+    for action in parser._actions:  # re-point the subcommand at the stub
+        if isinstance(action, argparse._SubParsersAction):
+            action.choices["answer"].set_defaults(func=cli._cmd_answer)
+    monkeypatch.setattr(cli, "build_parser", lambda: parser)
+    code, out, err = run_cli(
+        capsys,
+        "answer",
+        str(tmp_path / "missing"),
+        "Q-001",
+        "--text",
+        "x",
+        "--by",
+        "me",
+        "--role",
+        "engineer",
+    )
+    assert code == 2 and out is None and not ran and "not a folder" in err
+
+
+def _subcommands() -> dict[str, argparse.ArgumentParser]:
+    import tekla_harness.cli as cli
+
+    for action in cli.build_parser()._actions:
+        if isinstance(action, argparse._SubParsersAction):
+            return dict(action.choices)
+    raise AssertionError("no subcommands")
+
+
+def test_every_command_is_classified_locked_or_unlocked():
+    """A new command must be put on one list on purpose (review m4): writers lock, the rest say why not."""
+    import tekla_harness.cli as cli
+
+    lists = [
+        set(cli.LOCKED_COMMANDS),
+        set(cli.LOCKED_ACTIONS),
+        {cli.SELF_LOCKING_COMMAND},
+        set(cli.UNLOCKED_COMMANDS),
+    ]
+    for i, a in enumerate(lists):
+        for b in lists[i + 1 :]:
+            assert not a & b
+    assert set(_subcommands()) == set().union(*lists)
 
 
 def test_cli_fails_closed_without_lock_support(world, capsys, monkeypatch):

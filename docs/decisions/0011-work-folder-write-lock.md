@@ -77,20 +77,26 @@ Details:
 2. **Fail closed.** Any other `OSError` from the lock call (`ENOLCK`, `EOPNOTSUPP`, `EINVAL`, …)
    is exit 3 with its own message; the command never runs unlocked.
 3. **Holder record.** After acquiring, the holder writes `.harness.lock.json` (pid, host,
-   command name, start time; never argv, which holds absolute paths). A refused command reads it
+   platform, command name, start time; never argv, which holds absolute paths). A refused command reads it
    for its message; it is informational and may be stale or missing. The holder removes it just
    before unlocking (best effort, reported on stderr when it fails), so a finished command leaves
    no file a work-folder snapshot would see. The lock file itself is opened without truncation and
    never deleted: deleting it would let a later process lock a new inode while an older one still
-   holds the old one.
+   holds the old one. A record whose `platform` is another OS's (`win32` vs `linux`) refuses the
+   lock with exit 3 even though this OS's lock was free: it is the only trace of a writer on the
+   other side of the WSL/Windows boundary. The message says to delete the record when nothing runs
+   there. A record from this OS, or one without a platform, is stale and is replaced.
 4. **Not reentrant.** The lock is taken once, at command entry: in `cli.main` for read-structure,
    callouts, marks, grid-system, answer, ask, finding add/withdraw and questions-md, and inside
    `run_intake` after its usage checks (and after creating the work folder). Library functions
    never take it: a second acquisition in the same process conflicts with the first (flock and
    LockFile both treat a second open independently).
-5. **Not locked:** status, list-sheets, sheet-text, find-text, finding list, dimensions,
-   validate, and every command that does not write a work folder. A command whose work folder does
-   not exist yet does not lock (it writes nothing and reports its own usage error).
+5. **Not locked:** status, list-sheets, sheet-text, find-text, finding list, dimensions (read
+   only), and the path-based tools (validate, detect, dwg2dxf, read-dxf, extract-*, env-check):
+   they write only where `--out` / `--out-dir` / `--cache-dir` point and never touch the registry
+   or answers, even when that path lies inside a work folder. `cli.UNLOCKED_COMMANDS` lists them; a
+   test fails when a subcommand is on no list. A locked command whose work folder does not exist is
+   refused by `cli.main` with exit 2 before it runs, so it never runs unlocked.
 6. **Contention message.** Exit 3, naming the holder, with "retry shortly": on Windows the OS may
    release the lock of a terminated process with a delay (LockFile remarks). The `_locking`
    advice to lock "only briefly" is about blocking other readers of the locked bytes; nobody reads
@@ -104,8 +110,13 @@ Details:
 - Agents running in parallel must use different work folders (projects), or wait and retry.
 - A work folder on a filesystem without locks (some network shares) cannot be written; the error
   says so.
-- A work folder shared between WSL and Windows is not protected: WSL's Linux `flock` and the
-  Windows byte lock do not see each other. Use one OS per work folder.
+- A work folder shared between WSL and Windows is only protected on a best-effort basis: WSL's
+  Linux `flock` and the Windows byte lock do not see each other (checked on a WSL2 /mnt/c drvfs
+  mount, 2026-11-08), so only the holder record's `platform` (decision 3) stops the second writer,
+  and two writers starting at the same instant can still miss each other. Use one OS per work folder.
+- On Windows, an unlocked reader (status, sheet-text) that has a work-folder file open can make a
+  writer's atomic replace of that file fail (Python opens files without delete sharing). This is
+  older than this ADR and is tracked in `requests-to-improve.md`.
 - `.harness.lock` stays in every written work folder (empty, harmless).
 - Tests: in-process second descriptor and a subprocess holder, on both CI operating systems
   (`tests/test_worklock.py`).

@@ -46,6 +46,18 @@ LOCKED_COMMANDS = frozenset(
     {"read-structure", "callouts", "marks", "grid-system", "answer", "ask", "questions-md"}
 )
 LOCKED_ACTIONS = {"finding": frozenset({"add", "withdraw"})}
+SELF_LOCKING_COMMAND = "intake"
+# Every other command, on purpose (a test checks that each subcommand is on exactly one list): they only
+# read a work folder, or they take explicit paths and never write the registry or answers.
+UNLOCKED_COMMANDS = frozenset(
+    {
+        # read-only on a work folder
+        "status", "list-sheets", "sheet-text", "find-text", "dimensions",
+        # explicit input/output paths, no registry or answers (ADR-0011 decision 5)
+        "validate", "detect", "dwg2dxf", "read-dxf", "extract-text", "extract-sheets", "extract-grids",
+        "extract-levels", "env-check",
+    }
+)  # fmt: skip
 _ENV_HOOK = Path(__file__).resolve().parents[2] / ".claude" / "hooks" / "session_env_check.py"
 
 
@@ -715,6 +727,9 @@ def main(argv: list[str] | None = None) -> int:
         target = _lock_target(args)
         if target is None:
             return args.func(args)
+        if not target.is_dir():  # never run a writer unlocked, even if the folder appears meanwhile
+            print(f"{target} is not a folder: nothing was run or written", file=sys.stderr)
+            return EXIT_USAGE
         command = " ".join([args.command, *([args.action] if args.command in LOCKED_ACTIONS else [])])
         with work_lock(target, command):
             return args.func(args)
@@ -724,13 +739,12 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _lock_target(args: argparse.Namespace) -> Path | None:
-    """The work folder this command must lock; None for a read-only command, or when the folder does not
-    exist (the command then writes nothing and reports its own usage error)."""
+    """The work folder this command must lock (it may not exist: main then refuses it), or None for a
+    command that does not lock here (UNLOCKED_COMMANDS; intake locks inside run_intake)."""
     action = getattr(args, "action", None)
     if args.command not in LOCKED_COMMANDS and action not in LOCKED_ACTIONS.get(args.command, ()):
         return None
-    work = Path(args.work_dir)
-    return work if work.is_dir() else None
+    return Path(args.work_dir)
 
 
 if __name__ == "__main__":

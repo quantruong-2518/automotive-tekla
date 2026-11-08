@@ -97,6 +97,23 @@ def test_new_schema_examples_are_valid(name, example):
     assert validate(name, example(name)) == []
 
 
+def test_code_enums_match_their_schema_copies():
+    """ROLES and CLOSURE_REASONS are repeated in schemas; a change to one side must reach the other."""
+    from tekla_harness.questions import CLOSURE_REASONS, ROLES
+
+    def enum_at(name: str, *path: str) -> set[str]:
+        node: dict = validator(name).schema  # type: ignore[assignment]
+        for key in path:
+            node = node[key]
+        return set(node["enum"])
+
+    assert enum_at("answers", "$defs", "answer", "properties", "answered_by_role") == set(ROLES)
+    intake = ("$defs", "question", "properties", "closed_by", "properties", "reason")
+    status = ("properties", "gate1", "properties", "closed", "items", "properties", "reason")
+    assert enum_at("intake", *intake) == set(CLOSURE_REASONS)
+    assert enum_at("status", *status) == set(CLOSURE_REASONS)
+
+
 def test_new_schemas_keep_id_0_1():
     for name in ("dimensions", "supplements"):
         schema: dict = validator(name).schema  # type: ignore[assignment]
