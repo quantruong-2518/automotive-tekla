@@ -153,3 +153,37 @@ def test_every_schema_pattern_translates():
     assert patterns
     for p in patterns:
         ecma_regex(p)
+
+
+# --- run journal (ADR-0012) ---------------------------------------------------------------
+
+
+def test_run_journal_example_valid(example):
+    assert validate("run-journal", example("run-journal")) == []
+
+
+def test_run_journal_inserting_entry_has_no_guid(example):
+    journal = example("run-journal")
+    journal["invocations"][0]["objects"][0]["state"] = "inserting"
+    assert validate("run-journal", journal)
+    journal["invocations"][0]["objects"][0]["guid"] = None
+    assert validate("run-journal", journal) == []
+
+
+def test_run_journal_inserted_entry_needs_guid(example):
+    journal = example("run-journal")
+    journal["invocations"][0]["objects"][1]["guid"] = None
+    assert validate("run-journal", journal)
+
+
+@pytest.mark.parametrize("run_id", ["r1", "-R1", "R 1", "R1\n", "R" * 33, ""])
+def test_run_journal_rejects_bad_run_id(example, run_id):
+    journal = example("run-journal")
+    journal["run_id"] = run_id
+    assert validate("run-journal", journal)
+
+
+def test_run_journal_rejects_uppercase_guid(example):
+    journal = example("run-journal")
+    journal["invocations"][0]["objects"][0]["guid"] = "3F2504E0-4F89-11D3-9A0C-0305E82C3301"
+    assert validate("run-journal", journal)

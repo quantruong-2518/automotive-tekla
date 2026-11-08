@@ -290,6 +290,10 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
   material, finite points). Refusals exit 5, I/O errors 3, bad path text 2. Hand-written strict
   JSON reader (no package) with its own correctly rounded decimal→double conversion
   (`System.Numerics.BigInteger`): 0 of 150,000 tokens differ from Python on .NET Framework 4.8.
+- Step 3 S1c contract (ADR-0012): new schema `run-journal` (`urn:tekla-harness:schema:run-journal:0.1`)
+  and example — one journal per lot and run (`run-journal-<RUN_ID>.json`), invocations with
+  per-object intent/inserted/tagged states, failure and conflicts; `run_id` pattern
+  `^[A-Z0-9][A-Z0-9_-]{0,31}$` added to `common`.
 - Versioning note: the reading-toolchain schemas above have not been released; they stay `0.1` and their
   changes are recorded here until the first tagged release, from which every change bumps its `$id`
   (AGENTS.md). Pending engineer confirmation.

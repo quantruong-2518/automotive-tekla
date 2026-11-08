@@ -1,0 +1,43 @@
+{
+  "schema_version": "0.1",
+  "project_id": "demo-warehouse",
+  "lot": 1,
+  "run_id": "R20261108-01",
+  "spec_file": "spec.json",
+  "spec_sha256": "77a1243091e09d63325185ae2a70896726c355f20f78564b57b9429023b91713",
+  "model_path": "C:\\Models\\demo-warehouse-copy",
+  "invocations": [
+    {
+      "command": "build",
+      "started_at": "2026-11-08T09:00:00Z",
+      "ended_at": "2026-11-08T09:00:05Z",
+      "tekla_version": "2024.0",
+      "model_path": "C:\\Models\\demo-warehouse-copy",
+      "outcome": "stopped",
+      "exit_code": 4,
+      "committed": false,
+      "objects": [
+        { "spec_id": "L1-C-A1", "guid": "3f2504e0-4f89-11d3-9a0c-0305e82c3301", "action": "created", "state": "tagged" },
+        { "spec_id": "L1-C-A2", "guid": "3f2504e0-4f89-11d3-9a0c-0305e82c3302", "action": "created", "state": "inserted" }
+      ],
+      "failure": { "stage": "tag", "spec_id": "L1-C-A2", "error": "SetUserProperty(SPEC_ID) returned false" },
+      "conflicts": []
+    },
+    {
+      "command": "build",
+      "started_at": "2026-11-08T09:10:00Z",
+      "ended_at": "2026-11-08T09:10:04Z",
+      "tekla_version": "2024.0",
+      "model_path": "C:\\Models\\demo-warehouse-copy",
+      "outcome": "ok",
+      "exit_code": 0,
+      "committed": true,
+      "objects": [
+        { "spec_id": "L1-C-A2", "guid": "3f2504e0-4f89-11d3-9a0c-0305e82c3302", "action": "retagged", "state": "tagged" },
+        { "spec_id": "L1-B-A12", "guid": "3f2504e0-4f89-11d3-9a0c-0305e82c3303", "action": "created", "state": "tagged" }
+      ],
+      "failure": null,
+      "conflicts": []
+    }
+  ]
+}
