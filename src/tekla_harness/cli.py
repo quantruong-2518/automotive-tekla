@@ -25,7 +25,7 @@ from tekla_harness.intake import IntakeError, run_intake
 from tekla_harness.knowledge import KnowledgeError
 from tekla_harness.questions import QuestionsError
 from tekla_harness.read_dxf import CONVERTER_CAPS, probe_dxf
-from tekla_harness.receipt import receipt_path, write_receipt
+from tekla_harness.receipt import ReceiptError, receipt_path, write_receipt
 from tekla_harness.schemas import SCHEMA_NAMES, validate
 from tekla_harness.sheet_text import DEFAULT_MAX_ENTRIES, ReaderError, list_sheets, sheet_text
 from tekla_harness.status import StatusError, build_status
@@ -54,13 +54,20 @@ def _validate_spec_file(path: str) -> tuple[dict[str, object], bool]:
         with spec.open("rb") as handle:
             data = handle.read(MAX_BYTES + 1)
         value = loads_strict(data)
-    except (OSError, StrictJsonError) as exc:
+    except (FileNotFoundError, StrictJsonError) as exc:
         return {
             "file": path,
             "valid": False,
             "errors": [{"path": "", "message": str(exc)}],
             "receipt": None,
         }, False
+    except OSError as exc:  # exists but unreadable (permission, a folder): environment error
+        return {
+            "file": path,
+            "valid": False,
+            "errors": [{"path": "", "message": f"spec could not be read: {exc}"}],
+            "receipt": None,
+        }, True
     problems = validate("spec", value)
     if problems:
         return {
@@ -71,6 +78,14 @@ def _validate_spec_file(path: str) -> tuple[dict[str, object], bool]:
         }, False
     try:
         written = write_receipt(spec, data)
+    except (ReceiptError, UnicodeEncodeError) as exc:  # e.g. a backslash or non-UTF-8 file name
+        message = f"no receipt: the file name cannot be recorded in a receipt: {exc}"
+        return {
+            "file": path,
+            "valid": False,
+            "errors": [{"path": "", "message": message}],
+            "receipt": None,
+        }, False
     except OSError as exc:
         message = f"receipt could not be written: {exc}"
         return {

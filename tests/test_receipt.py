@@ -108,3 +108,36 @@ def test_receipt_of_example_matches_example_receipt(tmp_path):
     assert {k: v for k, v in built.items() if k != "validated_at"} == {
         k: v for k, v in expected.items() if k != "validated_at"
     }
+
+
+# --- review fixes (ADR-0010 Amendment 1, m1) -------------------------------------------
+
+
+def test_backslash_file_name_gets_no_receipt_and_no_traceback(tmp_path, capsys):
+    import json as _json
+    import sys as _sys
+
+    from tekla_harness.cli import main
+
+    if _sys.platform == "win32":
+        pytest.skip("a backslash is a path separator on Windows")
+    spec = tmp_path / "a\\b.json"
+    spec.write_bytes((EXAMPLES / "spec.example.json").read_bytes())
+    assert main(["validate", "spec", str(spec)]) == 1
+    result = _json.loads(capsys.readouterr().out)["results"][0]
+    assert result["valid"] is False and result["receipt"] is None
+    assert not receipt.receipt_path(spec).exists()
+
+
+def test_unreadable_spec_is_an_environment_error(tmp_path, capsys):
+    from tekla_harness.cli import main
+
+    folder = tmp_path / "spec.json"
+    folder.mkdir()
+    assert main(["validate", "spec", str(folder)]) == 3
+
+
+def test_missing_spec_is_invalid_not_environment(tmp_path, capsys):
+    from tekla_harness.cli import main
+
+    assert main(["validate", "spec", str(tmp_path / "missing.json")]) == 1
