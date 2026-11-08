@@ -20,6 +20,7 @@ from tekla_harness.cli import main
 from tekla_harness.intake import MAX_PROBE_REFS, IntakeError, run_intake
 from tekla_harness.knowledge import EMPTY_TABLE, KnowledgeError
 from tekla_harness.schemas import validate
+from tekla_harness.worklock import work_lock
 from test_knowledge import approved, row, table_of
 
 DWG_BYTES = b"AC1032" + b"\x00" * 64
@@ -413,6 +414,18 @@ def test_no_converter_is_fine_without_dwg(tmp_path, monkeypatch):
     root = tmp_path / "input"
     make_dxf(root / "a.dxf")
     assert run_intake(root, tmp_path / "work", "demo-intake").exit_code == 0
+
+
+def test_a_held_work_lock_is_an_intake_error_with_exit_3_and_writes_nothing(tmp_path):
+    """run_intake promises IntakeError for exits 2 and 3: a held lock must not escape as WorkLockError."""
+    root = tmp_path / "input"
+    make_dxf(root / "a.dxf")
+    work = tmp_path / "work"
+    work.mkdir()
+    with work_lock(work, "answer"), pytest.raises(IntakeError) as caught:
+        run_intake(root, work, "demo-intake")
+    assert caught.value.exit_code == 3 and "answer" in str(caught.value)
+    assert not (work / "inventory.json").exists()
 
 
 def test_exit_code_rule(done, folder, tmp_path):

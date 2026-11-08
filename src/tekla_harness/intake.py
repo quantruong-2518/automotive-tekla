@@ -60,7 +60,7 @@ from tekla_harness.questions import (
 from tekla_harness.read_dxf import probe_dxf
 from tekla_harness.readlog import Attempt, ReadLog, ReadLogError, timed_attempt
 from tekla_harness.schemas import validate
-from tekla_harness.worklock import work_lock
+from tekla_harness.worklock import WorkLockError, work_lock
 
 SCHEMA_VERSION = "0.1"
 MAX_PROBE_REFS = 50  # refs listed per probe or text question group; the true total is always given
@@ -626,8 +626,11 @@ def run_intake(
     except OSError as exc:
         raise IntakeError(EXIT_ENV, f"cannot create the work folder {work_dir}: {exc}") from exc
     # One writer per work folder (ADR-0011): everything below reads or writes the work folder's state.
-    with work_lock(work_dir, "intake"):
-        return _intake_locked(input_dir, work_dir, project_id, entries, oda, dwg2dxf, timeout, table)
+    try:
+        with work_lock(work_dir, "intake"):
+            return _intake_locked(input_dir, work_dir, project_id, entries, oda, dwg2dxf, timeout, table)
+    except WorkLockError as exc:  # held, or no lock support: exit 3 as an IntakeError like every other exit
+        raise IntakeError(exc.exit_code, str(exc)) from exc
 
 
 def _intake_locked(
