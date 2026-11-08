@@ -422,6 +422,11 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
     copy, handle null, `block_path`), with what it measures next to its printed or override text and the
     probe's text rule and status, plus layer and detector sheet. Values as stored, never converted;
     `units` reports the declared and the answered unit only. A native DXF needs `--input-dir` (exit 2).
+  - `member_mark_prefix_meaning` moves from `harness callouts` to `harness marks` (EVAL-2 fix 1b): one
+    blocking question per file with one subject per prefix of its plan marks (upper-cased; titles such
+    as `DẦM D3` count, schedule cells do not); `marks.json` `question_counts` counts the prefixes. Callouts
+    still lists `member_mark` candidates but no longer asks; an answer to callouts' old question goes stale
+    once at the next callouts run and the engineer answers the marks question (default D6, reversible).
 
 ### Changed
 - Question lifecycle (tool wave 2, EVAL-2 fix 5):

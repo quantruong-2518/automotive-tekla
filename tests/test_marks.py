@@ -217,7 +217,11 @@ def test_title_word_is_evidence_not_a_prefix_meaning(doc):
     assert c2["form"] == "title" and c2["title_member_word"] == {"word": "COLUMN", "confidence": "medium"}
     (d3,) = plan(doc, "D3")
     assert d3["title_member_word"]["word"] == "DẦM"
-    assert "member_mark_prefix_meaning" not in json.dumps(doc["question_counts"])
+    # the prefix is still asked: a title word never answers it
+    (q,) = [q for q in marks_questions(doc) if q["code"] == "member_mark_prefix_meaning"]
+    assert {"C", "D"} <= {s["name"] for s in q["subjects"]}
+    assert "COLUMN" not in json.dumps(q["subjects"]) and "answer" not in q  # no meaning taken from it
+    assert {"COLUMN C2", "DẦM D3"} <= {r["found"] for r in q["refs"]}  # quoted as evidence, verbatim
 
 
 def test_line_grid_table(doc):
@@ -301,9 +305,11 @@ def test_size_conflict_question_quotes_both_entries(doc):
 
 
 def test_question_counts(doc):
+    prefixes = {p["lexical"]["prefix"].upper() for p in doc["plan_marks"]}
     assert doc["question_counts"] == {
         "mark_notation_equivalence": 1,
         "mark_size_conflict": 1,
+        "member_mark_prefix_meaning": len(prefixes),
         "schedule_table_unparsed": 1,
     }
 
@@ -323,17 +329,17 @@ def test_without_input_dir_a_native_dxf_falls_back_to_text_alignment(base):
 def test_run_writes_documents_and_question_ids_are_stable(world):
     root, work = world
     first = run_marks(work, root)
-    assert first.exit_code == 0 and first.summary["questions"] == 3
+    assert first.exit_code == 0 and first.summary["questions"] == 4
     q1 = load(work / "marks-questions.json")
     assert validate("intake", q1) == [] and validate("marks", load(work / "marks.json")) == []
     second = run_marks(work, root)
     q2 = load(work / "marks-questions.json")
     assert [(q["id"], q["key"]) for q in q1["questions"]] == [(q["id"], q["key"]) for q in q2["questions"]]
-    assert second.summary["blocking_open"] == 2
+    assert second.summary["blocking_open"] == 3  # with member_mark_prefix_meaning
     registry = load(work / "question-registry.json")
-    assert {e["producer"] for e in registry["questions"].values() if e["code"].startswith("mark")} == {
-        "marks"
-    }
+    assert {
+        e["producer"] for e in registry["questions"].values() if e["code"].startswith(("mark", "member_mark"))
+    } == {"marks"}
 
 
 def test_cli_exit_codes(world, capsys, tmp_path):
@@ -370,7 +376,7 @@ def test_status_sees_marks_fresh_after_a_run(tmp_path):
     run_marks(work, root)
     after = {p["producer"]: p for p in build_status(work)["producers"]}
     assert after["marks"]["outputs"]["status"] == "fresh"
-    assert after["marks"]["questions"]["blocking_open"] == 2
+    assert after["marks"]["questions"]["blocking_open"] == 3
 
 
 # --- review fixes ---------------------------------------------------------------------------------
@@ -550,6 +556,137 @@ def test_summary_per_sheet_keeps_marks_on_no_sheet_apart(base, tmp_path):
     assert rows[None]["tables"] == 0
     assert sum(r["plan_marks"] for r in rows.values()) == out["summary"]["plan_marks"]
     assert validate("marks", out) == []
+
+
+# --- tool wave 2: marks asks what every plan-mark prefix means (fix 1b) ---------------------------------
+
+
+def prefix_question(doc: dict[str, Any]) -> dict[str, Any]:
+    (q,) = [q for q in marks_questions(doc) if q["code"] == "member_mark_prefix_meaning"]
+    return q
+
+
+def test_every_plan_mark_prefix_gets_one_blocking_question_per_file(gate):
+    q = prefix_question(gate)
+    assert q["blocking"] is True and q["file"] == REL
+    names = [s["name"] for s in q["subjects"]]
+    assert names == sorted(names) and {"C", "D", "LT"} <= set(names)
+    plan_prefixes = {p["lexical"]["prefix"].upper() for p in gate["plan_marks"]}
+    assert set(names) == plan_prefixes  # plan marks only: G2 (blocked schedule cell) adds nothing
+    lt = next(s for s in q["subjects"] if s["name"] == "LT")
+    assert lt["count"] == 1 and lt["examples"] == [{"mark": "LT1", "count": 1}]
+    assert q["count"] == sum(s["count"] for s in q["subjects"]) == len(gate["plan_marks"])
+    assert all(r["where"].startswith("plan mark prefix ") and r["file"] == REL for r in q["refs"])
+    assert {r.get("sheet") for r in q["refs"]} == {"model#01"}
+    assert gate["question_counts"]["member_mark_prefix_meaning"] == len(names)
+
+
+def test_prefixes_fold_case_and_titles_count(doc):
+    q = prefix_question(doc)
+    subjects = {s["name"]: s for s in q["subjects"]}
+    assert "GM" in subjects and subjects["GM"]["examples"] == [{"mark": "gm1", "count": 1}]
+    assert {"mark": "D3", "count": 1} in subjects["D"]["examples"]  # from the title 'DẦM D3'
+    assert "KC" not in subjects and "I" not in subjects  # a sheet code and a section label are no marks
+
+
+def test_prefix_refs_are_capped_but_counts_stay_true(gate, monkeypatch):
+    import tekla_harness.marks as marks_mod
+
+    monkeypatch.setattr(marks_mod, "MAX_PREFIX_REFS", 1)
+    q = prefix_question(gate)
+    e = next(s for s in q["subjects"] if s["name"] == "E")
+    assert e["count"] == 3 and sum(r["where"].startswith("plan mark prefix E,") for r in q["refs"]) == 1
+    assert q["truncated"] is True and q["count"] == len(gate["plan_marks"])
+
+
+def test_old_callouts_prefix_answer_goes_stale_once_and_marks_asks_anew(tmp_path):
+    """D6: the question moved from callouts to marks; an answer given to callouts' question goes stale
+    (asked again), and marks' question never collides with the old registry key."""
+    from tekla_harness.answers import record_answer
+
+    work = build_gate_work(tmp_path)
+    root = tmp_path / "input"
+    seeded = _seed_callouts_prefix_answer(work)
+    run_callouts(work, root)
+    answers = {a["question_id"]: a for a in load(work / "answers.json")["answers"]}
+    assert answers[seeded]["status"] == "stale"
+    assert "no longer raises" in answers[seeded]["stale_reason"]
+    run_marks(work, root)
+    q = next(
+        q
+        for q in load(work / "marks-questions.json")["questions"]
+        if q["code"] == "member_mark_prefix_meaning"
+    )
+    assert q["id"] != seeded and q["answer"] is None
+    registry = load(work / "question-registry.json")["questions"]
+    assert registry[q["key"]]["producer"] == "marks"
+    record_answer(work, q["id"], "C cot", "A. Nguyen", {"C": "column"}, role="engineer")
+    run_callouts(work, root)  # callouts no longer touches it
+    run_marks(work, root)
+    again = next(
+        q
+        for q in load(work / "marks-questions.json")["questions"]
+        if q["code"] == "member_mark_prefix_meaning"
+    )
+    assert again["id"] == q["id"] and again["answer"]["values"] == {"C": "column"}
+
+
+def _seed_callouts_prefix_answer(work: Path) -> str:
+    """What a pre-wave-2 callouts run left behind: its prefix question with an active answer (the key is
+    callouts' old ref wording). Returns the question id."""
+    from tekla_harness.callouts import extract_callouts
+    from tekla_harness.questions import dump_json, load_ledger, question_key, write_text_atomic
+
+    ledger = load_ledger(work, None, create=False)
+    sha = next(r["sha256"] for r in load(work / "inventory.json")["files"] if r["path"] == REL)
+    # the refs callouts built before wave 2: per prefix (sorted), its first 10 member marks
+    by_prefix: dict[str, list[dict[str, Any]]] = {}
+    for c in extract_callouts(work)["candidates"]:
+        if c["kind"] == "member_mark":
+            by_prefix.setdefault(c["lexical"]["prefix"], []).append(c)
+    refs = [
+        {
+            "file": REL,
+            "where": f"prefix {prefix}, text entry {c['text_ref']['entry_id']}",
+            "found": " ".join(c["display_text"].split()),
+            "sheet": c["sheet"],
+        }
+        for prefix in sorted(by_prefix)
+        for c in by_prefix[prefix][:10]
+    ]
+    key = question_key("member_mark_prefix_meaning", REL, sha, refs)
+    reg = ledger.registry
+    qid = f"Q-{reg['next_id']:03d}"
+    reg["questions"][key] = {
+        "id": qid,
+        "code": "member_mark_prefix_meaning",
+        "file": REL,
+        "producer": "callouts",
+        "status": "answered",
+        "first_seen_run": reg["runs"],
+        "last_seen_run": reg["runs"],
+        "blocking": True,
+        "file_sha256": sha,
+    }
+    reg["next_id"] += 1
+    ledger.answers["answers"].append(
+        {
+            "question_id": qid,
+            "key": key,
+            "code": "member_mark_prefix_meaning",
+            "file": REL,
+            "answer_text": "C cot",
+            "values": {"C": "column"},
+            "answered_by": "A. Nguyen",
+            "answered_by_role": "engineer",
+            "answered_on": "2026-11-01",
+            "status": "active",
+        }
+    )
+    ledger.check()
+    write_text_atomic(work / "question-registry.json", dump_json(ledger.registry))
+    write_text_atomic(work / "answers.json", dump_json(ledger.answers))
+    return qid
 
 
 def test_a_table_added_to_another_file_does_not_re_key_this_files_questions(doc):

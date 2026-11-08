@@ -21,6 +21,7 @@ from tekla_harness.answers import check_values, parse_values, record_answer
 from tekla_harness.callouts import run_callouts
 from tekla_harness.cli import main
 from tekla_harness.intake import IntakeError, run_intake
+from tekla_harness.marks import run_marks
 from tekla_harness.questions import (
     QuestionsError,
     load_ledger,
@@ -669,11 +670,7 @@ def test_cli_callouts_writes_documents_and_numbers_questions(cwork, capsys):
     doc = load(cwork / "callouts-questions.json")
     assert validate("intake", doc) == []
     qs = doc["questions"]
-    assert {q["code"] for q in qs} == {
-        "callout_ambiguous",
-        "member_mark_prefix_meaning",
-        "grade_legacy_mapping",
-    }
+    assert {q["code"] for q in qs} == {"callout_ambiguous", "grade_legacy_mapping"}  # prefixes: harness marks
     assert all(q["file"] == REL and all(r["file"] == REL for r in q["refs"]) for q in qs)
     keys = [(not q["blocking"], q["code"], q["file"]) for q in qs]
     assert keys == sorted(keys)
@@ -686,16 +683,9 @@ def test_cli_callouts_writes_documents_and_numbers_questions(cwork, capsys):
     registry = load(cwork / "question-registry.json")["questions"]
     assert {registry[q["key"]]["producer"] for q in qs} == {"callouts"}
     assert {registry[k]["status"] for k in before_intake} == {"open"}  # callouts never touches intake keys
-    # counts are true counts over all candidates, per prefix
-    prefixes = find(qs, "member_mark_prefix_meaning")
-    subjects = {s["name"]: s for s in prefixes["subjects"]}
-    assert {"C", "D", "DP", "GM", "M", "TB", "Đ"} == set(subjects)
-    assert subjects["C"]["count"] == 4 and subjects["C"]["examples"][0] == {"mark": "C1", "count": 2}
-    assert prefixes["count"] == sum(s["count"] for s in subjects.values())
     counts = load(cwork / "callouts.json")  # the extractor document holds counts, not questions
     assert "questions" not in counts
     assert set(counts["question_counts"]) == {q["code"] for q in qs}
-    assert counts["question_counts"]["member_mark_prefix_meaning"] == len(subjects)
     notations = {s["name"] for q in qs if q["code"] == "callout_ambiguous" for s in q["subjects"]}
     assert {"rebar_plus_join", "section_designation", "steel_grade_standard_mix"} <= notations
     for q in (q for q in qs if q["code"] == "callout_ambiguous"):
@@ -717,8 +707,8 @@ def test_callouts_are_stable_across_runs_and_survive_an_unrelated_change(cwork):
 
 
 def test_member_mark_prefix_answer_has_values_and_lowers_blocking_open(cwork):
-    run_callouts(cwork)
-    q = find(questions_of(cwork, "callouts-questions.json"), "member_mark_prefix_meaning")
+    run_marks(cwork)  # tool wave 2: marks asks member_mark_prefix_meaning
+    q = find(questions_of(cwork, "marks-questions.json"), "member_mark_prefix_meaning")
     with pytest.raises(QuestionsError):
         record_answer(
             cwork, q["id"], "C is a column", "A. Nguyen", role="engineer"
@@ -726,12 +716,12 @@ def test_member_mark_prefix_answer_has_values_and_lowers_blocking_open(cwork):
     result = record_answer(
         cwork, q["id"], "C cot, D dam", "A. Nguyen", {"C": "column", "D": "beam"}, role="engineer"
     )
-    assert result["summaries"]["callouts-questions.json"]["blocking_open"] == (
-        load(cwork / "callouts-questions.json")["summary"]["blocking_questions"] - 1
+    assert result["summaries"]["marks-questions.json"]["blocking_open"] == (
+        load(cwork / "marks-questions.json")["summary"]["blocking_questions"] - 1
     )
-    summary = run_callouts(cwork).summary
+    summary = run_marks(cwork).summary
     assert summary["answered"] == 1
-    assert find(questions_of(cwork, "callouts-questions.json"), "member_mark_prefix_meaning")["answer"][
+    assert find(questions_of(cwork, "marks-questions.json"), "member_mark_prefix_meaning")["answer"][
         "values"
     ] == {"C": "column", "D": "beam"}
 

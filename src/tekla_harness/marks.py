@@ -5,9 +5,11 @@
 from a mark beyond comparing text: no quantity, length, weight or unit conversion.
 
 Split with `callouts.py`. callouts lists a text whose WHOLE line is a bare mark (`C1`, `GM2`, `DC-3a`,
-upper-case prefix) as a `member_mark` candidate and owns the `member_mark_prefix_meaning` question.
-This module never raises that question and never gives a prefix a meaning. It extends the mark grammar
-(`in_callouts` says when callouts also lists the text):
+upper-case prefix) as a `member_mark` candidate. Since tool wave 2 (fix 1b) this module owns the
+`member_mark_prefix_meaning` question: one blocking question per file, one subject per prefix of its plan
+marks (upper-cased), whatever grammar found them; it never gives a prefix a meaning itself. An answer given
+to the question callouts raised before goes stale once (its key is no longer raised) and is asked again
+here. It extends the mark grammar (`in_callouts` says when callouts also lists the text):
 
   * sub-numbered marks `D1.1`, `D1-1` (numbers kept as written), letter suffixes in either case
     (`D1a`, `D1.9A`), lower-case prefixes (`gm1`; a lone lower-case `a` or `s` is the spacing letter of a
@@ -16,7 +18,7 @@ This module never raises that question and never gives a prefix a meaning. It ex
   * a member-type word in front of the mark, as in a detail title (`DẦM D1.1`, `CỘT C1`, `ĐÀI CỌC DC1`,
     `GIẰNG MÓNG GM1`, `BEAM B1`, `COLUMN C1`): recorded as `title_member_word` evidence (confidence at
     most medium). It is NOT a prefix meaning: prefix meanings come only from `member_mark_prefix_meaning`
-    answers (callouts);
+    answers;
   * schedule tables and the matching of schedule rows to plan marks (below).
 
 A mark is never taken from a line that a callouts pattern claims (`I300`, `M20`, `BM12`...), from a
@@ -158,6 +160,8 @@ ROW_PITCH = 4.0  # text alignment: a data row at most this far below the previou
 LINE_CHARS = 200
 MAX_REFS = 50
 MAX_FOUND = 8  # occurrences quoted in one question ref
+MAX_PREFIX_REFS = 10  # refs per prefix in member_mark_prefix_meaning (count stays true)
+MAX_EXAMPLES = 5  # marks as written, per prefix subject
 
 CELL_TYPES = frozenset({"TEXT", "MTEXT", "ATTRIB"})
 _LINE_TYPES = frozenset({"LINE", "LWPOLYLINE", "POLYLINE"})
@@ -1262,6 +1266,12 @@ SIZE_MESSAGE = (
     "A plan mark with a section in brackets (b x h) and the schedule row of the same mark give different "
     "sizes. Which size is right? Both texts are quoted with their entry ids."
 )
+PREFIX_MESSAGE = (
+    "What does each member mark prefix listed in `subjects` mean in this project (column, beam, slab, "
+    "footing, tie beam, lintel, steel member...)? No standard defines the letters; use the drawing legend or "
+    "the member schedule. A member word in a detail title is evidence, not the answer. Answer with one value "
+    "per prefix, e.g. --value C=column. (research, section 4 and ambiguous #11)"
+)
 UNPARSED_MESSAGE = (
     "A schedule table was found but its rows could not be read reliably (reason per ref). Read it from the "
     "drawing; its rows are not matched to plan marks."
@@ -1290,11 +1300,48 @@ def _occurrences(
     return sorted(found, key=lambda f: f.split("(", 1)[1])
 
 
+def _prefix_questions(plan: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """One blocking member_mark_prefix_meaning per file over its plan marks: one subject per prefix
+    (upper-cased, as callouts listed them), refs capped per prefix, counts true. The refs' wording differs
+    from the question callouts raised before wave 2, so the two keys never collide."""
+    by_file: dict[str, dict[str, list[dict[str, Any]]]] = {}
+    for p in plan:
+        by_file.setdefault(p["file"], {}).setdefault(p["lexical"]["prefix"].upper(), []).append(p)
+    out = []
+    for file in sorted(by_file):
+        refs: list[dict[str, Any]] = []
+        subjects = []
+        for prefix in sorted(by_file[file]):
+            group = by_file[file][prefix]
+            written = Counter(p["mark"] for p in group)
+            examples = [
+                {"mark": mark, "count": n}
+                for mark, n in sorted(written.items(), key=lambda kv: (-kv[1], kv[0]))[:MAX_EXAMPLES]
+            ]
+            subjects.append({"name": prefix, "count": len(group), "examples": examples})
+            for p in group[:MAX_PREFIX_REFS]:
+                ref = {
+                    "file": file,
+                    "where": f"plan mark prefix {prefix}, text entry {p['text_ref']['entry_id']}",
+                    "found": p["display_text"],
+                }
+                if p["sheet"] is not None:
+                    ref["sheet"] = p["sheet"]
+                refs.append(ref)
+        q = question_group(
+            "member_mark_prefix_meaning", True, PREFIX_MESSAGE, refs, file=file, subjects=subjects
+        )
+        q["count"] = sum(s["count"] for s in subjects)
+        q["truncated"] = len(refs) < q["count"]
+        out.append(q)
+    return out
+
+
 def marks_questions(doc: dict[str, Any]) -> list[dict[str, Any]]:
     """Raw questions of a marks document: one per (code, file). Refs are sorted, so keys are stable."""
     plan_by_id = {p["id"]: p for p in doc["plan_marks"]}
     tables_by_id = {t["id"]: t for t in doc["tables"]}
-    out: list[dict[str, Any]] = []
+    out: list[dict[str, Any]] = _prefix_questions(doc["plan_marks"])
     for match in doc["matching"]:
         file = match["file"]
         if match["notation_variants"]:
@@ -1361,10 +1408,17 @@ def marks_questions(doc: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def question_counts(questions: list[dict[str, Any]]) -> dict[str, int]:
-    """Per code, how many things are asked (variant groups, conflicts, unparsed tables)."""
+    """Per code, how many things are asked (variant groups, conflicts, unparsed tables; for prefixes the
+    number of distinct prefixes over the project, as callouts counted them)."""
     counts: Counter[str] = Counter()
+    prefixes: set[str] = set()
     for q in questions:
-        counts[q["code"]] += q["count"]
+        if q["code"] == "member_mark_prefix_meaning":
+            prefixes.update(s["name"] for s in q["subjects"])
+        else:
+            counts[q["code"]] += q["count"]
+    if prefixes:
+        counts["member_mark_prefix_meaning"] = len(prefixes)
     return dict(sorted(counts.items()))
 
 

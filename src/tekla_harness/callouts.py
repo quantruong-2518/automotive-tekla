@@ -37,14 +37,14 @@ designations"):
     marks. Provenance: `method` 'derived', `derived_from` the text entry's provenance, `file` the inventory
     path (relative to the input folder), `sheet` the printed sheet number or 'unknown'.
 
-Questions. `callouts.json` holds no questions, only `question_counts` (per code: ambiguous notations, member
-mark prefixes, 1 for legacy grades). `run_callouts` (`harness callouts <work_dir>`) writes
-`callouts-questions.json`: `callout_ambiguous`, `member_mark_prefix_meaning` (blocking) and
-`grade_legacy_mapping` (blocking) as ONE question per (code, blocking flag, file) with a stable key, a
-registry id and the engineer's answer (questions.py, intake schema kind 'questions'). Inside one question
-`subjects` lists the notations (callout_ambiguous) or the member mark prefixes
-(member_mark_prefix_meaning, whose answer maps each prefix to its meaning). A changed drawing gives new
-keys, so these questions are asked again.
+Questions. `callouts.json` holds no questions, only `question_counts` (per code: ambiguous notations, 1 for
+legacy grades). `run_callouts` (`harness callouts <work_dir>`) writes `callouts-questions.json`:
+`callout_ambiguous` and `grade_legacy_mapping` (blocking) as ONE question per (code, blocking flag, file)
+with a stable key, a registry id and the engineer's answer (questions.py, intake schema kind 'questions').
+Inside a `callout_ambiguous` question `subjects` lists the notations. A changed drawing gives new keys, so
+these questions are asked again. Member mark prefixes (`member_mark_prefix_meaning`) are asked by
+`harness marks` since tool wave 2 (fix 1b): an answer given to the question callouts raised before goes
+stale once, at the next callouts run.
 
 Not covered (research ambiguous list): 5 circled bar marks, 8-10 sheet prefixes / axes / levels (other
 extractors), 15 weld symbols, 17 laps and hooks; welds and electrodes are not detected at all.
@@ -90,7 +90,6 @@ from tekla_harness.text_gate import meaning_block_reason
 
 MAX_REFS = 50  # refs listed per question; `count` is always the true total
 MAX_PREFIX_REFS = 10
-MAX_EXAMPLES = 5
 REF_TEXT_CHARS = 80
 LINE_CHARS = 200
 
@@ -643,13 +642,10 @@ LEGACY_GRADE_MESSAGE = (
 
 def question_counts(candidates: list[dict[str, Any]]) -> dict[str, int]:
     """Questions per code over the whole project: one `callout_ambiguous` per ambiguous notation, one
-    `member_mark_prefix_meaning` per member mark prefix, one `grade_legacy_mapping` when legacy grade groups
-    appear. (`callouts-questions.json` splits them per file; this is the project-wide number asked.)"""
+    `grade_legacy_mapping` when legacy grade groups appear. (`callouts-questions.json` splits them per file;
+    this is the project-wide number asked.) Member mark prefixes are asked by `harness marks`."""
     counts = {
         "callout_ambiguous": len({c["ambiguity"] for c in candidates if c["ambiguity"]}),
-        "member_mark_prefix_meaning": len(
-            {c["lexical"]["prefix"] for c in candidates if c["kind"] == "member_mark"}
-        ),
         "grade_legacy_mapping": int(
             any(
                 (c["parsed"] and c["parsed"]["form"] == "legacy_group")
@@ -848,12 +844,6 @@ AMBIGUOUS_GROUP_MESSAGE = (
     "listed in `subjects` is a question of its own: its wording is the `message` of its first reference. "
     "Answer in words, per notation."
 )
-PREFIX_GROUP_MESSAGE = (
-    "What does each member mark prefix listed in `subjects` mean in this project (column, beam, slab, "
-    "footing, tie beam, steel member...)? No standard defines the letters; use the drawing legend or the "
-    "member schedule. Answer with one value per prefix, e.g. --value C=column. (research, section 4 and "
-    "ambiguous #11)"
-)
 
 
 def _qref(c: dict[str, Any], where: str, found_prefix: str = "") -> dict[str, Any]:
@@ -899,36 +889,6 @@ def _legacy_question(file: str, cands: list[dict[str, Any]]) -> list[dict[str, A
     return [question_group("grade_legacy_mapping", True, LEGACY_GRADE_MESSAGE, refs, MAX_REFS, file=file)]
 
 
-def _prefix_question(file: str, cands: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    by_prefix: dict[str, list[dict[str, Any]]] = {}
-    for c in cands:
-        if c["kind"] == "member_mark":
-            assert c["lexical"] is not None
-            by_prefix.setdefault(c["lexical"]["prefix"], []).append(c)
-    if not by_prefix:
-        return []
-    refs: list[dict[str, Any]] = []
-    subjects = []
-    for prefix in sorted(by_prefix):
-        group = by_prefix[prefix]
-        marks = Counter(c["display_text"].strip() for c in group)
-        examples = [
-            {"mark": mark, "count": n}
-            for mark, n in sorted(marks.items(), key=lambda kv: (-kv[1], kv[0]))[:MAX_EXAMPLES]
-        ]
-        subjects.append({"name": prefix, "count": len(group), "examples": examples})
-        refs.extend(
-            _qref(c, f"prefix {prefix}, text entry {c['text_ref']['entry_id']}")
-            for c in group[:MAX_PREFIX_REFS]
-        )
-    total = sum(s["count"] for s in subjects)
-    q = question_group(
-        "member_mark_prefix_meaning", True, PREFIX_GROUP_MESSAGE, refs, file=file, subjects=subjects
-    )
-    q["count"], q["truncated"] = total, len(refs) < total
-    return [q]
-
-
 def callout_questions(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Raw questions (no id, key or answer yet) of a callouts document: one per (code, blocking flag, file),
     blocking first, then by code, then by file. Counts come from all candidates, not from capped lists."""
@@ -938,7 +898,7 @@ def callout_questions(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for file in sorted(by_file):
         mine = by_file[file]
-        out += _ambiguous_questions(file, mine) + _legacy_question(file, mine) + _prefix_question(file, mine)
+        out += _ambiguous_questions(file, mine) + _legacy_question(file, mine)
     return sorted(out, key=lambda q: (not q["blocking"], q["code"], q["file"]))
 
 

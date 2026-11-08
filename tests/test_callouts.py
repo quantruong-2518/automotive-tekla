@@ -524,20 +524,14 @@ def subjects(doc: dict[str, Any], code: str) -> dict[str, dict[str, Any]]:
 
 
 def refs_of(doc: dict[str, Any], code: str, name: str) -> list[dict[str, Any]]:
-    """The refs of one notation / prefix: they carry its name in `found` / `where`."""
-    marker = {"callout_ambiguous": f"[{name}] ", "member_mark_prefix_meaning": f"prefix {name},"}[code]
-    key = "found" if code == "callout_ambiguous" else "where"
-    return [r for q in questions(doc, code) for r in q["refs"] if r[key].startswith(marker)]
+    """The refs of one notation: they carry its name in `found`."""
+    return [r for q in questions(doc, code) for r in q["refs"] if r["found"].startswith(f"[{name}] ")]
 
 
 def test_the_document_holds_no_questions_only_counts(doc, work):
     assert "questions" not in doc and "questions" not in doc["summary"]
     assert "blocking_questions" not in doc["summary"]
-    assert doc["question_counts"] == {
-        "callout_ambiguous": 9,
-        "grade_legacy_mapping": 1,
-        "member_mark_prefix_meaning": 7,
-    }
+    assert doc["question_counts"] == {"callout_ambiguous": 9, "grade_legacy_mapping": 1}
     assert doc["question_counts"] == question_counts(doc["candidates"])
     assert extract_callouts(work)["question_counts"] == doc["question_counts"]  # deterministic
 
@@ -584,23 +578,14 @@ def test_blocking_choice_interpretation_blocks_standards_do_not(doc):
     assert not blocking["rebar_grade_edition"] and not blocking["steel_grade_standard_mix"]
 
 
-def test_one_blocking_subject_per_member_mark_prefix(doc):
-    (q,) = questions(doc, "member_mark_prefix_meaning")
-    assert q["blocking"] and q["file"] == REL
-    found = {s["name"]: s for s in q["subjects"]}
-    assert list(found) == sorted(found)
-    assert set(found) == {"C", "D", "DP", "GM", "M", "TB", "Đ"}
-    c = found["C"]
-    assert c["count"] == 4  # C1, C2 on S-101, C1 on S-102, C3 on S-201
-    assert c["examples"][0] == {"mark": "C1", "count": 2}
-    assert {e["mark"] for e in c["examples"]} == {"C1", "C2", "C3"}
-    assert {r["sheet"] for r in refs_of(doc, "member_mark_prefix_meaning", "C")} == {
-        "model#01",
-        "model#02",
-        "Plot#01",
-    }
-    assert found["D"]["count"] == 2  # D1 and the capital-font 'd1'
-    assert q["count"] == sum(s["count"] for s in q["subjects"])
+def test_member_marks_are_listed_but_their_prefixes_are_asked_by_marks(doc):
+    """Tool wave 2 (fix 1b, D6): `harness marks` asks member_mark_prefix_meaning for every plan-mark
+    prefix; callouts still lists member_mark candidates but raises no prefix question."""
+    assert not questions(doc, "member_mark_prefix_meaning")
+    assert "member_mark_prefix_meaning" not in question_counts(doc["candidates"])
+    prefixes = {c["lexical"]["prefix"] for c in doc["candidates"] if c["kind"] == "member_mark"}
+    assert prefixes == {"C", "D", "DP", "GM", "M", "TB", "Đ"}
+    assert doc["summary"]["member_mark_prefixes"] == len(prefixes)
 
 
 def test_legacy_grades_raise_one_blocking_mapping_question(doc):
@@ -619,9 +604,6 @@ def test_refs_are_capped_but_counts_stay_true(work, monkeypatch):
     assert mix["count"] == 7 and len(refs_of(out, "callout_ambiguous", "steel_grade_standard_mix")) == 1
     (q,) = questions(out, "callout_ambiguous")[:1]
     assert q["truncated"] is True
-    prefix = subjects(out, "member_mark_prefix_meaning")["C"]
-    assert prefix["count"] == 4 and len(refs_of(out, "member_mark_prefix_meaning", "C")) == 1
-    assert len(prefix["examples"]) == 3
     assert validate("callouts", out) == []
 
 
@@ -661,7 +643,9 @@ def test_summary_counts_add_up(doc):
     assert set(sheets) == {"model#01", "model#02", "Plot#01"}
     assert sheets["model#02"]["sheet_number"]["value"] == "S-102"
     assert sum(r["total"] for r in s["by_sheet"]) == len(cands)
-    assert s["member_mark_prefixes"] == len(subjects(doc, "member_mark_prefix_meaning"))
+    assert s["member_mark_prefixes"] == len(
+        {c["lexical"]["prefix"] for c in cands if c["kind"] == "member_mark"}
+    )
     assert (s["files_scanned"], s["files_skipped"]) == (1, 0)
     assert doc["files"][0]["candidates"] == len(cands)
 
