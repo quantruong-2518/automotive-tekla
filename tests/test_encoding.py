@@ -504,6 +504,29 @@ def test_capital_hint_from_the_family(style, family, capital):
     assert font_hint(style, None, family).capital_font is capital
 
 
+@pytest.mark.parametrize(
+    ("style", "family", "capital"),
+    [
+        # dwgshare 270: style names that start like a legacy font but are not font names (a hyphen
+        # suffix): the name gives no case hint, so the family decides (review of tool wave 2, F1 item 5)
+        ("VN-ABC", ".VnAvantH", True),
+        ("VNARIALH-BOLD", ".VnArialH", True),
+        ("VN-ABC", ".VnAvant", False),
+        ("VN_ABC", ".VnAvantH", True),
+        ("VN-ABC", None, None),  # nothing font-like at all: no hint
+        ("vn.abc", None, None),
+        # font-like names keep their hint, with or without a family
+        ("VntimeH", None, True),
+        (".VnArial NarrowH", None, True),
+        ("VNSIM", None, False),
+        (".VnTime", ".VnTimeH", None),  # a font-like name that disagrees with the family: never guess
+        ("kt..1", ".VnArialH-Bold", None),  # the same rule for the family: not a font name, no hint
+    ],
+)
+def test_a_style_name_that_is_not_a_font_name_gives_no_capital_hint(style, family, capital):
+    assert font_hint(style, "VHAVAN_2.TTF", family).capital_font is capital
+
+
 def test_decided_by_names_the_field_that_gave_the_encoding():
     assert font_hint(".VnTime").decided_by == "name"
     assert font_hint("MyStyle", ".VnTime.ttf").decided_by == "font"

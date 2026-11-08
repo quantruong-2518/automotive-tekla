@@ -455,6 +455,10 @@ _FONT_FILE_SUFFIXES = (".ttf", ".otf", ".ttc")
 # Style names that look like a legacy Vietnamese TrueType name: ".Vn..." or "Vn..." (dot optional,
 # because the real sample has "VntimeH"), but not "VNI-..." (VNI keeps case in its bytes).
 _LEGACY_STYLE = re.compile(r"\.?vn(?!i-)", re.IGNORECASE)
+# A name that IS such a font name (letters, digits and spaces after the prefix: "VntimeH", ".VnArial
+# NarrowH"), so its last letter can be the capital-font "H". Style names "VN-ABC", "VNARIALH-BOLD" (dwgshare
+# 270) and "vntimeh.shx" start like one but are not: their last letter says nothing about case.
+_FONT_LIKE_STYLE = re.compile(r"\.?vn[a-z0-9 ]*", re.IGNORECASE)
 
 
 HintField = Literal["name", "font", "family"]
@@ -502,10 +506,11 @@ def guess_encoding_from_font(font_name: str) -> FontEncoding:
 
 
 def _capital_hint(name: str) -> bool | None:
-    """True for a legacy-looking name (".Vn..." or "Vn...") ending in an uppercase "H", False for one without
-    the suffix, None otherwise (also for an all-lowercase name ending in "h": the suffix is not readable)."""
+    """True for a legacy font name (".Vn..." or "Vn...", then only letters, digits and spaces) ending in an
+    uppercase "H", False for one without the suffix, None otherwise (also for an all-lowercase name ending
+    in "h": the suffix is not readable; and for "VN-ABC": not a font name, its last letter says nothing)."""
     name = _clean_font_name(name)
-    if not _LEGACY_STYLE.match(name):
+    if not _FONT_LIKE_STYLE.fullmatch(name):
         return None
     if name.endswith("H"):
         return True
@@ -530,7 +535,10 @@ def font_hint(style_name: str, font_file: str | None = None, family: str | None 
     "h" returns None, because lowercasing destroyed the suffix. The style name and the family are read
     the same way (default D3, tool wave 2); when both give a hint and they disagree, the result is None
     (never guess); when only one gives a hint, it is used. So "VntimeH" gives encoding "unknown" (no
-    dot) but capital_font True: the two answers are independent hints.
+    dot) but capital_font True: the two answers are independent hints. A name gives a case hint only
+    when it is itself a font name (letters, digits and spaces after the prefix): style names "VN-ABC" or
+    "VNARIALH-BOLD" (dwgshare 270, families ".VnAvantH" / ".VnArialH") say nothing, so the family decides
+    (review of tool wave 2, F1).
 
     This is an observed naming convention, NOT verified against any font specification or font
     file: treat the result as a hint and settle it with the engineer.

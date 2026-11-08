@@ -529,6 +529,11 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
     a document whose `next_id` is not above every `F-` id is refused.
   - `harness questions-md` prints reader questions as written (never "chưa có bản dịch"); `harness ask
     --text` is the Vietnamese question the engineer reads.
+- Tool wave 2, review fixes, package F1 (legacy-font gate and grids):
+  - Capital-font hint: a style name or family gives a case hint only when it is itself a font name
+    (`.Vn`/`Vn` then letters, digits, spaces). Style names such as `VN-ABC` or `VNARIALH-BOLD` no longer
+    veto their family's hint (`.VnAvantH` → capital); `vntimeh.shx` used as a style name no longer reads
+    the `x` of its extension as "not capital" (its case is now reported as uncertain).
 - `guard_tekla_write.py` now exits 2 (the blocking code) on any internal error instead of
   relying on an undocumented `onFailure` setting; the setting was removed.
 - `guard_tekla_write.py` no longer blocks commands that only mention `tekla-cli` as data
