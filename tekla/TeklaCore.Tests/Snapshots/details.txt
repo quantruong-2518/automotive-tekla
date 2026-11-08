@@ -1,0 +1,223 @@
+plan run id null: RunIdInvalid exit 2 | RUN_ID '' must match ^[A-Z0-9][A-Z0-9_-]{0,31}$.
+plan run id lower case: RunIdInvalid exit 2 | RUN_ID 'r\u00001' must match ^[A-Z0-9][A-Z0-9_-]{0,31}$.
+plan header: JournalHeaderMismatch exit 5 | The run journal belongs to project 'demo-warehouse', lot 2, RUN_ID R20261108-01, not to project 'demo-warehouse', lot 1, RUN_ID R20261108-01.
+plan spec hash: SpecHashMismatch exit 5 | The run journal was written for spec bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb, not this spec aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa: a changed spec is an update, or a rollback of this run and a build with a new RUN_ID (the engineer decides).
+plan model path: ModelPathMismatch exit 5 | The run journal was written for model 'C:\Models\other', but the open working copy is 'C:\Models\demo-copy'.
+plan rolled back: RunRolledBack exit 5 | RUN_ID R20261108-01 has a rollback invocation (outcome ok): a run that was rolled back, even partly, is never resumed, so nothing the engineer asked to delete is rebuilt. Finish the rollback, then build with a new RUN_ID.
+plan partial rollback: RunRolledBack exit 5 | RUN_ID R20261108-01 has a rollback invocation (outcome stopped): a run that was rolled back, even partly, is never resumed, so nothing the engineer asked to delete is rebuilt. Finish the rollback, then build with a new RUN_ID.
+plan tagged without journal: TaggedObjectsWithoutJournal exit 5 | No run journal, but object 00000000-0000-0000-0000-000000000001 is tagged with lot 1 and RUN_ID R20261108-01: untagged leftovers of this run cannot be ruled out without the journal.
+plan unreadable tag: UnreadableTag exit 3 | A tag of object 00000000-0000-0000-0000-000000000001 could not be read.
+plan guid error: GuidLookupError exit 4 | Looking up journal GUID 00000000-0000-0000-0000-000000000001 failed.
+plan no lookup result: SnapshotIncomplete exit 3 | The snapshot has no lookup result for journal GUID 00000000-0000-0000-0000-000000000001.
+plan present not listed: SnapshotIncomplete exit 3 | The snapshot says journal GUID 00000000-0000-0000-0000-000000000001 is present but does not list its object.
+plan absent but listed: SnapshotIncomplete exit 3 | The snapshot says journal GUID 00000000-0000-0000-0000-000000000001 is absent but lists its object.
+plan missed by LOT: LookupUntrusted exit 3 | Object 00000000-0000-0000-0000-000000000001 carries this LOT but the LOT lookup did not return it: the filter cannot be trusted.
+plan missed by RUN_ID: LookupUntrusted exit 3 | Object 00000000-0000-0000-0000-000000000001 carries this RUN_ID but the RUN_ID lookup did not return it: the filter cannot be trusted.
+plan missed by SPEC_ID: LookupUntrusted exit 3 | Object 00000000-0000-0000-0000-000000000001 carries this SPEC_ID but the SPEC_ID lookup did not return it: the filter cannot be trusted.
+plan fresh: None exit 0 | Plan: 0 skip, 0 retag, 3 create, 0 conflict; 0 conflict(s) in all.
+  L1-C-A1 Create -
+  L1-C-A2 Create -
+  L1-B-A12 Create -
+plan resume: None exit 0 | Plan: 1 skip, 1 retag, 1 create, 0 conflict; 0 conflict(s) in all.
+  L1-C-A1 Skip 00000000-0000-0000-0000-000000000001
+  L1-C-A2 Retag 00000000-0000-0000-0000-000000000002
+  L1-B-A12 Create - recreated absent 00000000-0000-0000-0000-000000000003/Tagged
+plan name note: None exit 0 | Plan: 1 skip, 0 retag, 0 create, 0 conflict; 0 conflict(s) in all.
+  N Skip 00000000-0000-0000-0000-000000000001 | note: Name (unreadable) differs from the spec name 'BEAM-A'.
+plan mismatch every field: None exit 1 | Plan: 0 skip, 0 retag, 0 create, 1 conflict; 1 conflict(s) in all.
+  N Conflict - | note: Name 'BEAM-B' differs from the spec name 'BEAM-A'.
+  ! Mismatch N 00000000-0000-0000-0000-000000000001 | Object 00000000-0000-0000-0000-000000000001 differs from spec item N: start unreadable (spec (0, 0, 0)); end (1000.5, 0, 0) is 0.5 mm from the spec (1000, 0, 0); profile 'X\u0001' (spec 'HEA300'); material (unreadable) (spec 'S355JR'); kind 'other' (spec type 'beam'); rotation unreadable (spec 0 deg); class (unreadable) (spec '3').
+plan mismatch numbers: None exit 1 | Plan: 0 skip, 0 retag, 0 create, 1 conflict; 1 conflict(s) in all.
+  N Conflict -
+  ! Mismatch N 00000000-0000-0000-0000-000000000001 | Object 00000000-0000-0000-0000-000000000001 differs from spec item N: start (0, 0.25, 0) is 0.25 mm from the spec (0, 0, 0); rotation 1.5 deg (spec 0 deg); class '4' (spec '3').
+plan intent: None exit 1 | Plan: 0 skip, 0 retag, 2 create, 1 conflict; 1 conflict(s) in all.
+  L1-C-A1 Conflict -
+  L1-C-A2 Create -
+  L1-B-A12 Create -
+  ! IntentUnresolved L1-C-A1 - | The journal still has an insert intent for SPEC_ID L1-C-A1: an untagged object may exist. Check the model, then roll the run back or remove the stray object and start a new RUN_ID.
+plan duplicate: None exit 1 | Plan: 0 skip, 0 retag, 2 create, 1 conflict; 1 conflict(s) in all.
+  L1-C-A1 Conflict -
+  L1-C-A2 Create -
+  L1-B-A12 Create -
+  ! DuplicateSpecId L1-C-A1 - | Several objects stand for SPEC_ID L1-C-A1: 00000000-0000-0000-0000-000000000001, 00000000-0000-0000-0000-000000000002.
+plan not the latest: None exit 1 | Plan: 0 skip, 0 retag, 2 create, 1 conflict; 1 conflict(s) in all.
+  L1-C-A1 Conflict - absent 00000000-0000-0000-0000-000000000002/Tagged
+  L1-C-A2 Create -
+  L1-B-A12 Create -
+  ! TagContradiction L1-C-A1 00000000-0000-0000-0000-000000000001 | Object 00000000-0000-0000-0000-000000000001 stands for SPEC_ID L1-C-A1, but the journal's latest object for it is 00000000-0000-0000-0000-000000000002.
+plan one guid two members: None exit 1 | Plan: 0 skip, 0 retag, 1 create, 2 conflict; 2 conflict(s) in all.
+  L1-C-A1 Conflict - absent 00000000-0000-0000-0000-000000000001/Inserted
+  L1-C-A2 Conflict - absent 00000000-0000-0000-0000-000000000001/Inserted
+  L1-B-A12 Create -
+  ! TagContradiction L1-C-A1 00000000-0000-0000-0000-000000000001 | The journal records object 00000000-0000-0000-0000-000000000001 for several SPEC_IDs: L1-C-A1, L1-C-A2.
+  ! TagContradiction L1-C-A2 00000000-0000-0000-0000-000000000001 | The journal records object 00000000-0000-0000-0000-000000000001 for several SPEC_IDs: L1-C-A1, L1-C-A2.
+plan tags contradict: None exit 1 | Plan: 0 skip, 0 retag, 1 create, 2 conflict; 2 conflict(s) in all.
+  L1-C-A1 Conflict -
+  L1-C-A2 Conflict -
+  L1-B-A12 Create -
+  ! TagContradiction L1-C-A1 00000000-0000-0000-0000-000000000001 | Object 00000000-0000-0000-0000-000000000001 is recorded in the journal for SPEC_ID L1-C-A1 but carries LOT '2', RUN_ID (absent), SPEC_ID 'L1-C-A2'.
+  ! TagContradiction L1-C-A2 00000000-0000-0000-0000-000000000001 | Object 00000000-0000-0000-0000-000000000001 is recorded in the journal for SPEC_ID L1-C-A1 but carries LOT '2', RUN_ID (absent), SPEC_ID 'L1-C-A2'.
+plan other run: None exit 1 | Plan: 0 skip, 0 retag, 2 create, 1 conflict; 1 conflict(s) in all.
+  L1-C-A1 Conflict -
+  L1-C-A2 Create -
+  L1-B-A12 Create -
+  ! SpecIdInOtherRun L1-C-A1 00000000-0000-0000-0000-000000000005 | Object 00000000-0000-0000-0000-000000000005 carries SPEC_ID L1-C-A1 under another run: LOT '1', RUN_ID 'R-OLD', SPEC_ID 'L1-C-A1'.
+plan other lot: None exit 1 | Plan: 0 skip, 0 retag, 2 create, 1 conflict; 2 conflict(s) in all.
+  L1-C-A1 Conflict -
+  L1-C-A2 Create -
+  L1-B-A12 Create -
+  ! RunInOtherLot L1-C-A1 00000000-0000-0000-0000-000000000007 | Object 00000000-0000-0000-0000-000000000007 carries RUN_ID R20261108-01 in another lot: LOT '2', RUN_ID 'R20261108-01', SPEC_ID 'L1-C-A1'.
+  ! RunInOtherLot - 00000000-0000-0000-0000-000000000008 | Object 00000000-0000-0000-0000-000000000008 carries RUN_ID R20261108-01 in another lot: LOT '2', RUN_ID 'R20261108-01', SPEC_ID (absent).
+plan unknown spec id: None exit 1 | Plan: 0 skip, 0 retag, 3 create, 0 conflict; 1 conflict(s) in all.
+  L1-C-A1 Create -
+  L1-C-A2 Create -
+  L1-B-A12 Create -
+  ! UnknownSpecId L1-GONE 00000000-0000-0000-0000-000000000008 | Object 00000000-0000-0000-0000-000000000008 is tagged with this lot and run, but SPEC_ID L1-GONE is not in the spec.
+plan unknown in journal: None exit 1 | Plan: 0 skip, 0 retag, 3 create, 0 conflict; 2 conflict(s) in all.
+  L1-C-A1 Create -
+  L1-C-A2 Create -
+  L1-B-A12 Create -
+  ! UnknownSpecId L1-GONE 00000000-0000-0000-0000-000000000009 | The journal records object 00000000-0000-0000-0000-000000000009 for SPEC_ID L1-GONE, which is not in the spec.
+  ! UnknownSpecId L1-GONE - | The journal records an insert intent for SPEC_ID L1-GONE, which is not in the spec.
+plan unclassified: None exit 1 | Plan: 0 skip, 0 retag, 2 create, 1 conflict; 2 conflict(s) in all.
+  L1-C-A1 Create -
+  L1-C-A2 Conflict -
+  L1-B-A12 Create -
+  ! Unclassified L1-C-A2 00000000-0000-0000-0000-000000000007 | Object 00000000-0000-0000-0000-000000000007 has harness tags no rule classifies: LOT (absent), RUN_ID (absent), SPEC_ID 'L1-C-A2'.
+  ! Unclassified - 00000000-0000-0000-0000-000000000006 | Object 00000000-0000-0000-0000-000000000006 has harness tags no rule classifies: LOT '1', RUN_ID (absent), SPEC_ID (absent).
+reader 000 | test journal is not a valid run journal: missing field 'schema_version'.
+reader 001 | test journal is not a valid run journal: missing field 'project_id'.
+reader 002 | test journal is not a valid run journal: missing field 'lot'.
+reader 003 | test journal is not a valid run journal: missing field 'run_id'.
+reader 004 | test journal is not a valid run journal: missing field 'spec_file'.
+reader 005 | test journal is not a valid run journal: missing field 'spec_sha256'.
+reader 006 | test journal is not a valid run journal: missing field 'model_path'.
+reader 007 | test journal is not a valid run journal: missing field 'invocations'.
+reader 008 | test journal is not a valid run journal: unknown field 'extra'.
+reader 009 | test journal is not a valid run journal: 'schema_version' must be "0.1".
+reader 010 | test journal is not a valid run journal: 'schema_version' must be a string.
+reader 011 | test journal is not a valid run journal: 'project_id' must match ^[a-z0-9][a-z0-9-]{1,63}$.
+reader 012 | test journal is not a valid run journal: 'project_id' must match ^[a-z0-9][a-z0-9-]{1,63}$.
+reader 013 | test journal is not a valid run journal: 'project_id' must match ^[a-z0-9][a-z0-9-]{1,63}$.
+reader 014 | test journal is not a valid run journal: 'project_id' must match ^[a-z0-9][a-z0-9-]{1,63}$.
+reader 015 | test journal is not a valid run journal: 'project_id' must match ^[a-z0-9][a-z0-9-]{1,63}$.
+reader 016 | test journal is not a valid run journal: 'project_id' must be a string.
+reader 017 | test journal is not a valid run journal: 'lot' must be an integer token from 1 to 2147483647.
+reader 018 | test journal is not a valid run journal: 'lot' must be an integer token from 1 to 2147483647.
+reader 019 | test journal is not a valid run journal: 'lot' must be an integer token from 1 to 2147483647.
+reader 020 | test journal is not a valid run journal: 'lot' must be an integer token from 1 to 2147483647.
+reader 021 | test journal is not a valid run journal: 'lot' must be an integer token from 1 to 2147483647.
+reader 022 | test journal is not a valid run journal: 'lot' must be an integer token from 1 to 2147483647.
+reader 023 | test journal is not a valid run journal: 'run_id' must match ^[A-Z0-9][A-Z0-9_-]{0,31}$.
+reader 024 | test journal is not a valid run journal: 'run_id' must match ^[A-Z0-9][A-Z0-9_-]{0,31}$.
+reader 025 | test journal is not a valid run journal: 'run_id' must match ^[A-Z0-9][A-Z0-9_-]{0,31}$.
+reader 026 | test journal is not a valid run journal: 'run_id' must match ^[A-Z0-9][A-Z0-9_-]{0,31}$.
+reader 027 | test journal is not a valid run journal: 'run_id' must match ^[A-Z0-9][A-Z0-9_-]{0,31}$.
+reader 028 | test journal is not a valid run journal: 'run_id' must match ^[A-Z0-9][A-Z0-9_-]{0,31}$.
+reader 029 | test journal is not a valid run journal: 'spec_file' must be a non-empty base name.
+reader 030 | test journal is not a valid run journal: 'spec_file' must be a non-empty base name.
+reader 031 | test journal is not a valid run journal: 'spec_file' must be a non-empty base name.
+reader 032 | test journal is not a valid run journal: 'spec_sha256' must be 64 lowercase hexadecimal characters.
+reader 033 | test journal is not a valid run journal: 'spec_sha256' must be 64 lowercase hexadecimal characters.
+reader 034 | test journal is not a valid run journal: 'spec_sha256' must be 64 lowercase hexadecimal characters.
+reader 035 | test journal is not a valid run journal: 'spec_sha256' must be 64 lowercase hexadecimal characters.
+reader 036 | test journal is not a valid run journal: 'model_path' must be a non-empty string.
+reader 037 | test journal is not a valid run journal: 'model_path' must be a string.
+reader 038 | test journal is not a valid run journal: 'invocations' must be an array.
+reader 039 | test journal is not a valid run journal: 'invocations' must be an array.
+reader 040 | test journal is not a valid run journal: 'invocations[0]' must be an object.
+reader 041 | test journal is not a valid run journal: 'invocations[0]' must be an object.
+reader 042 | test journal is not a valid run journal: missing field 'invocations[0].command'.
+reader 043 | test journal is not a valid run journal: missing field 'invocations[0].started_at'.
+reader 044 | test journal is not a valid run journal: missing field 'invocations[0].ended_at'.
+reader 045 | test journal is not a valid run journal: missing field 'invocations[0].tekla_version'.
+reader 046 | test journal is not a valid run journal: missing field 'invocations[0].model_path'.
+reader 047 | test journal is not a valid run journal: missing field 'invocations[0].outcome'.
+reader 048 | test journal is not a valid run journal: missing field 'invocations[0].exit_code'.
+reader 049 | test journal is not a valid run journal: missing field 'invocations[0].committed'.
+reader 050 | test journal is not a valid run journal: missing field 'invocations[0].objects'.
+reader 051 | test journal is not a valid run journal: missing field 'invocations[0].failure'.
+reader 052 | test journal is not a valid run journal: missing field 'invocations[0].conflicts'.
+reader 053 | test journal is not a valid run journal: unknown field 'invocations[0].note'.
+reader 054 | test journal is not a valid run journal: 'invocations[0].command' must be one of build, update, rollback.
+reader 055 | test journal is not a valid run journal: 'invocations[0].command' must be one of build, update, rollback.
+reader 056 | test journal is not a valid run journal: 'invocations[0].command' must be one of build, update, rollback.
+reader 057 | test journal is not a valid run journal: 'invocations[0].started_at' must look like 2026-11-08T09:00:00Z.
+reader 058 | test journal is not a valid run journal: 'invocations[0].started_at' must look like 2026-11-08T09:00:00Z.
+reader 059 | test journal is not a valid run journal: 'invocations[0].started_at' must look like 2026-11-08T09:00:00Z.
+reader 060 | test journal is not a valid run journal: 'invocations[0].started_at' must look like 2026-11-08T09:00:00Z.
+reader 061 | test journal is not a valid run journal: 'invocations[0].started_at' must look like 2026-11-08T09:00:00Z.
+reader 062 | test journal is not a valid run journal: 'invocations[0].started_at' must look like 2026-11-08T09:00:00Z.
+reader 063 | test journal is not a valid run journal: 'invocations[0].started_at' must look like 2026-11-08T09:00:00Z.
+reader 064 | test journal is not a valid run journal: 'invocations[0].ended_at' must look like 2026-11-08T09:00:00Z.
+reader 065 | test journal is not a valid run journal: 'invocations[0].ended_at' must look like 2026-11-08T09:00:00Z.
+reader 066 | test journal is not a valid run journal: 'invocations[0].tekla_version' must be a non-empty string.
+reader 067 | test journal is not a valid run journal: 'invocations[0].tekla_version' must be a string.
+reader 068 | test journal is not a valid run journal: 'invocations[0].model_path' must be a non-empty string.
+reader 069 | test journal is not a valid run journal: 'invocations[0].outcome' must be one of running, ok, stopped, conflict, refused, abandoned.
+reader 070 | test journal is not a valid run journal: 'invocations[0].outcome' must be one of running, ok, stopped, conflict, refused, abandoned.
+reader 071 | test journal is not a valid run journal: 'invocations[0].exit_code' must be an integer token from 0 to 5.
+reader 072 | test journal is not a valid run journal: 'invocations[0].exit_code' must be an integer token from 0 to 5.
+reader 073 | test journal is not a valid run journal: 'invocations[0].exit_code' must be an integer token from 0 to 5.
+reader 074 | test journal is not a valid run journal: 'invocations[0].exit_code' must be an integer token from 0 to 5.
+reader 075 | test journal is not a valid run journal: 'invocations[0].committed' must be a boolean.
+reader 076 | test journal is not a valid run journal: 'invocations[0].committed' must be a boolean.
+reader 077 | test journal is not a valid run journal: 'invocations[0].committed' must be a boolean.
+reader 078 | test journal is not a valid run journal: 'invocations[0].objects' must be an array.
+reader 079 | test journal is not a valid run journal: 'invocations[0].objects' must be an array.
+reader 080 | test journal is not a valid run journal: 'invocations[0].objects[0]' must be an object.
+reader 081 | test journal is not a valid run journal: 'invocations[0].failure' must be an object or null.
+reader 082 | test journal is not a valid run journal: 'invocations[0].failure' must be an object or null.
+reader 083 | test journal is not a valid run journal: 'invocations[0].conflicts' must be an array.
+reader 084 | test journal is not a valid run journal: 'invocations[0].conflicts[0]' must be an object.
+reader 085 | test journal is not a valid run journal: missing field 'invocations[0].objects[0].spec_id'.
+reader 086 | test journal is not a valid run journal: missing field 'invocations[0].objects[0].guid'.
+reader 087 | test journal is not a valid run journal: missing field 'invocations[0].objects[0].action'.
+reader 088 | test journal is not a valid run journal: missing field 'invocations[0].objects[0].state'.
+reader 089 | test journal is not a valid run journal: unknown field 'invocations[0].objects[0].x'.
+reader 090 | test journal is not a valid run journal: 'invocations[0].objects[0].spec_id' must match ^[A-Z0-9][A-Z0-9_-]{0,63}$.
+reader 091 | test journal is not a valid run journal: 'invocations[0].objects[0].spec_id' must match ^[A-Z0-9][A-Z0-9_-]{0,63}$.
+reader 092 | test journal is not a valid run journal: 'invocations[0].objects[0].spec_id' must match ^[A-Z0-9][A-Z0-9_-]{0,63}$.
+reader 093 | test journal is not a valid run journal: 'invocations[0].objects[0].spec_id' must match ^[A-Z0-9][A-Z0-9_-]{0,63}$.
+reader 094 | test journal is not a valid run journal: 'invocations[0].objects[0].spec_id' must be a string.
+reader 095 | test journal is not a valid run journal: 'invocations[0].objects[0].spec_id' must match ^[A-Z0-9][A-Z0-9_-]{0,63}$.
+reader 096 | test journal is not a valid run journal: 'invocations[0].objects[0].guid' must be a lowercase GUID like 3f2504e0-4f89-11d3-9a0c-0305e82c3301.
+reader 097 | test journal is not a valid run journal: 'invocations[0].objects[0].guid' must be a lowercase GUID like 3f2504e0-4f89-11d3-9a0c-0305e82c3301.
+reader 098 | test journal is not a valid run journal: 'invocations[0].objects[0].guid' must be a lowercase GUID like 3f2504e0-4f89-11d3-9a0c-0305e82c3301.
+reader 099 | test journal is not a valid run journal: 'invocations[0].objects[0].guid' must be a lowercase GUID like 3f2504e0-4f89-11d3-9a0c-0305e82c3301.
+reader 100 | test journal is not a valid run journal: 'invocations[0].objects[0].guid' must be a lowercase GUID like 3f2504e0-4f89-11d3-9a0c-0305e82c3301.
+reader 101 | test journal is not a valid run journal: 'invocations[0].objects[0].guid' must be a lowercase GUID like 3f2504e0-4f89-11d3-9a0c-0305e82c3301.
+reader 102 | test journal is not a valid run journal: 'invocations[0].objects[0].guid' must be a lowercase GUID like 3f2504e0-4f89-11d3-9a0c-0305e82c3301.
+reader 103 | test journal is not a valid run journal: 'invocations[0].objects[0].guid' must be a lowercase GUID like 3f2504e0-4f89-11d3-9a0c-0305e82c3301.
+reader 104 | test journal is not a valid run journal: 'invocations[0].objects[0].action' must be one of created, retagged.
+reader 105 | test journal is not a valid run journal: 'invocations[0].objects[0].action' must be one of created, retagged.
+reader 106 | test journal is not a valid run journal: 'invocations[0].objects[0].state' must be one of inserting, inserted, tagged.
+reader 107 | test journal is not a valid run journal: 'invocations[0].objects[0].guid' must be null while state is "inserting".
+reader 108 | test journal is not a valid run journal: 'invocations[0].objects[0].guid' must be a lowercase GUID like 3f2504e0-4f89-11d3-9a0c-0305e82c3301.
+reader 109 | test journal is not a valid run journal: 'invocations[0].objects[0].guid' must be a lowercase GUID like 3f2504e0-4f89-11d3-9a0c-0305e82c3301.
+reader 110 | test journal is not a valid run journal: missing field 'invocations[0].failure.stage'.
+reader 111 | test journal is not a valid run journal: missing field 'invocations[0].failure.spec_id'.
+reader 112 | test journal is not a valid run journal: missing field 'invocations[0].failure.error'.
+reader 113 | test journal is not a valid run journal: unknown field 'invocations[0].failure.x'.
+reader 114 | test journal is not a valid run journal: 'invocations[0].failure.stage' must be one of plan, insert, tag, commit, journal, other.
+reader 115 | test journal is not a valid run journal: 'invocations[0].failure.spec_id' must match ^[A-Z0-9][A-Z0-9_-]{0,63}$.
+reader 116 | test journal is not a valid run journal: 'invocations[0].failure.spec_id' must match ^[A-Z0-9][A-Z0-9_-]{0,63}$.
+reader 117 | test journal is not a valid run journal: 'invocations[0].failure.error' must be a non-empty string.
+reader 118 | test journal is not a valid run journal: 'invocations[0].failure.error' must be a string.
+reader 119 | test journal is not a valid run journal: missing field 'invocations[0].conflicts[0].kind'.
+reader 120 | test journal is not a valid run journal: missing field 'invocations[0].conflicts[0].spec_id'.
+reader 121 | test journal is not a valid run journal: missing field 'invocations[0].conflicts[0].guid'.
+reader 122 | test journal is not a valid run journal: missing field 'invocations[0].conflicts[0].detail'.
+reader 123 | test journal is not a valid run journal: unknown field 'invocations[0].conflicts[0].x'.
+reader 124 | test journal is not a valid run journal: 'invocations[0].conflicts[0].kind' must be one of mismatch, duplicate_spec_id, spec_id_in_other_run, run_in_other_lot, unknown_spec_id, intent_unresolved, tag_contradiction, unclassified.
+reader 125 | test journal is not a valid run journal: 'invocations[0].conflicts[0].spec_id' must be a non-empty string.
+reader 126 | test journal is not a valid run journal: 'invocations[0].conflicts[0].spec_id' must be a string.
+reader 127 | test journal is not a valid run journal: 'invocations[0].conflicts[0].guid' must be a lowercase GUID like 3f2504e0-4f89-11d3-9a0c-0305e82c3301.
+reader 128 | test journal is not a valid run journal: 'invocations[0].conflicts[0].detail' must be a non-empty string.
+reader 129 | test journal is not a valid run journal: 'invocations[0].conflicts[0].detail' must be a string.
+reader 130 | test journal is not a valid run journal: 'run_id' must be a string.
+reader 131 | test journal is not a valid run journal: 'spec_file' must be a string.
+reader 132 | test journal is not a valid run journal: 'spec_sha256' must be a string.
+reader 133 | test journal is not a valid run journal: 'invocations[0].failure.spec_id' must be a string.
+reader [] | test journal is not a valid run journal: the top level must be an object.
+reader {"schema_version":"0.1"} | test journal is not a valid run journal: missing field 'project_id'.

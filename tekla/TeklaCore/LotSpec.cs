@@ -81,7 +81,7 @@ public sealed class MemberSpec
 /// <summary>A point in millimetres.</summary>
 public sealed class Point3
 {
-    internal Point3(double x, double y, double z)
+    public Point3(double x, double y, double z)
     {
         X = x;
         Y = y;

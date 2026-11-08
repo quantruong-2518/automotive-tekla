@@ -294,6 +294,13 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
   and example — one journal per lot and run (`run-journal-<RUN_ID>.json`), invocations with
   per-object intent/inserted/tagged states, failure and conflicts; `run_id` pattern
   `^[A-Z0-9][A-Z0-9_-]{0,31}$` added to `common`.
+- Step 3 S1c C# (ADR-0012): `TeklaCore` run journal reader/writer (strict JSON, bytes identical to
+  Python `json.dumps(indent=2, ensure_ascii=False)`, golden fixture `tests/fixtures/run-journal/`,
+  atomic replace with retries), per-model run lock (named mutex on the normalised working-copy
+  path; held → exit 3), model snapshot types (three-state tags, GUID presence) and a pure
+  `ResumePlanner`: skip, retag, create or conflict per member, refusals before planning (spec hash,
+  model path, header, any rollback, untrusted lookups), matching within 0.1 mm (+1e-6 rounding
+  allowance), kind, rotation 0.01° and class.
 - Versioning note: the reading-toolchain schemas above have not been released; they stay `0.1` and their
   changes are recorded here until the first tagged release, from which every change bumps its `$id`
   (AGENTS.md). Pending engineer confirmation.

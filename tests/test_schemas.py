@@ -187,3 +187,17 @@ def test_run_journal_rejects_uppercase_guid(example):
     journal = example("run-journal")
     journal["invocations"][0]["objects"][0]["guid"] = "3F2504E0-4F89-11D3-9A0C-0305E82C3301"
     assert validate("run-journal", journal)
+
+
+def test_run_journal_golden_matches_schema_and_python_bytes():
+    """The C# writer's output (tests/fixtures/run-journal/golden.json, checked byte for byte in
+    xunit) is a valid journal and equals Python's json.dumps of the same content."""
+    import json as _json
+
+    from conftest import EXAMPLES, REPO
+
+    golden = (REPO / "tests" / "fixtures" / "run-journal" / "golden.json").read_bytes()
+    data = _json.loads(golden)
+    assert validate("run-journal", data) == []
+    assert data == _json.loads((EXAMPLES / "run-journal.example.json").read_text("utf-8"))
+    assert golden == (_json.dumps(data, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
