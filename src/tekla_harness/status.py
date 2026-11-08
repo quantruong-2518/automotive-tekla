@@ -26,7 +26,10 @@ question is harmless) and is reported in `blocking_unknown`.
 
 Tool wave 2:
   * a question `lifecycle.closures` closes (another answer or selection settles it) leaves the `blocking` and
-    `blocking_open` counts and is listed in `gate1.closed` with its reason;
+    `blocking_open` counts and is listed in `gate1.closed` with its reason, but only when the closure keeps
+    the contract (`check_closures`: its reason fits the closed question's producer and code, the question
+    is not the reader's, and it names a live question the engineer answered). A refused closure leaves the
+    question open and is a gate-1 reason (`closures: ...`);
   * an active answer to a live gate-relevant question (producers intake, read-structure, grid-system,
     reader: every question gate 1 reads) that the engineer did not give (`answered_by_role` 'simulated', or
     no role at all: an answer recorded before roles existed) is a gate-1 reason naming its question id and
@@ -54,6 +57,8 @@ from tekla_harness.questions import (
     UNIT_CODES,
     UNITS,
     UNITS_CONFIRM_CODE,
+    Closure,
+    Ledger,
     QuestionsError,
     active_answers,
     load_ledger,
@@ -83,6 +88,10 @@ GATE_ANSWER_PRODUCERS = frozenset(dict(PRODUCERS)[label] for label in GATE_PRODU
 LEGACY_ANSWER_IS_ENGINEER = False
 # an answer to these never closes them: they close through another question's structured values
 NOT_CLOSED_BY_AN_ANSWER = frozenset({CONFLICT_CODE})
+# closure contract (check_closures): units_answered closes this read-structure code only, and
+# rejected_systems_only closes read-structure codes of this prefix only (grids.py, refs with `families`)
+UNITS_DOUBT_CODE = "grid_units_doubt"
+GRID_FAMILY_PREFIX = "grid_"
 # A printed answer command is the ENGINEER's step, never an agent's (review M1): it is always introduced by
 # ENGINEER_STEP and names `--role engineer` once, after --by (gate 1 counts the engineer's answers only).
 ENGINEER_STEP = "the engineer runs: "
@@ -116,7 +125,7 @@ def _id_number(question_id: str) -> int:
 def _question_counts(
     registry: dict[str, Any], active: dict[str, dict[str, Any]], producer: str, closed: frozenset[str]
 ) -> tuple[dict[str, int], list[str]]:
-    """`closed`: keys lifecycle.closures closes; they block nothing."""
+    """`closed`: keys of the accepted closures (check_closures); they block nothing."""
     entries = {k: e for k, e in registry["questions"].items() if e["producer"] == producer}
     live = {k: e for k, e in entries.items() if e["status"] != "obsolete"}
     blocking = {k: e for k, e in live.items() if e.get("blocking", True) and k not in closed}
@@ -390,11 +399,84 @@ def _non_engineer_answers(
         entry = registry["questions"].get(key)
         if entry is None or entry["status"] == "obsolete" or entry["producer"] not in GATE_ANSWER_PRODUCERS:
             continue
-        role = answer.get("answered_by_role")
-        if role == "engineer" or (role is None and LEGACY_ANSWER_IS_ENGINEER):
+        if _by_engineer(answer):
             continue
-        out.append({"question_id": entry["id"], "code": entry["code"], "file": entry["file"], "role": role})
+        out.append(
+            {
+                "question_id": entry["id"],
+                "code": entry["code"],
+                "file": entry["file"],
+                "role": answer.get("answered_by_role"),
+            }
+        )
     return sorted(out, key=lambda a: _id_number(a["question_id"]))
+
+
+def _by_engineer(answer: dict[str, Any]) -> bool:
+    role = answer.get("answered_by_role")
+    return role == "engineer" or (role is None and LEGACY_ANSWER_IS_ENGINEER)
+
+
+def _closure_fits(reason: str, entry: dict[str, Any]) -> bool:
+    """The closure contract (DESIGN §1 5a-5d): which reason may close which producer's code."""
+    producer, code = entry["producer"], entry["code"]
+    if reason in ("not_selected", "separate", "other_file_set"):  # 5a, 5d: a grid-system conflict
+        return producer == "grid-system" and code == CONFLICT_CODE
+    if reason == "units_answered":  # 5c
+        return producer == "structure" and code == UNITS_DOUBT_CODE
+    if reason == "rejected_systems_only":  # 5b: a read-structure question citing grid families
+        return producer == "structure" and code.startswith(GRID_FAMILY_PREFIX)
+    return False
+
+
+def check_closures(
+    registry: dict[str, Any], active: dict[str, dict[str, Any]], closures: dict[str, Closure]
+) -> tuple[dict[str, Closure], list[str]]:
+    """The closures gate 1 accepts, and a gate-1 reason per refused one (review M2). A closure is accepted
+    only when its reason fits the closed question (`_closure_fits`), the question is not the reader's (a
+    reader question closes only through its own answer), and it names a live question with an active answer
+    the engineer gave. A refused closure leaves its question open and blocking as before. Closures of keys
+    that are unknown or obsolete in the registry are ignored (they block nothing either way)."""
+    entries = registry["questions"]
+    by_id = {e["id"]: (k, e) for k, e in entries.items()}
+    accepted: dict[str, Closure] = {}
+    refused: list[tuple[str, str]] = []
+    for key, c in closures.items():
+        entry = entries.get(key)
+        if entry is None or entry["status"] == "obsolete":
+            continue
+        closer = by_id.get(c.question_id) if c.question_id is not None else None
+        if entry["producer"] == "reader":
+            why = "a reader question closes only through its own answer"
+        elif not _closure_fits(c.reason, entry):
+            why = f"{c.reason} cannot close a {entry['producer']} {entry['code']} question"
+        elif c.question_id is None:
+            why = "it names no question whose answer closes it"
+        elif closer is None or closer[1]["status"] == "obsolete":
+            why = f"{c.question_id} is not a live question"
+        elif closer[0] not in active:
+            why = f"{c.question_id} has no active answer"
+        elif not _by_engineer(active[closer[0]]):
+            why = f"{c.question_id} was not answered by the engineer"
+        else:
+            accepted[key] = c
+            continue
+        by = f" by {c.question_id}" if c.question_id else ""
+        refused.append(
+            (
+                entry["id"],
+                f"closures: {entry['id']} {entry['code']} ({entry['file'] or 'project'}) stays open: the "
+                f"closure {c.reason}{by} is refused ({why})",
+            )
+        )
+    return accepted, [r for _, r in sorted(refused, key=lambda row: _id_number(row[0]))]
+
+
+def accepted_closures(work: Path, ledger: Ledger) -> dict[str, Closure]:
+    """`lifecycle.closures` filtered by `check_closures`: what `harness status` and questions.md treat as
+    closed."""
+    raw = lifecycle.closures(work, ledger)
+    return check_closures(ledger.registry, active_answers(ledger.answers), raw)[0]
 
 
 def _role_reasons(non_engineer: list[dict[str, Any]], work_dir: str) -> list[str]:
@@ -445,7 +527,7 @@ def build_status(work_dir: str | Path) -> dict[str, Any]:
     registry, answers = ledger.registry, ledger.answers["answers"]
     active = active_answers(ledger.answers)
     inventory_sha = hashlib.sha256(inventory_bytes).hexdigest()
-    closures = lifecycle.closures(work, ledger)
+    closures, refused_closures = check_closures(registry, active, lifecycle.closures(work, ledger))
     closed_keys = frozenset(closures)
 
     producers: list[dict[str, Any]] = []
@@ -470,6 +552,7 @@ def build_status(work_dir: str | Path) -> dict[str, Any]:
     reasons += _level_reasons(registry, active)
     non_engineer = _non_engineer_answers(registry, active)
     reasons += _role_reasons(non_engineer, shown)
+    reasons += refused_closures
     for label in GATE_PRODUCERS:
         q = by_label[label]["questions"]
         if q["blocking_open"]:

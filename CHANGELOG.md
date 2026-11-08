@@ -380,6 +380,11 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
     (`the engineer runs: …`), the role reason says the engineer must answer again themselves, and
     questions.md labels the command as one the engineer runs and an agent never runs instead.
     `record_answer` takes `role` as a required keyword (no default; None is a usage error).
+  - Review M2: `harness status` and `harness questions-md` accept a `lifecycle.closures` closure only when
+    its reason fits the closed question (not_selected / separate / other_file_set: grid-system
+    `grid_system_conflict`; units_answered: read-structure `grid_units_doubt`; rejected_systems_only:
+    read-structure `grid_*`), the question is not the reader's, and it names a live question with an
+    active engineer answer. A refused closure leaves the question open and is a `closures:` gate-1 reason.
 
 ### Changed
 - Question lifecycle (tool wave 2, EVAL-2 fix 5):

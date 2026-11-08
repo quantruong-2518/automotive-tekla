@@ -15,6 +15,8 @@ import re
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from tekla_harness.answers import record_answer
 from tekla_harness.schemas import validate
 from tekla_harness.status import build_status
@@ -59,8 +61,6 @@ def test_every_printed_answer_command_is_the_engineers_step_not_an_agents(world)
 
 
 def test_record_answer_needs_a_role_keyword(world):
-    import pytest
-
     from tekla_harness.questions import QuestionsError
 
     _, work = world
@@ -190,3 +190,140 @@ def values_of(work: Path, question_id: str) -> dict[str, str]:
         if a["question_id"] == question_id and a["status"] == "active":
             return {k: ",".join(v) if isinstance(v, list) else v for k, v in a["values"].items()}
     return {}
+
+
+# --- review M2: status accepts a lifecycle closure only under the closure contract --------------------
+
+
+def inject(work: Path, producer: str, code: str, *, role: str | None = None, blocking: bool = True) -> str:
+    """Add a live registry question (and, with `role`, an active answer by that role); returns its id."""
+    registry, answers = load(work / "question-registry.json"), load(work / "answers.json")
+    number = registry["next_id"]
+    qid, key = f"Q-{number:03d}", f"{number:016x}"
+    registry["questions"][key] = {
+        "id": qid, "code": code, "file": "set.dxf", "producer": producer,
+        "status": "open" if role is None else "answered", "first_seen_run": 1, "last_seen_run": 1,
+        "blocking": blocking, "file_sha256": None,
+    }  # fmt: skip
+    registry["next_id"] = number + 1
+    if role is not None:
+        answers["answers"].append(
+            {
+                "key": key, "question_id": qid, "code": code, "file": "set.dxf", "answer_text": "x",
+                "values": {}, "answered_by": "x", "answered_by_role": role, "answered_on": "2026-11-08",
+                "status": "active",
+            }
+        )  # fmt: skip
+    (work / "question-registry.json").write_text(json.dumps(registry), encoding="utf-8")
+    (work / "answers.json").write_text(json.dumps(answers), encoding="utf-8")
+    return qid
+
+
+def close(monkeypatch, work: Path, rows: dict[str, Any]) -> None:
+    """lifecycle.closures returns these closures (question id -> Closure)."""
+    from tekla_harness import lifecycle
+
+    keys = {e["id"]: k for k, e in load(work / "question-registry.json")["questions"].items()}
+    monkeypatch.setattr(lifecycle, "closures", lambda w, ledger: {keys[q]: c for q, c in rows.items()})
+
+
+def select_id(work: Path) -> str:
+    return find(questions_of(work, "grid-system-questions.json"), "grid_system_select")["id"]
+
+
+def units_id(work: Path) -> str:
+    return find(questions_of(work, "questions.json"), "units_confirm_all", "set.dxf")["id"]
+
+
+def refused(work: Path, qid: str) -> str:
+    gate1 = build_status(work)["gate1"]
+    assert gate1["ready_for_gate1"] is False
+    assert qid not in [row["id"] for row in gate1.get("closed", [])]
+    (reason,) = [r for r in gate1["reasons"] if r.startswith(f"closures: {qid} ")]
+    return reason
+
+
+def test_a_closure_naming_no_answer_does_not_open_gate1(ready, monkeypatch):
+    """The review probe: Closure(None, units_answered) on an unanswered blocking reader question."""
+    from tekla_harness.ask import ask_question
+    from tekla_harness.questions import Closure
+
+    _, work = ready
+    asked = ask_question(work, code="reader_gap", where="S-1 note 3", found="??", text="?", blocking=True)
+    close(monkeypatch, work, {asked["id"]: Closure(None, "units_answered")})
+    reason = refused(work, asked["id"])
+    assert "stays open" in reason and "reader" in reason
+    reasons = build_status(work)["gate1"]["reasons"]
+    assert any(r.startswith("reader: 1 blocking question(s) open") for r in reasons)
+
+
+@pytest.mark.parametrize(
+    "case",
+    ["wrong_reason", "no_question", "unknown_question", "unanswered", "simulated", "legacy", "reader"],
+)
+def test_a_closure_outside_the_contract_is_refused(ready, monkeypatch, case):
+    from tekla_harness.questions import Closure
+
+    _, work = ready
+    target = inject(work, "reader" if case == "reader" else "structure", "grid_label_missing")
+    closer = {
+        "wrong_reason": units_id(work),
+        "no_question": None,
+        "unknown_question": "Q-999",
+        "unanswered": inject(work, "intake", "units_confirm_all"),
+        "simulated": inject(work, "marks", "mark_unparsed", role="simulated"),
+    }.get(case, select_id(work))
+    if case == "legacy":
+        doc = load(work / "answers.json")
+        for a in doc["answers"]:
+            if a["question_id"] == closer:
+                a.pop("answered_by_role")
+        (work / "answers.json").write_text(json.dumps(doc), encoding="utf-8")
+    why = "units_answered" if case == "wrong_reason" else "rejected_systems_only"
+    close(monkeypatch, work, {target: Closure(closer, why)})
+    assert "stays open" in refused(work, target)
+
+
+@pytest.mark.parametrize(
+    ("producer", "code", "reason", "closer"),
+    [
+        ("structure", "grid_label_missing", "rejected_systems_only", "select"),
+        ("structure", "grid_gate1_confirmation", "rejected_systems_only", "select"),
+        ("structure", "grid_units_doubt", "units_answered", "units"),
+        ("grid-system", "grid_system_conflict", "not_selected", "select"),
+        ("grid-system", "grid_system_conflict", "separate", "select"),
+        ("grid-system", "grid_system_conflict", "other_file_set", "select"),
+    ],
+)
+def test_a_closure_under_the_contract_closes_its_question(ready, monkeypatch, producer, code, reason, closer):
+    from tekla_harness.questions import Closure
+
+    _, work = ready
+    target = inject(work, producer, code)
+    assert build_status(work)["gate1"]["ready_for_gate1"] is False
+    by = select_id(work) if closer == "select" else units_id(work)
+    close(monkeypatch, work, {target: Closure(by, reason)})
+    gate1 = build_status(work)["gate1"]
+    assert gate1["ready_for_gate1"] is True, gate1["reasons"]
+    assert {"id": target, "reason": reason, "question_id": by} in gate1["closed"]
+
+
+@pytest.mark.parametrize(
+    ("producer", "code", "reason"),
+    [
+        ("structure", "grid_label_missing", "units_answered"),
+        ("structure", "level_name_conflict", "rejected_systems_only"),
+        ("intake", "grid_label_missing", "rejected_systems_only"),
+        ("structure", "grid_system_conflict", "separate"),
+        ("grid-system", "grid_system_select", "not_selected"),
+        ("structure", "grid_units_doubt", "not_selected"),
+        ("grid-system", "grid_system_conflict", "units_answered"),
+    ],
+)
+def test_a_closure_reason_must_fit_the_closed_question(ready, monkeypatch, producer, code, reason):
+    from tekla_harness.questions import Closure
+
+    _, work = ready
+    target = inject(work, producer, code)
+    close(monkeypatch, work, {target: Closure(select_id(work), reason)})
+    assert "cannot close" in refused(work, target)

@@ -554,20 +554,28 @@ def test_a_closed_question_leaves_the_open_sections(world, monkeypatch):
     from tekla_harness import lifecycle
     from tekla_harness.questions import Closure
 
-    target = first_blocking_open(world)
+    # a closure keeps the contract (status.check_closures): a structure grid question, closed by rejected
+    # systems, naming the select question the engineer answered
+    select = next(q for q in documents(world) if q["code"] == SELECT_CODE)
+    record_answer(world, select["id"], "S001", "A", role="engineer")
+    target = next(q for q in documents(world) if q["blocking"] and q["code"] == "grid_label_missing")
     before = render_questions_md(world)
-    monkeypatch.setattr(
-        lifecycle, "closures", lambda work, ledger: {target["key"]: Closure("Q-001", "units_answered")}
-    )
-    rendered = render_questions_md(world)
-    body = sections(rendered.text)
-    assert f"##### {target['id']} " not in body["2"] and f"##### {target['id']} " not in body["3"]
-    (line,) = [ln for ln in body["4"].splitlines() if ln.startswith(f"- {target['id']} ")]
-    assert "đã đóng" in line and "Q-001" in line and code_span("units_answered") in line
-    assert rendered.summary["blocking_open"] == before.summary["blocking_open"] - 1
-    assert rendered.summary["blocking_open"] == sum(
-        p["questions"]["blocking_open"] for p in build_status(world)["producers"]
-    )
+    for closure, closed in (
+        (Closure(None, "rejected_systems_only"), False),
+        (Closure(select["id"], "rejected_systems_only"), True),
+    ):
+        monkeypatch.setattr(lifecycle, "closures", lambda work, ledger, c=closure: {target["key"]: c})
+        rendered = render_questions_md(world)
+        body = sections(rendered.text)
+        assert (f"##### {target['id']} " in body["2"]) is not closed  # a refused closure leaves it open
+        lines = [ln for ln in body["4"].splitlines() if ln.startswith(f"- {target['id']} ")]
+        assert len(lines) == closed
+        assert rendered.summary["blocking_open"] == before.summary["blocking_open"] - closed
+        assert rendered.summary["blocking_open"] == sum(
+            p["questions"]["blocking_open"] for p in build_status(world)["producers"]
+        )
+    (line,) = lines
+    assert "đã đóng" in line and select["id"] in line and code_span("rejected_systems_only") in line
 
 
 def test_reader_supplements_show_under_their_question(world, monkeypatch):

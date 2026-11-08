@@ -13,9 +13,9 @@ Sources (all read-only):
   * `harness status` (`status.build_status`): the gate-1 reasons and the per-step counts;
   * `grid-systems.json` + its SVGs and `structure-summary.json`: the proposals shown next to the questions
     they inform. A proposal is always labelled "ĐỀ XUẤT — chưa xác nhận" and is never an answer;
-  * `lifecycle.closures` (the same as `harness status`): a closed question is not open; it is listed in
-    section 4 with why it closed. `supplements.load_supplements`: the reader's active supplements are
-    printed under the question they supplement, verbatim.
+  * `status.accepted_closures` (the lifecycle closures `harness status` accepts): a closed question is not
+    open; it is listed in section 4 with why it closed. `supplements.load_supplements`: the reader's active
+    supplements are printed under the question they supplement, verbatim.
 
 Layout: 1 Tóm tắt; 2 blocking open questions; 3 non-blocking open questions (both grouped by topic in the
 order of `questions_md_vi.TOPICS`, inside a topic by file then id); 4 Đã trả lời; 5 stale answers. Wording
@@ -44,7 +44,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from tekla_harness import lifecycle, supplements
+from tekla_harness import supplements
 from tekla_harness.questions import (
     AXIS_CODE,
     AXIS_DIRECTIONS,
@@ -65,7 +65,12 @@ from tekla_harness.questions import (
 )
 from tekla_harness.questions_md_vi import CODES, TOPICS, topic_of
 from tekla_harness.schemas import validate
-from tekla_harness.status import NOT_CLOSED_BY_AN_ANSWER, StatusError, build_status
+from tekla_harness.status import (
+    NOT_CLOSED_BY_AN_ANSWER,
+    StatusError,
+    accepted_closures,
+    build_status,
+)
 
 COMMAND = "questions-md"
 HELP = "render questions.md (Vietnamese) from every question source of a work folder"
@@ -668,6 +673,7 @@ CATEGORIES = (
     ("grid systems", "hệ lưới"),
     ("levels", "cao độ"),
     ("answers", "câu trả lời"),
+    ("closures", "đóng câu hỏi"),
 )
 
 
@@ -749,7 +755,7 @@ def render_questions_md(work_dir: Path | str, out: Path | str | None = None) -> 
     except (StatusError, QuestionsError) as exc:
         raise QuestionsMdError(exc.exit_code, str(exc)) from exc
     items, missing = load_items(work, ledger.registry, ledger.answers)
-    closures = lifecycle.closures(work, ledger)
+    closures = accepted_closures(work, ledger)
     by_target: dict[str, list[dict[str, Any]]] = {}
     for row in supplements.load_supplements(work):
         by_target.setdefault(row["target_key"], []).append(row)

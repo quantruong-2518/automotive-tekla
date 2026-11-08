@@ -981,20 +981,21 @@ def test_a_closed_question_leaves_the_blocking_counts(world, monkeypatch):
     from tekla_harness.questions import Closure
 
     _, work = world
+    by = answer_select(work)["answer"]["question_id"]  # a closure names an engineer answer (review M2)
     before = build_status(work)
     step = by_label(before)["read-structure"]
     closed_id = step["blocking_open_ids"][0]
     registry = load(work / "question-registry.json")["questions"]
     (key,) = [k for k, e in registry.items() if e["id"] == closed_id]
-    monkeypatch.setattr(
-        lifecycle, "closures", lambda w, ledger: {key: Closure(None, "rejected_systems_only")}
-    )
+    monkeypatch.setattr(lifecycle, "closures", lambda w, ledger: {key: Closure(by, "rejected_systems_only")})
     after = build_status(work)
     counts = by_label(after)["read-structure"]
     assert counts["questions"]["blocking_open"] == step["questions"]["blocking_open"] - 1
     assert counts["questions"]["blocking"] == step["questions"]["blocking"] - 1
     assert closed_id not in counts["blocking_open_ids"]
-    assert after["gate1"]["closed"] == [{"id": closed_id, "reason": "rejected_systems_only"}]
+    assert after["gate1"]["closed"] == [
+        {"id": closed_id, "reason": "rejected_systems_only", "question_id": by}
+    ]
     assert validate("status", after) == []
 
 
