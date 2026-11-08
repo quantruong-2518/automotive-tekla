@@ -25,18 +25,72 @@ from tekla_harness.intake import IntakeError, run_intake
 from tekla_harness.knowledge import KnowledgeError
 from tekla_harness.questions import QuestionsError
 from tekla_harness.read_dxf import CONVERTER_CAPS, probe_dxf
+from tekla_harness.receipt import receipt_path, write_receipt
 from tekla_harness.schemas import SCHEMA_NAMES, validate
 from tekla_harness.sheet_text import DEFAULT_MAX_ENTRIES, ReaderError, list_sheets, sheet_text
 from tekla_harness.status import StatusError, build_status
+from tekla_harness.strict_json import MAX_BYTES, StrictJsonError, loads_strict
 from tekla_harness.structure import StructureError, read_structure, run_extractor
 
 EXIT_OK, EXIT_INVALID, EXIT_USAGE, EXIT_ENV = 0, 1, 2, 3
 _ENV_HOOK = Path(__file__).resolve().parents[2] / ".claude" / "hooks" / "session_env_check.py"
 
 
+def _validate_spec_file(path: str) -> tuple[dict[str, object], bool]:
+    """Validate one spec and write its receipt. Second item: an environment error occurred."""
+    spec = Path(path)
+    stale = receipt_path(spec)
+    try:
+        stale.unlink(missing_ok=True)
+    except OSError as exc:
+        message = f"stale receipt {stale} could not be deleted: {exc}"
+        return {
+            "file": path,
+            "valid": False,
+            "errors": [{"path": "", "message": message}],
+            "receipt": None,
+        }, True
+    try:
+        with spec.open("rb") as handle:
+            data = handle.read(MAX_BYTES + 1)
+        value = loads_strict(data)
+    except (OSError, StrictJsonError) as exc:
+        return {
+            "file": path,
+            "valid": False,
+            "errors": [{"path": "", "message": str(exc)}],
+            "receipt": None,
+        }, False
+    problems = validate("spec", value)
+    if problems:
+        return {
+            "file": path,
+            "valid": False,
+            "errors": [p.as_dict() for p in problems],
+            "receipt": None,
+        }, False
+    try:
+        written = write_receipt(spec, data)
+    except OSError as exc:
+        message = f"receipt could not be written: {exc}"
+        return {
+            "file": path,
+            "valid": False,
+            "errors": [{"path": "", "message": message}],
+            "receipt": None,
+        }, True
+    return {"file": path, "valid": True, "errors": [], "receipt": str(written)}, False
+
+
 def _cmd_validate(args: argparse.Namespace) -> int:
     results = []
+    env_error = False
     for path in args.files:
+        if args.schema == "spec":
+            result, failed = _validate_spec_file(path)
+            results.append(result)
+            env_error = env_error or failed
+            continue
         try:
             data = json.loads(Path(path).read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
@@ -45,6 +99,8 @@ def _cmd_validate(args: argparse.Namespace) -> int:
         problems = validate(args.schema, data)
         results.append({"file": path, "valid": not problems, "errors": [p.as_dict() for p in problems]})
     print(json.dumps({"schema": args.schema, "results": results}, ensure_ascii=False, indent=2))
+    if env_error:
+        return EXIT_ENV
     return EXIT_OK if all(r["valid"] for r in results) else EXIT_INVALID
 
 
@@ -355,7 +411,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p_val = sub.add_parser("validate", help="validate JSON files against a schema")
+    p_val = sub.add_parser(
+        "validate",
+        help=(
+            "validate JSON files against a schema; for 'spec' also read each file with the strict "
+            "JSON profile and write <file>.receipt.json next to every valid one (exit 3 if a stale "
+            "receipt cannot be deleted)"
+        ),
+    )
     p_val.add_argument("schema", choices=[n for n in SCHEMA_NAMES if n != "common"])
     p_val.add_argument("files", nargs="+")
     p_val.set_defaults(func=_cmd_validate)

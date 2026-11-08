@@ -87,3 +87,16 @@ def test_failed_attempt_needs_error(example):
     log = example("read-log")
     del log["files"][0]["attempts"][0]["error"]
     assert validate("read-log", log)
+
+
+@pytest.mark.parametrize("lot", [1.0, 2147483648, 9007199254740992])
+def test_lot_must_be_int32(example, lot):
+    spec = example("spec")
+    spec["lot"] = lot
+    assert any("lot" in p.path for p in validate("spec", spec))
+
+
+def test_lot_int32_maximum_ok(example):
+    spec = example("spec")
+    spec["lot"] = 2147483647
+    assert validate("spec", spec) == []

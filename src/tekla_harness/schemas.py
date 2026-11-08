@@ -33,6 +33,7 @@ SCHEMA_NAMES = (
     "cache-entry",
     "spec-receipt",
 )
+MAX_LOT = 2**31 - 1  # the C# reader parses lot as int32
 _REPO_SCHEMAS = Path(__file__).resolve().parents[2] / "schemas"
 
 
@@ -85,6 +86,11 @@ def validate(name: str, data: Any) -> list[Problem]:
 def check_spec(spec: dict[str, Any]) -> list[Problem]:
     """Rules JSON Schema cannot express."""
     problems: list[Problem] = []
+    lot = spec["lot"]
+    if not isinstance(lot, int):
+        problems.append(Problem("/lot", f"lot must be an integer, not {lot!r}"))
+    elif lot > MAX_LOT:
+        problems.append(Problem("/lot", f"lot {lot} is above {MAX_LOT} (int32 maximum)"))
     seen: dict[str, int] = {}
     open_questions = set(spec["open_questions"])
     for i, member in enumerate(spec["members"]):

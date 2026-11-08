@@ -274,6 +274,12 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
   `<spec file name>.receipt.json` binds the spec's exact bytes (SHA-256), the spec schema `$id`
   and the validator `rules_version`; `*.receipt.json` is git-ignored. Shared strict-JSON corpus
   `tests/fixtures/strict-json/` (accept/reject) for the Python and C# readers.
+- Step 3 S1b Python: `harness validate spec` reads each spec once under the strict JSON profile
+  (`tekla_harness.strict_json`: no BOM, duplicate keys, NaN/Infinity, integers beyond ±2^53, lone
+  surrogates or NUL, depth over 64, size over 16 MiB), deletes a stale receipt first (exit 3 if it
+  cannot), and writes `<spec>.receipt.json` atomically next to each valid spec
+  (`SPEC_RULES_VERSION = 1`); each result gains `receipt`. `check_spec` now requires `lot` to be
+  an integer token (not `1.0`) and at most 2147483647.
 - Versioning note: the reading-toolchain schemas above have not been released; they stay `0.1` and their
   changes are recorded here until the first tagged release, from which every change bumps its `$id`
   (AGENTS.md). Pending engineer confirmation.
