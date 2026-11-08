@@ -344,6 +344,8 @@ def test_answer_is_bound_to_the_key_and_shown_in_every_document(world, capsys):
         "Don vi la mm.",
         "--by",
         "A. Nguyen",
+        "--role",
+        "engineer",
         "--value",
         "unit=mm",
     )
@@ -504,13 +506,21 @@ def test_answer_refusals_and_exit_codes(world, capsys):
     q = find(questions_of(work), "units_confirm_all", "set.dxf")
     snapshot = {p.name: p.read_bytes() for p in work.glob("*.json")}
     cases = [
-        (["Q-999", "--text", "x", "--by", "me", "--value", "unit=mm"], 2, "unknown question id"),
-        (["nope", "--text", "x", "--by", "me"], 2, "unknown question id"),
-        ([q["id"], "--text", "   ", "--by", "me", "--value", "unit=mm"], 2, "empty"),
+        (
+            ["Q-999", "--text", "x", "--by", "me", "--role", "engineer", "--value", "unit=mm"],
+            2,
+            "unknown question id",
+        ),
+        (["nope", "--text", "x", "--by", "me", "--role", "engineer"], 2, "unknown question id"),
+        ([q["id"], "--text", "   ", "--by", "me", "--role", "engineer", "--value", "unit=mm"], 2, "empty"),
         ([q["id"], "--text", "x", "--by", " ", "--value", "unit=mm"], 2, "empty"),
-        ([q["id"], "--text", "x", "--by", "me", "--value", "unit=furlong"], 1, "furlong"),
-        ([q["id"], "--text", "x", "--by", "me"], 1, "unit="),
-        ([q["id"], "--text", "x", "--by", "me", "--value", "unit"], 2, "key=value"),
+        (
+            [q["id"], "--text", "x", "--by", "me", "--role", "engineer", "--value", "unit=furlong"],
+            1,
+            "furlong",
+        ),
+        ([q["id"], "--text", "x", "--by", "me", "--role", "engineer"], 1, "unit="),
+        ([q["id"], "--text", "x", "--by", "me", "--role", "engineer", "--value", "unit"], 2, "key=value"),
     ]
     for argv, expected, needle in cases:
         code, out, err = run_cli(capsys, "answer", str(work), *argv)
@@ -520,9 +530,22 @@ def test_answer_refusals_and_exit_codes(world, capsys):
 
 
 def test_answer_needs_a_registry(tmp_path, capsys):
-    code, _, err = run_cli(capsys, "answer", str(tmp_path), "Q-001", "--text", "x", "--by", "me")
+    code, _, err = run_cli(
+        capsys, "answer", str(tmp_path), "Q-001", "--text", "x", "--by", "me", "--role", "engineer"
+    )
     assert code == 2 and "question-registry.json" in err
-    code, _, err = run_cli(capsys, "answer", str(tmp_path / "missing"), "Q-001", "--text", "x", "--by", "me")
+    code, _, err = run_cli(
+        capsys,
+        "answer",
+        str(tmp_path / "missing"),
+        "Q-001",
+        "--text",
+        "x",
+        "--by",
+        "me",
+        "--role",
+        "engineer",
+    )
     assert code == 2
 
 

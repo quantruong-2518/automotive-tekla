@@ -37,7 +37,13 @@ HOLDER_SCRIPT = (
 
 
 def snapshot(work: Path) -> dict[str, bytes]:
-    return {p.relative_to(work).as_posix(): p.read_bytes() for p in sorted(work.rglob("*")) if p.is_file()}
+    """Every file's bytes except the lock file's: its bytes mean nothing, and on Windows a held byte lock
+    denies reads through another handle (LockFile remarks)."""
+    return {
+        p.relative_to(work).as_posix(): p.read_bytes()
+        for p in sorted(work.rglob("*"))
+        if p.is_file() and p.name != LOCK_FILE
+    }
 
 
 def acquire_eventually(work: Path, seconds: float = 15.0) -> None:
@@ -231,7 +237,7 @@ def writer_argv(work: Path) -> list[list[str]]:
         ["callouts", w],
         ["marks", w],
         ["grid-system", w, "--no-svg"],
-        ["answer", w, "Q-001", "--text", "x", "--by", "me", "--value", "unit=mm"],
+        ["answer", w, "Q-001", "--text", "x", "--by", "me", "--role", "engineer", "--value", "unit=mm"],
         ["ask", w, "--code", "lock_test", "--where", "here", "--found", "", "--text", "câu hỏi"],
         ["ask", w, "--withdraw", "Q-001", "--reason", "x"],
         [
@@ -314,7 +320,9 @@ def test_writer_releases_the_lock_after_it_ran(world, capsys, tmp_path):
 
 def test_writer_on_a_missing_work_folder_keeps_its_usage_error(tmp_path, capsys):
     missing = tmp_path / "missing"
-    code, out, err = run_cli(capsys, "answer", str(missing), "Q-001", "--text", "x", "--by", "me")
+    code, out, err = run_cli(
+        capsys, "answer", str(missing), "Q-001", "--text", "x", "--by", "me", "--role", "engineer"
+    )
     assert code == 2 and out is None and "not a folder" in err
     assert not missing.exists()
 

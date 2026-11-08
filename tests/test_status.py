@@ -253,13 +253,35 @@ def test_select_answer_values_are_checked(world, capsys, value):
     _, work = world
     select = find(questions_of(work, "grid-system-questions.json"), SELECT_CODE)
     code, out, err = run_cli(
-        capsys, "answer", str(work), select["id"], "--text", "x", "--by", "me", "--value", value
+        capsys,
+        "answer",
+        str(work),
+        select["id"],
+        "--text",
+        "x",
+        "--by",
+        "me",
+        "--role",
+        "engineer",
+        "--value",
+        value,
     )
     assert code == 1 and out is None and "systems" in err
     assert not (work / "answers.json").exists()
     other = find(questions_of(work, "grid-system-questions.json"), "grid_system_conflict")
     code, _, err = run_cli(
-        capsys, "answer", str(work), other["id"], "--text", "x", "--by", "me", "--value", "systems=S001"
+        capsys,
+        "answer",
+        str(work),
+        other["id"],
+        "--text",
+        "x",
+        "--by",
+        "me",
+        "--role",
+        "engineer",
+        "--value",
+        "systems=S001",
     )
     assert code == 1 and "take no value" in err
 
@@ -305,7 +327,18 @@ def test_answer_is_refused_when_the_questions_file_changed_since_it_was_raised(w
     run_intake(root, work, PROJECT)  # ... and intake saw it; read-structure has not rerun yet
     snapshot = {p.name: p.read_bytes() for p in work.glob("*.json")}
     code, out, err = run_cli(
-        capsys, "answer", str(work), structure_q["id"], "--text", "x", "--by", "me", "--value", "F001=X"
+        capsys,
+        "answer",
+        str(work),
+        structure_q["id"],
+        "--text",
+        "x",
+        "--by",
+        "me",
+        "--role",
+        "engineer",
+        "--value",
+        "F001=X",
     )
     assert code == 1 and out is None
     assert "file changed since this question was raised" in err and "rerun `harness read-structure`" in err
@@ -313,13 +346,35 @@ def test_answer_is_refused_when_the_questions_file_changed_since_it_was_raised(w
     assert {p.name: p.read_bytes() for p in work.glob("*.json")} == snapshot  # nothing written
     # intake's own question was obsoleted by the intake rerun: the older, clearer refusal comes first
     code, _, err = run_cli(
-        capsys, "answer", str(work), intake_q["id"], "--text", "x", "--by", "me", "--value", "unit=mm"
+        capsys,
+        "answer",
+        str(work),
+        intake_q["id"],
+        "--text",
+        "x",
+        "--by",
+        "me",
+        "--role",
+        "engineer",
+        "--value",
+        "unit=mm",
     )
     assert code == 2 and "obsolete" in err
     # an untouched file's question is still accepted
     other = find(questions_of(work, "structure-questions.json"), "grid_family_axis_assignment", "other.dxf")
     code, _, _ = run_cli(
-        capsys, "answer", str(work), other["id"], "--text", "x", "--by", "me", "--value", "F001=X"
+        capsys,
+        "answer",
+        str(work),
+        other["id"],
+        "--text",
+        "x",
+        "--by",
+        "me",
+        "--role",
+        "engineer",
+        "--value",
+        "F001=X",
     )
     assert code == 0
 
@@ -636,7 +691,16 @@ def test_words_in_the_select_answer_close_no_conflict_and_no_axis_question(world
     assert "S001 has no Tekla X/Y" in text and "S002 has no Tekla X/Y" in text
     # a conflict cannot be answered in words: it closes through the select answer only
     code, out, err = run_cli(
-        capsys, "answer", str(work), conflict["id"], "--text", "different buildings", "--by", "me"
+        capsys,
+        "answer",
+        str(work),
+        conflict["id"],
+        "--text",
+        "different buildings",
+        "--by",
+        "me",
+        "--role",
+        "engineer",
     )
     assert code == 2 and out is None and "cannot be answered" in err and select["id"] in err
     assert build_status(work) == status  # nothing was written
@@ -699,7 +763,7 @@ def test_a_legacy_words_answer_to_a_conflict_still_counts_as_open(world):
 def test_separate_values_are_checked(world, capsys, values, needle):
     _, work = world
     select = find(questions_of(work, "grid-system-questions.json"), SELECT_CODE)
-    argv = ["answer", str(work), select["id"], "--text", "x", "--by", "me"]
+    argv = ["answer", str(work), select["id"], "--text", "x", "--by", "me", "--role", "engineer"]
     for v in values:
         argv += ["--value", v]
     code, out, err = run_cli(capsys, *argv)
@@ -877,7 +941,9 @@ def test_every_command_in_a_gate1_reason_names_the_work_folder_and_parses(world)
 
     _, work = world
     reasons = build_status(work)["gate1"]["reasons"]
-    commands = [m for r in reasons for m in re.findall(r"harness answer [^()\n]*?--by \"\.\.\.\"", r)]
+    commands = [
+        m for r in reasons for m in re.findall(r"harness answer [^()\n]*?--by \"\.\.\.\"(?: --role \w+)?", r)
+    ]
     assert commands
     parser = build_parser()
     for c in commands:

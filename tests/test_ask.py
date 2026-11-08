@@ -280,7 +280,9 @@ def test_status_counts_reader_questions_and_gate1_waits_for_blocking_ones(world)
 def test_an_answer_to_a_reader_question_is_recorded_and_shown_in_the_document(world, capsys):
     _, work = world
     q = ask(work, blocking=True)
-    rc, out, _ = run_cli(capsys, "answer", str(work), q["id"], "--text", "It is A.", "--by", "eng")
+    rc, out, _ = run_cli(
+        capsys, "answer", str(work), q["id"], "--text", "It is A.", "--by", "eng", "--role", "engineer"
+    )
     assert rc == 0 and "reader-questions.json" in out["refreshed"]
     doc = load(work / "reader-questions.json")
     assert doc["questions"][0]["answer"]["answer_text"] == "It is A."
