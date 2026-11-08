@@ -58,6 +58,14 @@ WRITE_COMMANDS = [
     "env dotnet run -- build",
     "dotnet build tekla/TeklaCli && dotnet run --project tekla/TeklaCli -- build",
     "C:/Program Files/dotnet/dotnet.exe run -- build",
+    # RTI-0009: a newline separates commands, so an inert first line must not hide a write.
+    "cd projects/p\ntekla-cli build --lot 1 --run-id r1 --spec lots/1/spec.json",
+    "git status\ntekla-cli build --lot 1",
+    "cat notes.md\r\ntekla-cli build --lot 1",
+    "cd projects/p && \\\ntekla-cli build --lot 1",  # line continuation
+    # PowerShell: a trailing backslash is part of a path, not a continuation.
+    "Set-Location C:\\TeklaModels\\proj\\\ntekla-cli build --lot 1",
+    "dir projects\\p\\\r\ntekla-cli build --lot 1",
 ]
 
 # Commands that only mention the tool name as data. They must not be blocked, otherwise the
@@ -65,6 +73,7 @@ WRITE_COMMANDS = [
 MENTION_ONLY_COMMANDS = [
     "cat docs/tekla-cli-contract.md",
     "grep -rn tekla-cli docs/",
+    'git commit -m "docs: contract\n\ntekla-cli build is reserved for the builder"',  # RTI-0009
     'git commit -m "docs: update tekla-cli contract"',
     'git log --grep="tekla-cli"',
     "git diff -- docs/tekla-cli-contract.md",

@@ -123,3 +123,21 @@ Severity: `critical` · `major` · `minor`.
   own receipt, and the Tekla machine needs Python (ADR-0010 says it should not). Proposed: step 1
   becomes "the receipt exists and matches", checked by `tekla-cli` itself; validation stays with
   the planner/doc-reader before the gate.
+
+## RTI-0009 — Write guard reads a multi-line command as one command
+
+- Source: independent review of RTI-0008, 2026-11-08
+- Classification: tooling (safety layer) · Severity: critical · Status: **implemented**
+  (branch `feat/rti-0008-receipt-guard`; awaiting engineer approval with RTI-0008)
+- Root cause: `_split` in `guard_tekla_write.py` let `shlex` treat a newline as whitespace, so
+  `cd projects/p` + newline + `tekla-cli build …` became one segment whose command word `cd`
+  is inert, and the write passed for any agent. The `Bash(tekla-cli build *)` ask rule still
+  prompted, but it does not check which agent runs the command.
+- Fix: every newline separates commands like `;`, a bash backslash-newline too (in PowerShell a
+  trailing `\` is part of a path, so joining lines would hide the next one; a split bash
+  continuation fails closed). Inside quotes a newline stays in its token, so a multi-line
+  `git commit -m` is still data. Accepted change: a heredoc body is now read as commands, so a
+  heredoc that mentions a CLI write is denied outside `builder` (the commit skill uses `-F`).
+- Regression test: `tests/test_guard_hook.py` — newline, CRLF, bash continuation and
+  PowerShell trailing-backslash cases in `WRITE_COMMANDS` and `RECEIPT_WRITE_COMMANDS`; a
+  multi-line commit message in `MENTION_ONLY_COMMANDS`.

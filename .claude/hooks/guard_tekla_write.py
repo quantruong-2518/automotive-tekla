@@ -66,8 +66,14 @@ _SEPARATORS = frozenset({";", "&&", "||", "|", "&", "(", ")", "{", "}", "`", "$(
 
 
 def _split(command: str) -> list[str]:
-    """Tokenize loosely across bash and PowerShell; never raise."""
-    spaced = re.sub(r"(\$\(|&&|\|\||[;|&(){}`])", r" \1 ", command)
+    """Tokenize loosely across bash and PowerShell; never raise.
+
+    Every newline separates commands like `;` (RTI-0009), a bash backslash-newline too: in
+    PowerShell a trailing backslash is part of a path, so joining lines would hide the next
+    one. A split bash continuation fails closed. A newline inside quotes stays in its token.
+    """
+    lines = re.sub(r"\r?\n", " ; ", command)
+    spaced = re.sub(r"(\$\(|&&|\|\||[;|&(){}`])", r" \1 ", lines)
     try:
         lexer = shlex.shlex(spaced, posix=True, punctuation_chars=False)
         lexer.whitespace_split = True

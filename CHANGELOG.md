@@ -324,5 +324,7 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
   (e.g. `sed -n 1,40p docs/tekla-cli-contract.md`); RTI-0005.
 - Write guard now recognises the CLI under its .NET project name (`TeklaCli.exe`) and treats
   every `dotnet run|exec|watch` as a write; `dotnet build|restore|clean` stay allowed; RTI-0006.
+- Write guard now treats a newline as a command separator: `cd x` + newline + a `tekla-cli`
+  write passed for any agent (RTI-0009, critical).
 - `workflow.md`: the lot loop is strictly sequential (lot n+1 waits for gate 4 of lot n).
 - Added `PowerShell(...)` allow rules matching the existing `Bash(...)` ones.
