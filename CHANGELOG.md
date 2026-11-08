@@ -390,6 +390,11 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
     unknown-encoding font that also holds non-ASCII text of unknown encoding, are judged (default D2,
     reversible: suspect shapes only, not all ASCII). The legacy-font gate blocks such text with reason
     `legacy_ascii_suspect`, ahead of the ASCII rule.
+  - Level extractor (`read-structure`) applies the legacy-font gate: a blocked text gives no candidate,
+    level, storey height, storey name or question; each level-shaped value in it is listed in
+    `levels.json` `blocked_candidates` (entry id, line, value as stored, reason; count in
+    `summary.blocked_candidates`), and `level_none_found` says how many were held back. A literal `±`
+    in an unknown-encoding font is non-ASCII, so it is blocked too (`%%p` is read as before).
 
 ### Fixed
 - Reading toolchain, after an independent review of the EVAL-1 wave:

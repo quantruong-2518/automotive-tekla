@@ -31,6 +31,10 @@ on a structural sheet is finished or structural. So:
    consecutive levels whose candidates name a storey; when fewer than two levels are named, the
    differences of all non-embedded levels seen twice, at the datum, or next to a symbol are given, capped
    'low', with a blocking level_storey_selection question. Values are never converted.
+6. Legacy-font gate (`text_gate.meaning_block_reason`, tool wave 2 fix 1a): an entry whose meaning is blocked
+   gives no candidate, level, group, storey name or question; each level-shaped match in it is listed in
+   `blocked_candidates` (entry id, 0-based line, value text as stored, reason), and a 'none found' question
+   says how many were held back.
 Questions: none found, finished vs structural (always), same name with different values, a storey name
 with a negative value, values outside LEVEL_RANGE_M (unit doubt), a level seen once, no datum, storey
 selection, non-three-decimal writing. `question_counts` gives the true number per code (the list is
@@ -66,6 +70,7 @@ from tekla_harness.sheets import (
     rnum,
     text_box,
 )
+from tekla_harness.text_gate import meaning_block_reason
 
 SCHEMA_VERSION = "0.1"
 _MINUS = "\u2212"  # MINUS SIGN, also accepted as a sign
@@ -303,8 +308,17 @@ def extract_levels(
         by_sheet_space[(locator.text_sheet(e["id"]), e["space"])].append(e)
 
     candidates: list[dict[str, Any]] = []
+    blocked: list[dict[str, Any]] = []
     for e in entries:
         lines = e["display_text"].split("\n")
+        reason = meaning_block_reason(e)
+        if reason is not None:  # legacy-font gate: listed, never a candidate
+            blocked.extend(
+                {"entry_id": e["id"], "line": i, "value_text": m.group(0).strip(), "reason": reason}
+                for i, line in enumerate(lines)
+                for m, *_ in _parse(line)
+            )
+            continue
         for line in lines:
             for m, value, flags, form, prefix, name in _parse(line):
                 if len(lines) > 1:
@@ -436,10 +450,18 @@ def extract_levels(
 
     # questions
     if not candidates:
+        held = (
+            f" {len(blocked)} level-shaped text(s) are blocked by the legacy-font gate (unknown or suspect "
+            "font encoding, see blocked_candidates): no value is taken from them."
+            if blocked
+            else ""
+        )
         ask(
             "level_none_found",
             True,
-            "No level text (signed value in metres such as '+3.600') was found. Where are the levels given?",
+            "No level text (signed value in metres such as '+3.600') was found."
+            + held
+            + " Where are the levels given?",
             str(file_path),
             f"{len(entries)} texts scanned",
         )
@@ -534,12 +556,14 @@ def extract_levels(
         "candidates": candidates,
         "levels": levels,
         "storey_heights": heights,
+        "blocked_candidates": blocked,
         "summary": {
             "texts_scanned": len(entries),
             "candidates": len(candidates),
             "by_form": dict(sorted(Counter(c["form"] for c in candidates).items())),
             "levels": len(levels),
             "level_symbol_inserts": sum(len(v) for v in symbols.values()),
+            "blocked_candidates": len(blocked),
         },
         "questions": questions,
         "question_counts": dict(sorted(q_counts.items())),
@@ -559,8 +583,8 @@ def _adjacent_name(
     cx, cy = (box[0] + box[2]) / 2, (box[1] + box[3]) / 2
     best: tuple[float, str, dict[str, Any], tuple[float, float, float, float]] | None = None
     for other in neighbours:
-        if other["id"] == entry["id"]:
-            continue
+        if other["id"] == entry["id"] or meaning_block_reason(other) is not None:
+            continue  # a blocked text never names a storey (legacy-font gate)
         text = other["display_text"].strip()
         if not text or len(text) > 40 or "\n" in text or _VALUE_RE.search(text):
             continue

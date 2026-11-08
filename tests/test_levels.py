@@ -124,7 +124,8 @@ def test_storey_heights_only_between_named_storeys(level_set):
 
 
 def test_unnamed_levels_give_low_heights_and_a_blocking_question(tmp_path):
-    texts = ["±0.000", "-0.450", "-0.450", "-1.500", "-1.500", "+3.150", "+3.150", "+3.600", "+3.600"]
+    # '%%p' is ASCII as stored; a literal '±' in this unknown-encoding font would be blocked (see below)
+    texts = ["%%p0.000", "-0.450", "-0.450", "-1.500", "-1.500", "+3.150", "+3.150", "+3.600", "+3.600"]
     result = run(_texts(tmp_path, *texts))
     assert [h["height"]["confidence"] for h in result["storey_heights"]] == ["low"] * 4
     q = next(q for q in result["questions"] if q["code"] == "level_storey_selection")
@@ -164,7 +165,7 @@ def test_a_copied_sheet_is_not_a_second_occurrence(tmp_path):
         for i in range(6):
             msp.add_text(f"NOTE {i}", height=350, dxfattribs={"insert": (ox + 1000, 1000 + i * 1000)})
         msp.add_text("+3.600", height=350, dxfattribs={"insert": (ox + 40000, 40000)})
-        msp.add_text("±0.000", height=350, dxfattribs={"insert": (ox + 40000, 30000)})
+        msp.add_text("%%p0.000", height=350, dxfattribs={"insert": (ox + 40000, 30000)})
     path = tmp_path / "copy.dxf"
     doc.saveas(path)
     result = run(path)
@@ -215,6 +216,79 @@ def test_embedded_values_are_never_storey_heights(tmp_path):
 def test_no_level_found(tmp_path):
     result = run(_texts(tmp_path, "NOTE", "4%%c16"))
     assert codes(result) == ["level_none_found"]
+
+
+# --- legacy-font gate (tool wave 2, fix 1a) ---------------------------------------------------------
+# The Standard style (font txt) is covered by no font name, family or knowledge row, so non-ASCII text in it
+# is blocked (encoding_unknown). '(cao \xaeé +3.850)' is 'cao độ' written in TCVN3 bytes.
+
+BLOCKED_LEVEL = "(cao \xae\xe9 +3.850)"
+
+
+def test_a_blocked_level_text_gives_no_level_and_is_listed(tmp_path):
+    result = run(_texts(tmp_path, BLOCKED_LEVEL, "+3.600", "+3.600"))
+    assert [c["value_text"] for c in result["candidates"]] == ["+3.600", "+3.600"]
+    assert [lv["value_text"] for lv in result["levels"]] == ["+3.600"]
+    (blocked,) = result["blocked_candidates"]
+    text_id = next(c["text_id"] for c in result["candidates"])
+    assert blocked == {"entry_id": "T000001", "line": 0, "value_text": "+3.850", "reason": "encoding_unknown"}
+    assert text_id != "T000001"
+    assert result["summary"]["blocked_candidates"] == 1
+    assert all("3.850" not in q["where"] + q["found"] for q in result["questions"])
+
+
+def test_only_blocked_level_texts_give_no_candidate_and_say_so(tmp_path):
+    doc = new("R2018", setup=True)
+    doc.modelspace().add_text("GHI CHU", height=250, dxfattribs={"insert": (0, 0)})
+    attribs = {"insert": (0, 2000), "char_height": 250}
+    doc.modelspace().add_mtext("\xae\xe9\\P+1.200 / -0.300", dxfattribs=attribs)
+    doc.saveas(tmp_path / "m.dxf")
+    result = run(tmp_path / "m.dxf")
+    assert result["candidates"] == [] and result["levels"] == []
+    held = [(b["line"], b["value_text"]) for b in result["blocked_candidates"]]
+    assert held == [(1, "+1.200"), (1, "-0.300")]
+    (q,) = result["questions"]
+    assert q["code"] == "level_none_found" and "blocked" in q["message"]
+
+
+def test_a_blocked_neighbour_never_names_a_level(tmp_path):
+    def fixture(name: str, label: str) -> Path:
+        doc = new("R2018", setup=True)
+        msp = doc.modelspace()
+        msp.add_text(label, height=250, dxfattribs={"insert": (0, 0)})
+        msp.add_text("+3.600", height=250, dxfattribs={"insert": (2000, 0)})
+        path = tmp_path / name
+        doc.saveas(path)
+        return path
+
+    named = run(fixture("ok.dxf", "FLOOR 2"))
+    assert named["candidates"][0]["name"]["value"] == "FLOOR 2"
+    blocked = run(fixture("blocked.dxf", "FLOOR 2 \xae\xe9"))
+    assert blocked["candidates"][0]["name"] is None
+
+
+def test_a_level_in_legacy_looking_ascii_is_blocked_with_that_reason(tmp_path):
+    doc = new("R2018", setup=True)
+    doc.styles.add(".VnTime", font="vntime.ttf")
+    msp = doc.modelspace()
+    msp.add_text("BT LO/ST +3.850", height=250, dxfattribs={"insert": (0, 0), "style": ".VnTime"})
+    msp.add_text("+3.850", height=250, dxfattribs={"insert": (0, 2000), "style": ".VnTime"})
+    doc.saveas(tmp_path / "a.dxf")
+    result = run(tmp_path / "a.dxf")
+    assert [b["reason"] for b in result["blocked_candidates"]] == ["legacy_ascii_suspect"]
+    assert [c["text_id"] for c in result["candidates"]] == ["T000002"]
+
+
+def test_a_literal_plus_minus_in_an_unknown_font_is_blocked_but_the_special_code_is_read(tmp_path):
+    # the gate blocks any non-ASCII text of unknown encoding, '±' (U+00B1) included; '%%p' is ASCII
+    result = run(_texts(tmp_path, "±0.000", "%%p0.000"))
+    assert [c["text_id"] for c in result["candidates"]] == ["T000002"]
+    assert [(b["entry_id"], b["value_text"]) for b in result["blocked_candidates"]] == [("T000001", "±0.000")]
+
+
+def test_allowed_texts_give_no_blocked_candidates(tmp_path):
+    result = run(_texts(tmp_path, "+3.600", "TẦNG 2: +3.600"))
+    assert result["blocked_candidates"] == [] and result["summary"]["blocked_candidates"] == 0
 
 
 def test_output_is_deterministic(tmp_path):
