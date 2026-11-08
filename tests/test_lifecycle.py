@@ -56,6 +56,27 @@ def test_a_conflict_the_select_answer_settles_is_closed_by_the_select_question(
     assert _closures(work) == {conflict["key"]: Closure(answer["question_id"], reason)}
 
 
+@pytest.mark.parametrize("tamper", ["select_obsolete", "key_of_another_code"])
+def test_a_conflict_closure_needs_a_live_select_question_and_a_conflict_entry(tmp_path, example, tamper):
+    """The closure contract: the closing question is live and answered, and the reason fits the closed
+    question's code (a damaged or older registry must not close anything)."""
+    work = _ledger_work(_two_buildings(tmp_path, example))
+    run_grid_systems(work, svg=False)
+    answer = _select(work, {"systems": ["S001"]})
+    _set_answers(work, [answer])
+    run_grid_systems(work, svg=False)
+    conflict = _one(_gs_questions(work), "grid_system_conflict")["key"]
+    assert conflict in _closures(work)
+    path = work / "question-registry.json"
+    registry = json.loads(path.read_text(encoding="utf-8"))
+    if tamper == "select_obsolete":
+        registry["questions"][answer["key"]]["status"] = "obsolete"
+    else:
+        registry["questions"][conflict]["code"] = "grid_system_units_unconfirmed"
+    path.write_text(json.dumps(registry), encoding="utf-8")
+    assert conflict not in _closures(work)
+
+
 def test_a_conflict_left_open_by_the_select_answer_is_not_closed(tmp_path, example):
     work = _ledger_work(_two_buildings(tmp_path, example))
     run_grid_systems(work, svg=False)

@@ -1015,6 +1015,25 @@ def test_an_open_conflict_keeps_the_conflict_flag(tmp_path, example):
     assert conflict["question_id"] == _one(_gs_questions(work), "grid_system_conflict")["id"]
 
 
+def test_the_conflict_identity_lists_its_sides_in_file_order_not_system_order(tmp_path, example):
+    """S001 (two views) is in b.dxf, S002 (one view) in a.dxf: the key must not depend on which system
+    ranks first, so the sides are sorted by file, view and family."""
+    w = Work(tmp_path, example)
+    w.add_file("b.dxf", [plan("V001", "model#01", 1), plan("V002", "model#02", 3)])
+    other = view(
+        "V001",
+        "model#01",
+        fam("F001", ["A", "B", "C"], [3600.0, 4800.0], angle=0.0),
+        fam("F002", NUMBERS, [5400.0, 5400.0], angle=90.0),
+    )
+    w.add_file("a.dxf", [other])
+    doc = build_grid_systems(w.finish())
+    assert doc["systems"][0]["directions"][0]["representative"]["file"] == "b.dxf"
+    (q,) = [q for q in doc["questions"] if q["code"] == "grid_system_conflict"]
+    assert q["where"] == "a.dxf V001/F001 vs b.dxf V001/F001" and q["file"] == "a.dxf"
+    assert q["found"].startswith("V001/F001 x V001/F001: shared labels A B C")
+
+
 def test_an_answer_to_an_old_style_conflict_key_goes_stale_once(tmp_path, example):
     """Conflict keys changed with fix 5a: an existing answer to the old key goes stale on the first run and
     the conflict is asked under a new id; the next run changes nothing."""
