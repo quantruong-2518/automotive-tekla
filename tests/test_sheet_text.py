@@ -33,7 +33,7 @@ from tekla_harness.sheet_text import (
     truncation_warning,
 )
 from tekla_harness.sheets import extract_sheets
-from tekla_harness.text_gate import BLOCK_REASONS
+from tekla_harness.text_gate import BLOCK_REASONS, meaning_block_reason
 
 
 @pytest.fixture(scope="module")
@@ -848,3 +848,17 @@ def test_cli_unassigned(loose, capsys):
     assert code == 0 and doc["counts"]["hits"] == 2
     code, out, err = run_cli(capsys, "sheet-text", str(loose), LOOSE, "model#01", "--unassigned")
     assert code == 2 and out is None and "--unassigned" in err
+
+
+# --- list-sheets: blocked text per file (tool wave 2, fix 11) ----------------------------------------------
+
+
+def test_list_sheets_counts_the_blocked_text_of_the_whole_file(work, loose, damaged):
+    row = list_sheets(work)["files"][0]
+    blocked_on_sheets = sum(s["blocked_text_count"] for s in row["sheets"])
+    every = sum(meaning_block_reason(e) is not None for e in text_index(work)["entries"])
+    assert row["blocked_text_count"] == every >= blocked_on_sheets > 0
+    assert list_sheets(loose)["files"][0]["blocked_text_count"] == 1  # all of it unassigned
+    (damaged / STRUCTURE_DIR / f"{REL}.sheets.json").unlink()
+    skipped = list_sheets(damaged)["files"][0]
+    assert skipped["status"] == "skipped" and skipped["blocked_text_count"] is None

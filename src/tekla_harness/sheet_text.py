@@ -429,6 +429,7 @@ def list_sheets(work_dir: Path | str, *, check_inputs: bool = False) -> dict[str
             "text_entries": None,
             "unassigned_text": None,
             "sheets": None,
+            "blocked_text_count": None,
         }
         files.append(entry)
         if loaded.skip is not None or loaded.text_index is None:
@@ -438,6 +439,10 @@ def list_sheets(work_dir: Path | str, *, check_inputs: bool = False) -> dict[str
         if loaded.sheets is None:
             entry.update(status="skipped", reason="no sheets document (run `harness read-structure`)")
             continue
+        # the whole file, on a sheet or not (tool wave 2, fix 11)
+        entry["blocked_text_count"] = sum(
+            meaning_block_reason(e) is not None for e in loaded.text_index["entries"]
+        )
         sheets = []
         for sh in loaded.sheets["sheets"]:
             entries = _sheet_entries(loaded, sh)

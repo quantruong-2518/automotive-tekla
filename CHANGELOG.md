@@ -401,6 +401,8 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
     entries (hits with sheet id `unassigned`, `counts.unassigned_entries_searched`): the text of a file
     without a detected sheet is now reachable. A sheet id together with `--unassigned` is exit 2.
     `find-text` counts unassigned entries once each (an id both unassigned and ambiguous was counted twice).
+  - `harness list-sheets` gives each listed file `blocked_text_count`: its text-index entries the
+    legacy-font gate blocks, on a sheet or not (null for a skipped file).
 
 ### Fixed
 - Reading toolchain, after an independent review of the EVAL-1 wave:
