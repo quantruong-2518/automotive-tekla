@@ -34,8 +34,13 @@ would create a second validator that drifts from the first (ADR-0009, Consequenc
 
 ## Amendment 1 (2026-11-07, slice S1b design)
 
-The engineer delegated these choices to the orchestrator ("decide the best options, brainstorm
-with a second agent"). An independent Opus review reached the same design; it also ran the current
+- Status of this amendment: **proposed by the orchestrator, pending engineer confirmation at merge.**
+  The engineer delegated the C# JSON library choice (decision 2 below: "decide the best options,
+  brainstorm with a second agent"); the other decisions, notably decision 6 (exit `5` instead of
+  the engineer's `1`) and decision 10 (ECMA `pattern` meaning for every schema), are the
+  orchestrator's and need the engineer's confirmation.
+
+An independent Opus review reached the same design; it also ran the current
 validator and found it accepts `NaN`, `Infinity`, `1e400` (read as infinity), duplicate keys
 (last wins), `lot: 1.0`, lone surrogates and NUL. A receipt over such a file would vouch for values
 the C# reader cannot see the same way. Decisions:

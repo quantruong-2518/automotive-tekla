@@ -118,3 +118,8 @@ Severity: `critical` · `major` · `minor`.
   produces receipts. Check the current permission-rule syntax in the Claude Code docs first.
 - Regression test: a hook/permission test where `builder` tries to Write `x.json.receipt.json`
   and is denied, while `uv run harness validate spec` still writes it.
+- Related, also needs approval (agent definition): `.claude/agents/builder.md` step 1 runs
+  `harness validate spec` right before building, so the agent that writes to Tekla produces its
+  own receipt, and the Tekla machine needs Python (ADR-0010 says it should not). Proposed: step 1
+  becomes "the receipt exists and matches", checked by `tekla-cli` itself; validation stays with
+  the planner/doc-reader before the gate.
