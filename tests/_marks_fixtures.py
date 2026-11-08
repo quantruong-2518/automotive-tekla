@@ -12,6 +12,8 @@ adds, on sheet S-101, texts and lines invented here (none from sample drawings):
   * an unreadable table: header 'MARK | QTY' with a single row B7 5;
   * plan marks in a column at x = 46000 (see PLAN_TEXTS).
 
+`build_gate_work` builds a second, smaller world for the schedule gate (tables E, F, G below).
+
 It runs the real `run_intake` and writes the real sheets document (`_callout_fixtures.write_structure`);
 `full=True` runs the real `read_structure` instead (grids and levels too, for `harness status`). The DXF is
 native, so its lines are read only with `--input-dir`.
@@ -139,4 +141,71 @@ def build_marks_work(base: Path, *, full: bool = False, plan_texts: tuple[str, .
         read_structure(work, root)
     else:
         write_structure(root, work)
+    return work
+
+
+# --- the schedule gate (tool wave 2, fix 8) --------------------------------------------------------
+# Four line-grid tables on sheet S-101, each header cell (text, style); style BLOCKED_STYLE blocks
+# non-ASCII text. KÍNH stands for a header word in a legacy font the gate blocks.
+KINH = "KÍNH"
+BLOCKED_H = "45ç0"  # a size cell whose text the gate blocks
+BLOCKED_SUB = "(ký)"  # a second, blocked text in table E's mark-column header cell, under the keyword
+# table E: keyword header, one blocked header cell that is not the mark column; row E2's h cell blocked
+E_X, E_COLS = 2000.0, (3000.0, 2000.0, 2000.0, 2000.0)
+E_HEADER = (("KÝ HIỆU", None), ("b", None), ("h", None), (KINH, BLOCKED_STYLE))
+E_ROWS = (
+    (("E1", None), ("220", None), ("300", None), ("16", None)),
+    (("E2", None), ("220", None), (BLOCKED_H, BLOCKED_STYLE), ("18", None)),
+    (("E3", None), ("200", None), ("400", None), ("20", None)),
+)
+# table F: no keyword; the mark column's header is allowed text, another header cell is blocked (it may
+# be the h column: only b is named)
+F_X, F_COLS = 14000.0, (3000.0, 2000.0, 2000.0)
+F_HEADER = (("SỐ HIỆU", None), (KINH, BLOCKED_STYLE), ("b", None))
+F_ROWS = ((("F1", None), ("16", None), ("2", None)), (("F2", None), ("18", None), ("4", None)))
+# table G: no keyword; the mark column's header is blocked, the other header cell is allowed
+G_X, G_COLS = 26000.0, (3000.0, 2000.0)
+G_HEADER = (("Abçd", BLOCKED_STYLE), ("SL", None))
+G_ROWS = ((("G1", None), ("2", None)), (("G2", None), ("4", None)))
+# table H: no keyword and no blocked header text: not a schedule (as likely the space between plan lines)
+H_X, H_COLS = 34000.0, (3000.0, 2000.0)
+H_HEADER = (("TT", None), ("SL", None))
+H_ROWS = ((("H1", None), ("2", None)), (("H2", None), ("4", None)))
+GATE_TOP, GATE_ROW = 56000.0, 800.0
+GATE_PLAN = ("E1(220x300)", "E2(220x450)", "E3", "F1(200x300)", "F2", "G1", "D1", "LT1", "C1")
+
+
+def _styled_table(msp, x0: float, cols: tuple[float, ...], header, rows) -> None:
+    _grid_lines(msp, x0, GATE_TOP, cols, len(rows) + 1, GATE_ROW)
+    centres = []
+    x = x0
+    for w in cols:
+        centres.append(x + w / 2)
+        x += w
+    for i, cells in enumerate((header, *rows)):
+        for cx, (text, style) in zip(centres, cells, strict=True):
+            _cell_text(msp, text, cx, GATE_TOP - GATE_ROW * i - GATE_ROW / 2, style)
+
+
+def build_gate_work(base: Path, plan_texts: tuple[str, ...] = GATE_PLAN) -> Path:
+    """Tables E, F, G, H and `plan_texts` on sheet S-101: `base/input` and `base/work` (intake + sheets).
+    Returns the work folder; the DXF is native (lines need --input-dir)."""
+    root = base / "input"
+    (root / "plans").mkdir(parents=True)
+    doc = readfile(str(build_set(base, "src.dxf")))
+    doc.styles.add(BLOCKED_STYLE, font="vntimeh.shx")
+    msp = doc.modelspace()
+    _styled_table(msp, E_X, E_COLS, E_HEADER, E_ROWS)
+    msp.add_text(BLOCKED_SUB, height=TH / 2, dxfattribs={"style": BLOCKED_STYLE}).set_placement(
+        (E_X + E_COLS[0] / 2, GATE_TOP - GATE_ROW * 0.85), align=TextEntityAlignment.MIDDLE_CENTER
+    )
+    _styled_table(msp, F_X, F_COLS, F_HEADER, F_ROWS)
+    _styled_table(msp, G_X, G_COLS, G_HEADER, G_ROWS)
+    _styled_table(msp, H_X, H_COLS, H_HEADER, H_ROWS)
+    for i, text in enumerate(plan_texts):
+        msp.add_text(text, height=TH, dxfattribs={"insert": (PLAN_X, PLAN_TOP - i * PLAN_STEP)})
+    doc.saveas(root / REL)
+    work = base / "work"
+    run_intake(root, work, PROJECT, knowledge=PROPOSED_FONT_TABLE)
+    write_structure(root, work)
     return work

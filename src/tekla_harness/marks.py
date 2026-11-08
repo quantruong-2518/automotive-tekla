@@ -24,11 +24,14 @@ sheet code (`KC-01`), from texts the title block, grid or level extractors claim
 from a sheet that duplicates an earlier one.
 
 Legacy-font gate (`text_gate.meaning_block_reason`). Only an entry whose meaning is allowed can be a plan
-mark, a header keyword or a matchable schedule mark. A table whose header holds no allowed keyword but
-blocked text is reported with `header_blocked: true`; every cell of it carries `meaning: blocked`, and
-its mark-shaped cells are listed in `blocked_marks` (verbatim, with the entry id and the reason), never
-matched and never part of a notation variant. A blocked cell in the mark column of an allowed table is
-listed the same way. No question paraphrases blocked text.
+mark, a header keyword or a matchable schedule mark. The gate works per column (tool wave 2, fix 8): only
+the mark column's header can block a table. A table whose mark column is not named by an allowed keyword
+and whose mark-column header cell holds blocked text is reported with `header_blocked: true`; every cell
+of it carries `meaning: blocked`, and its mark-shaped cells are listed in `blocked_marks` (verbatim, with
+the entry id and the reason), never matched and never part of a notation variant. Any other blocked
+header cell is listed in the table's `blocked_columns`: its column gets no role, the rest of the table is
+read (cells keep their own meaning). A blocked cell in the mark column of an allowed table is listed in
+`blocked_marks` the same way. No question paraphrases blocked text.
 
 Schedule tables, per sheet and per space of the texts (a paper sheet shows model-space texts through its
 viewports: the table is in the texts' own coordinates, `space` says which):
@@ -52,11 +55,14 @@ viewports: the table is in the texts' own coordinates, `space` says which):
     their centres differ by at most `ROW_TOL` x h; a row needs a cell in the mark column and (with two
     header columns or more) a second cell, and lies at most `ROW_PITCH` x h below the previous row.
     Rotated texts and dimensions are never cells in this mode.
-  * blocked headers are found from the line grid only: a mark-shaped text in a grid cell whose topmost
-    band holds blocked text in at least two columns, no allowed keyword and no mark-shaped text, with at
-    least two data bands holding a mark-shaped cell in the seed's column. Without a grid such a table is
-    not detected (a known miss). A grid of mark-shaped cells whose header has neither a keyword nor
-    blocked text is not reported either: on a plan it is as likely the space between drawn lines.
+  * headers without an allowed keyword are found from the line grid only: a mark-shaped text (the seed)
+    in a grid cell whose topmost band spans at least two columns, holds blocked text, no allowed keyword
+    and no mark-shaped text, with at least two data bands holding a mark-shaped cell in the seed's
+    column. The seed's column is the mark column. When its header cell holds blocked text the table is
+    header-blocked; otherwise the table is read on that column, with confidence low (no keyword names
+    it). Without a grid such a table is not detected (a known miss). A grid of mark-shaped cells whose
+    header has neither a keyword nor blocked text is not reported either: on a plan it is as likely the
+    space between drawn lines.
   * a keyword whose table has fewer than two data rows with a mark cell is listed in `unparsed_tables`
     and asked as a non-blocking `schedule_table_unparsed` question; texts inside the part of it that was
     found (line grid) are not plan marks.
@@ -67,12 +73,16 @@ Two keys with the same structure (prefix, the numbers as integers, suffix, compa
 but different keys, e.g. `D1.1` / `D1-1` or `C-01` / `C1`, are a `notation_variant`: never merged, asked
 once per file as `mark_notation_equivalence` (blocking for lot specs). A matched plan mark with a section
 `(b x h)` and a schedule row whose size columns (b / h, or a combined `b x h` column) hold numbers is
-compared; a difference is a blocking `mark_size_conflict` quoting both entry ids. `plan_only` is listed
-only for a file with at least one matchable schedule.
+compared; a difference is a blocking `mark_size_conflict` quoting both entry ids. Every matched key says
+`size_compared` (true when at least one plan mark and row pair had both sizes) and otherwise
+`size_not_compared_reason`: the plan marks have no size, or per row the table has no size column, the
+header cells that could name one are blocked, the size cells are blocked, or they are not numbers
+(`summary.size_comparisons` counts both). `plan_only` is listed only for a file with at least one
+matchable schedule.
 
 Confidence is never high: plan marks, titles and tables are at most medium (callouts' rule: min(cap,
 entry confidence), low for case-uncertain text, unmapped characters or unknown-encoding flags); a
-header-blocked table is low.
+header-blocked table, and a table whose mark column no keyword names, is low.
 
 Exit codes as `harness callouts`: 0 ok, 1 inconsistent work folder or invalid output, 2 usage, 3 cannot
 write. A DXF that cannot be opened for its lines (native DXF without `--input-dir`, read error) is not an
@@ -221,6 +231,12 @@ SIZE_KEYWORDS = {
     "size": "bxh",
     "section": "bxh",
 }
+# why a matched mark's size was not compared (marks.json matched[].size_not_compared_reason)
+NO_PLAN_SIZE = "the plan mark has no size"
+NO_SIZE_COLUMN = "the schedule table has no size column"
+SIZE_HEADER_BLOCKED = "the schedule header cells that could name a size column are blocked"
+SIZE_CELLS_BLOCKED = "the schedule size cells are blocked"
+SIZE_NOT_NUMBERS = "the schedule size cells are not numbers"
 _SIZE_VALUE = re.compile(r"^\s*(\d+(?:[.,]\d+)?)\s*[xX\u00d7]\s*(\d+(?:[.,]\d+)?)\s*$")
 _NUMBER = re.compile(r"^\s*(\d+(?:[.,]\d+)?)\s*$")
 
@@ -474,6 +490,7 @@ class _Table:
     header_blocked: bool
     anchor: _Text
     ids: set[str] = field(default_factory=set)
+    inferred: bool = False  # the mark column is the seed's column, not named by an allowed keyword
 
 
 def _column(columns: list[tuple[float, float]], x: float) -> int | None:
@@ -578,11 +595,16 @@ def _grid_table(lines: Lines, seed: _Text, pool: list[_Text], keyword: bool) -> 
                 ((x_lo, b_bottom, x_hi, b_top), sorted(cells, key=lambda c: (c[0] or 0, -c[1].cy, c[1].cx)))
             )
     mark_col = _mark_priority(header)
-    header_blocked = mark_col is None and any(t.block is not None for _, t in header)
-    if keyword and mark_col is None:
+    inferred = mark_col is None and not keyword
+    if mark_col is None:
         mark_col = _column(columns, seed.cx)
+    if mark_col is None:
+        return "the text it was found from lies in no column of the grid"
+    # only the mark column's header can block the table (fix 8); other blocked cells are blocked_columns
+    header_blocked = inferred and any(t.block is not None for c, t in header if c == mark_col)
     table = _Table("line_grid", table_box, columns, header, rows, mark_col, header_blocked, seed)
     table.ids = {t.id for t in inside}
+    table.inferred = inferred
     return table
 
 
@@ -823,7 +845,7 @@ def _tables_of_group(
             continue
         if any(_box_has(result.bbox, a) for a, _, _, _ in unparsed):
             continue  # the keyword pass already judged this table
-        if result.mark_column is not None or (result.header_blocked and _plausible_blocked_header(result)):
+        if not result.inferred or _plausible_blocked_header(result):
             seen_boxes.append(result.bbox)
             tables.append(result)
         # otherwise not a schedule: a plan region between drawn lines, or a table with no keyword (a miss)
@@ -831,7 +853,10 @@ def _tables_of_group(
 
 
 def _plausible_blocked_header(table: _Table) -> bool:
-    """A blocked header row spans at least two columns and holds no mark-shaped text."""
+    """A header row without a keyword that still marks a schedule: it holds blocked text, spans at least
+    two columns and holds no mark-shaped text."""
+    if not any(t.block is not None for _, t in table.header):
+        return False
     cols = {c for c, _ in table.header if c is not None}
     marks_in_header = any(
         t.block is None
@@ -1001,8 +1026,14 @@ def _table_doc(rel: str, sheet: dict[str, Any] | None, space: str, tb: _Table) -
             role = size_role(t.entry["display_text"]) if t.block is None else None
             if col is not None and role is not None and col != tb.mark_column:
                 roles.setdefault(col, role)
-    conf = "low" if tb.header_blocked else _confidence("medium", tb.anchor.entry, ())
+    conf = "low" if tb.header_blocked or tb.inferred else _confidence("medium", tb.anchor.entry, ())
     header_reasons = sorted({t.block for _, t in tb.header if t.block is not None})
+    ordered_header = sorted(tb.header, key=lambda ct: (ct[1].cx, -ct[1].cy))
+    blocked_columns = [
+        {"column": c, "entry_id": t.id, "reason": t.block}
+        for c, t in ordered_header
+        if t.block is not None and not tb.header_blocked and c != tb.mark_column
+    ]
     rows = []
     for index, (box, cells) in enumerate(tb.rows, start=1):
         cell_docs = [_cell_doc(c, t) for c, t in cells]
@@ -1028,13 +1059,15 @@ def _table_doc(rel: str, sheet: dict[str, Any] | None, space: str, tb: _Table) -
                         "_structure": None if mark is None else mark.structure,
                     }
                 )
+        size, size_reason = _row_size(cells, roles, bool(blocked_columns))
         rows.append(
             {
                 "index": index,
                 "bbox": _round_box(box),
                 "cells": cell_docs,
                 "marks": marks,
-                "size": _row_size(cells, roles),
+                "size": size,
+                "_size_reason": size_reason,
             }
         )
     columns = [
@@ -1046,7 +1079,7 @@ def _table_doc(rel: str, sheet: dict[str, Any] | None, space: str, tb: _Table) -
         }
         for i, (x0, x1) in enumerate(tb.columns)
     ]
-    header = [_cell_doc(c, t) for c, t in sorted(tb.header, key=lambda ct: (ct[1].cx, -ct[1].cy))]
+    header = [_cell_doc(c, t) for c, t in ordered_header]
     prov: dict[str, Any] = {
         "file": rel,
         "sheet": sheet_label(sheet),
@@ -1067,6 +1100,7 @@ def _table_doc(rel: str, sheet: dict[str, Any] | None, space: str, tb: _Table) -
         "anchor_entry_id": tb.anchor.id,
         "header_blocked": tb.header_blocked,
         "header_block_reasons": header_reasons if tb.header_blocked else [],
+        "blocked_columns": blocked_columns,
         "header": header,
         "columns": columns,
         "mark_column": None if tb.header_blocked else tb.mark_column,
@@ -1076,11 +1110,21 @@ def _table_doc(rel: str, sheet: dict[str, Any] | None, space: str, tb: _Table) -
     }
 
 
-def _row_size(cells: list[tuple[int | None, _Text]], roles: dict[int, str]) -> dict[str, Any] | None:
+def _row_size(
+    cells: list[tuple[int | None, _Text]], roles: dict[int, str], header_cells_blocked: bool
+) -> tuple[dict[str, Any] | None, str | None]:
+    """The row's (b, h) from its size columns, else None and why (a SIZE_* reason)."""
+    named = set(roles.values())
+    if "bxh" not in named and not {"b", "h"} <= named:
+        return None, SIZE_HEADER_BLOCKED if header_cells_blocked else NO_SIZE_COLUMN
     found: dict[str, tuple[int | float, str]] = {}
+    blocked = False
     for col, t in cells:
         role = roles.get(col) if col is not None else None
-        if role is None or t.block is not None:
+        if role is None:
+            continue
+        if t.block is not None:
+            blocked = True
             continue
         text = " ".join(t.entry["display_text"].split())
         if role == "bxh":
@@ -1093,8 +1137,9 @@ def _row_size(cells: list[tuple[int | None, _Text]], roles: dict[int, str]) -> d
             if m:
                 found.setdefault(role, (_num(m[1]), t.id))
     if "b" not in found or "h" not in found:
-        return None
-    return {"b": found["b"][0], "h": found["h"][0], "entry_ids": sorted({found["b"][1], found["h"][1]})}
+        return None, SIZE_CELLS_BLOCKED if blocked else SIZE_NOT_NUMBERS
+    size = {"b": found["b"][0], "h": found["h"][0], "entry_ids": sorted({found["b"][1], found["h"][1]})}
+    return size, None
 
 
 # --- matching -----------------------------------------------------------------------------------------
@@ -1127,21 +1172,26 @@ def _match_file(file: str, plan: list[dict[str, Any]], tables: list[dict[str, An
         ps, ss = plan_by_key.get(key, []), sched_by_key.get(key, [])
         if ps and ss:
             conf = _min_conf(*(p["confidence"] for p in ps), *(m["confidence"] for _, _, m in ss))
-            matched.append(
-                {
-                    "key": key,
-                    "mark": first_text(key),
-                    "plan_marks": [p["id"] for p in ps],
-                    "schedule": sched_refs(key),
-                    "confidence": conf,
-                }
-            )
+            match: dict[str, Any] = {
+                "key": key,
+                "mark": first_text(key),
+                "plan_marks": [p["id"] for p in ps],
+                "schedule": sched_refs(key),
+                "confidence": conf,
+                "size_compared": False,
+            }
+            matched.append(match)
+            row_reasons: set[str] = set()
             for p in ps:
                 if p["size"] is None:
                     continue
                 for t, row, m in ss:
                     size = row["size"]
-                    if size is None or (size["b"], size["h"]) == (p["size"]["b"], p["size"]["h"]):
+                    if size is None:
+                        row_reasons.add(row["_size_reason"])
+                        continue
+                    match["size_compared"] = True
+                    if (size["b"], size["h"]) == (p["size"]["b"], p["size"]["h"]):
                         continue
                     conflicts.append(
                         {
@@ -1157,6 +1207,9 @@ def _match_file(file: str, plan: list[dict[str, Any]], tables: list[dict[str, An
                             "schedule_size": size,
                         }
                     )
+            if not match["size_compared"]:
+                reasons = sorted(row_reasons) if row_reasons else [NO_PLAN_SIZE]
+                match["size_not_compared_reason"] = "; ".join(reasons)
         elif ss:
             schedule_only.append({"key": key, "mark": first_text(key), "schedule": sched_refs(key)})
         elif matchable:
@@ -1391,6 +1444,7 @@ def extract_marks(
         p.pop("_structure", None)
     for t in tables:
         for row in t["rows"]:
+            row.pop("_size_reason", None)
             for m in row["marks"]:
                 m.pop("_structure", None)
     doc: dict[str, Any] = {
@@ -1453,6 +1507,14 @@ def _summary(doc: dict[str, Any]) -> dict[str, Any]:
     out["files_scanned"] = sum(1 for f in doc["files"] if f["status"] == "scanned")
     out["files_skipped"] = sum(1 for f in doc["files"] if f["status"] == "skipped")
     out["by_file"] = by_file
+    matches = [m for f in doc["matching"] for m in f["matched"]]
+    out["size_comparisons"] = {
+        "compared": sum(1 for m in matches if m["size_compared"]),
+        "not_compared": sum(1 for m in matches if not m["size_compared"]),
+        "by_reason": dict(
+            sorted(Counter(m["size_not_compared_reason"] for m in matches if not m["size_compared"]).items())
+        ),
+    }
     return out
 
 

@@ -12,7 +12,7 @@ from typing import Any
 
 import pytest
 
-from _marks_fixtures import PROJECT, build_marks_work
+from _marks_fixtures import BLOCKED_H, BLOCKED_SUB, KINH, PROJECT, build_gate_work, build_marks_work
 from tekla_harness.callouts import run_callouts
 from tekla_harness.cli import main
 from tekla_harness.marks import (
@@ -245,6 +245,7 @@ def test_blocked_header_table(doc):
     (t,) = [t for t in doc["tables"] if t["header_blocked"]]
     assert t["detection"] == "line_grid" and t["mark_column"] is None and t["confidence"] == "low"
     assert t["header_block_reasons"] and all(h["meaning"] == "blocked" for h in t["header"])
+    assert t["blocked_columns"] == []  # a header-blocked table lists no column apart
     assert all(c["meaning"] == "blocked" for r in t["rows"] for c in r["cells"])
     assert all(not r["marks"] for r in t["rows"])
     blocked = [b for b in doc["blocked_marks"] if b["table"] == t["id"]]
@@ -400,6 +401,121 @@ def test_rotated_header_keyword_is_an_unparsed_table_not_a_crash(tmp_path, capsy
     assert code == 0
     out = load(work / "marks.json")
     assert any("rotated" in u["reason"] for u in out["unparsed_tables"])
+
+
+# --- tool wave 2: the schedule gate per column (fix 8) and the counts (fix 11) ---------------------------
+
+NO_PLAN_SIZE = "the plan mark has no size"
+NO_SIZE_COLUMN = "the schedule table has no size column"
+SIZE_HEADER_BLOCKED = "the schedule header cells that could name a size column are blocked"
+SIZE_CELLS_BLOCKED = "the schedule size cells are blocked"
+
+
+@pytest.fixture(scope="module")
+def gate_base(tmp_path_factory) -> Path:
+    root = tmp_path_factory.mktemp("gate")
+    build_gate_work(root)
+    return root
+
+
+@pytest.fixture(scope="module")
+def gate(gate_base) -> dict[str, Any]:
+    return extract_marks(gate_base / "work", gate_base / "input", check_inputs=True)
+
+
+def header_entry(table: dict[str, Any], text: str) -> dict[str, Any]:
+    (h,) = [h for h in table["header"] if h["display_text"] == text]
+    return h
+
+
+def matched(doc: dict[str, Any], key: str) -> dict[str, Any]:
+    (m,) = [m for m in matching(doc)["matched"] if m["key"] == key]
+    return m
+
+
+def test_gate_document_is_schema_valid(gate):
+    assert validate("marks", gate) == []
+    assert gate["files"][0]["line_grid"]["status"] == "read"
+
+
+def test_a_blocked_header_cell_outside_the_mark_column_goes_to_blocked_columns(gate):
+    t = table_with(gate, "KÝ HIỆU")
+    kinh = header_entry(t, KINH)
+    assert kinh["meaning"] == "blocked"
+    assert t["header_blocked"] is False and t["mark_column"] == 0 and t["header_block_reasons"] == []
+    assert t["blocked_columns"] == [
+        {"column": 3, "entry_id": kinh["entry_id"], "reason": kinh["block_reason"]}
+    ]
+    # a blocked text under the keyword, in the mark column's own header cell: the keyword names the
+    # column, so it neither blocks the table nor is a blocked column
+    assert header_entry(t, BLOCKED_SUB)["meaning"] == "blocked"
+    assert header_entry(t, BLOCKED_SUB)["column"] == 0
+    assert [c["role"] for c in t["columns"]] == ["mark", "b", "h", None]
+    assert [[m["text"] for m in r["marks"]] for r in t["rows"]] == [["E1"], ["E2"], ["E3"]]
+    for row in t["rows"]:  # numeric cells under the allowed headers stay allowed
+        for cell in row["cells"]:
+            assert cell["meaning"] == ("blocked" if cell["display_text"] == BLOCKED_H else "allowed")
+    assert t["rows"][0]["size"]["b"] == 220 and t["rows"][0]["size"]["h"] == 300
+    assert t["rows"][1]["size"] is None  # its h cell is blocked
+
+
+def test_a_keywordless_grid_with_a_blocked_header_cell_is_read_on_its_mark_column(gate):
+    """Before wave 2 one blocked header cell (KÍNH) blocked the whole table and its marks."""
+    t = table_with(gate, "SỐ HIỆU")
+    kinh = header_entry(t, KINH)
+    assert t["header_blocked"] is False and t["mark_column"] == 0
+    assert t["blocked_columns"] == [
+        {"column": 1, "entry_id": kinh["entry_id"], "reason": kinh["block_reason"]}
+    ]
+    assert t["confidence"] == "low"  # the mark column is not named by a keyword
+    assert [c["role"] for c in t["columns"]] == ["mark", None, "b"]
+    assert [[m["text"] for m in r["marks"]] for r in t["rows"]] == [["F1"], ["F2"]]
+    assert all(c["meaning"] == "allowed" for r in t["rows"] for c in r["cells"])
+    assert not [b for b in gate["blocked_marks"] if b["table"] == t["id"]]
+    assert {"f1", "f2"} <= {m["key"] for m in matching(gate)["matched"]}
+    assert matched(gate, "f1")["confidence"] == "low"
+
+
+def test_a_blocked_mark_column_header_still_blocks_the_table(gate):
+    (t,) = [t for t in gate["tables"] if t["header_blocked"]]
+    assert {h["display_text"] for h in t["header"]} == {"Abçd", "SL"}
+    assert t["mark_column"] is None and t["confidence"] == "low" and t["blocked_columns"] == []
+    assert [b["display_text"] for b in gate["blocked_marks"] if b["table"] == t["id"]] == ["G1", "G2"]
+    assert "g1" not in {m["key"] for m in matching(gate)["matched"]}
+
+
+def test_a_keywordless_grid_without_blocked_header_text_is_no_schedule(gate):
+    """Mark-shaped texts between drawn lines, under a header with neither a keyword nor blocked text,
+    are as likely a plan region: no table, and the texts stay plan marks."""
+    assert not [t for t in gate["tables"] if any(h["display_text"] == "TT" for h in t["header"])]
+    assert len(gate["tables"]) == 3
+    assert {"h1", "h2"} <= {p["key"] for p in gate["plan_marks"]}
+
+
+def test_every_match_says_whether_its_size_was_compared(doc, gate):
+    assert matched(doc, "d2")["size_compared"] is True and "size_not_compared_reason" not in matched(
+        doc, "d2"
+    )
+    assert matched(doc, "d1")["size_compared"] is False
+    assert matched(doc, "d1")["size_not_compared_reason"] == NO_PLAN_SIZE
+    assert matched(doc, "c1")["size_not_compared_reason"] == NO_SIZE_COLUMN
+    assert matched(doc, "c2")["size_not_compared_reason"] == NO_PLAN_SIZE  # 'COLUMN C2' has no section
+    assert matched(gate, "e1")["size_compared"] is True  # same size: compared, no conflict
+    assert not matching(gate)["size_conflicts"]
+    assert matched(gate, "e2")["size_not_compared_reason"] == SIZE_CELLS_BLOCKED
+    assert matched(gate, "e3")["size_not_compared_reason"] == NO_PLAN_SIZE
+    assert matched(gate, "f1")["size_not_compared_reason"] == SIZE_HEADER_BLOCKED
+
+
+def test_summary_counts_size_comparisons(doc, gate):
+    assert doc["summary"]["size_comparisons"] == {
+        "compared": 1,
+        "not_compared": 3,
+        "by_reason": {NO_PLAN_SIZE: 2, NO_SIZE_COLUMN: 1},
+    }
+    s = gate["summary"]["size_comparisons"]
+    assert (s["compared"], s["not_compared"]) == (1, 4)
+    assert s["by_reason"] == {NO_PLAN_SIZE: 2, SIZE_CELLS_BLOCKED: 1, SIZE_HEADER_BLOCKED: 1}
 
 
 def test_a_table_added_to_another_file_does_not_re_key_this_files_questions(doc):

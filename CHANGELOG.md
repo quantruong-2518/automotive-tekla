@@ -408,6 +408,12 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
     duplicate or as a sheet's active class.
   - `harness finding list` prints `summary.by_class`: the listed `sheet_class` findings per class, counting
     only active, non-stale ones (a withdrawn or stale class would count a sheet twice).
+- Tool wave 2, package P4 (marks and dimensions):
+  - `harness marks` gates schedule tables per column (EVAL-2 fix 8): only a blocked mark-column header
+    blocks a table; any other blocked header cell is listed in `table.blocked_columns` and the table is
+    read. A line-grid table without a keyword is read on the column it was found from (confidence low)
+    unless that column's header is blocked. Every matched mark says `size_compared`, else
+    `size_not_compared_reason`; `summary.size_comparisons` counts them.
 
 ### Changed
 - Question lifecycle (tool wave 2, EVAL-2 fix 5):
