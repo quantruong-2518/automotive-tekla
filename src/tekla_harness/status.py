@@ -665,7 +665,10 @@ def build_status(work_dir: str | Path) -> dict[str, Any]:
     registry, answers = ledger.registry, ledger.answers["answers"]
     active = active_answers(ledger.answers)
     inventory_sha = hashlib.sha256(inventory_bytes).hexdigest()
-    state = closure_state(work, ledger)
+    try:
+        state = closure_state(work, ledger)
+    except QuestionsError as exc:  # lifecycle: an unreadable or invalid document it reads
+        raise StatusError(exc.exit_code, str(exc)) from exc
     closures, refused_closures = state.accepted, state.reasons
     closed_keys = frozenset(closures)
 

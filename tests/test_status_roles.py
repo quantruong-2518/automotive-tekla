@@ -501,3 +501,23 @@ def test_a_written_closure_outside_the_contract_counts_as_blocking(
     counts = {p["producer"]: p["questions"] for p in status["producers"]}[label]
     old = {p["producer"]: p["questions"] for p in before["producers"]}[label]
     assert counts["blocking"] == old["blocking"] + 1  # both questions were non-blocking before
+
+
+# --- an unreadable lifecycle document is a status error, not a traceback --------------------------------
+
+
+def test_an_invalid_grid_systems_document_is_exit_1_in_status_and_questions_md(ready, capsys):
+    from tekla_harness.cli import main
+    from tekla_harness.questions_md import QuestionsMdError, render_questions_md
+    from tekla_harness.status import StatusError
+
+    _, work = ready
+    (work / "grid-systems.json").write_text("{}", encoding="utf-8")  # JSON, but not a grid-system document
+    with pytest.raises(StatusError) as caught:
+        build_status(work)
+    assert caught.value.exit_code == 1
+    with pytest.raises(QuestionsMdError) as rendered:
+        render_questions_md(work)
+    assert rendered.value.exit_code == 1
+    assert main(["status", str(work)]) == 1
+    assert "Traceback" not in capsys.readouterr().err

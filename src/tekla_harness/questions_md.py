@@ -753,10 +753,10 @@ def render_questions_md(work_dir: Path | str, out: Path | str | None = None) -> 
         status = build_status(work)
         ledger = load_ledger(work, status["project_id"], create=False)
         supplement_rows = supplements.load_supplements(work)
+        closures = closure_state(work, ledger)  # the closures harness status accepts
     except (StatusError, QuestionsError) as exc:
         raise QuestionsMdError(exc.exit_code, str(exc)) from exc
     items, missing = load_items(work, ledger.registry, ledger.answers)
-    closures = closure_state(work, ledger)  # the closures harness status accepts
     by_target: dict[str, list[dict[str, Any]]] = {}
     for row in supplement_rows:
         by_target.setdefault(row["target_key"], []).append(row)
