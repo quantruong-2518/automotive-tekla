@@ -231,6 +231,7 @@ def test_a_non_engineer_answer_to_no_registry_question_is_named_by_its_key(ready
     ]
     (reason,) = answer_reasons(work)
     assert "e" * 16 in reason and "not in the registry" in reason, reason
+    assert "no harness command retires this answer" in reason and "rerun" not in reason, reason
 
 
 def test_a_non_engineer_answer_to_an_obsolete_question_still_read_by_a_gate_check_is_named(ready):
@@ -246,6 +247,7 @@ def test_a_non_engineer_answer_to_an_obsolete_question_still_read_by_a_gate_chec
     (work / "answers.json").write_text(json.dumps(doc), encoding="utf-8")
     (reason,) = answer_reasons(work)
     assert q["key"] in reason and "obsolete" in reason, reason
+    assert "rerun the command that raises this code (the answer goes stale)" in reason, reason
 
 
 def test_retired_answers_by_the_engineer_or_not_read_by_gate_1_are_no_reason(ready):

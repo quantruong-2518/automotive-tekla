@@ -1,7 +1,9 @@
 """status: where a work folder stands (`harness status <work_dir>`), and whether gate 1 can be opened.
 
 Read-only: nothing is written. Everything is recomputed from the sources of truth, never from the question
-documents (they can be stale after `harness answer` or a producer rerun):
+documents (they can be stale after `harness answer` or a producer rerun); the one exception is `closed_by`,
+read from them only to check a closure a producer wrote (closure_state), so an unreadable question document
+is an error (exit 1):
 
   * per producer (intake, read-structure, callouts, grid-system, reader): question counts from
     `question-registry.json` + `answers.json` (total, blocking, blocking_open, answered), the stale answers,
@@ -481,13 +483,22 @@ def _retired_answers(registry: dict[str, Any], active: dict[str, dict[str, Any]]
     return out
 
 
+# what clears a retired answer: a rerun marks an answer to an obsolete question stale (questions.Ledger.sync),
+# but nothing in the harness retires an answer whose key no registry entry has
+RETIRED_REMEDY = {
+    "obsolete": "rerun the command that raises this code (the answer goes stale), then the engineer answers "
+    "the live question themselves",
+    "not in the registry": "no harness command retires this answer (no question has its key): the engineer "
+    "decides what to do with answers.json",
+}
+
+
 def _retired_reasons(retired: list[dict[str, Any]]) -> list[str]:
     return [
         f"answers: {a['question_id']} {a['code']} ({a['file'] or 'project'}), answer key {a['key']}, was "
         f"answered by {'a ' + a['role'] + ' role' if a['role'] else 'no recorded role'}, not the engineer, "
-        f"and its question is {a['retired']}; gate checks still read it, so gate 1 does not count it: rerun "
-        "the command that raises this code (the answer goes stale), then the engineer answers the live "
-        "question themselves"
+        f"and its question is {a['retired']}; gate checks still read it, so gate 1 does not count it: "
+        f"{RETIRED_REMEDY[a['retired']]}"
         for a in retired
     ]
 
