@@ -654,6 +654,23 @@ def test_a_finding_stale_from_its_row_does_not_block_recording_it_again(work):
     assert doc(work)["findings"][1]["decoded_by"][0]["decided_on"] == "2026-12-01"
 
 
+def test_two_rows_with_one_pattern_resolve_to_the_approved_one(work):
+    """The text index records the pattern, not applies_to: the approved row (the only kind that decodes)
+    is the one recorded, even when a proposed row with that pattern comes first."""
+    pattern, day = "VHARIAL.TTF", "2026-11-07"
+    shared = FontEncodingTable(
+        (
+            FontEncodingRow(2, pattern, "style_name", "vni", None, "proposed", "e", "t", "", ""),
+            FontEncodingRow(3, pattern, "font_file", "tcvn3", None, "approved", "e", "t", "eng", day),
+        )
+    )
+    decoded(work, CONCRETE, "knowledge_table", [run("knowledge_table", "VHARIAL.TTF")])
+    add(work, kind="structural_system", value="v", fields=["aspect=floors"], knowledge=shared)
+    (item,) = doc(work)["findings"][0]["decoded_by"]
+    assert (item["row_status"], item["decided_on"]) == ("approved", "2026-11-07")
+    assert [f["stale"] for f in list_findings(work, knowledge=shared)["findings"]] == [False]
+
+
 def test_a_finding_without_decoded_by_is_judged_by_its_file_only(work):
     decoded(work, CONCRETE, "knowledge_table", [run("knowledge_table", "VHARIAL.TTF")])
     add(work, kind="structural_system", value="v", fields=["aspect=floors"], knowledge=KNOWN)

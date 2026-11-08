@@ -66,7 +66,7 @@ def test_answer_role_must_be_known(tmp_path, capsys):
 
 def test_answer_without_a_role_is_a_usage_error(tmp_path, capsys):
     assert main(["answer", str(tmp_path), "Q-001", "--text", "x", "--by", "me"]) == 2
-    assert "--role" in capsys.readouterr().err
+    assert "the following arguments are required: --role" in capsys.readouterr().err  # argparse refuses
 
 
 def test_ask_supplement_without_a_registry_is_a_usage_error(tmp_path, capsys):

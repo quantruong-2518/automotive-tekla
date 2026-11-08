@@ -252,15 +252,24 @@ def test_a_closure_naming_no_answer_does_not_open_gate1(ready, monkeypatch):
     asked = ask_question(work, code="reader_gap", where="S-1 note 3", found="??", text="?", blocking=True)
     close(monkeypatch, work, {asked["id"]: Closure(None, "units_answered")})
     reason = refused(work, asked["id"])
-    assert "stays open" in reason and "reader" in reason
+    assert "stays open" in reason and "a reader question closes only through its own answer" in reason
     reasons = build_status(work)["gate1"]["reasons"]
     assert any(r.startswith("reader: 1 blocking question(s) open") for r in reasons)
 
 
-@pytest.mark.parametrize(
-    "case",
-    ["wrong_reason", "no_question", "unknown_question", "unanswered", "simulated", "legacy", "reader"],
-)
+WHY = {  # the refusal each contract violation names (each check, not just the first that happens to fire)
+    "wrong_reason": "units_answered cannot close a structure grid_label_missing question",
+    "no_question": "it names no question whose answer closes it",
+    "unknown_question": "Q-999 is not a live question",
+    "obsolete": "is not a live question",
+    "unanswered": "has no active answer",
+    "simulated": "was not answered by the engineer",
+    "legacy": "was not answered by the engineer",
+    "reader": "a reader question closes only through its own answer",
+}
+
+
+@pytest.mark.parametrize("case", list(WHY))
 def test_a_closure_outside_the_contract_is_refused(ready, monkeypatch, case):
     from tekla_harness.questions import Closure
 
@@ -279,9 +288,16 @@ def test_a_closure_outside_the_contract_is_refused(ready, monkeypatch, case):
             if a["question_id"] == closer:
                 a.pop("answered_by_role")
         (work / "answers.json").write_text(json.dumps(doc), encoding="utf-8")
+    if case == "obsolete":  # the select question is no longer raised; its answer is still active
+        registry = load(work / "question-registry.json")
+        for e in registry["questions"].values():
+            if e["id"] == closer:
+                e["status"] = "obsolete"
+        (work / "question-registry.json").write_text(json.dumps(registry), encoding="utf-8")
     why = "units_answered" if case == "wrong_reason" else "rejected_systems_only"
     close(monkeypatch, work, {target: Closure(closer, why)})
-    assert "stays open" in refused(work, target)
+    reason = refused(work, target)
+    assert "stays open" in reason and WHY[case] in reason, reason
 
 
 @pytest.mark.parametrize(
@@ -316,6 +332,8 @@ def test_a_closure_under_the_contract_closes_its_question(ready, monkeypatch, pr
         ("intake", "grid_label_missing", "rejected_systems_only"),
         ("structure", "grid_system_conflict", "separate"),
         ("grid-system", "grid_system_select", "not_selected"),
+        ("grid-system", "grid_system_axis_unassigned", "separate"),
+        ("grid-system", "units_answer_contradicts_evidence", "other_file_set"),
         ("structure", "grid_units_doubt", "not_selected"),
         ("grid-system", "grid_system_conflict", "units_answered"),
     ],
