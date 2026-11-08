@@ -212,14 +212,21 @@ def answer_reasons(work: Path) -> list[str]:
     return [r for r in build_status(work)["gate1"]["reasons"] if r.startswith("answers:")]
 
 
-@pytest.mark.parametrize("role", ["simulated", None])
-def test_a_non_engineer_answer_to_no_registry_question_is_named_by_its_key(ready, role):
+@pytest.mark.parametrize(
+    ("code", "values", "role"),
+    [
+        ("units_confirm_all", {"unit": "mm"}, "simulated"),
+        ("units_confirm_all", {"unit": "mm"}, None),
+        ("grid_system_select", {"systems": ["S001"]}, "simulated"),  # read by harness grid-system
+    ],
+)
+def test_a_non_engineer_answer_to_no_registry_question_is_named_by_its_key(ready, code, values, role):
     _, work = ready
-    orphan(work, "units_confirm_all", {"unit": "mm"}, role)
+    orphan(work, code, values, role)
     gate1 = build_status(work)["gate1"]
     assert gate1["ready_for_gate1"] is False
     assert validate("status", build_status(work)) == []
-    assert {"question_id": "Q-990", "code": "units_confirm_all", "file": "set.dxf", "role": role} in gate1[
+    assert {"question_id": "Q-990", "code": code, "file": "set.dxf", "role": role} in gate1[
         "non_engineer_answers"
     ]
     (reason,) = answer_reasons(work)
@@ -503,6 +510,21 @@ def test_a_written_closure_outside_the_contract_counts_as_blocking(
     assert counts["blocking"] == old["blocking"] + 1  # both questions were non-blocking before
 
 
+def test_a_refused_written_closure_beats_the_lifecycle_closure_of_the_same_question(ready):
+    """The real lifecycle closes the separate= conflict (select answer); a written closed_by for it that
+    breaks the contract still makes it blocking, and it leaves gate1.closed."""
+    _, work = ready
+    q = write_closed_by(
+        work,
+        "grid-system-questions.json",
+        "grid_system_conflict",
+        {"question_id": None, "reason": "separate"},
+    )
+    gate1 = build_status(work)["gate1"]
+    assert q["id"] not in [row["id"] for row in gate1.get("closed", [])]
+    assert any(r.startswith(f"closures: {q['id']} ") and "stays blocking" in r for r in gate1["reasons"])
+
+
 # --- an unreadable lifecycle document is a status error, not a traceback --------------------------------
 
 
@@ -528,7 +550,7 @@ def test_an_invalid_grid_systems_document_is_exit_1_in_status_and_questions_md(r
 
 def test_a_pending_cross_file_conflict_points_at_the_file_set_question(world):
     from tekla_harness.grid_system import run_grid_systems
-    from test_status import answer_blocking, answer_select
+    from test_status import answer_blocking, answer_select, values_for
 
     _, work = world
     answer_blocking(work, ("questions.json", "structure-questions.json"), skip=("file_set_relation",))
@@ -548,3 +570,11 @@ def test_a_pending_cross_file_conflict_points_at_the_file_set_question(world):
     for r in reasons:
         assert f"pending {file_set['id']} (file_set_relation)" in r and "separate=" not in r, r
         assert f"{ENGINEER_STEP}harness answer {work} {file_set['id']} " in r, r
+    # once the file sets are answered the conflict is no longer pending on them: select/separate again
+    record_answer(work, file_set["id"], "one project", "eng", values_for(file_set), role="engineer")
+    from tekla_harness.grid_system import consumed_answers_digest
+
+    doc["answers_sha256"] = consumed_answers_digest(load(work / "answers.json")["answers"])  # keep it fresh
+    (work / "grid-systems.json").write_text(json.dumps(doc), encoding="utf-8")
+    after = [r for r in build_status(work)["gate1"]["reasons"] if " conflict " in r]
+    assert after and all("separate=" in r and "pending" not in r for r in after), after
