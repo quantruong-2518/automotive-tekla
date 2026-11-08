@@ -283,6 +283,13 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
   Value parity: canonical dumps `tests/fixtures/strict-json/values/` (IEEE bits, UTF-16 units)
   for every accept file, plus `accept/number_parity.json` (4049 tokens incl. 1019 that
   .NET Framework 4.8 `double.Parse` rounds differently); compared by pytest and xunit.
+- Step 3 S1b C#: `TeklaCore.SpecLoader.Load(spec, lot)` builds a `LotSpec` only when
+  `<spec>.receipt.json` matches the spec's exact bytes (SHA-256 of the one buffer it also parses),
+  an accepted spec schema `$id` and `rules_version ≥ 1`; then read-time checks (schema_version vs
+  receipt, units `mm`, lot int32 = `--lot`, unique `spec_id` matching its pattern, profile,
+  material, finite points). Refusals exit 5, I/O errors 3, bad path text 2. Hand-written strict
+  JSON reader (no package) with its own correctly rounded decimal→double conversion
+  (`System.Numerics.BigInteger`): 0 of 150,000 tokens differ from Python on .NET Framework 4.8.
 - Versioning note: the reading-toolchain schemas above have not been released; they stay `0.1` and their
   changes are recorded here until the first tagged release, from which every change bumps its `$id`
   (AGENTS.md). Pending engineer confirmation.
