@@ -521,3 +521,30 @@ def test_an_invalid_grid_systems_document_is_exit_1_in_status_and_questions_md(r
     assert rendered.value.exit_code == 1
     assert main(["status", str(work)]) == 1
     assert "Traceback" not in capsys.readouterr().err
+
+
+# --- a cross-file conflict pending on the file sets points at the file_set_relation question -----------
+
+
+def test_a_pending_cross_file_conflict_points_at_the_file_set_question(world):
+    from tekla_harness.grid_system import run_grid_systems
+    from test_status import answer_blocking, answer_select
+
+    _, work = world
+    answer_blocking(work, ("questions.json", "structure-questions.json"), skip=("file_set_relation",))
+    run_grid_systems(work)
+    answer_select(work, separate=False)  # both systems used, not declared separate
+    run_grid_systems(work)
+    file_set = find(questions_of(work, "questions.json"), "file_set_relation")
+    doc = load(work / "grid-systems.json")
+    assert doc["conflicts"] and all(c["closed_by"] is None for c in doc["conflicts"])
+    shared = [r for r in build_status(work)["gate1"]["reasons"] if " conflict " in r]
+    assert all("separate=" in r for r in shared)  # the two systems share a file: select/separate is the fix
+    for c in doc["conflicts"]:  # as harness grid-system writes a cross-set conflict while the sets are asked
+        c["blocking"] = False
+    (work / "grid-systems.json").write_text(json.dumps(doc), encoding="utf-8")
+    reasons = [r for r in build_status(work)["gate1"]["reasons"] if " conflict " in r]
+    assert len(reasons) == len(doc["conflicts"])
+    for r in reasons:
+        assert f"pending {file_set['id']} (file_set_relation)" in r and "separate=" not in r, r
+        assert f"{ENGINEER_STEP}harness answer {work} {file_set['id']} " in r, r

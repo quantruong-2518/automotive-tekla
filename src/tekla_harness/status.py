@@ -61,6 +61,7 @@ from tekla_harness.questions import (
     CLOSURE_REASONS,
     CONFLICT_CODE,
     CONTRADICTION_CODE,
+    FILE_SET_CODE,
     PRODUCER_COMMANDS,
     QUESTION_DOCUMENTS,
     REGISTRY_FILE,
@@ -406,11 +407,26 @@ def _grid_reasons(
                 f"grid systems: {sid} has no Tekla X/Y ({axis['reason']}): {how} (or answer "
                 "grid_family_axis_assignment per family), then rerun harness grid-system"
             )
+    # an unanswered live file_set_relation question: a conflict grid-system left non-blocking without a
+    # closure is pending on it (the two systems may be separate projects), so it is the question to answer
+    file_set = max(
+        (e["id"] for k, e in _live(registry, FILE_SET_CODE).values() if k not in active),
+        key=_id_number,
+        default=None,
+    )
     for c in doc.get("conflicts", []):
         a, b = c["systems"]
         if a not in used or b not in used or {a, b} <= separate:
             continue
         qid = id_of.get(c["question_key"] or "") or CONFLICT_CODE
+        if file_set is not None and not c["blocking"] and c["closed_by"] is None:
+            reasons.append(
+                f"grid systems: {a} and {b} conflict ({qid}) across drawing files, pending {file_set} "
+                f"({FILE_SET_CODE}): say which files form one set first "
+                f"({ANSWER.format(work_dir=work_dir, id=file_set)} --value set1=<file>,<file> "
+                "[--value set2=...]), then rerun harness grid-system"
+            )
+            continue
         reasons.append(
             f"grid systems: {a} and {b} conflict ({qid}); an answer to it closes nothing: answer "
             f"{SELECT_CODE} ({select_ids}) again with systems= leaving one of them out, or with "

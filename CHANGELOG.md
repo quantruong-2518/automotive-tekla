@@ -393,6 +393,9 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
     `blocking: false` plus `closed_by` in the question document) is checked against the same contract;
     a refused one counts the question as blocking again, in status and in questions.md. An unreadable or
     invalid document the lifecycle reads is exit 1 in `harness status` and `harness questions-md`.
+  - A grid-system conflict pending on an unanswered `file_set_relation` question (non-blocking, no
+    `closed_by`) gets a gate-1 reason that names that question and its answer command, instead of the
+    `separate=` advice.
   - `harness ask --supplement Q-id --where --found --text [--file --sheet]` adds the reader's evidence to a
     producer's question in `reader-supplements.json` (key = target key, file, file sha256, where; prints
     `new` or `already_supplemented`); exit 2 for an unknown, obsolete or reader-owned target, a withdrawn
