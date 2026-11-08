@@ -70,14 +70,33 @@ the C# reader cannot see the same way. Decisions:
    on success (temporary file + atomic replace, validated against its own schema before writing).
    A receipt that cannot be deleted is an environment error (exit `3`). `*.receipt.json` is
    git-ignored; tests validate copies in a temporary folder.
-6. **Exit code `5`, not `1`** for every receipt refusal (missing, unreadable, hash mismatch,
-   unknown schema `$id`, `rules_version` too old), for a spec the C# reader rejects, and for a spec
-   `lot` other than `--lot`. Reason: contract rule 3 is a safety rule and the contract defines `5`
-   as "refused by safety rule"; decision 2 above said `1` and is replaced. Missing arguments stay
-   `2`; an I/O error reading an existing file is `3`.
+6. **Exit code `5`, not `1`** for every receipt refusal (missing, not strict JSON, wrong shape,
+   hash mismatch, unknown schema `$id`, `rules_version` too old), for a spec the C# reader rejects,
+   and for a spec `lot` other than `--lot`. Reason: contract rule 3 is a safety rule and the
+   contract defines `5` as "refused by safety rule"; decision 2 above said `1` and is replaced.
+   Missing or malformed path arguments stay `2`; an I/O error reading a file that exists (access
+   denied, a folder, a sharing violation) is `3`.
 7. **Read-time checks in C#** (decision 3) also include: spec `schema_version` matches the
    receipt's `spec_schema_id`; `lot` is an integer token within int32; `spec_id` unique within
    the file (contract rule 6 relies on it, so the reader enforces it rather than trusting it).
+
+8. **Numbers are converted by our own code, correctly rounded** (added after the independent
+   review). Measured on .NET Framework 4.8.9363 (the production runtime): `double.Parse` gave a
+   value 1 ULP away from Python `float()` for 1019 of 150,000 tokens, including plain
+   coordinates such as `9.178631892786`. The C# reader therefore converts decimal text to `double`
+   with an exact big-integer algorithm (round half to even, as Python), integer tokens become
+   `(double)` of their exact integer (`-0` is `+0`, as Python's int `0`), and float tokens keep
+   their sign (`-0.0` is `-0.0`).
+9. **Values, not only verdicts, are shared.** Every accept file in `tests/fixtures/strict-json/`
+   has a canonical dump in `values/` (UTF-16 units of every string and key, IEEE bits of every
+   number, int/float flag), produced by Python (`tests/strict_json_values.py`) and compared byte
+   for byte by pytest and xunit. `accept/number_parity.json` holds the 1019 tokens above plus
+   signed zeros, subnormals and halfway cases.
+10. **`pattern` has ECMA-262 meaning** in the Python validator, as JSON Schema 2020-12 requires.
+    Python's `$` also matched before a final newline, so `"L1-C-A2\n"` passed the `spec_id`
+    pattern and could sit beside `"L1-C-A2"` (found by the review). Outside a character class `$`
+    is translated to `\Z` and `.` excludes every line terminator; this applies to every schema.
+    The C# reader also checks `spec_id` against its pattern, since `SPEC_ID` becomes a Tekla tag.
 
 Accepted limits:
 - A receipt proves the spec bytes have not changed since a validation, not that the validator
