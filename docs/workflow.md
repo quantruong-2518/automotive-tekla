@@ -60,7 +60,8 @@ space, missing xrefs, `$INSUNITS`, legacy Vietnamese encodings (TCVN3/VNI).
 Lot n+1 starts only after gate 4 of lot n is approved. Nothing runs in parallel across lots:
 the engineer's 3D check may reject lot n, and a rejected lot can change the spec of later lots.
 9. **Extract lot n** — every value with source sheet and confidence; `validate_spec`,
-   `selfcheck`, `profile_map`. → `lots/n/spec.json`
+   `selfcheck`, `profile_map`. → `lots/n/spec.json` + its receipt `spec.json.receipt.json`
+   (written only by `harness validate spec`, run by `doc-reader`; RTI-0008)
 10. **Build lot n** — hook: backup, permission check; one `tekla-cli build` per lot, tags
     `LOT`/`RUN_ID`/`SPEC_ID`, single commit. → model, log
 11. **Verify lot n** — export CSV + IFC; `compare_report`, `compare_ifc`; classify issues;
