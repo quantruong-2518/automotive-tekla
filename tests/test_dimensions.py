@@ -27,7 +27,9 @@ from tekla_harness.sheet_text import ReaderError
 DIM_LAYER = "S-DIM"
 NESTED_AT = (20000.0, 30000.0)
 MOVED_TEXT_AT = (11000.0, 1500.0)
-TOTAL = 7
+ZERO_HOST = "S-DIM-HOST"  # layer of the INSERT whose block content is on layer 0
+ZERO_AT = (60000.0, 20000.0)
+TOTAL = 9
 
 
 def build_dims_dxf(base: Path) -> Path:
@@ -69,6 +71,18 @@ def build_dims_dxf(base: Path) -> Path:
     doc.layouts.get("Plot").add_linear_dim(
         base=(100, 120), p1=(100, 100), p2=(150, 100), dimstyle="Standard"
     ).render()
+    # layer 0 inside blocks takes the layer of the INSERT that places it (AutoCAD's rule), recursively:
+    # DIMS_ZERO's dimension is on layer 0; DIMS_ZERO_OUTER places it once on layer 0 (so the outer
+    # INSERT's layer ZERO_HOST applies) and once on S-DIM
+    doc.layers.add(ZERO_HOST)
+    zero = doc.blocks.new("DIMS_ZERO")
+    zero.add_linear_dim(
+        base=(0, 1000), p1=(0, 0), p2=(2500, 0), text="1234", dimstyle="Standard", dxfattribs={"layer": "0"}
+    ).render()
+    zero_outer = doc.blocks.new("DIMS_ZERO_OUTER")
+    zero_outer.add_blockref("DIMS_ZERO", (0, 0), dxfattribs={"layer": "0"})
+    zero_outer.add_blockref("DIMS_ZERO", (0, 3000), dxfattribs={"layer": DIM_LAYER})
+    msp.add_blockref("DIMS_ZERO_OUTER", ZERO_AT, dxfattribs={"layer": ZERO_HOST})
     doc.add_xref_def("other.dxf", "XREF1")  # an INSERT the walk cannot expand: reported, not dropped
     msp.add_blockref("XREF1", (0, 0))
     doc.saveas(root / REL)
@@ -131,6 +145,17 @@ def test_a_dimension_nested_in_inserts_carries_its_block_path(doc):
     assert nested["layer"] == DIM_LAYER
 
 
+def test_layer_zero_in_a_block_takes_the_layer_of_its_insert(base, doc):
+    """The schema has one layer field: it holds the effective layer (the stored one is not reported)."""
+    zero = rows(doc, text="1234")
+    assert sorted(r["layer"] for r in zero) == [DIM_LAYER, ZERO_HOST]
+    assert all(r["block_path"] == ["DIMS_ZERO_OUTER", "DIMS_ZERO"] for r in zero)
+    (top,) = rows(doc, text="6500")
+    assert top["layer"] == "0" and top["block_path"] == []  # layer 0 at top level stays 0
+    host = dimensions(base / "work", REL, layer=ZERO_HOST.lower(), input_dir=base / "input")
+    assert [r["text"] for r in host["dimensions"]] == ["1234"]
+
+
 def test_angular_values_are_as_declared_never_converted(doc):
     (ang,) = rows(doc, dim_type="angular")
     assert ang["measured"] == pytest.approx(45.0)  # degrees, as ezdxf measures; no unit applied
@@ -150,12 +175,12 @@ def test_sheet_of_each_dimension(doc):
 def test_filters_and_true_counts(base):
     work, inp = base / "work", base / "input"
     on = dimensions(work, REL, sheet="model#01", input_dir=inp)
-    assert {r["sheet"] for r in on["dimensions"]} == {"model#01"} and on["counts"]["matched"] == 5
+    assert {r["sheet"] for r in on["dimensions"]} == {"model#01"} and on["counts"]["matched"] == 7
     assert on["counts"]["dimensions"] == TOTAL
     off = dimensions(work, REL, unassigned=True, input_dir=inp)
     assert [r["sheet"] for r in off["dimensions"]] == [None] and off["query"]["unassigned"] is True
     layer = dimensions(work, REL, layer="s-dim", input_dir=inp)
-    assert {r["layer"] for r in layer["dimensions"]} == {DIM_LAYER} and layer["counts"]["matched"] == 2
+    assert {r["layer"] for r in layer["dimensions"]} == {DIM_LAYER} and layer["counts"]["matched"] == 3
     assert layer["query"]["layer"] == "s-dim"
     cut = dimensions(work, REL, max_rows=1, input_dir=inp)
     c = cut["counts"]

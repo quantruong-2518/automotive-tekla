@@ -17,6 +17,10 @@ dimension placed directly in model space is passed as `is_model` (a negative DIM
 to mean factor 1); block content keeps the conservative default. An INSERT with a scale other than 1
 scales the virtual copy's geometry, so its measurement can disagree with group 42 (status not_compared).
 
+Layer: the effective layer. Inside a block, a dimension on layer 0 takes the layer of the INSERT that
+places it, resolved through nested INSERTs (AutoCAD's layer-0 rule); `--layer` filters on it. The schema
+has one layer field, so the stored layer of such a dimension (0) is not reported.
+
 Sheet: the detector sheet holding the dimension's text midpoint (else its definition point), by
 `sheets.SheetLocator` on the sheets document; null on no sheet, on several, or without a sheets document.
 `--sheet` and `--unassigned` need the sheets document (exit 2 without it, or for an unknown sheet id).
@@ -55,7 +59,16 @@ COMMAND = "dimensions"
 HELP = "every DIMENSION of one drawing: measured value, printed text, override, layer, sheet (read-only)"
 EXIT_ENV = 3
 UNITS = frozenset({"mm", "cm", "m", "in", "ft"})
-_DIMENSION = frozenset({"DIMENSION"})
+_WALKED = frozenset({"DIMENSION", "INSERT"})  # INSERTs only to resolve layer 0 of their content
+
+
+def _effective_layer(stored: Any, owner: int, insert_layers: dict[int, str | None]) -> str | None:
+    """The layer an entity is drawn on: inside a block, layer 0 takes the effective layer of the INSERT
+    that places it (AutoCAD's layer-0 rule, so recursively through nested INSERTs); otherwise as stored."""
+    layer = None if stored is None else str(stored)
+    if layer == "0" and owner in insert_layers:
+        return insert_layers[owner]
+    return layer
 
 
 def _anchor(dim: Any) -> tuple[float | None, float | None]:
@@ -142,8 +155,13 @@ def dimensions(
     walker = Walker(doc, handles_ok)
     rows: list[dict[str, Any]] = []
     for space, layout, is_model in layout_spaces(doc):
-        for placed in walker.walk(layout, space, _DIMENSION):
+        insert_layers: dict[int, str | None] = {}  # INSERT occurrence serial -> its effective layer
+        for placed in walker.walk(layout, space, _WALKED):
             dim = placed.entity
+            effective = _effective_layer(dim.dxf.get("layer"), placed.owner, insert_layers)
+            if dim.dxftype() == "INSERT":
+                insert_layers[placed.serial] = effective
+                continue
             block_path = list(placed.block_path)
             row = measure_dimension(
                 dim,
@@ -157,7 +175,7 @@ def dimensions(
                 x, y = _anchor(dim)
                 found = locator.locate(space, x, y)
                 on = None if found == SHEET_UNKNOWN else found
-            row.update(layer=dim.dxf.get("layer"), sheet=on, block_path=block_path)
+            row.update(layer=effective, sheet=on, block_path=block_path)
             rows.append(row)
     if walker.skipped:
         warnings.append(f"{file_rel}: some INSERTs were not expanded: {dict(sorted(walker.skipped.items()))}")
