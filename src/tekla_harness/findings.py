@@ -44,7 +44,8 @@ now has another status or date, or is gone. A stale finding is neither a duplica
 way of a new sheet class.
 
 Stdout: add -> {"id", "status": "new" | "already_recorded"}; withdraw -> {"id", "status": "withdrawn" |
-"already_withdrawn"}; list -> the document with a `stale` flag on every finding. Exit codes (AGENTS.md):
+"already_withdrawn"}; list -> the document with a `stale` flag on every finding and `summary.by_class`
+(listed sheet_class findings per class, active and not stale only). Exit codes (AGENTS.md):
 1 a refusal that depends on the work folder, 2 usage (missing or malformed option, unknown finding id, no
 work folder), 3 environment.
 """
@@ -580,6 +581,13 @@ def list_findings(
         for f in doc["findings"]
         if (kind is None or f["kind"] == kind) and (file is None or f["file"] == file)
     ]
+    # the sheets' current classes: a withdrawn or stale class was (or must be) replaced, never counted
+    current_classes = [
+        f["value"]
+        for f in out["findings"]
+        if f["kind"] == "sheet_class" and f["status"] == "active" and not f["stale"]
+    ]
+    out["summary"] = {"by_class": {c: current_classes.count(c) for c in sorted(set(current_classes))}}
     return out
 
 

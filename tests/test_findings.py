@@ -661,3 +661,32 @@ def test_a_finding_without_decoded_by_is_judged_by_its_file_only(work):
     d["findings"][0].pop("decoded_by")
     (work / "reader-findings.json").write_text(json.dumps(d), encoding="utf-8")
     assert [f["stale"] for f in list_findings(work, knowledge=table())["findings"]] == [False]
+
+
+# --- list summary.by_class (tool wave 2, fix 11) ------------------------------------------------------
+
+
+def test_list_counts_the_current_sheet_classes(work):
+    """by_class counts the listed sheet_class findings that are active and not stale: a withdrawn or stale
+    class has been replaced (or must be), so it would count a sheet twice."""
+    assert list_findings(work)["summary"] == {"by_class": {}}
+    add(work, kind="sheet_class", sheet="model#01", entries=[HEAD], value="general_notes")
+    add(work, kind="sheet_class", sheet="model#02", entries=[OTHER_SHEET], value="foundation")
+    add(work, kind="structural_system", value="v", fields=["aspect=floors"])  # not a sheet class
+    listing = list_findings(work)
+    assert listing["summary"] == {"by_class": {"foundation": 1, "general_notes": 1}}
+    assert validate("reader-findings", {k: v for k, v in listing.items()} | {
+        "findings": [{k: v for k, v in f.items() if k != "stale"} for f in listing["findings"]]
+    }) == []  # fmt: skip
+    withdraw_finding(work, "F-002", "it is the setting-out plan")
+    add(work, kind="sheet_class", sheet="model#02", entries=[OTHER_SHEET], value="setting_out")
+    assert list_findings(work)["summary"]["by_class"] == {"general_notes": 1, "setting_out": 1}
+    assert list_findings(work, file="other.dxf")["summary"]["by_class"] == {}  # follows the filters
+    assert "summary" not in doc(work)  # never stored
+    path = work / "inventory.json"
+    inventory = load(path)
+    for row in inventory["files"]:
+        if row["path"] == REL:
+            row["sha256"] = "0" * 64
+    path.write_text(json.dumps(inventory), encoding="utf-8")
+    assert list_findings(work)["summary"]["by_class"] == {}  # every class is stale now

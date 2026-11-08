@@ -395,6 +395,8 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
     entries' runs, the knowledge row's status and decision date. `finding list` marks a finding `stale`
     when that row's status or date changes or the row is gone; such a finding no longer counts as a
     duplicate or as a sheet's active class.
+  - `harness finding list` prints `summary.by_class`: the listed `sheet_class` findings per class, counting
+    only active, non-stale ones (a withdrawn or stale class would count a sheet twice).
 
 ### Changed
 - Question lifecycle (tool wave 2, EVAL-2 fix 5):
