@@ -22,6 +22,8 @@ Rules (deterministic, conservative: when in doubt nothing closes):
     (full or partial) of a system the answered select question leaves out and of no selected system. A
     family in no system, a ref without families, or every system selected keeps it open. Not
     grid_gate1_confirmation: confirming the grids stays a gate-1 step (an engineer decision to drop it).
+  * units_answered: a live grid_units_doubt whose file's live units_confirm_all (same file content) has an
+    active answer; `question_id` is that units question.
   * other_file_set is not derived: once file_set_relation is answered, harness grid-system no longer
     compares two sets, so a cross-set conflict is no longer raised at all (obsolete, not closed).
 
@@ -42,6 +44,7 @@ from tekla_harness.questions import (
     CONFLICT_CODE,
     EXIT_INVALID,
     SELECT_CODE,
+    UNITS_CONFIRM_CODE,
     Closure,
     Ledger,
     QuestionsError,
@@ -52,6 +55,7 @@ from tekla_harness.schemas import validate
 GRID_SYSTEMS_FILE = "grid-systems.json"
 INVENTORY_FILE = "inventory.json"
 STRUCTURE_QUESTIONS_FILE = "structure-questions.json"
+UNITS_DOUBT_CODE = "grid_units_doubt"
 # read-structure codes that rejected_systems_only may close: every grids code whose refs cite families,
 # except grid_gate1_confirmation (the grid confirmation stays a gate-1 step)
 REJECTABLE_CODES = FAMILY_WHERE_CODES | frozenset({"grid_family_axis_assignment"})
@@ -172,11 +176,26 @@ def _rejected_closures(
     return out
 
 
+def _units_closures(ledger: Ledger) -> dict[str, Closure]:
+    active = active_answers(ledger.answers)
+    answered = {
+        (e["file"], e.get("file_sha256")): e["id"]
+        for k, e in _live(ledger, UNITS_CONFIRM_CODE, "intake")
+        if k in active and e["file"] is not None
+    }
+    out: dict[str, Closure] = {}
+    for k, e in _live(ledger, UNITS_DOUBT_CODE, "structure"):
+        qid = answered.get((e["file"], e.get("file_sha256")))
+        if qid is not None:
+            out[k] = Closure(qid, "units_answered")
+    return out
+
+
 def closures(work: Path, ledger: Ledger) -> dict[str, Closure]:
     """Registry key -> why that question is closed. See the module docstring for the rules."""
     work = Path(work)
     live = {k: e for k, e in ledger.registry["questions"].items() if e["status"] != "obsolete"}
-    out: dict[str, Closure] = {}
+    out = _units_closures(ledger)
     grid = _fresh_grid_systems(work, ledger)
     if grid is not None:
         out.update(_conflict_closures(grid, ledger, live))

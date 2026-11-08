@@ -12,12 +12,14 @@ from tekla_harness.grid_system import run_grid_systems
 from tekla_harness.lifecycle import closures
 from tekla_harness.questions import Closure, QuestionsError, load_ledger
 from test_grid_system import (
+    Work,
     _gs_questions,
     _ledger_work,
     _one,
     _set_answers,
     _two_buildings,
     ans,
+    plan,
 )
 
 
@@ -203,3 +205,49 @@ def test_a_broken_structure_questions_document_is_an_error(tmp_path, example):
     with pytest.raises(QuestionsError) as caught:
         _closures(work)
     assert caught.value.exit_code == 1 and "structure-questions.json" in str(caught.value)
+
+
+# --- grid_units_doubt closes with the file's units answer (fix 5c) ------------------------------------
+
+
+def _units_answer(key: str, qid: str, status: str = "active") -> dict[str, Any]:
+    answer = {**ans("units_confirm_all", "plans.dxf", {"unit": "mm"}, status), "key": key, "question_id": qid}
+    return {**answer, "stale_reason": "the input file was changed"} if status == "stale" else answer
+
+
+def test_grid_units_doubt_closes_once_the_file_units_question_is_answered(tmp_path, example):
+    work = _ledger_work(_two_buildings(tmp_path, example))
+    units_key, units_id = _add(work, "intake", "units_confirm_all", "plans.dxf")
+    doubt, _ = _add(work, "structure", "grid_units_doubt", "plans.dxf", blocking=False)
+    assert _closures(work) == {}
+    _set_answers(work, [_units_answer(units_key, units_id)])
+    assert _closures(work) == {doubt: Closure(units_id, "units_answered")}
+
+
+def test_grid_units_doubt_needs_an_active_answer_on_its_own_file_units_confirm_all(tmp_path, example):
+    w = Work(tmp_path, example)
+    w.add_file("plans.dxf", [plan("V001", "model#01", 1)])
+    w.add_file("other.dxf", [plan("V001", "model#01", 1)])
+    work = _ledger_work(w.finish())
+    units_key, units_id = _add(work, "intake", "units_confirm_all", "plans.dxf")
+    other_key, other_id = _add(work, "intake", "units_confirm_all", "other.dxf")
+    suspect_key, suspect_id = _add(work, "intake", "units_suspect", "plans.dxf")
+    doubt, _ = _add(work, "structure", "grid_units_doubt", "plans.dxf", blocking=False)
+    for answers in (
+        [_units_answer(units_key, units_id, status="stale")],
+        [{**_units_answer(other_key, other_id), "file": "other.dxf"}],  # another file's units
+        [{**_units_answer(suspect_key, suspect_id), "code": "units_suspect"}],  # a legacy units code
+    ):
+        _set_answers(work, answers)
+        assert doubt not in _closures(work), answers
+    # the units question of another content of the file (sha changed since) does not count either
+    registry = _registry(work)
+    registry["questions"][units_key]["file_sha256"] = "0" * 64
+    (work / "question-registry.json").write_text(json.dumps(registry), encoding="utf-8")
+    _set_answers(work, [_units_answer(units_key, units_id)])
+    assert doubt not in _closures(work)
+    # and an obsolete units question closes nothing
+    registry["questions"][units_key]["file_sha256"] = registry["questions"][doubt]["file_sha256"]
+    registry["questions"][units_key]["status"] = "obsolete"
+    (work / "question-registry.json").write_text(json.dumps(registry), encoding="utf-8")
+    assert doubt not in _closures(work)

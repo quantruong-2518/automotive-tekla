@@ -388,6 +388,8 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
     `lifecycle.closures` closes a read-structure grid question (`rejected_systems_only`) only when every
     family it cites belongs to a system the `grid_system_select` answer leaves out; a family of a selected
     system, of no system, or a ref without families keeps it open; `grid_gate1_confirmation` is never closed.
+  - `grid_units_doubt` is closed (`units_answered`, naming the units question) once the same file's
+    `units_confirm_all` has an active answer.
 - `knowledge/font-encodings.csv`: the three seed rows are approved by the engineer (2026-11-07) after
   reading decoded samples: `VHARIAL.TTF` and `vntimeh.shx` = TCVN3, `vn_vni.shx` = VNI. Text in these
   fonts is now decoded instead of blocked by the legacy-font gate. The engineer also endorsed the
