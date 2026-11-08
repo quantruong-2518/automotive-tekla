@@ -50,7 +50,9 @@ resume planner in `TeklaCore`. S2 fills the snapshot from the Open API; S4 execu
    - journal `spec_sha256` ≠ the receipt's → `5` (a changed spec is `update` in S4, or `rollback` of
      this run and a build with a new `RUN_ID`, decided by the engineer);
    - journal `model_path` ≠ the open working copy (same comparison as safety rule 1) → `5`;
-   - the run has a completed `rollback` invocation → `5`;
+   - the journal header's `project_id`, `lot` or `run_id` differs from this run → `5`;
+   - the run has any `rollback` invocation, whatever its outcome → `5` (a partial rollback is never
+     followed by a resume that rebuilds what the engineer asked to delete);
    - no journal, but objects tagged with this lot and `RUN_ID` exist → `5` (untagged leftovers
      cannot be ruled out without it).
 6. **Snapshot** (supplied by S2, global coordinates in mm): the union of objects with `LOT` = lot,
@@ -58,12 +60,14 @@ resume planner in `TeklaCore`. S2 fills the snapshot from the Open API; S4 execu
    those lookups found it, kind (`beam`/`column`/... in the spec's `type` vocabulary, or `other`),
    each of the three tags as value / absent / unreadable, start, end, profile, material, rotation,
    class, name. Per journal GUID: present, absent (only when the lookup of that very GUID says "not
-   found") or error. Refusals: an unreadable tag or a GUID lookup error → `3`/`4`; a journal GUID
-   tagged with this lot that the `LOT` lookup did not return → `3` (the filter cannot be trusted).
+   found") or error. Refusals: an unreadable tag or a GUID lookup error → `3`/`4`; any object that
+   carries this `LOT`, this `RUN_ID` or a `SPEC_ID` of the spec but was not returned by that lookup
+   → `3` (the filter cannot be trusted).
 7. **"Differs"** (ADR-0007 §2, widened by the engineer on 2026-11-08): an object matches its spec
-   item only when the start and the end are each within 0.1 mm (Euclidean, `d <= 0.1`; a non-finite
-   point never matches; start with start, end with end), profile and material are equal (ordinal),
-   the kind equals the spec `type`, the rotation is within 0.01° modulo 360 (absent in the spec =
+   item only when the start and the end are each within 0.1 mm (Euclidean, `d <= 0.1 + 1e-6`: the
+   1e-6 mm absorbs binary rounding, so 6000 against 6000.1 matches; a non-finite point never
+   matches; start with start, end with end), profile and material are equal (ordinal),
+   the kind equals the spec `type`, the rotation is within 0.01° (+ 1e-9° rounding allowance) modulo 360 (absent in the spec =
    0), and the class is equal when the spec gives one. A different name is reported, not a conflict.
 8. **Plan per spec member** — exactly one action:
    - `skip`: one object tagged with this lot, run and `SPEC_ID` that matches; if the journal has a
@@ -78,7 +82,12 @@ resume planner in `TeklaCore`. S2 fills the snapshot from the Open API; S4 execu
      the stray object and starts a new `RUN_ID`); tags that contradict the journal.
    Run-level conflicts: an object tagged with this lot and run whose `SPEC_ID` is not in the spec;
    an object with any harness tag the rules above cannot classify; this `RUN_ID` in another lot. All
-   conflicts are returned together.
+   conflicts are returned together. Implementation choices, all fail-closed: with several journal
+   GUIDs for one `SPEC_ID` (it was recreated) the latest one is the target, an older one still
+   present is a conflict; an object carrying this `SPEC_ID` under another `RUN_ID` is a conflict in
+   any lot; an object of another run in this lot is `unclassified` even if its `SPEC_ID` is not in
+   the spec; a tagged matching object the journal never recorded is skipped (a journal write may
+   have failed after its GUID was printed, decision 3).
 
 ## Consequences
 
