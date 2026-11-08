@@ -417,6 +417,11 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
   - Counts the report asks for (EVAL-2 fix 11): `harness marks` `summary.by_sheet` (plan marks, tables,
     header-blocked tables, rows, unparsed tables, blocked marks per detector sheet; sheet null for texts on
     no sheet) and `harness callouts` `summary.unparsed_by_reason` (unparsed candidates per reason).
+  - `harness dimensions <work_dir> <file> [--sheet ID | --unassigned] [--layer L] [--max N] [--input-dir
+    DIR]` (EVAL-2 fix 11), read-only: every DIMENSION of one drawing, also inside nested INSERTs (virtual
+    copy, handle null, `block_path`), with what it measures next to its printed or override text and the
+    probe's text rule and status, plus layer and detector sheet. Values as stored, never converted;
+    `units` reports the declared and the answered unit only. A native DXF needs `--input-dir` (exit 2).
 
 ### Changed
 - Question lifecycle (tool wave 2, EVAL-2 fix 5):

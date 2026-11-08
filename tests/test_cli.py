@@ -36,9 +36,10 @@ def test_schema_names_include_the_wave2_schemas(capsys):
 # --- tool wave 2 seam: flags and stubs (the packages implement them) ---------------------------
 
 
-def test_dimensions_is_registered_and_not_implemented_yet(tmp_path, capsys):
-    assert main(["dimensions", str(tmp_path), "a.dxf"]) == 3
-    assert "not implemented yet" in capsys.readouterr().err
+def test_dimensions_is_registered(tmp_path, capsys):
+    # package P4 implemented it (tests/test_dimensions.py): a folder without inventory is a usage error
+    assert main(["dimensions", str(tmp_path), "a.dxf"]) == 2
+    assert "inventory.json" in capsys.readouterr().err
 
 
 def test_dimensions_sheet_and_unassigned_exclude_each_other(tmp_path, capsys):
