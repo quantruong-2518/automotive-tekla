@@ -389,7 +389,9 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
     except `grid_gate1_confirmation`; other_file_set: none yet, nothing derives it), the question is not
     the reader's, and it names a live question of the code the reason needs (`grid_system_select`, or
     `units_confirm_all` for units_answered) with an active engineer answer. A refused closure leaves the
-    question open and is a `closures:` gate-1 reason.
+    question open and is a `closures:` gate-1 reason. A closure a producer already wrote (registry
+    `blocking: false` plus `closed_by` in the question document) is checked against the same contract;
+    a refused one counts the question as blocking again, in status and in questions.md.
   - `harness ask --supplement Q-id --where --found --text [--file --sheet]` adds the reader's evidence to a
     producer's question in `reader-supplements.json` (key = target key, file, file sha256, where; prints
     `new` or `already_supplemented`); exit 2 for an unknown, obsolete or reader-owned target, a withdrawn

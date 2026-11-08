@@ -432,3 +432,72 @@ def test_a_closure_needs_the_closing_question_its_reason_names(
     close(monkeypatch, work, {target: Closure(by, reason)})
     reason_text = refused(work, target)
     assert f"{by} is not a {needed} question" in reason_text, reason_text
+
+
+# --- a closure a producer already wrote (blocking: false + closed_by) passes the same contract ----------
+
+
+def write_closed_by(work: Path, name: str, code: str, closed_by: dict[str, Any] | None) -> dict[str, Any]:
+    """Set `closed_by` on the first question of `code` in a question document and make its registry entry
+    non-blocking (what a producer writes for a question a closure settles); returns the question."""
+    doc = load(work / name)
+    q = next(q for q in doc["questions"] if q["code"] == code)
+    q["closed_by"], q["blocking"] = closed_by, False
+    (work / name).write_text(json.dumps(doc), encoding="utf-8")
+    registry = load(work / "question-registry.json")
+    registry["questions"][q["key"]]["blocking"] = False
+    (work / "question-registry.json").write_text(json.dumps(registry), encoding="utf-8")
+    return q
+
+
+def test_the_conflict_grid_system_closed_stays_closed(ready):
+    _, work = ready
+    conflict = find(questions_of(work, "grid-system-questions.json"), "grid_system_conflict")
+    assert conflict["blocking"] is False and conflict["closed_by"]["reason"] == "separate"
+    assert build_status(work)["gate1"] == ready_gate1(work)
+
+
+@pytest.mark.parametrize(
+    ("name", "code", "closed_by", "why"),
+    [
+        (
+            "grid-system-questions.json",
+            "grid_system_conflict",
+            {"question_id": None, "reason": "separate"},
+            "it names no question whose answer closes it",
+        ),
+        (
+            "structure-questions.json",
+            "grid_family_axis_assignment",
+            {"question_id": "UNITS", "reason": "rejected_systems_only"},
+            "is not a grid_system_select question",
+        ),
+        (
+            "structure-questions.json",
+            "grid_family_axis_assignment",
+            {"question_id": "SELECT", "reason": "x"},
+            "unknown closure reason",
+        ),
+    ],
+)
+def test_a_written_closure_outside_the_contract_counts_as_blocking(
+    ready, monkeypatch, name, code, closed_by, why
+):
+    from tekla_harness import lifecycle
+
+    _, work = ready
+    monkeypatch.setattr(lifecycle, "closures", lambda w, ledger: {})  # only the written flag says closed
+    ids = {"UNITS": units_id(work), "SELECT": select_id(work)}
+    if closed_by["question_id"] in ids:
+        closed_by = {**closed_by, "question_id": ids[closed_by["question_id"]]}
+    before = build_status(work)
+    q = write_closed_by(work, name, code, closed_by)
+    status = build_status(work)
+    gate1 = status["gate1"]
+    assert gate1["ready_for_gate1"] is False
+    (reason,) = [r for r in gate1["reasons"] if r.startswith(f"closures: {q['id']} ")]
+    assert "stays blocking" in reason and why in reason, reason
+    label = "grid-system" if name.startswith("grid-system") else "read-structure"
+    counts = {p["producer"]: p["questions"] for p in status["producers"]}[label]
+    old = {p["producer"]: p["questions"] for p in before["producers"]}[label]
+    assert counts["blocking"] == old["blocking"] + 1  # both questions were non-blocking before

@@ -618,3 +618,20 @@ def test_every_printed_answer_command_names_the_engineer_role_once_after_by(worl
     for c in commands:
         assert c.count("--role") == 1, c
         assert '--by "..." --role engineer' in c, c
+
+
+def test_a_refused_written_closure_shows_its_question_as_blocking(world):
+    """A non-blocking question whose document carries a closed_by outside the closure contract counts as
+    blocking, in questions.md as in harness status."""
+    doc = load(world / "structure-questions.json")
+    q = next(q for q in doc["questions"] if q["code"] == "grid_family_axis_assignment" and not q["blocking"])
+    assert f"##### {q['id']} " in sections(render(world))["3"]  # non-blocking, open
+    q["closed_by"] = {"question_id": None, "reason": "rejected_systems_only"}
+    (world / "structure-questions.json").write_text(json.dumps(doc), encoding="utf-8")
+    assert load(world / "question-registry.json")["questions"][q["key"]]["blocking"] is False
+    rendered = render_questions_md(world)
+    body = sections(rendered.text)
+    assert f"##### {q['id']} " in body["2"] and f"##### {q['id']} " not in body["3"]
+    assert rendered.summary["blocking_open"] == sum(
+        p["questions"]["blocking_open"] for p in build_status(world)["producers"]
+    )

@@ -13,7 +13,7 @@ Sources (all read-only):
   * `harness status` (`status.build_status`): the gate-1 reasons and the per-step counts;
   * `grid-systems.json` + its SVGs and `structure-summary.json`: the proposals shown next to the questions
     they inform. A proposal is always labelled "ĐỀ XUẤT — chưa xác nhận" and is never an answer;
-  * `status.accepted_closures` (the lifecycle closures `harness status` accepts): a closed question is not
+  * `status.closure_state` (the closures `harness status` accepts): a closed question is not
     open; it is listed in section 4 with why it closed. `supplements.load_supplements`: the reader's active
     supplements are printed under the question they supplement, verbatim.
 
@@ -68,8 +68,8 @@ from tekla_harness.schemas import validate
 from tekla_harness.status import (
     NOT_CLOSED_BY_AN_ANSWER,
     StatusError,
-    accepted_closures,
     build_status,
+    closure_state,
 )
 
 COMMAND = "questions-md"
@@ -756,12 +756,13 @@ def render_questions_md(work_dir: Path | str, out: Path | str | None = None) -> 
     except (StatusError, QuestionsError) as exc:
         raise QuestionsMdError(exc.exit_code, str(exc)) from exc
     items, missing = load_items(work, ledger.registry, ledger.answers)
-    closures = accepted_closures(work, ledger)
+    closures = closure_state(work, ledger)  # the closures harness status accepts
     by_target: dict[str, list[dict[str, Any]]] = {}
     for row in supplement_rows:
         by_target.setdefault(row["target_key"], []).append(row)
     for item in items:
-        item.closed_by = closures.get(item.key)
+        item.closed_by = closures.accepted.get(item.key)
+        item.blocking = item.blocking or item.key in closures.forced  # a refused written closure blocks
         item.supplements = by_target.get(item.key, [])
     ctx = _load_context(work, out_path.parent, status)
     ctx.select_ids = sorted((i.id for i in items if i.code == SELECT_CODE), key=_id_number)

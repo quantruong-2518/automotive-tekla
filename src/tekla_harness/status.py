@@ -46,6 +46,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -57,9 +58,11 @@ from tekla_harness.grid_system import (
     units_evidence,
 )
 from tekla_harness.questions import (
+    CLOSURE_REASONS,
     CONFLICT_CODE,
     CONTRADICTION_CODE,
     PRODUCER_COMMANDS,
+    QUESTION_DOCUMENTS,
     REGISTRY_FILE,
     SELECT_CODE,
     UNIT_CODES,
@@ -144,12 +147,17 @@ def _id_number(question_id: str) -> int:
 
 
 def _question_counts(
-    registry: dict[str, Any], active: dict[str, dict[str, Any]], producer: str, closed: frozenset[str]
+    registry: dict[str, Any],
+    active: dict[str, dict[str, Any]],
+    producer: str,
+    closed: frozenset[str],
+    forced: frozenset[str] = frozenset(),
 ) -> tuple[dict[str, int], list[str]]:
-    """`closed`: keys of the accepted closures (check_closures); they block nothing."""
+    """`closed`: keys of the accepted closures; they block nothing. `forced`: non-blocking questions whose
+    written closure was refused; they count as blocking (closure_state)."""
     entries = {k: e for k, e in registry["questions"].items() if e["producer"] == producer}
     live = {k: e for k, e in entries.items() if e["status"] != "obsolete"}
-    blocking = {k: e for k, e in live.items() if e.get("blocking", True) and k not in closed}
+    blocking = {k: e for k, e in live.items() if (e.get("blocking", True) or k in forced) and k not in closed}
     open_ids = sorted(
         (e["id"] for k, e in blocking.items() if k not in active or e["code"] in NOT_CLOSED_BY_AN_ANSWER),
         key=_id_number,
@@ -497,47 +505,116 @@ def check_closures(
     derives it yet). A refused closure leaves its question open and blocking as before. Closures of keys
     that are unknown or obsolete in the registry are ignored (they block nothing either way)."""
     entries = registry["questions"]
-    by_id = {e["id"]: (k, e) for k, e in entries.items()}
     accepted: dict[str, Closure] = {}
     refused: list[tuple[str, str]] = []
     for key, c in closures.items():
         entry = entries.get(key)
         if entry is None or entry["status"] == "obsolete":
             continue
-        closer = by_id.get(c.question_id) if c.question_id is not None else None
-        if entry["producer"] == "reader":
-            why = "a reader question closes only through its own answer"
-        elif not _closure_fits(c.reason, entry):
-            why = f"{c.reason} cannot close a {entry['producer']} {entry['code']} question"
-        elif c.question_id is None:
-            why = "it names no question whose answer closes it"
-        elif closer is None or closer[1]["status"] == "obsolete":
-            why = f"{c.question_id} is not a live question"
-        elif closer[1]["code"] != CLOSER_CODES[c.reason]:
-            why = f"{c.question_id} is not a {CLOSER_CODES[c.reason]} question"
-        elif closer[0] not in active:
-            why = f"{c.question_id} has no active answer"
-        elif not _by_engineer(active[closer[0]]):
-            why = f"{c.question_id} was not answered by the engineer"
-        else:
+        why = _refusal(registry, active, entry, c.question_id, c.reason)
+        if why is None:
             accepted[key] = c
             continue
-        by = f" by {c.question_id}" if c.question_id else ""
-        refused.append(
-            (
-                entry["id"],
-                f"closures: {entry['id']} {entry['code']} ({entry['file'] or 'project'}) stays open: the "
-                f"closure {c.reason}{by} is refused ({why})",
-            )
-        )
+        refused.append((entry["id"], _refusal_reason(entry, c.question_id, c.reason, why, written=False)))
     return accepted, [r for _, r in sorted(refused, key=lambda row: _id_number(row[0]))]
 
 
+def _refusal(
+    registry: dict[str, Any],
+    active: dict[str, dict[str, Any]],
+    entry: dict[str, Any],
+    question_id: str | None,
+    reason: str,
+) -> str | None:
+    """Why a closure of `entry` (named closer, reason) breaks the contract; None when it keeps it."""
+    closer = next(
+        (
+            (k, e)
+            for k, e in registry["questions"].items()
+            if e["id"] == question_id and question_id is not None
+        ),
+        None,
+    )
+    if reason not in CLOSURE_REASONS:
+        return f"unknown closure reason '{reason}'"
+    if entry["producer"] == "reader":
+        return "a reader question closes only through its own answer"
+    if not _closure_fits(reason, entry):
+        return f"{reason} cannot close a {entry['producer']} {entry['code']} question"
+    if question_id is None:
+        return "it names no question whose answer closes it"
+    if closer is None or closer[1]["status"] == "obsolete":
+        return f"{question_id} is not a live question"
+    if closer[1]["code"] != CLOSER_CODES[reason]:
+        return f"{question_id} is not a {CLOSER_CODES[reason]} question"
+    if closer[0] not in active:
+        return f"{question_id} has no active answer"
+    if not _by_engineer(active[closer[0]]):
+        return f"{question_id} was not answered by the engineer"
+    return None
+
+
+def _refusal_reason(
+    entry: dict[str, Any], question_id: str | None, reason: str, why: str, *, written: bool
+) -> str:
+    by = f" by {question_id}" if question_id else ""
+    state, what = ("stays blocking", "written closure") if written else ("stays open", "closure")
+    return (
+        f"closures: {entry['id']} {entry['code']} ({entry['file'] or 'project'}) {state}: the {what} "
+        f"{reason}{by} is refused ({why})"
+    )
+
+
+def _written_closures(work: Path, registry: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """key -> `closed_by` of the live questions a producer already wrote as closed: non-blocking in the
+    registry and carrying `closed_by` in its question document (grid-system writes these for a conflict the
+    select answer settles). Read-only; an unreadable document is an error."""
+    out: dict[str, dict[str, Any]] = {}
+    for name in QUESTION_DOCUMENTS:
+        if not (work / name).is_file():
+            continue
+        doc = _read_json(work / name, name)
+        for q in doc.get("questions", []) if isinstance(doc, dict) else []:
+            if not isinstance(q, dict) or not isinstance(q.get("closed_by"), dict):
+                continue
+            entry = registry["questions"].get(q.get("key"))
+            if entry is not None and entry["status"] != "obsolete" and entry.get("blocking", True) is False:
+                out[q["key"]] = q["closed_by"]
+    return out
+
+
+@dataclass(frozen=True)
+class ClosureState:
+    """What gate 1 treats as closed (`accepted`), the non-blocking questions whose written closure breaks the
+    contract and so count as blocking (`forced`), and a gate-1 reason per refusal (`reasons`)."""
+
+    accepted: dict[str, Closure]
+    forced: frozenset[str]
+    reasons: list[str]
+
+
+def closure_state(work: Path, ledger: Ledger) -> ClosureState:
+    """`lifecycle.closures` and the closures producers wrote (blocking false + closed_by), both checked
+    against the closure contract (`check_closures`, `_refusal`). Used by `harness status` and questions-md."""
+    registry, active = ledger.registry, active_answers(ledger.answers)
+    accepted, reasons = check_closures(registry, active, lifecycle.closures(work, ledger))
+    forced: set[str] = set()
+    written_reasons: list[tuple[str, str]] = []
+    for key, closed_by in _written_closures(work, registry).items():
+        entry = registry["questions"][key]
+        qid, reason = closed_by.get("question_id"), str(closed_by.get("reason"))
+        why = _refusal(registry, active, entry, qid, reason)
+        if why is not None:
+            forced.add(key)
+            written_reasons.append((entry["id"], _refusal_reason(entry, qid, reason, why, written=True)))
+    accepted = {k: c for k, c in accepted.items() if k not in forced}
+    reasons += [r for _, r in sorted(written_reasons, key=lambda row: _id_number(row[0]))]
+    return ClosureState(accepted, frozenset(forced), reasons)
+
+
 def accepted_closures(work: Path, ledger: Ledger) -> dict[str, Closure]:
-    """`lifecycle.closures` filtered by `check_closures`: what `harness status` and questions.md treat as
-    closed."""
-    raw = lifecycle.closures(work, ledger)
-    return check_closures(ledger.registry, active_answers(ledger.answers), raw)[0]
+    """The closures `harness status` and questions.md treat as closed (closure_state)."""
+    return closure_state(work, ledger).accepted
 
 
 def _role_reasons(non_engineer: list[dict[str, Any]], work_dir: str) -> list[str]:
@@ -588,12 +665,13 @@ def build_status(work_dir: str | Path) -> dict[str, Any]:
     registry, answers = ledger.registry, ledger.answers["answers"]
     active = active_answers(ledger.answers)
     inventory_sha = hashlib.sha256(inventory_bytes).hexdigest()
-    closures, refused_closures = check_closures(registry, active, lifecycle.closures(work, ledger))
+    state = closure_state(work, ledger)
+    closures, refused_closures = state.accepted, state.reasons
     closed_keys = frozenset(closures)
 
     producers: list[dict[str, Any]] = []
     for label, producer in PRODUCERS:
-        counts, open_ids = _question_counts(registry, active, producer, closed_keys)
+        counts, open_ids = _question_counts(registry, active, producer, closed_keys, state.forced)
         producers.append(
             {
                 "producer": label,
