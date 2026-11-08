@@ -11,7 +11,14 @@ import pytest
 from tekla_harness.grid_system import run_grid_systems
 from tekla_harness.lifecycle import closures
 from tekla_harness.questions import Closure, QuestionsError, load_ledger
-from test_grid_system import _gs_questions, _ledger_work, _one, _set_answers, _two_buildings, ans
+from test_grid_system import (
+    _gs_questions,
+    _ledger_work,
+    _one,
+    _set_answers,
+    _two_buildings,
+    ans,
+)
 
 
 def _closures(work: Path) -> dict[str, Closure]:
@@ -77,3 +84,122 @@ def test_no_grid_systems_document_closes_nothing_and_a_broken_one_is_an_error(tm
     with pytest.raises(QuestionsError) as caught:
         _closures(work)
     assert caught.value.exit_code == 1 and "invalid" in str(caught.value)
+
+
+# --- read-structure questions citing only rejected grid systems (fix 5b) ------------------------------
+# _two_buildings: plans.dxf, S001 = views V001 V002 (families F001-F004), S002 = V003 V004 (F005-F008).
+
+
+def _registry(work: Path) -> dict[str, Any]:
+    return json.loads((work / "question-registry.json").read_text(encoding="utf-8"))
+
+
+def _add(
+    work: Path, producer: str, code: str, file: str | None, *, blocking: bool = True, status: str = "open"
+) -> tuple[str, str]:
+    """Register one question of `producer` (as its run would) and return (key, id)."""
+    registry = _registry(work)
+    qid = f"Q-{registry['next_id']:03d}"
+    key = f"{registry['next_id']:016x}"
+    sha = None
+    if file is not None:
+        rows = json.loads((work / "inventory.json").read_text(encoding="utf-8"))["files"]
+        sha = next(r["sha256"] for r in rows if r["path"] == file)
+    registry["questions"][key] = {
+        "id": qid, "code": code, "file": file, "producer": producer, "status": status,
+        "first_seen_run": 1, "last_seen_run": 1, "blocking": blocking, "file_sha256": sha,
+    }  # fmt: skip
+    registry["next_id"] += 1
+    (work / "question-registry.json").write_text(json.dumps(registry), encoding="utf-8")
+    return key, qid
+
+
+def _structure_questions(work: Path, specs: list[tuple[str, list[list[str] | None]]]) -> list[str]:
+    """Register one read-structure question per (code, families of each ref) and write
+    structure-questions.json with them; returns their keys."""
+    questions, keys = [], []
+    for code, ref_families in specs:
+        key, qid = _add(work, "structure", code, "plans.dxf")
+        refs = []
+        for k, fams in enumerate(ref_families):
+            ref: dict[str, Any] = {"file": "plans.dxf", "where": f"V001/F{k:03d}", "found": "x"}
+            if fams is not None:
+                ref["families"] = fams
+            refs.append(ref)
+        questions.append(
+            {
+                "id": qid, "key": key, "code": code, "blocking": True, "file": "plans.dxf", "message": "m",
+                "count": len(refs), "truncated": False, "refs": refs, "answer": None,
+            }
+        )  # fmt: skip
+        keys.append(key)
+    doc = {"schema_version": "0.1", "kind": "questions", "project_id": "demo-project", "questions": questions}
+    doc["summary"] = {
+        "questions": len(questions),
+        "blocking_questions": len(questions),
+        "answered": 0,
+        "blocking_open": len(questions),
+    }
+    (work / "structure-questions.json").write_text(json.dumps(doc), encoding="utf-8")
+    return keys
+
+
+def _selected_world(tmp_path: Path, example: Any, systems: list[str]) -> tuple[Path, str]:
+    work = _ledger_work(_two_buildings(tmp_path, example))
+    run_grid_systems(work, svg=False)
+    answer = _select(work, {"systems": systems})
+    _set_answers(work, [answer])
+    run_grid_systems(work, svg=False)
+    return work, answer["question_id"]
+
+
+def test_a_question_citing_only_families_of_unselected_systems_is_closed(tmp_path, example):
+    work, select_id = _selected_world(tmp_path, example, ["S001"])
+    conflict = _one(_gs_questions(work), "grid_system_conflict")["key"]
+    rejected, mixed, two_refs, partly_known, unassigned, gate, no_family, axis = _structure_questions(
+        work,
+        [
+            ("grid_label_duplicate", [["F005"], ["F006", "F008"]]),  # S002 only: closed
+            ("grid_spacing_cross_sheet_mismatch", [["F001", "F005"]]),  # one family of selected S001
+            ("grid_label_missing", [["F007"], ["F003"]]),  # the second ref cites S001
+            ("grid_axis_not_parallel", [["F005"], None]),  # a ref that cites no family
+            ("grid_label_order_nonmonotonic", [["F009"]]),  # a family of no system
+            ("grid_gate1_confirmation", [["F005", "F006", "F007", "F008"]]),  # the gate-1 reason stays
+            ("grid_rotated", [[]]),
+            ("grid_family_axis_assignment", [["F005", "F007"]]),
+        ],
+    )
+    got = _closures(work)
+    assert got == {
+        conflict: Closure(select_id, "not_selected"),
+        rejected: Closure(select_id, "rejected_systems_only"),
+        axis: Closure(select_id, "rejected_systems_only"),
+    }
+    assert not {mixed, two_refs, partly_known, unassigned, gate, no_family} & set(got)
+
+
+def test_every_system_selected_or_no_select_answer_closes_no_structure_question(tmp_path, example):
+    work, _ = _selected_world(tmp_path, example, ["S001", "S002"])
+    (key,) = _structure_questions(work, [("grid_label_duplicate", [["F005"]])])
+    assert key not in _closures(work)
+    unanswered = _ledger_work(_two_buildings(tmp_path / "b", example))
+    run_grid_systems(unanswered, svg=False)
+    (key,) = _structure_questions(unanswered, [("grid_label_duplicate", [["F005"]])])
+    assert _closures(unanswered) == {}
+
+
+def test_an_obsolete_structure_question_is_not_closed(tmp_path, example):
+    work, _ = _selected_world(tmp_path, example, ["S001"])
+    (key,) = _structure_questions(work, [("grid_label_duplicate", [["F005"]])])
+    registry = _registry(work)
+    registry["questions"][key]["status"] = "obsolete"
+    (work / "question-registry.json").write_text(json.dumps(registry), encoding="utf-8")
+    assert key not in _closures(work)
+
+
+def test_a_broken_structure_questions_document_is_an_error(tmp_path, example):
+    work, _ = _selected_world(tmp_path, example, ["S001"])
+    (work / "structure-questions.json").write_text("[", encoding="utf-8")
+    with pytest.raises(QuestionsError) as caught:
+        _closures(work)
+    assert caught.value.exit_code == 1 and "structure-questions.json" in str(caught.value)

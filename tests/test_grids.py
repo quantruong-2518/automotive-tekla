@@ -535,3 +535,65 @@ def test_question_counts_are_true_counts_when_the_list_is_capped(tmp_path, monke
 
 def test_example_is_valid(example):
     assert validate("grids", example("grids")) == []
+
+
+# --- families a question cites (tool wave 2, fix 5b) ------------------------------------------------
+
+
+def _doc(*axes_per_family: int) -> dict[str, Any]:
+    """A grids document reduced to what question_families reads: families F001.. with n axes each."""
+    fams = [{"family_id": f"F{k:03d}", "axes": [{}] * n} for k, n in enumerate(axes_per_family, start=1)]
+    return {
+        "groups": [{"group_id": "V001", "families": fams[:2]}, {"group_id": "V002", "families": fams[2:]}]
+    }
+
+
+def _q(code: str, where: str) -> dict[str, Any]:
+    return {"code": code, "blocking": True, "message": "m", "where": where, "found": "f"}
+
+
+@pytest.mark.parametrize(
+    ("code", "where", "families"),
+    [
+        ("grid_label_duplicate", "V001/F001", ["F001"]),
+        ("grid_axis_not_parallel", "V001/F002 axis 3", ["F002"]),
+        ("grid_label_missing", "V002/F003 line 1A2", ["F003"]),
+        ("grid_dimension_override_mismatch", "V002/F003 dimension 2F", ["F003"]),
+        ("grid_non_orthogonal", "V001/F001,F002", ["F001", "F002"]),
+        (
+            "grid_spacing_cross_sheet_mismatch",
+            "V002/F003 (model#02) vs V001/F001 (model#01)",
+            ["F001", "F003"],
+        ),
+        ("grid_scale_differs", "V001/F002 vs V002/F003", ["F002", "F003"]),
+        # every family of two or more axes (the where lists them with listed(), which truncates)
+        ("grid_family_axis_assignment", "F001, F002 (+1 more)", ["F001", "F002", "F003"]),
+        ("grid_gate1_confirmation", "F001, F002 (+1 more)", ["F001", "F002", "F003"]),
+        # no family: before families exist, or about the whole file
+        ("grid_axis_label_conflict", "line 1A2 on layer 'S-GRID'", None),
+        ("grid_none_found", "plans/F001.dxf", None),
+        ("grid_units_doubt", "header $INSUNITS", None),
+        ("level_single_occurrence", "V001/F001", None),  # not a grids code
+        ("grid_label_duplicate", "V001/F009", None),  # a family the document does not have
+    ],
+)
+def test_question_families_reads_its_own_where_formats(code, where, families):
+    assert grids_mod.question_families(_q(code, where), _doc(3, 4, 2, 1)) == families
+
+
+def test_every_grids_question_code_is_classified_for_its_families():
+    """A new grids question code must say whether its where cites families (else lifecycle never closes it,
+    silently)."""
+    import re
+
+    source = Path(grids_mod.__file__).read_text(encoding="utf-8")
+    raised = set(re.findall(r'ctx\.ask\(\s*"(grid_[a-z0-9_]+)"', source))
+    without = {"grid_none_found", "grid_units_doubt"}  # about the whole file
+    assert raised == grids_mod.FAMILY_WHERE_CODES | grids_mod.ALL_FAMILIES_CODES | without
+
+
+def test_every_grids_question_cites_only_families_of_its_document(tmp_path):
+    result = run(_plain(tmp_path, lambda m: _rotated(m, -0.5, -0.5)))
+    ids = {f["family_id"] for g in result["groups"] for f in g["families"]}
+    cited = [grids_mod.question_families(q, result) for q in result["questions"]]
+    assert any(cited) and all(c is None or set(c) <= ids for c in cited)

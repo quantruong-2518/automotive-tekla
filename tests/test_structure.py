@@ -664,6 +664,70 @@ def test_a_native_dxf_needs_the_input_folder(work, capsys):
     assert not (work / "structure").exists()
 
 
+def test_grid_question_refs_carry_the_grid_families_they_cite(work):
+    """Fix 5b: lifecycle closes a read-structure question only when every family it cites belongs to an
+    unselected grid system, so each grid ref names its families (not part of the key)."""
+    assert rs(work).exit_code == 0
+    grids = load(work / "structure" / "set.dxf.grids.json")
+    usable = sorted(f["family_id"] for g in grids["groups"] for f in g["families"] if len(f["axes"]) >= 2)
+    questions = [q for q in load(work / "structure-questions.json")["questions"] if q["file"] == "set.dxf"]
+    by_code = {q["code"]: q for q in questions}
+    assert by_code["grid_family_axis_assignment"]["refs"][0]["families"] == usable
+    missing = by_code["grid_label_missing"]["refs"][0]
+    assert missing["families"] == [missing["where"].split("/")[1].split()[0]]
+    for q in questions:
+        for ref in q["refs"]:
+            if not q["code"].startswith("grid_") or q["code"] == "grid_units_doubt":
+                assert "families" not in ref, q["code"]
+            elif "families" in ref:
+                assert set(ref["families"]) <= set(usable) | {
+                    f["family_id"] for g in grids["groups"] for f in g["families"]
+                }
+
+
+def _family_questions(n: int, missing: int | None = None) -> list[tuple[dict, list[str] | None]]:
+    return [
+        (
+            {
+                "code": "grid_label_duplicate",
+                "blocking": True,
+                "message": "m",
+                "where": f"V001/F{k:03d}",
+                "found": "A",
+            },
+            None if k == missing else [f"F{k:03d}"],
+        )
+        for k in range(1, n + 1)
+    ]
+
+
+def test_truncated_refs_still_cover_every_cited_family():
+    from collections import Counter
+
+    (q,) = structure_mod._consolidate([("a.dxf", _family_questions(MAX_STRUCTURE_REFS + 10), Counter())])
+    assert q["truncated"] and len(q["refs"]) == MAX_STRUCTURE_REFS and q["count"] == MAX_STRUCTURE_REFS + 10
+    assert q["refs"][0]["families"] == ["F001"]
+    # the last listed ref also carries the families of the refs that were not listed
+    assert q["refs"][-1]["families"] == [
+        f"F{k:03d}" for k in range(MAX_STRUCTURE_REFS, MAX_STRUCTURE_REFS + 11)
+    ]
+    union = {f for r in q["refs"] for f in r["families"]}
+    assert union == {f"F{k:03d}" for k in range(1, MAX_STRUCTURE_REFS + 11)}
+
+
+@pytest.mark.parametrize("case", ["extractor_unlisted", "unlisted_ref_without_family"])
+def test_a_question_whose_families_are_not_all_known_carries_none(case):
+    from collections import Counter
+
+    n = MAX_STRUCTURE_REFS + 10
+    if case == "extractor_unlisted":  # the grids extractor counted more than it listed: unknown families
+        per_file = [("a.dxf", _family_questions(3), Counter({"grid_label_duplicate": 5}))]
+    else:
+        per_file = [("a.dxf", _family_questions(n, missing=n), Counter())]
+    (q,) = structure_mod._consolidate(per_file)
+    assert q["truncated"] and all("families" not in r for r in q["refs"])
+
+
 def test_consolidated_counts_include_questions_an_extractor_did_not_list(work, monkeypatch):
     from tekla_harness import levels as levels_mod
 

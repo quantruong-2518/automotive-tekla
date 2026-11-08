@@ -17,6 +17,13 @@ Rules (deterministic, conservative: when in doubt nothing closes):
     positional, so a stale document could name other systems; `harness status` asks for the rerun.
   * not_selected / separate: the conflict's `closed_by` in that fresh document (harness grid-system derived it
     from the grid_system_select answer); `question_id` is the answered select question.
+  * rejected_systems_only: a live read-structure question of a REJECTABLE_CODES code whose every ref in
+    `structure-questions.json` names its grid `families`, every one of them (file-local ids) a member family
+    (full or partial) of a system the answered select question leaves out and of no selected system. A
+    family in no system, a ref without families, or every system selected keeps it open. Not
+    grid_gate1_confirmation: confirming the grids stays a gate-1 step (an engineer decision to drop it).
+  * other_file_set is not derived: once file_set_relation is answered, harness grid-system no longer
+    compares two sets, so a cross-set conflict is no longer raised at all (obsolete, not closed).
 
 Read-only: never writes. A missing document closes nothing; an unreadable or invalid one is an error
 (QuestionsError, exit 1), never silently skipped.
@@ -30,6 +37,7 @@ from pathlib import Path
 from typing import Any
 
 from tekla_harness.grid_system import consumed_answers_digest
+from tekla_harness.grids import FAMILY_WHERE_CODES
 from tekla_harness.questions import (
     CONFLICT_CODE,
     EXIT_INVALID,
@@ -43,6 +51,10 @@ from tekla_harness.schemas import validate
 
 GRID_SYSTEMS_FILE = "grid-systems.json"
 INVENTORY_FILE = "inventory.json"
+STRUCTURE_QUESTIONS_FILE = "structure-questions.json"
+# read-structure codes that rejected_systems_only may close: every grids code whose refs cite families,
+# except grid_gate1_confirmation (the grid confirmation stays a gate-1 step)
+REJECTABLE_CODES = FAMILY_WHERE_CODES | frozenset({"grid_family_axis_assignment"})
 
 
 def _load(path: Path, schema: str) -> Any:
@@ -120,6 +132,46 @@ def _conflict_closures(
     return out
 
 
+def _rejected_closures(
+    work: Path, doc: dict[str, Any], ledger: Ledger, live: dict[str, dict[str, Any]]
+) -> dict[str, Closure]:
+    select = _answered(ledger, SELECT_CODE, "grid-system")
+    if select is None:
+        return {}
+    ids = [s["system_id"] for s in doc["systems"]]
+    values = select[1].get("values")
+    chosen = values.get("systems") if isinstance(values, dict) else None
+    selected = {str(x) for x in chosen} if isinstance(chosen, list) and chosen else set(ids)
+
+    def members(sids: set[str]) -> set[tuple[str, str]]:
+        return {
+            (c["file"], f["family_id"])
+            for s in doc["systems"]
+            if s["system_id"] in sids
+            for c in s["evidence"]["contributors"]
+            for f in c["families"]
+        }
+
+    rejected = members(set(ids) - selected) - members(selected)
+    if not rejected:
+        return {}
+    questions = _load(work / STRUCTURE_QUESTIONS_FILE, "intake")
+    out: dict[str, Closure] = {}
+    for q in questions["questions"] if questions is not None else []:
+        entry = live.get(q["key"])
+        if (
+            entry is None
+            or (entry["producer"], entry["code"]) != ("structure", q["code"])
+            or q["code"] not in REJECTABLE_CODES
+            or not q["refs"]
+        ):
+            continue
+        cited = [(r.get("file") or q["file"], fid) for r in q["refs"] for fid in r.get("families") or [None]]
+        if all(fid is not None and (file, fid) in rejected for file, fid in cited):
+            out[q["key"]] = Closure(select[0], "rejected_systems_only")
+    return out
+
+
 def closures(work: Path, ledger: Ledger) -> dict[str, Closure]:
     """Registry key -> why that question is closed. See the module docstring for the rules."""
     work = Path(work)
@@ -128,4 +180,5 @@ def closures(work: Path, ledger: Ledger) -> dict[str, Closure]:
     grid = _fresh_grid_systems(work, ledger)
     if grid is not None:
         out.update(_conflict_closures(grid, ledger, live))
+        out.update(_rejected_closures(work, grid, ledger, live))
     return out

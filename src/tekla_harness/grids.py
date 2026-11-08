@@ -119,6 +119,54 @@ def implausible_spacing(median: dict[str, Any] | None, unit: str) -> str | None:
     )
 
 
+# --- the grid families a question cites (tool wave 2: lifecycle closes a question only when every family it
+# cites belongs to an unselected grid system). Read back from this module's own `where` formats: the grids
+# schema has no field for them on a question.
+
+# codes whose `where` starts with "<view>/<family>[,<family>]" (and, for cross-checks, " vs <view>/<family>")
+FAMILY_WHERE_CODES = frozenset(
+    {
+        "grid_axis_label_conflict",  # "line <handle> on layer ..." before families exist: no family
+        "grid_label_duplicate",
+        "grid_axis_not_parallel",
+        "grid_axis_layer_mismatch",
+        "grid_label_kind_mixed",
+        "grid_label_order_nonmonotonic",
+        "grid_label_sequence_gap",
+        "grid_rotated",
+        "grid_axis_skewed",
+        "grid_non_orthogonal",
+        "grid_label_missing",
+        "grid_axis_unlabelled",
+        "grid_two_bubble_axis",
+        "grid_label_order_mismatch",
+        "grid_scale_differs",
+        "grid_spacing_cross_sheet_mismatch",
+        "grid_spacing_drafting_tolerance",
+        "grid_dimension_override_mismatch",
+    }
+)
+# codes about every family of two or more axes (their `where` is listed(), which truncates)
+ALL_FAMILIES_CODES = frozenset({"grid_family_axis_assignment", "grid_gate1_confirmation"})
+_WHERE_FAMILIES = re.compile(r"(?:^| vs )V\d{3,}/(F\d{3,}(?:,F\d{3,})*)")
+
+
+def question_families(question: dict[str, Any], doc: dict[str, Any]) -> list[str] | None:
+    """Sorted family ids (F001..) a grids question of `doc` is about; None when it cites no family (or one
+    the document does not have: never guess)."""
+    code = question["code"]
+    known = {f["family_id"]: len(f["axes"]) for g in doc["groups"] for f in g["families"]}
+    if code in ALL_FAMILIES_CODES:
+        found = [fid for fid, n in known.items() if n >= 2]
+    elif code in FAMILY_WHERE_CODES:
+        found = [fid for m in _WHERE_FAMILIES.finditer(question["where"]) for fid in m.group(1).split(",")]
+    else:
+        return None
+    if not found or any(fid not in known for fid in found):
+        return None
+    return sorted(set(found))
+
+
 _LABEL_RE = re.compile(
     r"^(?:[A-Za-z]{1,2}[a-z]?|\d{1,3}[A-Za-z]?|[A-Za-z]\d{1,2}[a-z]?)(?:'{1,2}|\u2032)?$"
     r"|^[A-Za-z0-9]{1,3}/[A-Za-z0-9]{1,3}$"

@@ -383,6 +383,11 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
     into one system and are never compared; `grid-systems.json` records `file_sets` (pending, answered or
     single). While it is open, a conflict between two systems with no file in common does not block
     ("pending Q-x"); the answer is part of the answers `harness status` checks grid-systems.json against.
+  - `harness read-structure` grid refs name the grid `families` they cite (the last listed ref of a
+    truncated question also carries the unlisted refs' families; none when they are not all known).
+    `lifecycle.closures` closes a read-structure grid question (`rejected_systems_only`) only when every
+    family it cites belongs to a system the `grid_system_select` answer leaves out; a family of a selected
+    system, of no system, or a ref without families keeps it open; `grid_gate1_confirmation` is never closed.
 - `knowledge/font-encodings.csv`: the three seed rows are approved by the engineer (2026-11-07) after
   reading decoded samples: `VHARIAL.TTF` and `vntimeh.shx` = TCVN3, `vn_vni.shx` = VNI. Text in these
   fonts is now decoded instead of blocked by the legacy-font gate. The engineer also endorsed the
