@@ -82,3 +82,32 @@ def test_message_names_the_problem():
         loads_strict(b'{"a":1,"a":2}')
     with pytest.raises(StrictJsonError, match="BOM"):
         loads_strict(b"\xef\xbb\xbf{}")
+
+
+# --- value parity with the C# reader (ADR-0010 Amendment 1, review fix M2) ---------------
+
+VALUES = CORPUS / "values"
+
+
+def test_every_accept_file_has_expected_values():
+    assert sorted(p.stem for p in ACCEPT) == sorted(p.stem for p in VALUES.glob("*.txt"))
+
+
+@pytest.mark.parametrize("path", ACCEPT, ids=lambda p: p.name)
+def test_accept_corpus_values_match_canonical_dump(path):
+    from strict_json_values import dump
+
+    expected = (VALUES / f"{path.stem}.txt").read_bytes().decode("utf-8")
+    assert dump(loads_strict(path.read_bytes())) == expected
+
+
+def test_dump_distinguishes_negative_zero_and_int():
+    from strict_json_values import dump
+
+    assert dump(loads_strict(b"[-0, -0.0, 1, 1.0]")).splitlines() == [
+        "array 4",
+        "int 0000000000000000",
+        "float 8000000000000000",
+        "int 3ff0000000000000",
+        "float 3ff0000000000000",
+    ]

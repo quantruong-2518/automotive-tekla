@@ -280,11 +280,19 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
   cannot), and writes `<spec>.receipt.json` atomically next to each valid spec
   (`SPEC_RULES_VERSION = 1`); each result gains `receipt`. `check_spec` now requires `lot` to be
   an integer token (not `1.0`) and at most 2147483647.
+  Value parity: canonical dumps `tests/fixtures/strict-json/values/` (IEEE bits, UTF-16 units)
+  for every accept file, plus `accept/number_parity.json` (4049 tokens incl. 1019 that
+  .NET Framework 4.8 `double.Parse` rounds differently); compared by pytest and xunit.
 - Versioning note: the reading-toolchain schemas above have not been released; they stay `0.1` and their
   changes are recorded here until the first tagged release, from which every change bumps its `$id`
   (AGENTS.md). Pending engineer confirmation.
 
 ### Fixed
+- Schema `pattern` now has ECMA-262 meaning in `harness validate` (JSON Schema 2020-12): Python's
+  `$` matched before a final newline, so `"L1-C-A2\n"` passed the `spec_id` pattern; `.` no longer
+  matches `\r`, U+2028 or U+2029. Applies to every schema (ADR-0010 Amendment 1 §10).
+- `harness validate spec`: a file name that a receipt cannot record (backslash, non-UTF-8) is an
+  invalid result instead of a traceback; an existing spec that cannot be read exits 3.
 - `guard_tekla_write.py` now exits 2 (the blocking code) on any internal error instead of
   relying on an undocumented `onFailure` setting; the setting was removed.
 - `guard_tekla_write.py` no longer blocks commands that only mention `tekla-cli` as data

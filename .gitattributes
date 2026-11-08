@@ -19,3 +19,6 @@
 
 # Strict-JSON corpus (ADR-0010 Amendment 1): exact bytes matter (BOM, CRLF, invalid UTF-8)
 tests/fixtures/strict-json/** binary
+
+# Canonical dumps compared byte for byte by pytest and xunit
+tests/fixtures/strict-json/values/** binary
