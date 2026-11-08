@@ -344,6 +344,25 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
   Read-only commands (status, list-sheets, sheet-text, find-text, finding list, validate) do not lock; a
   writer whose work folder does not exist keeps its own usage error. Intake now resolves its converters
   before it reads the work folder's registry, and creates the work folder just before locking it.
+- Tool wave 2 seam (EVAL-2 fixes; the packages fill in the behaviour). Schemas, all additive and optional,
+  `$id` still `0.1` (engineer, 2026-11-07): `text-index` decode source `style_family` and flag
+  `legacy_ascii_suspect`; `dxf-probe` hint `matched.field` `family`; `sheet-text` block reason
+  `legacy_ascii_suspect`, `list_file.blocked_text_count`, sheet id `unassigned` with null layout and bbox,
+  `query.unassigned`, `find_text.counts.unassigned_entries_searched`; `levels` `blocked_candidates`;
+  `marks` `table.blocked_columns`, match `size_compared` / `size_not_compared_reason`, `summary.by_sheet`,
+  `summary.size_comparisons`; `callouts` `summary.unparsed_by_reason` and reason `legacy_ascii_suspect`;
+  `intake` question `closed_by` and ref `families`; `answers` `answered_by_role` (engineer | simulated) and
+  `file_set_relation` values; `reader-findings` `decoded_by` and list `summary.by_class`; `grid-system`
+  `conflicts[].question_id` and `file_sets`; `status` `gate1.closed` and `gate1.non_engineer_answers`. New
+  schemas `dimensions` and `supplements` with examples. Shared code: `questions.FILE_SET_CODE`, `ROLES`,
+  `Closure`; `lifecycle.closures` and `supplements.load_supplements` stubs (no closure, no supplement
+  yet); `harness status` leaves closed questions out of the blocking counts and makes a `simulated`
+  answer to a gate-relevant question a gate-1 reason (an answer without a role still counts as the
+  engineer's); `harness questions-md` renders closures and supplements and has a `file_set_relation` row;
+  `harness answer --role engineer|simulated` and `file_set_relation` values (every file of the question
+  once); `harness ask` gives `member_mark_prefix_meaning` to marks and `file_set_relation` to intake;
+  `read_dxf.measure_dimension`. Not implemented yet (exit 3): `harness dimensions`, `sheet-text` /
+  `find-text --unassigned`, `harness ask --supplement` / `--withdraw-supplement`.
 
 ### Changed
 - `knowledge/font-encodings.csv`: the three seed rows are approved by the engineer (2026-11-07) after

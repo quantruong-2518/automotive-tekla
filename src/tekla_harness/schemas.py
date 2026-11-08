@@ -33,6 +33,8 @@ SCHEMA_NAMES = (
     "cache-entry",
     "reader-findings",
     "marks",
+    "dimensions",
+    "supplements",
 )
 _REPO_SCHEMAS = Path(__file__).resolve().parents[2] / "schemas"
 

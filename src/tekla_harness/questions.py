@@ -43,6 +43,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -89,6 +90,30 @@ CONFLICT_CODE = "grid_system_conflict"
 PREFIX_CODE = "member_mark_prefix_meaning"
 SELECT_CODE = "grid_system_select"
 AXIS_DIRECTIONS = ("dir1", "dir2")  # value keys of a grid_system_axis_unassigned answer
+# intake, project level: which readable drawing files form one set (one building, one grid); answered with
+# set1=a.dwg,b.dwg set2=c.dwg, every file of the question's refs exactly once
+FILE_SET_CODE = "file_set_relation"
+FILE_SET_KEY = re.compile(r"set[1-9][0-9]*")
+# who gave an answer (answers.json answered_by_role): gate 1 counts the engineer's answers only
+ROLES = ("engineer", "simulated")
+# why a question is closed without an answer of its own (intake schema closed_by.reason; lifecycle.py)
+CLOSURE_REASONS = ("not_selected", "separate", "units_answered", "rejected_systems_only", "other_file_set")
+
+
+@dataclass(frozen=True)
+class Closure:
+    """A question closed by another answer or selection (lifecycle.closures): `question_id` is the question
+    whose answer closes it (None when no single question does), `reason` one of CLOSURE_REASONS."""
+
+    question_id: str | None
+    reason: str
+
+    def __post_init__(self) -> None:
+        if self.reason not in CLOSURE_REASONS:
+            raise ValueError(f"unknown closure reason '{self.reason}'")
+
+    def as_dict(self) -> dict[str, str | None]:
+        return {"question_id": self.question_id, "reason": self.reason}
 
 
 class QuestionsError(Exception):

@@ -1172,6 +1172,46 @@ def test_no_block_dimensions_means_in_blocks_zero_and_no_warning(tmp_path):
     assert not any("block definitions" in w for w in result["warnings"])
 
 
+def test_measure_dimension_is_the_probe_row_without_seq(tmp_path, monkeypatch):
+    """Tool wave 2 seam: the public per-dimension measurement `harness dimensions` will use."""
+    from ezdxf.entities import Dimension
+    from ezdxf.filemanagement import readfile
+
+    from tekla_harness.read_dxf import measure_dimension
+
+    handles: dict[str, str] = {}
+
+    def build(doc):
+        handles["measured"] = add_dim(doc)
+        handles["differs"] = add_dim(doc, text="1200")
+        handles["words"] = add_dim(doc, text="TYP")
+        handles["negative"] = add_dim(doc, text="1000", override={"dimlfac": -75.0}, actual=1000.0)
+
+    path = make(tmp_path, build)
+    rows = audit_rows(probe(path))
+    doc = readfile(path)
+
+    def dim_of(handle: str) -> Dimension:
+        entity = doc.entitydb[handle]
+        assert isinstance(entity, Dimension)
+        return entity
+
+    for name, handle in handles.items():
+        row = measure_dimension(dim_of(handle), layout="Model", is_model=True, handles_ok=True)
+        assert row == {k: v for k, v in rows[handle].items() if k != "seq"}, name
+    # conservative defaults: no handle, and a negative DIMLFAC is not proven outside modelspace
+    row = measure_dimension(dim_of(handles["negative"]))
+    assert row["handle"] is None and row["status"] == "not_compared" and row["layout"] == ""
+
+    def boom(self):
+        raise RuntimeError("bad geometry")
+
+    monkeypatch.setattr(Dimension, "get_measurement", boom)
+    row = measure_dimension(dim_of(handles["differs"]), layout="Model", is_model=True)
+    assert row["status"] == "error" and row["note"] == "RuntimeError: bad geometry"
+    assert row["dim_type"] == "linear" and row["text"] == "1200"
+
+
 # non-finite and out-of-range numbers
 def test_400_digit_override_is_not_numeric_and_output_is_strict_json(tmp_path):
     row = one_row(tmp_path, lambda doc: add_dim(doc, text="9" * 400))

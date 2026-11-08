@@ -227,7 +227,14 @@ def test_a_changed_file_is_asked_again_and_its_old_answer_goes_stale(world):
     root, work = world
     old = find(questions_of(work), "units_confirm_all", "set.dxf")
     untouched = find(questions_of(work), "units_confirm_all", "other.dxf")
-    record_answer(work, old["id"], "mm, checked against the 6000 dimension", "A. Nguyen", {"unit": "mm"})
+    record_answer(
+        work,
+        old["id"],
+        "mm, checked against the 6000 dimension",
+        "A. Nguyen",
+        {"unit": "mm"},
+        role="engineer",
+    )
     build_set(root, "set.dxf", sheet2_number="S-888")  # the drawing changed
     result = run_intake(root, work, PROJECT)
     assert load(work / "inventory.json")["summary"]["changes"]["changed"] == ["set.dxf"]
@@ -253,7 +260,7 @@ def test_a_changed_file_is_asked_again_and_its_old_answer_goes_stale(world):
     registry = load(work / "question-registry.json")["questions"]
     assert registry[old["key"]]["status"] == "obsolete" and registry[new["key"]]["status"] == "open"
     with pytest.raises(QuestionsError, match="obsolete") as caught:
-        record_answer(work, old["id"], "again", "A. Nguyen", {"unit": "mm"})
+        record_answer(work, old["id"], "again", "A. Nguyen", {"unit": "mm"}, role="engineer")
     assert caught.value.exit_code == 2
 
 
@@ -274,6 +281,7 @@ def test_an_answer_goes_stale_when_its_producer_no_longer_raises_the_question(tm
             "answer_text": "yes",
             "values": {},
             "answered_by": "A. Nguyen",
+            "answered_by_role": "engineer",
             "answered_on": "2026-11-06",
             "status": "active",
         }
@@ -298,7 +306,7 @@ def test_an_answer_goes_stale_when_its_producer_no_longer_raises_the_question(tm
 def test_structure_answers_of_a_changed_file_go_stale_at_intake(world):
     root, work = world
     q = find(questions_of(work, "structure-questions.json"), "grid_gate1_confirmation", "set.dxf")
-    record_answer(work, q["id"], "confirmed", "A. Nguyen")
+    record_answer(work, q["id"], "confirmed", "A. Nguyen", role="engineer")
     build_set(root, "set.dxf", sheet2_number="S-888")
     result = run_intake(root, work, PROJECT)
     assert [a["question_id"] for a in result.summary["stale_answers"]] == [q["id"]]
@@ -312,7 +320,7 @@ def test_structure_answers_of_a_changed_file_go_stale_at_intake(world):
 def test_a_rebuilt_drawing_stales_the_answer_and_read_structure_reports_it(world):
     root, work = world
     q = find(questions_of(work, "structure-questions.json"), "grid_gate1_confirmation", "other.dxf")
-    record_answer(work, q["id"], "confirmed", "A. Nguyen")
+    record_answer(work, q["id"], "confirmed", "A. Nguyen", role="engineer")
     # the same name now holds a different drawing: the structure producer no longer raises this key
     build_set(root, "other.dxf", sheet2_number="S-999")
     run_intake(root, work, PROJECT)
@@ -364,8 +372,8 @@ def test_an_answer_survives_reruns_and_lowers_blocking_open(world):
     intake_open = load(work / "questions.json")["summary"]["blocking_open"]
     units = find(questions_of(work), "units_confirm_all", "set.dxf")
     gate = find(questions_of(work, "structure-questions.json"), "grid_gate1_confirmation", "set.dxf")
-    record_answer(work, units["id"], "mm", "A. Nguyen", {"unit": "mm"})
-    record_answer(work, gate["id"], "confirmed", "A. Nguyen")
+    record_answer(work, units["id"], "mm", "A. Nguyen", {"unit": "mm"}, role="engineer")
+    record_answer(work, gate["id"], "confirmed", "A. Nguyen", role="engineer")
     rerun_all(root, work)
     again = find(questions_of(work), "units_confirm_all", "set.dxf")
     assert (again["id"], again["key"]) == (units["id"], units["key"]) and again["answer"]["values"] == {
@@ -382,8 +390,10 @@ def test_an_answer_survives_reruns_and_lowers_blocking_open(world):
 def test_a_second_answer_supersedes_the_first(world):
     _, work = world
     q = find(questions_of(work), "units_confirm_all", "other.dxf")
-    record_answer(work, q["id"], "cm", "A. Nguyen", {"unit": "cm"}, today=date(2026, 11, 1))
-    result = record_answer(work, q["id"], "No, mm", "B. Tran", {"unit": "mm"}, today=date(2026, 11, 2))
+    record_answer(work, q["id"], "cm", "A. Nguyen", {"unit": "cm"}, today=date(2026, 11, 1), role="engineer")
+    result = record_answer(
+        work, q["id"], "No, mm", "B. Tran", {"unit": "mm"}, today=date(2026, 11, 2), role="engineer"
+    )
     assert result["superseded"] == 1
     first, second = load(work / "answers.json")["answers"]
     assert (first["status"], first["values"], first["answered_on"]) == (
@@ -411,7 +421,7 @@ def test_a_non_blocking_answer_does_not_change_blocking_open(world):
     q = non_blocking[0]
     name = "questions.json" if q in questions_of(work) else "structure-questions.json"
     before = load(work / name)["summary"]
-    record_answer(work, q["id"], "noted", "A. Nguyen")
+    record_answer(work, q["id"], "noted", "A. Nguyen", role="engineer")
     after = load(work / name)["summary"]
     assert after["blocking_open"] == before["blocking_open"] and after["answered"] == before["answered"] + 1
 
@@ -452,6 +462,7 @@ def test_structured_values_by_code(code, values, ok):
         "answer_text": "t",
         "values": values,
         "answered_by": "x",
+        "answered_by_role": "engineer",
         "answered_on": "2026-11-06",
         "status": "active",
     }
@@ -472,6 +483,7 @@ def test_system_axis_values_the_command_refuses_but_the_schema_keeps(values):
         "answer_text": "t",
         "values": values,
         "answered_by": "x",
+        "answered_by_role": "engineer",
         "answered_on": "2026-11-06",
         "status": "active",
     }
@@ -524,7 +536,7 @@ def test_an_invalid_question_document_is_left_alone_and_reported(world):
     _, work = world
     (work / "structure-questions.json").write_text("{}", encoding="utf-8")
     q = find(questions_of(work), "units_confirm_all", "set.dxf")
-    result = record_answer(work, q["id"], "mm", "A. Nguyen", {"unit": "mm"})
+    result = record_answer(work, q["id"], "mm", "A. Nguyen", {"unit": "mm"}, role="engineer")
     assert result["refreshed"] == ["questions.json"]
     assert [i["file"] for i in result["not_refreshed"]] == ["structure-questions.json"]
     assert (work / "structure-questions.json").read_text(encoding="utf-8") == "{}"
@@ -551,7 +563,7 @@ def test_read_structure_needs_the_registry(world):
 def test_two_active_answers_to_one_key_are_refused(world):
     _, work = world
     q = find(questions_of(work), "units_confirm_all", "set.dxf")
-    record_answer(work, q["id"], "mm", "A. Nguyen", {"unit": "mm"})
+    record_answer(work, q["id"], "mm", "A. Nguyen", {"unit": "mm"}, role="engineer")
     doc = load(work / "answers.json")
     doc["answers"].append({**doc["answers"][0], "answer_text": "cm", "values": {"unit": "cm"}})
     (work / "answers.json").write_text(json.dumps(doc), encoding="utf-8")
@@ -672,8 +684,12 @@ def test_member_mark_prefix_answer_has_values_and_lowers_blocking_open(cwork):
     run_callouts(cwork)
     q = find(questions_of(cwork, "callouts-questions.json"), "member_mark_prefix_meaning")
     with pytest.raises(QuestionsError):
-        record_answer(cwork, q["id"], "C is a column", "A. Nguyen")  # needs at least one prefix meaning
-    result = record_answer(cwork, q["id"], "C cot, D dam", "A. Nguyen", {"C": "column", "D": "beam"})
+        record_answer(
+            cwork, q["id"], "C is a column", "A. Nguyen", role="engineer"
+        )  # needs at least one prefix meaning
+    result = record_answer(
+        cwork, q["id"], "C cot, D dam", "A. Nguyen", {"C": "column", "D": "beam"}, role="engineer"
+    )
     assert result["summaries"]["callouts-questions.json"]["blocking_open"] == (
         load(cwork / "callouts-questions.json")["summary"]["blocking_questions"] - 1
     )

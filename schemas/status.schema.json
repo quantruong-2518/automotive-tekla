@@ -24,7 +24,36 @@
       "additionalProperties": false,
       "properties": {
         "ready_for_gate1": { "type": "boolean" },
-        "reasons": { "type": "array", "items": { "type": "string", "minLength": 1 }, "description": "What still stops gate 1; empty exactly when ready_for_gate1 is true." }
+        "reasons": { "type": "array", "items": { "type": "string", "minLength": 1 }, "description": "What still stops gate 1; empty exactly when ready_for_gate1 is true." },
+        "closed": {
+          "type": "array",
+          "description": "Live questions closed without an answer of their own (lifecycle.closures); they are left out of every blocking count. Present only when not empty.",
+          "items": {
+            "type": "object",
+            "required": ["id", "reason"],
+            "additionalProperties": false,
+            "properties": {
+              "id": { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/question_id" },
+              "reason": { "enum": ["not_selected", "separate", "units_answered", "rejected_systems_only", "other_file_set"] },
+              "question_id": { "anyOf": [{ "type": "null" }, { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/question_id" }], "description": "The question whose answer closes it, when one does." }
+            }
+          }
+        },
+        "non_engineer_answers": {
+          "type": "array",
+          "description": "Active answers to gate-relevant questions that the engineer did not give (answered_by_role simulated, or no role when legacy answers do not count as the engineer's); each is also a gate-1 reason. Present only when not empty.",
+          "items": {
+            "type": "object",
+            "required": ["question_id", "code", "file", "role"],
+            "additionalProperties": false,
+            "properties": {
+              "question_id": { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/question_id" },
+              "code": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+              "file": { "type": ["string", "null"] },
+              "role": { "enum": ["simulated", null], "description": "null: an answer recorded without a role." }
+            }
+          }
+        }
       }
     }
   },

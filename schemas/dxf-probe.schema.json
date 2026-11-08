@@ -112,7 +112,7 @@
           "name": { "type": "string" },
           "font": { "type": "string", "description": "Font file as stored; empty if none." },
           "bigfont": { "type": "string" },
-          "family": { "type": "string", "description": "TrueType family from the style's ACAD XDATA; empty if none. Recorded only: it plays no part in the encoding hints." },
+          "family": { "type": "string", "description": "TrueType family from the style's ACAD XDATA; empty if none. font_hint tries it after the style name and the font file (hint matched.field 'family'), with the same 'H' capital-font rule." },
           "is_shx_like": { "type": "boolean", "description": "Font or bigfont ends in .shx. Says nothing about whether the font is installed; availability is not checked." },
           "capital_font": { "type": ["boolean", "null"], "description": "Capital-font hint of this style (encoding.font_hint: legacy-looking style name ending in an uppercase 'H'; an approved knowledge row may fill a null). Recorded for every style, also when no encoding hint row exists. A naming convention, not a fact; null when there is no hint." }
         }
@@ -139,7 +139,7 @@
               "type": "object",
               "required": ["field", "value"],
               "additionalProperties": false,
-              "properties": { "field": { "enum": ["name", "font"] }, "value": { "type": "string" } }
+              "properties": { "field": { "enum": ["name", "font", "family"] }, "value": { "type": "string" } }
             }
           },
           "kind": { "const": "hint" }

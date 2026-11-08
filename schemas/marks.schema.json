@@ -207,6 +207,20 @@
         "anchor_entry_id": { "$ref": "#/$defs/entry_id", "description": "The header keyword, or (header-blocked tables) the mark-shaped text the grid was found from." },
         "header_blocked": { "type": "boolean" },
         "header_block_reasons": { "type": "array", "items": { "type": "string" } },
+        "blocked_columns": {
+          "type": "array",
+          "description": "Header cells the legacy-font gate blocks that are NOT the mark column's header: their column gives no meaning, the table is still read (header_blocked stays false).",
+          "items": {
+            "type": "object",
+            "required": ["column", "entry_id", "reason"],
+            "additionalProperties": false,
+            "properties": {
+              "column": { "type": ["integer", "null"], "minimum": 0 },
+              "entry_id": { "$ref": "#/$defs/entry_id" },
+              "reason": { "type": "string", "minLength": 1, "description": "A text_gate reason (legacy_ascii_suspect included)." }
+            }
+          }
+        },
         "header": { "type": "array", "items": { "$ref": "#/$defs/cell" } },
         "columns": {
           "type": "array",
@@ -319,8 +333,13 @@
               "mark": { "type": "string", "minLength": 1 },
               "plan_marks": { "type": "array", "items": { "$ref": "#/$defs/plan_id" }, "minItems": 1 },
               "schedule": { "type": "array", "items": { "$ref": "#/$defs/schedule_ref" }, "minItems": 1 },
-              "confidence": { "$ref": "#/$defs/confidence_not_high" }
-            }
+              "confidence": { "$ref": "#/$defs/confidence_not_high" },
+              "size_compared": { "type": "boolean", "description": "Whether the plan size was compared with the schedule row." },
+              "size_not_compared_reason": { "type": "string", "minLength": 1, "description": "Only when size_compared is false: why (e.g. the plan mark has no size, the size cells are blocked)." }
+            },
+            "if": { "properties": { "size_compared": { "const": false } }, "required": ["size_compared"] },
+            "then": { "required": ["size_not_compared_reason"] },
+            "else": { "not": { "required": ["size_not_compared_reason"] } }
           }
         },
         "schedule_only": {
@@ -445,6 +464,30 @@
           "type": "object",
           "required": ["files_scanned", "files_skipped", "by_file"],
           "properties": {
+            "by_sheet": {
+              "type": "array",
+              "description": "Counts per detector sheet (sheet null: on no sheet). Keys besides file, sheet and sheet_number are counts.",
+              "items": {
+                "type": "object",
+                "required": ["file", "sheet"],
+                "properties": {
+                  "file": { "type": "string", "minLength": 1 },
+                  "sheet": { "type": ["string", "null"] },
+                  "sheet_number": { "$ref": "#/$defs/sheet_number" }
+                },
+                "additionalProperties": { "type": "integer", "minimum": 0 }
+              }
+            },
+            "size_comparisons": {
+              "type": "object",
+              "required": ["compared", "not_compared"],
+              "additionalProperties": false,
+              "properties": {
+                "compared": { "type": "integer", "minimum": 0 },
+                "not_compared": { "type": "integer", "minimum": 0 },
+                "by_reason": { "type": "object", "additionalProperties": { "type": "integer", "minimum": 1 } }
+              }
+            },
             "files_scanned": { "type": "integer", "minimum": 0 },
             "files_skipped": { "type": "integer", "minimum": 0 },
             "by_file": {

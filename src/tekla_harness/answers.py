@@ -23,6 +23,8 @@ Rules:
         grid_system_axis_unassigned   dir1=X|Y, dir2=X|Y            (exactly the directions the question
                                       lists in `subjects`, distinct axes)
         member_mark_prefix_meaning    <prefix>=<meaning>            (at least one)
+        file_set_relation             set1=a.dwg,b.dwg set2=c.dwg   (at least one set; every file the
+                                      question's refs list (their `file`) exactly once, no other file)
         grid_system_select            systems=S001,S002             (optional: the grid systems the project
                                       uses; without it `harness status` takes every listed system as used)
                                       separate=S001,S002            (optional: two or more systems of the
@@ -30,6 +32,8 @@ Rules:
     every other code takes no value;
   * grid_system_conflict cannot be answered: a conflict closes only through the grid_system_select answer
     (`systems` without one of the two, or `separate` with both), never through words;
+  * `role` (optional, `answered_by_role`): 'engineer' or 'simulated' (an agent standing in for the engineer);
+    gate 1 counts the engineer's answers only (status.py). Any other role is a usage error;
   * a second answer to the same key supersedes the first (kept, status 'superseded');
   * nothing is deleted: answers are only appended or change status.
 
@@ -56,9 +60,12 @@ from tekla_harness.questions import (
     CONTRADICTION_CODE,
     EXIT_INVALID,
     EXIT_USAGE,
+    FILE_SET_CODE,
+    FILE_SET_KEY,
     PREFIX_CODE,
     PRODUCER_COMMANDS,
     QUESTION_DOCUMENTS,
+    ROLES,
     SELECT_CODE,
     SYSTEM_AXIS_CODE,
     UNIT_CODES,
@@ -143,10 +150,26 @@ def check_values(code: str, values: dict[str, str]) -> list[str]:
                     f"separate: {', '.join(outside)} not in systems (a separate building must be selected)"
                 ]
         return bad
+    if code == FILE_SET_CODE:
+        if not values:
+            return ["this question needs at least one set: set1=a.dwg,b.dwg (set2=..., every file once)"]
+        bad = [f"'{k}' is not a set name like set1" for k in values if not FILE_SET_KEY.fullmatch(k)]
+        seen: dict[str, str] = {}
+        for name, text in values.items():
+            files = _system_ids(text)
+            if any(not f for f in files):
+                bad.append(f"{name}: a file name is blank")
+                continue
+            for f in files:
+                if f in seen:
+                    bad.append(f"{f} is named twice ({seen[f]} and {name}): each file belongs to one set")
+                seen.setdefault(f, name)
+        return bad
     return [f"questions with code '{code}' take no value, got: {', '.join(sorted(values))}"] if values else []
 
 
 def _system_ids(text: str) -> list[str]:
+    """Comma-separated ids or file names, stripped."""
     return [part.strip() for part in text.split(",")]
 
 
@@ -212,6 +235,22 @@ def _check_in_context(
                     f"{question_id}: {name} names {', '.join(unknown) or 'systems'} that the question does "
                     f"not list ({', '.join(known) or 'grid-system-questions.json has no such question'})",
                 )
+    if code == FILE_SET_CODE:
+        q = _raised_question(ledger.work, key)
+        listed = {r["file"] for r in (q or {}).get("refs") or [] if isinstance(r, dict) and r.get("file")}
+        if not listed:
+            raise QuestionsError(
+                EXIT_INVALID, f"{question_id}: its files are not in questions.json; rerun harness intake"
+            )
+        named = {f for text in values.values() for f in _system_ids(text)}
+        missing, unknown = sorted(listed - named), sorted(named - listed)
+        if missing or unknown:
+            raise QuestionsError(
+                EXIT_INVALID,
+                f"{question_id} ({code}): name every file of the question exactly once"
+                + (f"; missing {', '.join(missing)}" if missing else "")
+                + (f"; not in the question: {', '.join(unknown)}" if unknown else ""),
+            )
     if code == CONTRADICTION_CODE:
         units = {
             str(a["values"].get("unit"))
@@ -292,11 +331,14 @@ def record_answer(
     values: dict[str, str] | None = None,
     *,
     today: date | None = None,
+    role: str | None = None,
 ) -> dict[str, Any]:
     """Append an answer (see the module docstring). Returns what was done. Raises QuestionsError."""
     work = Path(work_dir).resolve()
     if not work.is_dir():
         raise QuestionsError(EXIT_USAGE, f"work folder not found (not a folder): {work_dir}")
+    if role is not None and role not in ROLES:
+        raise QuestionsError(EXIT_USAGE, f"--role '{role}' is not one of {', '.join(ROLES)}")
     if not text.strip():
         raise QuestionsError(EXIT_USAGE, "the answer text is empty: write the engineer's words verbatim")
     if not by.strip():
@@ -324,7 +366,9 @@ def record_answer(
         for name in ("systems", "separate"):
             if name in values:
                 stored[name] = _system_ids(values[name])
-    answer = {
+    if entry["code"] == FILE_SET_CODE:
+        stored = {name: _system_ids(files) for name, files in values.items()}
+    answer: dict[str, Any] = {
         "key": key,
         "question_id": question_id,
         "code": entry["code"],
@@ -332,6 +376,7 @@ def record_answer(
         "answer_text": text,
         "values": stored,
         "answered_by": by.strip(),
+        **({"answered_by_role": role} if role is not None else {}),
         "answered_on": (today or date.today()).isoformat(),
         "status": "active",
     }

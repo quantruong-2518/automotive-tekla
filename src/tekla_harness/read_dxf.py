@@ -896,6 +896,56 @@ def _audit_dimension(ref: _DimRef, seq: int, handles_ok: bool) -> dict[str, Any]
     return row
 
 
+def _measured_row(ref: _DimRef, seq: int, handles_ok: bool) -> dict[str, Any]:
+    """The audit row of one dimension; a dimension that raises becomes an 'error' row, never dropped."""
+    dim = ref.dim
+    try:
+        return _audit_dimension(ref, seq, handles_ok)
+    except Exception as exc:  # reported on the row, never dropped
+        text = str(dim.dxf.get("text", ""))
+        try:
+            dim_type = _dim_type_name(_dimtype(dim))
+        except Exception:
+            dim_type = "unknown"
+        return {
+            "seq": seq,
+            "handle": _handle(dim, handles_ok),
+            "layout": ref.label,
+            "dim_type": dim_type,
+            "text_rule": _text_rule(text),
+            "text": text,
+            "measured": None,
+            "actual_measurement": None,
+            "measurement_agrees": None,
+            "expected_text_value": None,
+            "override_value": None,
+            "tolerance": None,
+            "status": "error",
+            "note": f"{type(exc).__name__}: {exc}",
+        }
+
+
+def measure_dimension(
+    dim: Dimension,
+    *,
+    layout: str = "",
+    is_model: bool = False,
+    in_block: bool = False,
+    handles_ok: bool = False,
+) -> dict[str, Any]:
+    """What one DIMENSION measures and prints, by the dimension_audit rules of the probe: its row without
+    `seq` (handle, layout, dim_type, text_rule, text, measured, actual_measurement, measurement_agrees,
+    expected_text_value, override_value, tolerance, status, note). Values in drawing units, never converted.
+
+    `layout`: the name to report. `is_model`: the dimension is in modelspace, where a negative DIMLFAC means
+    factor 1 when group 42 proves it (False: never assumed). `handles_ok`: the file's handles are reliable
+    (False: handle null). The defaults are the conservative ones. A dimension that raises is an 'error'
+    row."""
+    row = _measured_row(_DimRef(dim, layout, is_model, in_block), 0, handles_ok)
+    del row["seq"]
+    return row
+
+
 @dataclass
 class _Audit:
     rows: list[dict[str, Any]]  # every dimension, in file order
@@ -911,30 +961,7 @@ def _audit_all(scan: _Scan, handles_ok: bool) -> _Audit:
     magnitudes: list[float] = []
     for seq, ref in enumerate(scan.dimensions, start=1):
         dim = ref.dim
-        try:
-            row = _audit_dimension(ref, seq, handles_ok)
-        except Exception as exc:  # reported on the row, never dropped
-            text = str(dim.dxf.get("text", ""))
-            try:
-                dim_type = _dim_type_name(_dimtype(dim))
-            except Exception:
-                dim_type = "unknown"
-            row = {
-                "seq": seq,
-                "handle": _handle(dim, handles_ok),
-                "layout": ref.label,
-                "dim_type": dim_type,
-                "text_rule": _text_rule(text),
-                "text": text,
-                "measured": None,
-                "actual_measurement": None,
-                "measurement_agrees": None,
-                "expected_text_value": None,
-                "override_value": None,
-                "tolerance": None,
-                "status": "error",
-                "note": f"{type(exc).__name__}: {exc}",
-            }
+        row = _measured_row(ref, seq, handles_ok)
         rows.append(row)
         if ref.is_model and row["dim_type"] in ("linear", "aligned"):
             length = row["actual_measurement"] if row["actual_measurement"] is not None else row["measured"]

@@ -72,16 +72,15 @@ OTHER_OWNERS: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
             "converter_errors",
             "read_failed",
             "no_reader_implemented",
+            "file_set_relation",
         ),
         ("units_",),
     ),
     "grid-system": (("units_answer_contradicts_evidence",), ("grid_system_",)),
     "structure": (("grid_family_axis_assignment", "grid_units_doubt"), ("grid_", "level_", "sheet_")),
-    "callouts": (
-        ("member_mark_prefix_meaning", "grade_legacy_mapping"),
-        ("callout_", "steel_grade", "rebar_"),
-    ),
-    "marks": ((), ("mark_", "schedule_")),
+    "callouts": (("grade_legacy_mapping",), ("callout_", "steel_grade", "rebar_")),
+    # member_mark_prefix_meaning: raised by marks for every plan-mark prefix (tool wave 2)
+    "marks": (("member_mark_prefix_meaning",), ("mark_", "schedule_")),
 }
 # Codes in this namespace are always the reader's own: no producer may own them, so the reader can ask
 # about grids, levels, sheets or rebar without colliding with a producer's prefix.

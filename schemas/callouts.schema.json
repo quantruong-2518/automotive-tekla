@@ -68,7 +68,7 @@
         "sheet": { "type": ["string", "null"] },
         "entry_id": { "type": "string", "pattern": "^T[0-9]{6,}$" },
         "display_text": { "type": "string", "description": "Verbatim (whitespace collapsed, capped), never interpreted." },
-        "reason": { "enum": ["knowledge_conflict", "encoding_proposed", "encoding_contradiction", "encoding_unknown"] }
+        "reason": { "enum": ["knowledge_conflict", "encoding_proposed", "encoding_contradiction", "encoding_unknown", "legacy_ascii_suspect"] }
       }
     },
     "file": {
@@ -251,6 +251,7 @@
           }
         },
         "member_mark_prefixes": { "type": "integer", "minimum": 0 },
+        "unparsed_by_reason": { "type": "object", "additionalProperties": { "type": "integer", "minimum": 1 }, "description": "Unparsed candidates per unparsed_reason." },
         "files_scanned": { "type": "integer", "minimum": 0 },
         "files_skipped": { "type": "integer", "minimum": 0 },
         "blocked_entries": { "type": "integer", "minimum": 0, "description": "Length of the document's blocked_entries." }

@@ -27,6 +27,58 @@ def test_usage_error_exit_2(capsys):
     assert main(["validate", "nope", "x.json"]) == 2
 
 
+def test_schema_names_include_the_wave2_schemas(capsys):
+    for name in ("dimensions", "supplements"):
+        assert main(["validate", name, str(EXAMPLES / f"{name}.example.json")]) == 0
+    capsys.readouterr()
+
+
+# --- tool wave 2 seam: flags and stubs (the packages implement them) ---------------------------
+
+
+def test_dimensions_is_registered_and_not_implemented_yet(tmp_path, capsys):
+    assert main(["dimensions", str(tmp_path), "a.dxf"]) == 3
+    assert "not implemented yet" in capsys.readouterr().err
+
+
+def test_dimensions_sheet_and_unassigned_exclude_each_other(tmp_path, capsys):
+    assert main(["dimensions", str(tmp_path), "a.dxf", "--sheet", "model#01", "--unassigned"]) == 2
+
+
+def test_sheet_text_needs_a_sheet_or_unassigned_not_both(tmp_path, capsys):
+    assert main(["sheet-text", str(tmp_path), "a.dxf"]) == 2
+    assert main(["sheet-text", str(tmp_path), "a.dxf", "model#01", "--unassigned"]) == 2
+    err = capsys.readouterr().err
+    assert "--unassigned" in err
+
+
+def test_sheet_text_and_find_text_unassigned_not_implemented_yet(tmp_path, capsys):
+    assert main(["sheet-text", str(tmp_path), "a.dxf", "--unassigned"]) == 3
+    assert main(["find-text", str(tmp_path), "--contains", "x", "--unassigned"]) == 3
+    assert "not implemented yet" in capsys.readouterr().err
+
+
+def test_answer_role_must_be_known(tmp_path, capsys):
+    argv = ["answer", str(tmp_path), "Q-001", "--text", "x", "--by", "me", "--role", "agent"]
+    assert main(argv) == 2
+
+
+def test_ask_supplement_not_implemented_yet(tmp_path, capsys):
+    argv = ["ask", str(tmp_path), "--supplement", "Q-001", "--where", "w", "--found", "", "--text", "t"]
+    assert main(argv) == 3
+    assert "not implemented yet" in capsys.readouterr().err
+    assert main(["ask", str(tmp_path), "--withdraw-supplement", "0123456789abcdef", "--reason", "r"]) == 3
+
+
+def test_ask_supplement_refuses_code_and_blocking(tmp_path, capsys):
+    base = ["ask", str(tmp_path), "--supplement", "Q-001", "--where", "w", "--found", "", "--text", "t"]
+    assert main([*base, "--code", "my_code"]) == 2
+    assert main([*base, "--blocking"]) == 2
+    assert main(["ask", str(tmp_path), "--supplement", "Q-001", "--found", "", "--text", "t"]) == 2
+    assert main(["ask", str(tmp_path), "--withdraw-supplement", "0123456789abcdef"]) == 2
+    assert "--supplement" in capsys.readouterr().err
+
+
 def test_env_check_outputs_json(capsys):
     code = main(["env-check"])
     out = json.loads(capsys.readouterr().out)

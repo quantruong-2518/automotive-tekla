@@ -96,7 +96,8 @@
           "systems": { "type": "array", "minItems": 2, "maxItems": 2, "items": { "type": "string", "pattern": "^S[0-9]{3,}$" } },
           "blocking": { "type": "boolean" },
           "closed_by": { "enum": [null, "not_selected", "separate"] },
-          "question_key": { "anyOf": [{ "type": "null" }, { "type": "string", "pattern": "^[0-9a-f]{16}$" }] }
+          "question_key": { "anyOf": [{ "type": "null" }, { "type": "string", "pattern": "^[0-9a-f]{16}$" }] },
+          "question_id": { "anyOf": [{ "type": "null" }, { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/question_id" }], "description": "Registry id of question_key." }
         }
       }
     },
@@ -106,7 +107,18 @@
       "additionalProperties": { "type": "integer", "minimum": 1 },
       "description": "True number of questions per code; `questions` lists at most 100 per code (a warning says so)."
     },
-    "warnings": { "type": "array", "items": { "type": "string" } }
+    "warnings": { "type": "array", "items": { "type": "string" } },
+    "file_sets": {
+      "type": "object",
+      "description": "The intake file_set_relation question: systems are compared only within one set. status pending: not answered (cross-file conflicts are non-blocking until it is); answered: sets as answered; single: one readable drawing file, no question.",
+      "required": ["status", "sets", "question_id"],
+      "additionalProperties": false,
+      "properties": {
+        "status": { "enum": ["pending", "answered", "single"] },
+        "sets": { "anyOf": [{ "type": "null" }, { "type": "array", "items": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } } }] },
+        "question_id": { "anyOf": [{ "type": "null" }, { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/question_id" }] }
+      }
+    }
   },
   "$defs": {
     "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },

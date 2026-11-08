@@ -24,6 +24,14 @@ documents (they can be stale after `harness answer` or a producer rerun):
 An entry written to the registry before it recorded the `blocking` flag counts as blocking (never assume a
 question is harmless) and is reported in `blocking_unknown`.
 
+Tool wave 2 seam:
+  * a question `lifecycle.closures` closes (another answer or selection settles it) leaves the `blocking` and
+    `blocking_open` counts and is listed in `gate1.closed` with its reason;
+  * an active answer to a gate-relevant question (producers intake, read-structure, grid-system, reader)
+    that the engineer did not give (`answered_by_role` 'simulated') is a gate-1 reason naming its question id
+    and is listed in `gate1.non_engineer_answers`. An answer without a role counts as the engineer's while
+    LEGACY_ANSWER_IS_ENGINEER is True (package P3 flips it). Both lists appear only when not empty.
+
 Exit codes (AGENTS.md): 0 for any readable work folder (status is information, not a verdict), 1 an
 unreadable or invalid document, 2 not a work folder.
 """
@@ -35,6 +43,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from tekla_harness import lifecycle
 from tekla_harness.grid_system import consumed_answers_digest, units_by_file, units_evidence
 from tekla_harness.questions import (
     CONFLICT_CODE,
@@ -67,6 +76,11 @@ PRODUCERS = (
 )
 # gate 1 needs no blocking question open in these
 GATE_PRODUCERS = ("intake", "read-structure", "grid-system", "reader")
+# their registry producers: an answer to one of their questions must be the engineer's
+GATE_ANSWER_PRODUCERS = frozenset(dict(PRODUCERS)[label] for label in GATE_PRODUCERS)
+# An answer recorded before answered_by_role existed counts as the engineer's while this is True (tool wave 2
+# seam). Package P3 sets it to False: such answers then have to be given again by the engineer (DESIGN D4).
+LEGACY_ANSWER_IS_ENGINEER = True
 # an answer to these never closes them: they close through another question's structured values
 NOT_CLOSED_BY_AN_ANSWER = frozenset({CONFLICT_CODE})
 ANSWER = 'harness answer {work_dir} {id} --text "..." --by "..."'
@@ -97,11 +111,12 @@ def _id_number(question_id: str) -> int:
 
 
 def _question_counts(
-    registry: dict[str, Any], active: dict[str, dict[str, Any]], producer: str
+    registry: dict[str, Any], active: dict[str, dict[str, Any]], producer: str, closed: frozenset[str]
 ) -> tuple[dict[str, int], list[str]]:
+    """`closed`: keys lifecycle.closures closes; they block nothing."""
     entries = {k: e for k, e in registry["questions"].items() if e["producer"] == producer}
     live = {k: e for k, e in entries.items() if e["status"] != "obsolete"}
-    blocking = {k: e for k, e in live.items() if e.get("blocking", True)}
+    blocking = {k: e for k, e in live.items() if e.get("blocking", True) and k not in closed}
     open_ids = sorted(
         (e["id"] for k, e in blocking.items() if k not in active or e["code"] in NOT_CLOSED_BY_AN_ANSWER),
         key=_id_number,
@@ -363,6 +378,31 @@ def _grid_reasons(
     return reasons
 
 
+def _non_engineer_answers(
+    registry: dict[str, Any], active: dict[str, dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Active answers to live gate-relevant questions that the engineer did not give, by question id."""
+    out = []
+    for key, answer in active.items():
+        entry = registry["questions"].get(key)
+        if entry is None or entry["status"] == "obsolete" or entry["producer"] not in GATE_ANSWER_PRODUCERS:
+            continue
+        role = answer.get("answered_by_role")
+        if role == "engineer" or (role is None and LEGACY_ANSWER_IS_ENGINEER):
+            continue
+        out.append({"question_id": entry["id"], "code": entry["code"], "file": entry["file"], "role": role})
+    return sorted(out, key=lambda a: _id_number(a["question_id"]))
+
+
+def _role_reasons(non_engineer: list[dict[str, Any]], work_dir: str) -> list[str]:
+    return [
+        f"answers: {a['question_id']} {a['code']} ({a['file'] or 'project'}) was answered by "
+        f"{'a ' + a['role'] + ' role' if a['role'] else 'no recorded role'}, not the engineer: the engineer "
+        f"answers it again ({ANSWER.format(work_dir=work_dir, id=a['question_id'])} --role engineer)"
+        for a in non_engineer
+    ]
+
+
 def _level_reasons(registry: dict[str, Any], active: dict[str, dict[str, Any]]) -> list[str]:
     return [
         f"levels: {e['id']} {e['code']} ({e['file']}) is not answered"
@@ -401,10 +441,12 @@ def build_status(work_dir: str | Path) -> dict[str, Any]:
     registry, answers = ledger.registry, ledger.answers["answers"]
     active = active_answers(ledger.answers)
     inventory_sha = hashlib.sha256(inventory_bytes).hexdigest()
+    closures = lifecycle.closures(work, ledger)
+    closed_keys = frozenset(closures)
 
     producers: list[dict[str, Any]] = []
     for label, producer in PRODUCERS:
-        counts, open_ids = _question_counts(registry, active, producer)
+        counts, open_ids = _question_counts(registry, active, producer, closed_keys)
         producers.append(
             {
                 "producer": label,
@@ -422,6 +464,8 @@ def build_status(work_dir: str | Path) -> dict[str, Any]:
     )
     reasons += _grid_reasons(work, registry, active, by_label["grid-system"]["outputs"], shown)
     reasons += _level_reasons(registry, active)
+    non_engineer = _non_engineer_answers(registry, active)
+    reasons += _role_reasons(non_engineer, shown)
     for label in GATE_PRODUCERS:
         q = by_label[label]["questions"]
         if q["blocking_open"]:
@@ -442,13 +486,31 @@ def build_status(work_dir: str | Path) -> dict[str, Any]:
                 f"{p['producer']}: outputs {out['status']} ({out['reason']}); rerun {out['rerun']}"
             )
 
+    gate1: dict[str, Any] = {"ready_for_gate1": not reasons, "reasons": reasons}
+    entries = registry["questions"]
+    closed = sorted(
+        (
+            {
+                "id": entries[k]["id"],
+                "reason": c.reason,
+                **({"question_id": c.question_id} if c.question_id else {}),
+            }
+            for k, c in closures.items()
+            if k in entries and entries[k]["status"] != "obsolete"
+        ),
+        key=lambda row: _id_number(row["id"]),
+    )
+    if closed:
+        gate1["closed"] = closed
+    if non_engineer:
+        gate1["non_engineer_answers"] = non_engineer
     doc = {
         "schema_version": SCHEMA_VERSION,
         "kind": "status",
         "project_id": inventory["project_id"],
         "inventory_sha256": inventory_sha,
         "producers": producers,
-        "gate1": {"ready_for_gate1": not reasons, "reasons": reasons},
+        "gate1": gate1,
     }
     issues = validate("status", doc)
     if issues:  # a bug here, not in the work folder

@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:tekla-harness:schema:supplements:0.1",
+  "title": "Reader supplements",
+  "description": "reader-supplements.json in the work folder: evidence the drawing-reader agent adds to a question a PRODUCER raised (`harness ask <work_dir> --supplement Q-id --where W --found F --text T [--file F] [--sheet S]`), instead of asking it again. A supplement never changes the target question: not its blocking flag, not its answer, not its refs. It is shown under the question in questions.md. Identity: `key` = first 16 hex of sha256 over (target key, file, the file's sha256, where); supplementing the same place again prints `already_supplemented`. A supplement whose target question is obsolete in the registry is shown as stale (status computed on read, never stored). `harness ask --withdraw-supplement <key> --reason R` marks one withdrawn (kept). A reader-owned target, an unknown or obsolete target, or --code / --blocking given with --supplement is a usage error (exit 2).",
+  "type": "object",
+  "required": ["schema_version", "kind", "project_id", "supplements"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": "0.1" },
+    "kind": { "const": "reader_supplements" },
+    "project_id": { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/project_id" },
+    "supplements": { "type": "array", "description": "In the order they were added.", "items": { "$ref": "#/$defs/supplement" } }
+  },
+  "$defs": {
+    "key": { "type": "string", "pattern": "^[0-9a-f]{16}$" },
+    "supplement": {
+      "type": "object",
+      "required": ["key", "target_key", "target_id", "target_code", "target_producer", "file", "file_sha256", "sheet", "where", "found", "text", "status"],
+      "additionalProperties": false,
+      "properties": {
+        "key": { "$ref": "#/$defs/key", "description": "Stable identity of this supplement (see above)." },
+        "target_key": { "$ref": "#/$defs/key", "description": "Registry key of the supplemented question." },
+        "target_id": { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/question_id", "description": "The target's id when the supplement was added." },
+        "target_code": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+        "target_producer": { "enum": ["intake", "structure", "callouts", "marks", "grid-system"], "description": "Never 'reader': the reader edits its own questions with ask / withdraw." },
+        "file": { "type": ["string", "null"], "minLength": 1, "description": "Inventory path the evidence is in; null for project-level evidence." },
+        "file_sha256": { "anyOf": [{ "type": "null" }, { "type": "string", "pattern": "^[0-9a-f]{64}$" }], "description": "The inventory's sha256 of file when the supplement was added; null when file is null." },
+        "sheet": { "type": ["string", "null"], "minLength": 1, "description": "Detector sheet id (model#01, <layout>#01); null when none was given." },
+        "where": { "type": "string", "minLength": 1 },
+        "found": { "type": "string", "description": "Verbatim from the drawing (may be empty)." },
+        "text": { "type": "string", "pattern": "\\S", "description": "The reader's note, in Vietnamese, printed verbatim in questions.md." },
+        "status": { "enum": ["active", "withdrawn"] },
+        "withdrawn_reason": { "type": "string", "minLength": 1, "description": "Only when status is 'withdrawn'." }
+      },
+      "allOf": [
+        { "if": { "properties": { "status": { "const": "withdrawn" } }, "required": ["status"] }, "then": { "required": ["withdrawn_reason"] }, "else": { "not": { "required": ["withdrawn_reason"] } } },
+        { "if": { "properties": { "file": { "type": "null" } }, "required": ["file"] }, "then": { "properties": { "file_sha256": { "type": "null" } } }, "else": { "properties": { "file_sha256": { "type": "string" } } } }
+      ]
+    }
+  }
+}

@@ -25,6 +25,7 @@
         "answer_text": { "type": "string", "pattern": "\\S", "description": "The engineer's words, verbatim." },
         "values": { "type": "object", "description": "Structured values, only for the codes listed in allOf below; {} for every other code." },
         "answered_by": { "type": "string", "pattern": "\\S" },
+        "answered_by_role": { "enum": ["engineer", "simulated"], "description": "Who gave the answer: 'engineer' (the engineer's own words) or 'simulated' (an agent run that stands in for the engineer, e.g. an evaluation). Gate 1 counts the engineer's answers only. An answer without it was recorded before roles existed (harness status decides how it counts)." },
         "answered_on": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$", "description": "YYYY-MM-DD." },
         "status": { "enum": ["active", "stale", "superseded"] },
         "stale_reason": { "type": "string", "minLength": 1, "description": "Only when status is 'stale': why (input file changed or removed, question no longer raised)." }
@@ -93,6 +94,19 @@
           }
         },
         {
+          "if": { "properties": { "code": { "const": "file_set_relation" } }, "required": ["code"] },
+          "then": {
+            "properties": {
+              "values": {
+                "description": "Which drawing files form one set (one building, one grid): {\"set1\": [\"a.dwg\", \"b.dwg\"], \"set2\": [\"c.dwg\"]}. harness answer requires every file the question lists exactly once.",
+                "minProperties": 1,
+                "propertyNames": { "pattern": "^set[1-9][0-9]*$" },
+                "additionalProperties": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "minLength": 1 } }
+              }
+            }
+          }
+        },
+        {
           "if": { "properties": { "code": { "const": "grid_system_select" } }, "required": ["code"] },
           "then": {
             "properties": {
@@ -110,7 +124,7 @@
         {
           "if": {
             "properties": {
-              "code": { "not": { "enum": ["units_confirm_all", "units_conflict", "units_suspect", "units_unknown", "grid_units_doubt", "units_answer_contradicts_evidence", "grid_family_axis_assignment", "grid_system_axis_unassigned", "member_mark_prefix_meaning", "grid_system_select"] } }
+              "code": { "not": { "enum": ["units_confirm_all", "units_conflict", "units_suspect", "units_unknown", "grid_units_doubt", "units_answer_contradicts_evidence", "grid_family_axis_assignment", "grid_system_axis_unassigned", "member_mark_prefix_meaning", "grid_system_select", "file_set_relation"] } }
             },
             "required": ["code"]
           },

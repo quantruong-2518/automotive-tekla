@@ -56,7 +56,8 @@ PRODUCER_CODES = (  # noqa: SIM905
     "level_decimals_nonstandard level_name_conflict level_value_out_of_range level_negative_storey "
     "level_single_occurrence "
     "callout_ambiguous grade_legacy_mapping member_mark_prefix_meaning "
-    "grid_system_select grid_system_conflict grid_system_units_unconfirmed grid_system_axis_unassigned"
+    "grid_system_select grid_system_conflict grid_system_units_unconfirmed grid_system_axis_unassigned "
+    "file_set_relation"
 ).split()
 
 
@@ -257,7 +258,12 @@ def test_answered_question_moves_to_the_answered_section(world):
     before = sections(render(world))
     assert f"##### {victim['id']} " in before["2"]
     record_answer(
-        world, victim["id"], "Đơn vị là mm, theo kích thước 5000 trên tờ 1", "Kỹ sư A", {"unit": "mm"}
+        world,
+        victim["id"],
+        "Đơn vị là mm, theo kích thước 5000 trên tờ 1",
+        "Kỹ sư A",
+        {"unit": "mm"},
+        role="engineer",
     )
     after = sections(render(world))
     assert f"##### {victim['id']} " not in after["2"] + after["3"]
@@ -269,14 +275,14 @@ def test_answered_question_moves_to_the_answered_section(world):
 def test_multi_line_answer_is_kept_verbatim_in_a_block(world):
     victim = next(q for q in documents(world) if q["code"] == "units_confirm_all")
     text = "dòng một\ndòng hai"
-    record_answer(world, victim["id"], text, "A", {"unit": "mm"})
+    record_answer(world, victim["id"], text, "A", {"unit": "mm"}, role="engineer")
     body = sections(render(world))["4"]
     assert "  dòng một\n  dòng hai\n" in body
 
 
 def test_stale_answers_are_listed_with_their_reason(world):
     victim = next(q for q in documents(world) if q["code"] == "units_confirm_all")
-    record_answer(world, victim["id"], "mm", "A", {"unit": "mm"})
+    record_answer(world, victim["id"], "mm", "A", {"unit": "mm"}, role="engineer")
     answers = load(world / "answers.json")
     answers["answers"][0]["status"] = "stale"
     answers["answers"][0]["stale_reason"] = "the input file was changed since the answer was given"
@@ -485,6 +491,7 @@ def test_a_legacy_answer_to_a_conflict_question_leaves_it_open(world):
             "answer_text": "hai toà nhà khác nhau",
             "values": {},
             "answered_by": "A",
+            "answered_by_role": "engineer",
             "answered_on": "2026-11-07",
             "status": "active",
         }
@@ -509,3 +516,70 @@ def test_contradiction_template_offers_only_the_unit_already_answered():
     command = answer_command(item, "cm")
     assert command.endswith("--value unit=cm") and check_values(item.code, {"unit": "cm"}) == []
     assert "<mm|cm|m|in|ft>" in answer_command(item)  # no unit answered yet: the generic form
+
+
+# --- tool wave 2 seam: file sets, closures, supplements ----------------------------------------------
+
+
+def test_file_set_template_names_the_sets_answers_py_requires():
+    item = Item(
+        id="Q-060", key="f" * 16, code="file_set_relation", blocking=True, file=None,
+        message="m", count=2, truncated=False,
+        refs=[{"file": f, "where": f, "found": "x"} for f in ("a.dxf", "b.dxf")],
+        subjects=None, source="questions.json", producer="intake", topic="convert", answer=None,
+    )  # fmt: skip
+    command = answer_command(item)
+    assert command.endswith("--value set1=<file>,<file> [--value set2=<file>,...]")
+    assert check_values("file_set_relation", {"set1": "a.dxf,b.dxf"}) == []
+    assert questions_md_vi.topic_of("file_set_relation", "intake") == "convert"
+
+
+def first_blocking_open(world: Path) -> dict[str, Any]:
+    return next(q for q in documents(world) if q["blocking"] and q["answer"] is None)
+
+
+def test_a_closed_question_leaves_the_open_sections(world, monkeypatch):
+    from tekla_harness import lifecycle
+    from tekla_harness.questions import Closure
+
+    target = first_blocking_open(world)
+    before = render_questions_md(world)
+    monkeypatch.setattr(
+        lifecycle, "closures", lambda work, ledger: {target["key"]: Closure("Q-001", "units_answered")}
+    )
+    rendered = render_questions_md(world)
+    body = sections(rendered.text)
+    assert f"##### {target['id']} " not in body["2"] and f"##### {target['id']} " not in body["3"]
+    (line,) = [ln for ln in body["4"].splitlines() if ln.startswith(f"- {target['id']} ")]
+    assert "đã đóng" in line and "Q-001" in line and code_span("units_answered") in line
+    assert rendered.summary["blocking_open"] == before.summary["blocking_open"] - 1
+    assert rendered.summary["blocking_open"] == sum(
+        p["questions"]["blocking_open"] for p in build_status(world)["producers"]
+    )
+
+
+def test_reader_supplements_show_under_their_question(world, monkeypatch):
+    from tekla_harness import supplements
+
+    target = first_blocking_open(world)
+    rows = [
+        {
+            "key": "1" * 16, "target_key": target["key"], "target_id": target["id"],
+            "target_code": target["code"], "target_producer": "intake", "file": None,
+            "file_sha256": None, "sheet": "model#01", "where": "góc phải", "found": "+3.850",
+            "text": "Ghi chú `đơn vị` là mm.", "status": "active",
+        },
+        {
+            "key": "2" * 16, "target_key": target["key"], "target_id": target["id"],
+            "target_code": target["code"], "target_producer": "intake", "file": None,
+            "file_sha256": None, "sheet": None, "where": "rút lại", "found": "",
+            "text": "không dùng", "status": "withdrawn", "withdrawn_reason": "sai",
+        },
+    ]  # fmt: skip
+    monkeypatch.setattr(supplements, "load_supplements", lambda work: rows)
+    body = sections(render(world))["2"]
+    block = re.split(r"\n#{2,5} ", body[body.index(f"##### {target['id']} ") :], maxsplit=1)[0]
+    assert "- **Bổ sung của người đọc:**" in block
+    assert code_span("Ghi chú `đơn vị` là mm.") in block and code_span("góc phải") in block
+    assert "tờ `model#01`" in block
+    assert code_span("rút lại") not in block

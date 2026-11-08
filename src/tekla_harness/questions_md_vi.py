@@ -102,6 +102,13 @@ CODES: dict[str, tuple[str, str, str]] = {
         "hoặc chờ có bộ đọc.",
         "Không có dữ liệu nào từ các file này.",
     ),
+    "file_set_relation": (
+        "convert",
+        "Cho biết những file bản vẽ nào thuộc cùng một bộ (cùng một công trình, cùng một hệ lưới trục). "
+        "Mỗi file nằm trong đúng một bộ, ví dụ --value set1=a.dwg,b.dwg --value set2=c.dwg.",
+        "Lưới trục chỉ được so sánh giữa các file cùng bộ; trước khi trả lời, xung đột lưới giữa các file "
+        "chưa chặn nhưng còn chờ câu này.",
+    ),
     "xref_unresolved": (
         "convert",
         "Không tìm thấy file tham chiếu ngoài (xref). Gửi file được tham chiếu, hoặc xác nhận bản vẽ đã đủ "

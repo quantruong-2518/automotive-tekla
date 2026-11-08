@@ -396,6 +396,16 @@
         "answer": {
           "anyOf": [{ "type": "null" }, { "$ref": "urn:tekla-harness:schema:answers:0.1#/$defs/answer" }],
           "description": "The active answer (answers.json) to this key, or null."
+        },
+        "closed_by": {
+          "type": "object",
+          "description": "Present when the question is closed without an answer of its own (lifecycle.closures): it no longer blocks. question_id: the question whose answer closes it (null when none does). not_selected / separate: a grid-system conflict closed by the grid_system_select answer; units_answered: grid_units_doubt after the file's units_confirm_all answer; rejected_systems_only: every grid family it cites belongs to an unselected system; other_file_set: a cross-file question between two different file sets. The key still hashes only where / found / sheet of the refs.",
+          "required": ["question_id", "reason"],
+          "additionalProperties": false,
+          "properties": {
+            "question_id": { "anyOf": [{ "type": "null" }, { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/question_id" }] },
+            "reason": { "enum": ["not_selected", "separate", "units_answered", "rejected_systems_only", "other_file_set"] }
+          }
         }
       }
     },
@@ -411,7 +421,8 @@
         "message": { "type": "string", "description": "Only when this ref's wording differs from the group's message (for example because it carries a count)." },
         "unit": { "type": "string", "description": "units_confirm_all only, first ref: the unit declared by the header." },
         "confidence": { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/confidence" },
-        "flags": { "type": "array", "items": { "type": "string" }, "description": "units_confirm_all only: the units_* flags of the file." }
+        "flags": { "type": "array", "items": { "type": "string" }, "description": "units_confirm_all only: the units_* flags of the file." },
+        "families": { "type": "array", "items": { "type": "string", "pattern": "^F[0-9]{3,}$" }, "description": "read-structure grid questions: every grid family id (F001..) the ref is about, the full list even when refs are truncated. Not part of the key." }
       }
     }
   }

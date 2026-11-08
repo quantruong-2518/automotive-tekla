@@ -68,7 +68,8 @@
         "reason": { "type": ["string", "null"], "description": "Why the file has no sheet list; null when listed." },
         "text_entries": { "type": ["integer", "null"], "minimum": 0, "description": "Entries in the text index; null when there is none." },
         "unassigned_text": { "type": ["integer", "null"], "minimum": 0, "description": "Entries on no sheet or on several (ambiguous); null when not listed." },
-        "sheets": { "anyOf": [{ "type": "null" }, { "type": "array", "items": { "$ref": "#/$defs/list_sheet" } }] }
+        "sheets": { "anyOf": [{ "type": "null" }, { "type": "array", "items": { "$ref": "#/$defs/list_sheet" } }] },
+        "blocked_text_count": { "type": ["integer", "null"], "minimum": 0, "description": "Entries of the file's text index whose meaning is blocked (legacy-font gate), on any sheet or none; null when not listed." }
       }
     },
     "list_sheet": {
@@ -117,22 +118,26 @@
         "file": { "type": "string", "minLength": 1, "description": "Inventory path." },
         "sheet": {
           "type": "object",
+          "description": "sheet_id 'unassigned' (sheet-text --unassigned): the entries on no sheet or on several; its layout and bbox are null.",
           "required": ["sheet_id", "space", "layout", "bbox", "sheet_number", "duplicate_of"],
           "additionalProperties": false,
           "properties": {
             "sheet_id": { "type": "string" },
             "space": { "type": "string", "minLength": 1 },
-            "layout": { "type": "string", "minLength": 1 },
-            "bbox": { "$ref": "#/$defs/bbox" },
+            "layout": { "type": ["string", "null"], "minLength": 1 },
+            "bbox": { "anyOf": [{ "type": "null" }, { "$ref": "#/$defs/bbox" }] },
             "sheet_number": { "$ref": "#/$defs/sheet_number" },
             "duplicate_of": { "type": ["string", "null"] }
-          }
+          },
+          "if": { "properties": { "sheet_id": { "not": { "const": "unassigned" } } } },
+          "then": { "properties": { "layout": { "type": "string" }, "bbox": { "type": "array" } } }
         },
         "query": {
           "type": "object",
           "required": ["contains", "max_entries"],
           "additionalProperties": false,
           "properties": {
+            "unassigned": { "type": "boolean", "description": "True when the request was --unassigned instead of a sheet id." },
             "contains": { "type": ["string", "null"], "description": "Case-insensitive substring (NFC + casefold, diacritics significant); null = no filter." },
             "max_entries": { "type": ["integer", "null"], "minimum": 1, "description": "Effective cap: --max, else 400, else null (unbounded) when contains filters." }
           }
@@ -161,7 +166,7 @@
             "blocked_entries": { "type": "integer", "minimum": 0 },
             "by_reason": {
               "type": "object",
-              "propertyNames": { "enum": ["knowledge_conflict", "encoding_proposed", "encoding_contradiction", "encoding_unknown"] },
+              "propertyNames": { "enum": ["knowledge_conflict", "encoding_proposed", "encoding_contradiction", "encoding_unknown", "legacy_ascii_suspect"] },
               "additionalProperties": { "type": "integer", "minimum": 1 }
             },
             "styles": { "type": "array", "items": { "type": "string" }, "description": "Sorted names of the text styles of the blocked entries ('' = no style)." },
@@ -205,7 +210,7 @@
       "description": "Legacy-font gate: 'blocked' = the text's encoding is unknown, proposed (unapproved knowledge row), contradicted or in conflict, so no meaning may be taken from it (quote it verbatim with its entry id). 'allowed' = ASCII, Unicode, or a decoding decided by font name, code points or an approved row."
     },
     "blocked_reason": {
-      "enum": ["knowledge_conflict", "encoding_proposed", "encoding_contradiction", "encoding_unknown", null],
+      "enum": ["knowledge_conflict", "encoding_proposed", "encoding_contradiction", "encoding_unknown", "legacy_ascii_suspect", null],
       "description": "null when meaning is 'allowed'; else the first matching reason of text_gate.BLOCK_REASONS."
     },
     "find_text": {
@@ -223,7 +228,8 @@
           "properties": {
             "contains": { "type": "string", "minLength": 1, "description": "Substring, NFC + casefold on both sides, diacritics significant." },
             "file": { "type": ["string", "null"], "description": "Inventory path searched; null = every DXF/DWG file." },
-            "max_hits": { "type": ["integer", "null"], "minimum": 1, "description": "Cap on returned hits; null = unbounded." }
+            "max_hits": { "type": ["integer", "null"], "minimum": 1, "description": "Cap on returned hits; null = unbounded." },
+            "unassigned": { "type": "boolean", "description": "True: only the entries on no sheet or on several were searched (find-text --unassigned); their hits carry sheet_id 'unassigned'." }
           }
         },
         "counts": {
@@ -241,7 +247,8 @@
               "minimum": 0,
               "description": "Blocked entries examined (whether they matched or not). They were matched on their stored text only, which rarely contains a Vietnamese word: the search is INCOMPLETE over them."
             },
-            "unassigned_entries_not_searched": { "type": "integer", "minimum": 0, "description": "Entries on no sheet or on several sheets (sheets document); not searched." }
+            "unassigned_entries_not_searched": { "type": "integer", "minimum": 0, "description": "Entries on no sheet or on several sheets (sheets document); not searched." },
+            "unassigned_entries_searched": { "type": "integer", "minimum": 0, "description": "With --unassigned: the entries on no sheet or on several that were searched." }
           }
         },
         "files": {

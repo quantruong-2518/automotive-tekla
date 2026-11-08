@@ -286,6 +286,7 @@ def ans(code: str, file: str | None, values: dict[str, Any], status: str = "acti
         "answer_text": "synthetic",
         "values": values,
         "answered_by": "engineer",
+        "answered_by_role": "engineer",
         "answered_on": "2026-11-06",
         "status": status,
     }

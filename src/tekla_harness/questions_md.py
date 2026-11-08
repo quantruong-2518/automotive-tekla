@@ -12,7 +12,10 @@ Sources (all read-only):
     whether it is answered. The documents' own `answer` fields are NOT used (they can lag behind);
   * `harness status` (`status.build_status`): the gate-1 reasons and the per-step counts;
   * `grid-systems.json` + its SVGs and `structure-summary.json`: the proposals shown next to the questions
-    they inform. A proposal is always labelled "ĐỀ XUẤT — chưa xác nhận" and is never an answer.
+    they inform. A proposal is always labelled "ĐỀ XUẤT — chưa xác nhận" and is never an answer;
+  * `lifecycle.closures` (the same as `harness status`): a closed question is not open; it is listed in
+    section 4 with why it closed. `supplements.load_supplements`: the reader's active supplements are
+    printed under the question they supplement, verbatim.
 
 Layout: 1 Tóm tắt; 2 blocking open questions; 3 non-blocking open questions (both grouped by topic in the
 order of `questions_md_vi.TOPICS`, inside a topic by file then id); 4 Đã trả lời; 5 stale answers. Wording
@@ -41,17 +44,20 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from tekla_harness import lifecycle, supplements
 from tekla_harness.questions import (
     AXIS_CODE,
     AXIS_DIRECTIONS,
     CONFLICT_CODE,
     CONTRADICTION_CODE,
+    FILE_SET_CODE,
     PREFIX_CODE,
     QUESTION_DOCUMENTS,
     SELECT_CODE,
     SYSTEM_AXIS_CODE,
     UNIT_CODES,
     UNITS,
+    Closure,
     QuestionsError,
     active_answers,
     load_ledger,
@@ -85,6 +91,13 @@ STEP_TITLES = {
     "reader": "người đọc bản vẽ",
 }
 OUTPUT_TITLES = {"fresh": "mới", "stale": "cũ", "missing": "thiếu", "n/a": "—"}
+CLOSURE_TITLES = {
+    "not_selected": "một trong hai hệ lưới không được chọn",
+    "separate": "hai hệ lưới là hai công trình riêng",
+    "units_answered": "đơn vị của file đã được trả lời",
+    "rejected_systems_only": "mọi họ lưới nêu trong câu thuộc hệ lưới không được chọn",
+    "other_file_set": "các file thuộc hai bộ bản vẽ khác nhau",
+}
 
 
 class QuestionsMdError(Exception):
@@ -113,10 +126,15 @@ class Item:
     producer: str
     topic: str
     answer: dict[str, Any] | None
+    closed_by: Closure | None = None
+    supplements: list[dict[str, Any]] = field(default_factory=list)
 
     @property
     def is_open(self) -> bool:
-        """Open until answered, except a code no answer closes (the same rule as `harness status`)."""
+        """Open until answered or closed (lifecycle), except that an answer never closes a code no answer
+        closes (the same rules as `harness status`)."""
+        if self.closed_by is not None:
+            return False
         return self.answer is None or self.code in NOT_CLOSED_BY_AN_ANSWER
 
 
@@ -275,6 +293,8 @@ def answer_values(item: Item, answered_unit: str | None = None) -> list[str]:
         return [f"{s['name']}=<X|Y>" for s in item.subjects or [{"name": n} for n in AXIS_DIRECTIONS]]
     if item.code == SELECT_CODE:
         return ["?systems=S001,S002", "?separate=S001,S002"]
+    if item.code == FILE_SET_CODE:  # every file of the question exactly once, one set per building
+        return ["set1=<file>,<file>", "?set2=<file>,..."]
     return []
 
 
@@ -373,6 +393,33 @@ def answered_unit(item: Item, ctx: Context) -> str | None:
 # --- one question ---------------------------------------------------------------------------------
 
 
+def supplement_lines(item: Item) -> list[str]:
+    """The reader's active supplements to this question, verbatim (`harness ask --supplement`)."""
+    rows = [s for s in item.supplements if s.get("status") == "active"]
+    if not rows:
+        return []
+    lines = ["- **Bổ sung của người đọc:**"]
+    for s in rows:
+        extra = ""
+        if s.get("sheet"):
+            extra += f" · tờ {code_span(s['sheet'])}"
+        if s.get("file") is not None and s.get("file") != item.file:
+            extra += f" · file {code_span(s['file'])}"
+        lines.append(f"  - {code_span(s['where'])} — {code_span(s['found'])}{extra}: {code_span(s['text'])}")
+    return lines
+
+
+def closed_line(item: Item) -> str:
+    """Section 4 line of a question closed without an answer of its own (lifecycle.closures)."""
+    assert item.closed_by is not None
+    where = code_span(item.file) if item.file is not None else PROJECT_LEVEL
+    label = "CHẶN" if item.blocking else "không chặn"
+    reason = item.closed_by.reason
+    why = f"{CLOSURE_TITLES.get(reason, reason)} ({code_span(reason)})"
+    by = f"; theo câu {item.closed_by.question_id}" if item.closed_by.question_id else ""
+    return f"- {item.id} · {code_span(item.code)} · {where} · {label} — đã đóng: {why}{by}"
+
+
 def _need_impact(item: Item) -> tuple[str, str, bool]:
     """(Cần gì, Ảnh hưởng, translated). A reader question is written in Vietnamese by the reader agent
     (`harness ask --text`) and always shows its own text verbatim: it is never 'untranslated'."""
@@ -416,6 +463,7 @@ def question_lines(item: Item, ctx: Context, level: str = "#####") -> list[str]:
         if "message" in ref:
             lines.append(f"    - câu hỏi riêng của chỗ này (nguyên văn): {code_span(ref['message'])}")
     lines += grid_proposals(item, ctx)
+    lines += supplement_lines(item)
     if item.answer is None:
         lines.append("- **Trả lời:** _chưa có_")
     else:  # only a code no answer closes is rendered open with an answer: show it, it closes nothing
@@ -491,6 +539,9 @@ def _answer_block(answer: dict[str, Any]) -> list[str]:
 def _answered_lines(items: list[Item]) -> list[str]:
     lines = []
     for item in sorted(items, key=lambda i: _id_number(i.id)):
+        if item.closed_by is not None:
+            lines.append(closed_line(item))
+            continue
         assert item.answer is not None
         where = code_span(item.file) if item.file is not None else PROJECT_LEVEL
         label = "CHẶN" if item.blocking else "không chặn"
@@ -607,7 +658,12 @@ REASONS: tuple[tuple[re.Pattern[str], Callable[[re.Match[str]], str]], ...] = (
 # Reasons about units, grid systems and levels are written by `harness status` as one English sentence that
 # names the question id and the exact command to run; they move with the gate rules, so they are shown
 # verbatim after a Vietnamese category instead of being translated here.
-CATEGORIES = (("units", "đơn vị"), ("grid systems", "hệ lưới"), ("levels", "cao độ"))
+CATEGORIES = (
+    ("units", "đơn vị"),
+    ("grid systems", "hệ lưới"),
+    ("levels", "cao độ"),
+    ("answers", "câu trả lời"),
+)
 
 
 def reason_vi(reason: str) -> str:
@@ -688,6 +744,13 @@ def render_questions_md(work_dir: Path | str, out: Path | str | None = None) -> 
     except (StatusError, QuestionsError) as exc:
         raise QuestionsMdError(exc.exit_code, str(exc)) from exc
     items, missing = load_items(work, ledger.registry, ledger.answers)
+    closures = lifecycle.closures(work, ledger)
+    by_target: dict[str, list[dict[str, Any]]] = {}
+    for row in supplements.load_supplements(work):
+        by_target.setdefault(row["target_key"], []).append(row)
+    for item in items:
+        item.closed_by = closures.get(item.key)
+        item.supplements = by_target.get(item.key, [])
     ctx = _load_context(work, out_path.parent, status)
     ctx.select_ids = sorted((i.id for i in items if i.code == SELECT_CODE), key=_id_number)
     ctx.unit_answers = [

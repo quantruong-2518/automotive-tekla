@@ -140,6 +140,8 @@ def test_unknown_file_is_refused_with_exit_1_and_writes_nothing(world, capsys):
         ("mark_unmatched", "marks"),
         ("units_answer_contradicts_evidence", "grid-system"),  # exact code beats intake's units_ prefix
         ("schedule_row_unparsed", "marks"),
+        ("member_mark_prefix_meaning", "marks"),  # tool wave 2: marks raises it, callouts no longer does
+        ("file_set_relation", "intake"),  # tool wave 2: intake's project-level file-set question
     ],
 )
 def test_a_code_owned_by_another_producer_is_refused_with_exit_2(world, capsys, code, owner):
@@ -237,7 +239,7 @@ def test_withdraw_refusals(world, capsys):
 def test_withdrawing_an_answered_question_stales_its_answer(world):
     _, work = world
     q = ask(work, blocking=True)
-    record_answer(work, q["id"], "It is A.", "eng")
+    record_answer(work, q["id"], "It is A.", "eng", role="engineer")
     withdraw_question(work, q["id"], "moot")
     (answer,) = [a for a in load(work / "answers.json")["answers"] if a["key"] == q["key"]]
     assert answer["status"] == "stale"
@@ -266,7 +268,7 @@ def test_status_counts_reader_questions_and_gate1_waits_for_blocking_ones(world)
         r.startswith("reader: 1 blocking question(s) open") and hard["id"] in r
         for r in status["gate1"]["reasons"]
     )
-    record_answer(work, hard["id"], "B", "eng")
+    record_answer(work, hard["id"], "B", "eng", role="engineer")
     reader = {p["producer"]: p for p in build_status(work)["producers"]}["reader"]
     assert reader["questions"]["blocking_open"] == 0 and reader["questions"]["answered"] == 1
     withdraw_question(work, soft["id"], "r")

@@ -468,16 +468,23 @@ def _file_row(inv: Inventory, file_rel: str) -> dict[str, Any]:
 def sheet_text(
     work_dir: Path | str,
     file_rel: str,
-    sheet_id: str,
+    sheet_id: str | None,
     *,
     contains: str | None = None,
     max_entries: int | None = None,
     check_inputs: bool = False,
+    unassigned: bool = False,
 ) -> dict[str, Any]:
     """The text of one sheet in reading order. Raises ReaderError. See `load_file`.
 
     `max_entries` None: DEFAULT_MAX_ENTRIES, or unbounded when `contains` filters (query.max_entries is the
-    effective value, null = unbounded). `legacy_font_gate` covers ALL entries assigned to the sheet."""
+    effective value, null = unbounded). `legacy_font_gate` covers ALL entries assigned to the sheet.
+    `unassigned` (instead of a sheet id): the entries on no sheet or on several, as sheet `unassigned`
+    (tool wave 2, package P1: not implemented yet)."""
+    if (sheet_id is None) == (not unassigned):
+        raise ReaderError(EXIT_USAGE, "give either a sheet id or --unassigned, not both and not neither")
+    if unassigned:
+        raise NotImplementedError("sheet-text --unassigned is not implemented yet (tool wave 2, package P1)")
     if max_entries is not None and max_entries < 1:
         raise ReaderError(EXIT_USAGE, "max_entries must be at least 1")
     inv = load_inventory(work_dir)
@@ -542,13 +549,18 @@ def find_text(
     file_rel: str | None = None,
     max_hits: int | None = None,
     check_inputs: bool = False,
+    unassigned: bool = False,
 ) -> dict[str, Any]:
     """Every entry of every sheet of every file (or of `file_rel`) whose text contains `contains`.
 
     Hits come in file path, sheet and reading order. `max_hits` None: unbounded; `counts.hits` is always
     the true number. Blocked entries are matched on their stored text only, so the search is incomplete
     over them: `counts.blocked_entries_not_searchable` is how many were examined (matched or not) and
-    `notes` says so. Entries on no sheet or on several sheets are not searched (counted separately)."""
+    `notes` says so. Entries on no sheet or on several sheets are not searched (counted separately).
+    `unassigned`: search only those entries, hits with sheet_id 'unassigned' (tool wave 2, package P1: not
+    implemented yet)."""
+    if unassigned:
+        raise NotImplementedError("find-text --unassigned is not implemented yet (tool wave 2, package P1)")
     if not contains:
         raise ReaderError(EXIT_USAGE, "find-text needs a non-empty --contains")
     if max_hits is not None and max_hits < 1:
@@ -585,8 +597,8 @@ def find_text(
         if loaded.sheets is None:
             summary.update(status="skipped", reason="no sheets document (run `harness read-structure`)")
             continue
-        unassigned = loaded.sheets["unassigned"]
-        summary["unassigned_entries"] = len(unassigned["text_ids"]) + len(unassigned["ambiguous_text_ids"])
+        off_sheet = loaded.sheets["unassigned"]
+        summary["unassigned_entries"] = len(off_sheet["text_ids"]) + len(off_sheet["ambiguous_text_ids"])
         for sh in loaded.sheets["sheets"]:
             summary["sheets_searched"] += 1
             for _, e in reading_order(_sheet_entries(loaded, sh)):

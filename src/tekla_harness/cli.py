@@ -12,7 +12,7 @@ import json
 import sys
 from pathlib import Path
 
-from tekla_harness import __version__, findings, marks, questions_md
+from tekla_harness import __version__, dimensions, findings, marks, questions_md
 from tekla_harness.answers import parse_values, record_answer
 from tekla_harness.ask import ask_question, withdraw_question
 from tekla_harness.cache import ReadCache
@@ -23,7 +23,7 @@ from tekla_harness.extract_text import extract_text
 from tekla_harness.grid_system import GridSystemError, run_grid_systems
 from tekla_harness.intake import IntakeError, run_intake
 from tekla_harness.knowledge import KnowledgeError
-from tekla_harness.questions import QuestionsError
+from tekla_harness.questions import ROLES, QuestionsError
 from tekla_harness.read_dxf import CONVERTER_CAPS, probe_dxf
 from tekla_harness.schemas import SCHEMA_NAMES, validate
 from tekla_harness.sheet_text import (
@@ -36,6 +36,7 @@ from tekla_harness.sheet_text import (
 )
 from tekla_harness.status import StatusError, build_status
 from tekla_harness.structure import StructureError, read_structure, run_extractor
+from tekla_harness.supplements import add_supplement, withdraw_supplement
 from tekla_harness.worklock import WorkLockError, work_lock
 
 EXIT_OK, EXIT_INVALID, EXIT_USAGE, EXIT_ENV = 0, 1, 2, 3
@@ -270,11 +271,19 @@ def _cmd_list_sheets(args: argparse.Namespace) -> int:
 def _cmd_sheet_text(args: argparse.Namespace) -> int:
     try:
         doc = sheet_text(
-            Path(args.work_dir), args.file, args.sheet_id, contains=args.contains, max_entries=args.max
+            Path(args.work_dir),
+            args.file,
+            args.sheet_id,
+            contains=args.contains,
+            max_entries=args.max,
+            unassigned=args.unassigned,
         )
     except ReaderError as exc:
         print(str(exc), file=sys.stderr)
         return exc.exit_code
+    except NotImplementedError as exc:  # tool wave 2: a package has not landed yet
+        print(str(exc), file=sys.stderr)
+        return EXIT_ENV
     warning = truncation_warning(doc)
     if warning:
         print(warning, file=sys.stderr)
@@ -284,10 +293,19 @@ def _cmd_sheet_text(args: argparse.Namespace) -> int:
 
 def _cmd_find_text(args: argparse.Namespace) -> int:
     try:
-        doc = find_text(Path(args.work_dir), args.contains, file_rel=args.file, max_hits=args.max)
+        doc = find_text(
+            Path(args.work_dir),
+            args.contains,
+            file_rel=args.file,
+            max_hits=args.max,
+            unassigned=args.unassigned,
+        )
     except ReaderError as exc:
         print(str(exc), file=sys.stderr)
         return exc.exit_code
+    except NotImplementedError as exc:  # tool wave 2: a package has not landed yet
+        print(str(exc), file=sys.stderr)
+        return EXIT_ENV
     counts = doc["counts"]
     if counts["truncated"]:
         print(
@@ -338,7 +356,12 @@ def _cmd_status(args: argparse.Namespace) -> int:
 def _cmd_answer(args: argparse.Namespace) -> int:
     try:
         result = record_answer(
-            Path(args.work_dir), args.question_id, args.text, args.by, parse_values(args.value)
+            Path(args.work_dir),
+            args.question_id,
+            args.text,
+            args.by,
+            parse_values(args.value),
+            role=args.role,
         )
     except QuestionsError as exc:
         print(str(exc), file=sys.stderr)
@@ -350,18 +373,47 @@ def _cmd_answer(args: argparse.Namespace) -> int:
 
 
 def _cmd_ask(args: argparse.Namespace) -> int:
+    question_fields = ("code", "file", "sheet", "where", "found", "text")
     try:
-        if args.withdraw is not None:
-            extra = [
-                f"--{name}"
-                for name in ("code", "file", "sheet", "where", "found", "text")
-                if getattr(args, name) is not None
-            ] + (["--blocking"] if args.blocking else [])
-            if extra or args.reason is None:
+        modes = [
+            f"--{name.replace('_', '-')}"
+            for name in ("withdraw", "supplement", "withdraw_supplement")
+            if getattr(args, name) is not None
+        ]
+        if len(modes) > 1:
+            raise QuestionsError(2, f"{' and '.join(modes)} cannot be combined")
+        given = [f"--{name}" for name in question_fields if getattr(args, name) is not None] + (
+            ["--blocking"] if args.blocking else []
+        )
+        if args.withdraw is not None or args.withdraw_supplement is not None:
+            flag = "--withdraw" if args.withdraw is not None else "--withdraw-supplement"
+            if given or args.reason is None:
                 raise QuestionsError(
-                    2, "--withdraw takes only --reason" + (f" (got {', '.join(extra)})" if extra else "")
+                    2, f"{flag} takes only --reason" + (f" (got {', '.join(given)})" if given else "")
                 )
-            result = withdraw_question(Path(args.work_dir), args.withdraw, args.reason)
+            if args.withdraw is not None:
+                result = withdraw_question(Path(args.work_dir), args.withdraw, args.reason)
+            else:
+                result = withdraw_supplement(Path(args.work_dir), args.withdraw_supplement, args.reason)
+        elif args.supplement is not None:
+            wrong = [f for f in given if f in ("--code", "--blocking")]
+            wrong += ["--reason"] if args.reason is not None else []
+            missing = [f"--{name}" for name in ("where", "found", "text") if getattr(args, name) is None]
+            if wrong or missing:
+                raise QuestionsError(
+                    2,
+                    "--supplement adds evidence to another producer's question: "
+                    + (f"it takes no {', '.join(wrong)}" if wrong else f"missing {', '.join(missing)}"),
+                )
+            result = add_supplement(
+                Path(args.work_dir),
+                target_id=args.supplement,
+                where=args.where,
+                found=args.found,
+                text=args.text,
+                file=args.file,
+                sheet=args.sheet,
+            )
         else:
             missing = [
                 f"--{name}" for name in ("code", "where", "found", "text") if getattr(args, name) is None
@@ -384,8 +436,13 @@ def _cmd_ask(args: argparse.Namespace) -> int:
     except QuestionsError as exc:
         print(str(exc), file=sys.stderr)
         return exc.exit_code
+    except NotImplementedError as exc:  # tool wave 2: a package has not landed yet
+        print(str(exc), file=sys.stderr)
+        return EXIT_ENV
     if result["status"] == "already_asked":
         print(f"{result['id']}: already asked", file=sys.stderr)
+    elif result["status"] == "already_supplemented":
+        print(f"{result['key']}: already supplemented", file=sys.stderr)
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return EXIT_OK
 
@@ -494,7 +551,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_st.add_argument("work_dir")
     p_st.add_argument("file", help="input-relative path of the drawing, as in inventory.json")
-    p_st.add_argument("sheet_id", help="detector sheet id from list-sheets, e.g. model#01")
+    p_st.add_argument(
+        "sheet_id", nargs="?", default=None, help="detector sheet id from list-sheets, e.g. model#01"
+    )
+    p_st.add_argument(
+        "--unassigned",
+        action="store_true",
+        help="instead of a sheet id: the entries on no sheet or on several (sheet id 'unassigned')",
+    )
     p_st.add_argument("--contains", help="keep only entries whose text contains this (NFC, case-insensitive)")
     p_st.add_argument(
         "--max",
@@ -516,6 +580,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_ft.add_argument("--file", help="search only this drawing (input-relative path, as in inventory.json)")
     p_ft.add_argument("--max", type=int, default=None, help="hits returned at most (default: all)")
+    p_ft.add_argument(
+        "--unassigned",
+        action="store_true",
+        help="search only the entries on no sheet or on several (hits carry sheet_id 'unassigned')",
+    )
     p_ft.set_defaults(func=_cmd_find_text)
 
     p_cal = sub.add_parser(
@@ -565,7 +634,8 @@ def build_parser() -> argparse.ArgumentParser:
             "the unit already answered (to confirm it; else re-answer units_confirm_all); "
             "grid_system_axis_unassigned takes one value per direction named in the question, "
             "dir1=X|Y and dir2=X|Y, distinct; grid_family_axis_assignment takes <family_id>=X|Y; "
-            "member_mark_prefix_meaning takes <prefix>=<meaning>; grid_system_select takes optional "
+            "member_mark_prefix_meaning takes <prefix>=<meaning>; file_set_relation takes set1=a.dwg,b.dwg "
+            "(and set2=..., every file of the question exactly once); grid_system_select takes optional "
             "systems=S001,S002 (the systems the project uses) and separate=S001,S002 (selected systems "
             "that are different buildings, which closes their conflict); grid_system_conflict cannot be "
             "answered: answer grid_system_select instead; every other question takes no value. Rerun "
@@ -578,6 +648,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_ans.add_argument("question_id", help="e.g. Q-003, from a questions document")
     p_ans.add_argument("--text", required=True, help="the engineer's answer, verbatim")
     p_ans.add_argument("--by", required=True, help="who answered")
+    p_ans.add_argument(
+        "--role",
+        choices=ROLES,
+        help="engineer: the engineer's own words; simulated: an agent standing in for the engineer "
+        "(gate 1 counts the engineer's answers only)",
+    )
     p_ans.add_argument(
         "--value", action="append", default=[], metavar="K=V", help="structured value, repeatable (see above)"
     )
@@ -606,11 +682,20 @@ def build_parser() -> argparse.ArgumentParser:
     p_ask.add_argument("--text", help="the question, in Vietnamese (printed verbatim in questions.md)")
     p_ask.add_argument("--blocking", action="store_true", help="the question blocks gate 1 until answered")
     p_ask.add_argument("--withdraw", metavar="Q-ID", help="retire this reader question (needs --reason)")
-    p_ask.add_argument("--reason", help="why the question is withdrawn")
+    p_ask.add_argument(
+        "--supplement",
+        metavar="Q-ID",
+        help="add evidence (--where, --found, --text, optional --file, --sheet) to a PRODUCER's question "
+        "instead of asking it again; never changes its blocking flag or answer",
+    )
+    p_ask.add_argument(
+        "--withdraw-supplement", metavar="KEY", help="withdraw a supplement by its key (needs --reason)"
+    )
+    p_ask.add_argument("--reason", help="why the question or supplement is withdrawn")
     p_ask.set_defaults(func=_cmd_ask)
 
     # Commands whose module owns its arguments and its run (add_arguments / run / COMMAND / HELP).
-    for module in (marks, questions_md, findings):
+    for module in (marks, questions_md, findings, dimensions):
         p_mod = sub.add_parser(module.COMMAND, help=module.HELP)
         module.add_arguments(p_mod)
         p_mod.set_defaults(func=module.run)
