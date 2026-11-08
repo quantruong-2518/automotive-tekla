@@ -4,6 +4,7 @@
    reader): a simulated or role-less answer leaves it open in `harness status` and in questions.md, where
    the answer is shown with its role.
 2. A grid-system conflict waiting for the file-set answer is pending, not closed, in questions.md.
+3. Every gate-1 reason and questions.md line that tells someone to answer frames it as the engineer's step.
 
 The two-sheet world is test_status.py's; the one-grid files are built here (one grid per file, so two
 files with the same labels and different spacings conflict across files).
@@ -23,6 +24,7 @@ from ezdxf.filemanagement import new
 
 from _dxf_fixtures import _bubble_block, _frame, _frame_block, _grid, _level, _level_block, _save
 from tekla_harness.answers import record_answer
+from tekla_harness.grid_system import run_grid_systems
 from tekla_harness.questions import empty_answers
 from tekla_harness.questions_md import Item, _answered_lines, code_span, render_questions_md
 from tekla_harness.status import build_status
@@ -40,6 +42,7 @@ from test_status import (  # noqa: F401  (pytest fixtures, used by name)
     rerun_all,
     world,
 )
+from test_status_roles import unframed
 
 ENGINEER_STEP = "the engineer runs: "
 MD_ENGINEER = "kỹ sư tự chạy, tác tử không chạy thay"
@@ -257,3 +260,70 @@ def test_a_conflict_the_select_answer_closed_is_listed_as_closed(ready):
         if ln.startswith(f"- {conflict['id']} ")
     ]
     assert "đã đóng" in line and code_span("separate") in line
+
+
+# --- 3. every instruction to answer is the engineer's step --------------------------------------------
+
+
+def scenario_reasons(world, ready, two_files) -> dict[str, list[str]]:
+    """Gate-1 reasons from worlds that raise every instruction harness status prints."""
+    out: dict[str, list[str]] = {"world": build_status(world[1])["gate1"]["reasons"]}
+    _, work = two_files
+    answer_select(work, separate=False)  # the conflict is checked once the select question is answered
+    run_grid_systems(work)
+    out["pending"] = build_status(work)["gate1"]["reasons"]
+    _, work = ready
+    answer_select(work, separate=False)  # both systems used, not separate: the conflict reason (probe p6)
+    run_grid_systems(work)
+    out["conflict"] = build_status(work)["gate1"]["reasons"]
+    doc = load(work / "grid-systems.json")
+    for f in doc["files"]:  # an implausible median spacing under the answered unit: the units reason
+        f["grid_spacing_median"] = {"value": 6.0, "count": 5}
+    system = doc["systems"][0]  # an unassigned system whose question the cap dropped: the axis fallback
+    system["axis_assignment"] = {"status": "not_answered", "reason": "test"}
+    system["axis_question_key"] = None
+    (work / "grid-systems.json").write_text(json.dumps(doc), encoding="utf-8")
+    out["units-axis"] = build_status(work)["gate1"]["reasons"]
+    # an engineer units answer that disagrees: the disagree reason (grid-system goes stale: no axis reason)
+    answers = load(work / "answers.json")
+    answers["answers"].append(
+        {
+            "key": "e" * 16, "question_id": "Q-990", "code": "units_conflict", "file": "other.dxf",
+            "answer_text": "cm", "values": {"unit": "cm"}, "answered_by": "x", "answered_by_role": "engineer",
+            "answered_on": "2026-11-08", "status": "active",
+        }
+    )  # fmt: skip
+    (work / "answers.json").write_text(json.dumps(answers), encoding="utf-8")
+    out["disagree"] = build_status(work)["gate1"]["reasons"]
+    return out
+
+
+def test_every_gate1_instruction_to_answer_is_the_engineers_step(world, ready, two_files):
+    """Review probe p6: the conflict, units and axis reasons told the reader to answer without saying that
+    the engineer does it. The widened rule: any instruction to answer, confirm or say is the engineer's."""
+    reasons = scenario_reasons(world, ready, two_files)
+    needles = {
+        "pending": "file_set_relation",
+        "conflict": " conflict (",
+        "units-axis": "contradicts the drawing",
+    }
+    for name, needle in needles.items():
+        assert any(needle in r for r in reasons[name]), (name, reasons[name])
+    assert any("disagree" in r for r in reasons["disagree"])
+    assert any("grid_system_axis_unassigned question of" in r for r in reasons["units-axis"])
+    for name, rows in reasons.items():
+        for r in rows:
+            assert unframed(r) == [], (name, r)
+            assert r.count("harness answer") == r.count(f"{ENGINEER_STEP}harness answer"), (name, r)
+
+
+def test_every_questions_md_line_that_tells_how_to_answer_is_the_engineers_step(ready, two_files):
+    _, work = ready
+    answer_select(work, separate=False)
+    run_grid_systems(work)
+    for w in (work, two_files[1]):
+        text = render_questions_md(w).text
+        lines = [ln for ln in text.splitlines() if "**Cách đóng" in ln or "**Lệnh trả lời" in ln]
+        assert any("**Cách đóng" in ln for ln in lines) or w == two_files[1]
+        for ln in lines:
+            assert MD_ENGINEER in ln, ln

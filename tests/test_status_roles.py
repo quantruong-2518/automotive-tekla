@@ -50,14 +50,38 @@ def test_every_printed_answer_command_names_the_engineer_role_once_after_by(worl
         assert f'--by "..." {ROLE}' in c, c
 
 
+# "answer X" / "confirm X" / "say which" as an instruction to whoever reads the reason. The framed forms are
+# the engineer's: "the engineer answers ...", "the engineer must answer ...", and `harness answer` commands
+# (introduced by ENGINEER_STEP, checked separately).
+INSTRUCTION = re.compile(
+    r"\b(answer|confirm|say)\b "
+    r"(?=it\b|them\b|Q-\d|[a-z]+_[a-z_]+|which\b|the\b|again\b|with\b|per\b|\S+ on purpose)"
+)
+FRAMED = ("the engineer ", "the engineer must ", "harness ")
+
+
+def unframed(reason: str) -> list[str]:
+    """The instructions to answer in a reason that do not say the engineer gives the answer."""
+    return [
+        reason[max(0, m.start() - 30) : m.end() + 30]
+        for m in INSTRUCTION.finditer(reason)
+        if not reason[: m.start()].endswith(FRAMED)
+    ]
+
+
 def test_every_printed_answer_command_is_the_engineers_step_not_an_agents(world):
-    """Review M1: a reason never hands an agent a ready-to-paste `--role engineer` command."""
+    """Review M1: a reason never hands an agent a ready-to-paste `--role engineer` command, and (F3) any
+    reason that tells someone to answer says the engineer does it (test_gate1_review covers more worlds)."""
     _, work = world
     reasons = build_status(work)["gate1"]["reasons"]
     hits = [r for r in reasons if "harness answer" in r]
     assert hits
     for r in hits:
         assert r.count("harness answer") == r.count(f"{ENGINEER_STEP}harness answer"), r
+    for r in reasons:
+        assert unframed(r) == [], r
+    assert unframed("x: answer Q-001 again") and unframed("x: or confirm mm on purpose")
+    assert not unframed("x: the engineer answers Q-001 again") and not unframed("an answer to it closes")
 
 
 def test_record_answer_needs_a_role_keyword(world):
@@ -582,4 +606,5 @@ def test_a_pending_cross_file_conflict_points_at_the_file_set_question(world):
     doc["answers_sha256"] = consumed_answers_digest(load(work / "answers.json")["answers"])  # keep it fresh
     (work / "grid-systems.json").write_text(json.dumps(doc), encoding="utf-8")
     after = [r for r in build_status(work)["gate1"]["reasons"] if " conflict " in r]
-    assert after and all("separate=" in r and "pending" not in r for r in after), after
+    # (the reason prints the work folder, whose tmp name holds this test's name: match "pending Q-")
+    assert after and all("separate=" in r and "pending Q-" not in r for r in after), after

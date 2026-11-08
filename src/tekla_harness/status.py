@@ -338,8 +338,8 @@ def _units_reasons(
                 {a["question_id"] for a in current if a["code"] in UNIT_CODES and a["file"] in (f, None)}
             )
             reasons.append(
-                f"units: {f} has active units answers that disagree ({', '.join(ids)}): answer them with one "
-                f"unit ({command} {values})"
+                f"units: {f} has active units answers that disagree ({', '.join(ids)}): the engineer answers "
+                f"them with one unit ({command} {values})"
             )
         elif status == "invalid":
             reasons.append(f"units: {f} has a units answer without a valid unit: {command} {values}")
@@ -363,10 +363,10 @@ def _units_reasons(
                 if c is not None
                 else f"the {CONTRADICTION_CODE} question that harness grid-system raises (rerun it)"
             )
+            again = hit[1]["id"] if hit else UNITS_CONFIRM_CODE
             reasons.append(
-                f"units: {f}: the answered unit {unit} contradicts the drawing ({evidence}): answer "
-                f"{hit[1]['id'] if hit else UNITS_CONFIRM_CODE} again with the right unit, or confirm {unit} "
-                f"on purpose ({where})"
+                f"units: {f}: the answered unit {unit} contradicts the drawing ({evidence}): the engineer "
+                f"answers {again} again with the right unit, or confirms {unit} on purpose ({where})"
             )
     return reasons
 
@@ -398,8 +398,8 @@ def _grid_reasons(
     )
     if answer is None:
         return [
-            f"grid systems: {SELECT_CODE} ({select_ids}) is not answered: say which systems are the "
-            f"project's grids ({select_command} [--value systems=S001,S002])"
+            f"grid systems: {SELECT_CODE} ({select_ids}) is not answered: the engineer says which systems "
+            f"are the project's grids ({select_command} [--value systems=S001,S002])"
         ]
     used = answer["values"].get("systems") or list(systems)
     separate = set(answer["values"].get("separate") or [])
@@ -420,10 +420,10 @@ def _grid_reasons(
             how = (
                 f"{ANSWER.format(work_dir=work_dir, id=qid)} " + " ".join(f"--value {n}=X|Y" for n in names)
                 if qid
-                else f"answer the grid_system_axis_unassigned question of {sid}"
+                else f"the engineer answers the grid_system_axis_unassigned question of {sid}"
             )
             reasons.append(
-                f"grid systems: {sid} has no Tekla X/Y ({axis['reason']}): {how} (or answer "
+                f"grid systems: {sid} has no Tekla X/Y ({axis['reason']}): {how} (or the engineer answers "
                 "grid_family_axis_assignment per family), then rerun harness grid-system"
             )
     # an unanswered live file_set_relation question: a conflict grid-system left non-blocking without a
@@ -441,15 +441,16 @@ def _grid_reasons(
         if file_set is not None and not c["blocking"] and c["closed_by"] is None:
             reasons.append(
                 f"grid systems: {a} and {b} conflict ({qid}) across drawing files, pending {file_set} "
-                f"({FILE_SET_CODE}): say which files form one set first "
+                f"({FILE_SET_CODE}): the engineer says which files form one set first "
                 f"({ANSWER.format(work_dir=work_dir, id=file_set)} --value set1=<file>,<file> "
                 "[--value set2=...]), then rerun harness grid-system"
             )
             continue
         reasons.append(
-            f"grid systems: {a} and {b} conflict ({qid}); an answer to it closes nothing: answer "
-            f"{SELECT_CODE} ({select_ids}) again with systems= leaving one of them out, or with "
-            f"separate={a},{b} if they are different buildings, then rerun harness grid-system"
+            f"grid systems: {a} and {b} conflict ({qid}); an answer to it closes nothing: the engineer "
+            f"answers {SELECT_CODE} ({select_ids}) again with systems= leaving one of them out, or with "
+            f"separate={a},{b} if they are different buildings ({select_command} --value systems=... "
+            f"[--value separate={a},{b}]), then rerun harness grid-system"
         )
     return reasons
 

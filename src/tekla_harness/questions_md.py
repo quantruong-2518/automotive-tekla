@@ -102,6 +102,8 @@ STEP_TITLES = {
     "reader": "người đọc bản vẽ",
 }
 OUTPUT_TITLES = {"fresh": "mới", "stale": "cũ", "missing": "thiếu", "n/a": "—"}
+# every line that tells how to answer says it is the engineer's own step, never an agent's (review M1)
+ENGINEER_STEP_VI = "kỹ sư tự chạy, tác tử không chạy thay"
 # who answered, when it is not the engineer (answers.json answered_by_role; none: recorded before roles)
 ROLE_TITLES = {"simulated": "mô phỏng"}
 NO_ROLE = "chưa rõ vai trò"
@@ -520,7 +522,7 @@ def question_lines(item: Item, ctx: Context, level: str = "#####") -> list[str]:
         lines.append(
             f"- **Trạng thái:** chưa chặn, đang chờ câu {pending} ({code_span(FILE_SET_CODE)}): hai hệ lưới "
             "nằm ở hai file bản vẽ khác nhau, có thể thuộc hai dự án riêng. Kỹ sư trả lời câu "
-            f"{pending} trước (kỹ sư tự chạy, tác tử không chạy thay), rồi chạy lại {rerun}; sau đó hai hệ "
+            f"{pending} trước ({ENGINEER_STEP_VI}), rồi chạy lại {rerun}; sau đó hai hệ "
             "chỉ được so với nhau khi cùng một bộ file."
         )
     elif item.code == CONFLICT_CODE:  # `harness answer` refuses it: it closes only through the select answer
@@ -529,14 +531,14 @@ def question_lines(item: Item, ctx: Context, level: str = "#####") -> list[str]:
         separate_opt = code_span("--value separate=Sxxx,Syyy")
         rerun = code_span("harness grid-system " + WORK_PLACEHOLDER)
         lines.append(
-            f"- **Cách đóng:** câu này không trả lời trực tiếp. Trả lời câu {select} "
-            f"({code_span(SELECT_CODE)}) với {systems_opt} bỏ một trong hai hệ, hoặc {separate_opt} nếu là "
-            f"hai toà nhà khác nhau (cả hai phải nằm trong systems); rồi chạy lại {rerun}."
+            f"- **Cách đóng ({ENGINEER_STEP_VI}):** câu này không trả lời trực tiếp. Kỹ sư trả lời câu "
+            f"{select} ({code_span(SELECT_CODE)}) với {systems_opt} bỏ một trong hai hệ, hoặc {separate_opt} "
+            f"nếu là hai toà nhà khác nhau (cả hai phải nằm trong systems); rồi chạy lại {rerun}."
         )
     else:
         # the engineer's own step, never an agent's (review M1): the label says so
         lines.append(
-            "- **Lệnh trả lời (kỹ sư tự chạy, tác tử không chạy thay):** "
+            f"- **Lệnh trả lời ({ENGINEER_STEP_VI}):** "
             f"{code_span(answer_command(item, answered_unit(item, ctx)))}"
         )
     return lines

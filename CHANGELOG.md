@@ -566,6 +566,10 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
     when it is only non-blocking while the file sets are asked: it says the conflict waits for the
     `file_set_relation` question named in grid-systems.json `file_sets`. Any other open, non-blocking
     conflict shows how to close it.
+  - Every gate-1 reason that tells someone to answer says the engineer does it (`the engineer answers …`,
+    `the engineer says …`, `the engineer runs: harness answer …`): the select, axis, conflict, file-set,
+    units-disagree and units-contradiction reasons; the conflict reason now prints the select answer
+    command. questions.md "Cách đóng" lines carry "kỹ sư tự chạy, tác tử không chạy thay".
 - `guard_tekla_write.py` now exits 2 (the blocking code) on any internal error instead of
   relying on an undocumented `onFailure` setting; the setting was removed.
 - `guard_tekla_write.py` no longer blocks commands that only mention `tekla-cli` as data
