@@ -820,6 +820,118 @@ def test_a_legacy_family_comes_before_the_knowledge_table(tmp_path):
     assert e["decode"]["knowledge_patterns"] == []
 
 
+# --- ASCII text that looks like legacy Vietnamese (tool wave 2, fix 2b; default D2) -------------------
+
+# Shapes seen in EVAL-2 (dwgshare 267 / 461, ASCII-only entries in legacy-font styles): a slash before a
+# letter or brace ('4/g14', 'BT LO/ST #100'), and an uppercase tone letter S F R X J after a vowel
+# ('chi tiESt kim thu seSt', 'haFn 200'). Invented strings of the same shapes are used here.
+SUSPECT = ["4/g14", "/G10", "1/G16", "BT LO/ST #100", "3 L/}/{/SI %%c6", "chi tiESt kim thu seSt", "haFn 200",
+           "coJC vaF", "DiJa", "tieRp", "keXt"]  # fmt: skip
+# Structural ASCII that must stay readable: grid labels, marks, levels, dimensions, rebar callouts, units.
+CLEAN = ["A", "Z", "D1", "C2", "+3.850", "4500", "%%c8a150", "4%%c16", "1/2", "%%c10a200/150",
+         "D1.11(220X450)", "CB300-V", "S355JR", "HEA 300", "Rb = 115 kG/cm2", "q = 2 T/m2", "2800Kg/M2",
+         "MPa", "kN/m", "M20", "d1", "Q235B", "2L65x8", "TB-01", "GHI CHU", "cU/pvc/pvc 2X4 e1,5",
+         "Cu/XLPE/PVC 2(1X16)"]  # fmt: skip
+
+
+def suspect_fixture(style: str, *, sibling: str | None = None):
+    def fn(doc):
+        doc.styles.add("Plain", font="plain.shx")
+        msp = doc.modelspace()
+        for i, text in enumerate(SUSPECT + CLEAN):
+            text_at(msp, text, style, insert=(0, 9 * i))
+        if sibling is not None:
+            text_at(msp, sibling, style, insert=(500, 0))
+
+    return fn
+
+
+def flagged(result: dict[str, Any]) -> dict[str, bool]:
+    ascii_entries = (e for e in result["entries"] if e["raw_text"].isascii())
+    return {e["raw_text"]: "legacy_ascii_suspect" in e["flags"] for e in ascii_entries}
+
+
+@pytest.mark.parametrize("style", [".VnTime", "VNI-Times"])
+def test_suspect_ascii_in_a_legacy_style_is_flagged_and_structural_ascii_is_not(tmp_path, style):
+    result = index(build(tmp_path, suspect_fixture(style)))
+    got = flagged(result)
+    assert {t for t in SUSPECT if not got[t]} == set()
+    assert {t for t in CLEAN if got[t]} == set()
+    assert all(only(result, raw_text=t)["confidence"] == "low" for t in SUSPECT)
+
+
+def test_an_approved_row_makes_a_legacy_style_too(tmp_path):
+    table = table_of(tmp_path, approved(pattern="plain.shx"))
+    got = flagged(index(build(tmp_path, suspect_fixture("Plain")), knowledge=table))
+    assert all(got[t] for t in SUSPECT) and not any(got[t] for t in CLEAN)
+
+
+def test_an_unknown_style_counts_only_with_a_non_ascii_sibling_of_unknown_encoding(tmp_path):
+    with_sibling = flagged(index(build(tmp_path, suspect_fixture("Plain", sibling="/D\xc2/FU COC"))))
+    assert all(with_sibling[t] for t in SUSPECT) and not any(with_sibling[t] for t in CLEAN)
+    alone = flagged(index(build(tmp_path, suspect_fixture("Plain"), name="alone.dxf")))
+    assert not any(alone.values())
+    # a sibling proved Unicode by its code points is no evidence of a legacy font
+    unicode_fixture = suspect_fixture("Plain", sibling="Ký hiệu")
+    assert not any(flagged(index(build(tmp_path, unicode_fixture, name="u.dxf"))).values())
+
+
+def test_a_unicode_style_is_never_suspect(tmp_path):
+    got = flagged(index(build(tmp_path, suspect_fixture("Arial", sibling="b\xb6n v\xcf"))))
+    assert not any(got.values())
+
+
+def test_a_sibling_in_another_style_does_not_count(tmp_path):
+    def fn(doc):
+        doc.styles.add("Plain", font="plain.shx")
+        doc.styles.add("Other", font="other.shx")
+        text_at(doc.modelspace(), "4/g14", "Plain")
+        text_at(doc.modelspace(), "/D\xc2/FU COC", "Other", insert=(0, 9))
+        text_at(doc.modelspace(), "1/G16", "Other", insert=(0, 18))
+
+    got = flagged(index(build(tmp_path, fn)))
+    assert got == {"4/g14": False, "1/G16": True}
+
+
+def test_a_sibling_inside_a_block_counts(tmp_path):
+    def fn(doc):
+        doc.styles.add("Plain", font="plain.shx")
+        blk = doc.blocks.new("NOTE")
+        blk.add_text("/D\xc2/FU COC", dxfattribs={"style": "Plain", "height": 2.5})
+        doc.modelspace().add_blockref("NOTE", (0, 50))
+        text_at(doc.modelspace(), "4/g14", "Plain")
+
+    assert flagged(index(build(tmp_path, fn))) == {"4/g14": True}
+
+
+def test_mixed_mtext_runs_are_judged_run_by_run(tmp_path):
+    def fn(doc):
+        msp = doc.modelspace()
+        # the suspect text sits in the legacy inline-font run: flagged
+        msp.add_mtext("{\\f.VnTime|c0;4/g14} 4500", dxfattribs={"style": "Arial", "insert": (0, 0)})
+        # the suspect text sits in the Unicode inline-font run of a legacy style: not flagged
+        msp.add_mtext("{\\fArial|c0;4/g14} D1", dxfattribs={"style": ".VnTime", "insert": (0, 50)})
+        # formatting codes and %% codes are not text: '\\P' and '%%c' never match
+        msp.add_mtext("D1\\PC2 %%c16", dxfattribs={"style": ".VnTime", "insert": (0, 100)})
+
+    result = index(build(tmp_path, fn))
+    assert flagged(result) == {
+        "{\\f.VnTime|c0;4/g14} 4500": True,
+        "{\\fArial|c0;4/g14} D1": False,
+        "D1\\PC2 %%c16": False,
+    }
+
+
+def test_special_codes_are_not_text_for_the_suspect_shapes(tmp_path):
+    # 'a%%dS1': the code between 'a' and 'S' must not join them into the tone shape 'aS';
+    # '%%uSo 1': the 'u' of the underline code is not a vowel of the text
+    def fn(doc):
+        text_at(doc.modelspace(), "a%%dS1", ".VnTime")
+        text_at(doc.modelspace(), "%%uSo 1", ".VnTime", insert=(0, 9))
+
+    assert flagged(index(build(tmp_path, fn))) == {"a%%dS1": False, "%%uSo 1": False}
+
+
 # --- damaged bytes ------------------------------------------------------------------------------
 
 

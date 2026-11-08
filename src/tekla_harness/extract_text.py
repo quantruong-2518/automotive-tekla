@@ -123,6 +123,7 @@ class _RunResult:
     unknown_non_ascii: bool = False
     reencode_failed: bool = False
     unknown_code: bool = False
+    literals: list[str] = field(default_factory=list)  # the run's text pieces between '%%' codes, as stored
     knowledge_pattern: str | None = None
     contradicts_font: bool = False  # Unicode evidence in a run whose font said TCVN3 / VNI
     eth: bool = False
@@ -200,6 +201,9 @@ def _has_unknown_code(text: str) -> bool:
     return any(not _SPECIAL_RE.fullmatch(m.group(0)) for m in _ANY_SPECIAL_RE.finditer(text))
 
 
+_SuspectRun = tuple[tuple[str, str], str]  # (font key: ("style", name) | ("font", inline family), encoding)
+
+
 @dataclass(frozen=True)
 class _StyleDecision:
     hint: FontHint
@@ -226,6 +230,10 @@ class _Context:
     block_info: dict[str, tuple[bool, tuple[str, ...]]] = field(default_factory=dict)
     bears_text: dict[str, bool] = field(default_factory=dict)
     entries: list[dict[str, Any]] = field(default_factory=list)
+    # legacy_ascii_suspect: fonts (("style", name) or ("font", inline family)) holding non-ASCII text of
+    # unknown encoding, and the pure-ASCII entries with a legacy-looking run, judged once all are read
+    unknown_non_ascii_fonts: set[tuple[str, str]] = field(default_factory=set)
+    ascii_suspects: list[tuple[dict[str, Any], list[_SuspectRun]]] = field(default_factory=list)
     errors: list[dict[str, Any]] = field(default_factory=list)
     errors_total: int = 0
     empty_skipped: int = 0
@@ -350,6 +358,7 @@ def _decode_run(ctx: _Context, run: _Run, decision: _StyleDecision) -> _RunResul
             decoded.append(piece)
             display.append(_SPECIAL_EXPANSION[piece[2:].lower()])
             continue
+        result.literals.append(piece)
         if encoding in ("tcvn3", "vni"):
             latin, ok = ctx.legacy_form(piece)
             if not ok:
@@ -390,6 +399,15 @@ def _decode_text(ctx: _Context, raw: str, style: str | None, *, mtext: bool) -> 
         escapes.append("dxf_unicode_escape_decoded")
     mif = any(has_mif_encoding(r.text) for r in runs)
     results = [_decode_run(ctx, run, decision) for run in runs]
+    suspect: list[_SuspectRun] = []  # the runs that look legacy
+    for run, r in zip(runs, results, strict=True):
+        key = ("style", style or "") if run.font is None else ("font", run.font.casefold())
+        if r.unknown_non_ascii:
+            ctx.unknown_non_ascii_fonts.add(key)
+        if r.encoding in ("tcvn3", "vni", "unknown") and any(
+            piece.isascii() and looks_legacy_ascii(piece) for piece in r.literals
+        ):
+            suspect.append((key, r.encoding))
 
     encodings = [r.encoding for r in results]
     used = encodings[0] if len(set(encodings)) == 1 else "mixed"
@@ -474,11 +492,43 @@ def _decode_text(ctx: _Context, raw: str, style: str | None, *, mtext: bool) -> 
         },
         "flags": flags,
         "confidence": confidence,
+        "_suspect_runs": suspect,
     }
 
 
 def _min_conf(a: str, b: str) -> str:
     return min(a, b, key=_CONFIDENCE_ORDER.__getitem__)
+
+
+# --- ASCII text that looks like legacy Vietnamese (tool wave 2, fix 2b) ----------------------------
+# Legacy fonts keep ASCII as ASCII, so the gate allows pure-ASCII text (text_gate). Some legacy Vietnamese
+# fonts, though, write Vietnamese with plain ASCII letters. EVAL-2 saw two shapes in legacy-font styles
+# (dwgshare 267 and 461): a slash before a letter or brace ('4/g14', 'BT LO/ST #100', '3 L/}/{/SI') and an
+# uppercase tone letter after a vowel, Telex style: S F R X J = acute, grave, hook, tilde, dot ('chi tiESt
+# kim thu seSt', 'haFn 200', 'coJC'). The encoding.py TCVN3 / VNI tables do not produce either shape (their
+# Vietnamese letters are all bytes >= 0x80), so the shapes come from the observed strings, kept narrow:
+#   * a slash before a unit denominator is not suspect ('kG/cm2', 'T/m2', 'kN/m', 'Kg/M2'), nor before a word
+#     of three or more letters ('Cu/PVC/PVC', seen in a TCVN3 capital-font style of dwgshare 461);
+#   * a tone letter needs a lowercase vowel just before it, or an uppercase A E O that follows a lowercase
+#     letter ('tiESt'), so all-capital words ('EST', 'HEA 300', 'S355JR') and marks ('D1', 'C2') never match.
+# Only texts in a TCVN3 / VNI run, or in an unknown-encoding font that also holds non-ASCII text of unknown
+# encoding (its "siblings"), are flagged (default D2, reversible: suspect patterns only, not all ASCII).
+_SLASH_LETTER = re.compile(r"/(?!(?i:mm|cm|dm|m)[23]?(?![A-Za-z0-9]))(?![A-Za-z]{3})[A-Za-z{}]")
+_TONE_LETTER = re.compile(r"(?:[aeiouy]|(?<=[a-z])[AEO])[SFRXJ]")
+
+
+def looks_legacy_ascii(text: str) -> bool:
+    """True when ASCII `text` has a shape legacy Vietnamese fonts give when written in ASCII (see above)."""
+    return bool(_SLASH_LETTER.search(text) or _TONE_LETTER.search(text))
+
+
+def _flag_legacy_ascii(ctx: _Context) -> None:
+    """Flag `legacy_ascii_suspect` (confidence low) on each pure-ASCII entry with a legacy-looking run in a
+    TCVN3 / VNI font, or in an unknown-encoding font that holds non-ASCII text of unknown encoding."""
+    for entry, runs in ctx.ascii_suspects:
+        if any(enc in ("tcvn3", "vni") or key in ctx.unknown_non_ascii_fonts for key, enc in runs):
+            entry["flags"].append("legacy_ascii_suspect")
+            entry["confidence"] = "low"
 
 
 # --- entities ------------------------------------------------------------------------
@@ -547,6 +597,7 @@ def _add_entry(
         return
     font_file, style_exists = ctx.style_font(style)
     decoded = _decode_text(ctx, raw, style, mtext=mtext)
+    suspect_runs = decoded.pop("_suspect_runs")
     flags = list(extra_flags) + decoded.pop("flags")
     if has_lone_surrogate(raw):  # undecodable bytes: scrubbed on output, so say it here
         flags.append("invalid_utf8_bytes")
@@ -597,6 +648,8 @@ def _add_entry(
     }
     entry["flags"] = flags
     ctx.entries.append(entry)
+    if suspect_runs and raw.isascii():
+        ctx.ascii_suspects.append((entry, suspect_runs))
 
 
 def _definition_handle(ctx: _Context, entity: Any) -> str | None:
@@ -1084,6 +1137,7 @@ def _extract_text(
         frame = _Frame("model" if is_model else name, name, "wcs" if is_model else "paper")
         for entity in layout:
             _visit_entity(ctx, frame, entity)
+    _flag_legacy_ascii(ctx)
     attdefs: list[dict[str, Any]] = []
     try:
         attdefs = _attdefs(ctx)

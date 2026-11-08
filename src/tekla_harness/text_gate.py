@@ -7,8 +7,11 @@ question wording that paraphrases it. Quoting it verbatim, with its entry id, st
 
 Rule, on one full text-index entry (schemas/text-index.schema.json `entry`):
 
-  * `raw_text` is pure ASCII -> allowed. Legacy Vietnamese encodings keep ASCII as ASCII (capital fonts
-    may change letter case: `decode.case_uncertain` says so, and callers compare case-insensitively).
+  * flag `legacy_ascii_suspect` -> "legacy_ascii_suspect" (tool wave 2, fix 2b): extract_text sets it on a
+    pure-ASCII entry of a legacy-font style whose text has a shape legacy Vietnamese takes when written in
+    ASCII ('4/g14', 'chi tiESt'); see `extract_text.looks_legacy_ascii`.
+  * otherwise `raw_text` is pure ASCII -> allowed. Legacy Vietnamese encodings keep ASCII as ASCII (capital
+    fonts may change letter case: `decode.case_uncertain` says so, and callers compare case-insensitively).
     `%%c`, `%%d`, `%%p` are ASCII in `raw_text`, so `%%c16` passes.
   * otherwise blocked when any of these holds, first match is the reason:
       - flag `knowledge_conflict`            -> "knowledge_conflict"
@@ -24,7 +27,13 @@ from __future__ import annotations
 
 from typing import Any
 
-BLOCK_REASONS = ("knowledge_conflict", "encoding_proposed", "encoding_contradiction", "encoding_unknown")
+BLOCK_REASONS = (
+    "knowledge_conflict",
+    "encoding_proposed",
+    "encoding_contradiction",
+    "encoding_unknown",
+    "legacy_ascii_suspect",
+)
 _FLAG_REASONS = (
     ("knowledge_conflict", "knowledge_conflict"),
     ("proposed_knowledge_row", "encoding_proposed"),
@@ -34,9 +43,11 @@ _FLAG_REASONS = (
 
 def meaning_block_reason(entry: dict[str, Any]) -> str | None:
     """None when meaning may be taken from the entry, else one of BLOCK_REASONS."""
+    flags = set(entry.get("flags") or ())
+    if "legacy_ascii_suspect" in flags:
+        return "legacy_ascii_suspect"
     if str(entry.get("raw_text", "")).isascii():
         return None
-    flags = set(entry.get("flags") or ())
     for flag, reason in _FLAG_REASONS:
         if flag in flags:
             return reason

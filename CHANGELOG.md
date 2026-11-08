@@ -383,6 +383,13 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
     decision as `decode.source` / `run_details[].font_source` `style_family`; `harness read-dxf` lists
     `matched` field `family`. A `.Vn*` family now decides before an approved font-file row, so those
     styles carry no `knowledge_patterns`.
+  - `harness extract-text` flags `legacy_ascii_suspect` (confidence low) on pure-ASCII text that looks like
+    Vietnamese written in ASCII by a legacy font: a slash before a letter or brace (`4/g14`, `BT LO/ST`;
+    not before a unit such as `kG/cm2` or a word of 3+ letters such as `Cu/PVC`) or an uppercase tone
+    letter S F R X J after a vowel (`chi tiESt`, `haFn`). Only runs in a TCVN3 / VNI font, or in an
+    unknown-encoding font that also holds non-ASCII text of unknown encoding, are judged (default D2,
+    reversible: suspect shapes only, not all ASCII). The legacy-font gate blocks such text with reason
+    `legacy_ascii_suspect`, ahead of the ASCII rule.
 
 ### Fixed
 - Reading toolchain, after an independent review of the EVAL-1 wave:
