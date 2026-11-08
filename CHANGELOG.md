@@ -335,6 +335,15 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
   `.claude/agents/doc-reader.md` (first three) and `planner.md` (the plan). Trigger check, 2 runs per
   query: intake 10/10 and 6/6 on fresh queries, reader 10/10 and 5/6, report 10/10, plan 10/10; no
   near-miss triggered.
+- Work-folder write lock (tool wave 2, ADR-0011, proposed): `worklock.work_lock` holds an exclusive OS
+  lock on `work/.harness.lock` (POSIX `flock`, Windows `msvcrt.locking` on byte 0) for the whole run of
+  intake, read-structure, callouts, marks, grid-system, answer, ask, finding add / withdraw and
+  questions-md. A held lock is exit 3 at once, naming the holder (pid, host, command, start time) from
+  `.harness.lock.json`, which the holder removes before unlocking; no waiting, no stale-lock rule, the
+  lock file is never deleted. A filesystem without lock support is exit 3 (never runs unlocked).
+  Read-only commands (status, list-sheets, sheet-text, find-text, finding list, validate) do not lock; a
+  writer whose work folder does not exist keeps its own usage error. Intake now resolves its converters
+  before it reads the work folder's registry, and creates the work folder just before locking it.
 
 ### Changed
 - `knowledge/font-encodings.csv`: the three seed rows are approved by the engineer (2026-11-07) after

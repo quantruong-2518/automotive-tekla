@@ -60,6 +60,7 @@ from tekla_harness.questions import (
 from tekla_harness.read_dxf import probe_dxf
 from tekla_harness.readlog import Attempt, ReadLog, ReadLogError, timed_attempt
 from tekla_harness.schemas import validate
+from tekla_harness.worklock import work_lock
 
 SCHEMA_VERSION = "0.1"
 MAX_PROBE_REFS = 50  # refs listed per probe or text question group; the true total is always given
@@ -608,12 +609,6 @@ def run_intake(
     entries = _detect_all(input_dir)
     if not entries:
         raise IntakeError(EXIT_USAGE, f"input folder {input_dir} has no files")
-    try:
-        ledger = load_ledger(work_dir, project_id, create=True)
-    except QuestionsError as exc:
-        raise IntakeError(exc.exit_code, str(exc)) from exc
-    hashes = {e.rel: e.info["sha256"] for e in entries}
-    changes = _diff_inputs(_previous_hashes(work_dir), hashes)
     targets: dict[str, str] = {}
     for e in entries:
         if e.fmt == "dwg":
@@ -626,6 +621,32 @@ def run_intake(
             "input contains DWG files but no DWG converter is configured: pass --oda / --dwg2dxf, set "
             "HARNESS_ODA_CONVERTER / HARNESS_DWG2DXF, or put ODAFileConverter / dwg2dxf on PATH",
         )
+    try:
+        work_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise IntakeError(EXIT_ENV, f"cannot create the work folder {work_dir}: {exc}") from exc
+    # One writer per work folder (ADR-0011): everything below reads or writes the work folder's state.
+    with work_lock(work_dir, "intake"):
+        return _intake_locked(input_dir, work_dir, project_id, entries, oda, dwg2dxf, timeout, table)
+
+
+def _intake_locked(
+    input_dir: Path,
+    work_dir: Path,
+    project_id: str,
+    entries: list[_Entry],
+    oda: list[str] | None,
+    dwg2dxf: list[str] | None,
+    timeout: float,
+    table: FontEncodingTable,
+) -> IntakeResult:
+    """run_intake after its usage checks, under the work-folder lock."""
+    try:
+        ledger = load_ledger(work_dir, project_id, create=True)
+    except QuestionsError as exc:
+        raise IntakeError(exc.exit_code, str(exc)) from exc
+    hashes = {e.rel: e.info["sha256"] for e in entries}
+    changes = _diff_inputs(_previous_hashes(work_dir), hashes)
 
     for name in WORK_SUBFOLDERS:  # rerun into the same folder: no stale files
         shutil.rmtree(work_dir / name, ignore_errors=True)
@@ -665,7 +686,6 @@ def run_intake(
     inventory_text = _utf8(dump_json(inventory), "inventory.json")
     questions_text = _utf8(dump_json(questions_doc), "questions.json")
 
-    work_dir.mkdir(parents=True, exist_ok=True)
     try:
         ledger.write()  # the registry is written before any document that uses its ids
     except OSError as exc:

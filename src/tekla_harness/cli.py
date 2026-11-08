@@ -36,8 +36,15 @@ from tekla_harness.sheet_text import (
 )
 from tekla_harness.status import StatusError, build_status
 from tekla_harness.structure import StructureError, read_structure, run_extractor
+from tekla_harness.worklock import WorkLockError, work_lock
 
 EXIT_OK, EXIT_INVALID, EXIT_USAGE, EXIT_ENV = 0, 1, 2, 3
+# Commands that write a work folder hold its lock for their whole run (ADR-0011). intake takes it itself,
+# inside run_intake, after its usage checks; `finding` locks only for add and withdraw.
+LOCKED_COMMANDS = frozenset(
+    {"read-structure", "callouts", "marks", "grid-system", "answer", "ask", "questions-md"}
+)
+LOCKED_ACTIONS = {"finding": frozenset({"add", "withdraw"})}
 _ENV_HOOK = Path(__file__).resolve().parents[2] / ".claude" / "hooks" / "session_env_check.py"
 
 
@@ -619,7 +626,26 @@ def main(argv: list[str] | None = None) -> int:
         args = parser.parse_args(argv)
     except SystemExit as exc:  # argparse exits 2 on usage errors, 0 on --help/--version
         return int(exc.code or 0)
-    return args.func(args)
+    try:
+        target = _lock_target(args)
+        if target is None:
+            return args.func(args)
+        command = " ".join([args.command, *([args.action] if args.command in LOCKED_ACTIONS else [])])
+        with work_lock(target, command):
+            return args.func(args)
+    except WorkLockError as exc:
+        print(str(exc), file=sys.stderr)
+        return exc.exit_code
+
+
+def _lock_target(args: argparse.Namespace) -> Path | None:
+    """The work folder this command must lock; None for a read-only command, or when the folder does not
+    exist (the command then writes nothing and reports its own usage error)."""
+    action = getattr(args, "action", None)
+    if args.command not in LOCKED_COMMANDS and action not in LOCKED_ACTIONS.get(args.command, ()):
+        return None
+    work = Path(args.work_dir)
+    return work if work.is_dir() else None
 
 
 if __name__ == "__main__":
