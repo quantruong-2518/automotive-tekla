@@ -34,11 +34,11 @@ would create a second validator that drifts from the first (ADR-0009, Consequenc
 
 ## Amendment 1 (2026-11-07, slice S1b design)
 
-- Status of this amendment: **proposed by the orchestrator, pending engineer confirmation at merge.**
+- Status of this amendment: **accepted** (engineer confirmed on 2026-11-08, after merge of PR #6).
   The engineer delegated the C# JSON library choice (decision 2 below: "decide the best options,
   brainstorm with a second agent"); the other decisions, notably decision 6 (exit `5` instead of
-  the engineer's `1`) and decision 10 (ECMA `pattern` meaning for every schema), are the
-  orchestrator's and need the engineer's confirmation.
+  the engineer's `1`) and decision 10 (ECMA `pattern` meaning for every schema), were proposed by
+  the orchestrator and confirmed by the engineer.
 
 An independent Opus review reached the same design; it also ran the current
 validator and found it accepts `NaN`, `Infinity`, `1e400` (read as infinity), duplicate keys

@@ -109,7 +109,7 @@ Severity: `critical` · `major` · `minor`.
 
 - Source: independent design review of slice S1b (ADR-0010 Amendment 1), 2026-11-08
 - Classification: safety layer · Severity: minor (the receipt is not a gate; gate approval stays
-  with the engineer) · Status: **proposed**
+  with the engineer) · Status: **approved** (engineer, 2026-11-08; not implemented yet)
 - Root cause: the receipt is a plain JSON file holding the spec's SHA-256. Any agent with file
   write access (`builder` has Write) can create a receipt for a spec that was never validated,
   and the CLI cannot tell. Signing adds nothing while the key sits on the same machine.
