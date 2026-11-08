@@ -279,8 +279,8 @@ def test_a_closure_outside_the_contract_is_refused(ready, monkeypatch, case):
         "wrong_reason": units_id(work),
         "no_question": None,
         "unknown_question": "Q-999",
-        "unanswered": inject(work, "intake", "units_confirm_all"),
-        "simulated": inject(work, "marks", "mark_unparsed", role="simulated"),
+        "unanswered": inject(work, "grid-system", "grid_system_select"),
+        "simulated": inject(work, "grid-system", "grid_system_select", role="simulated"),
     }.get(case, select_id(work))
     if case == "legacy":
         doc = load(work / "answers.json")
@@ -307,7 +307,6 @@ def test_a_closure_outside_the_contract_is_refused(ready, monkeypatch, case):
         ("structure", "grid_units_doubt", "units_answered", "units"),
         ("grid-system", "grid_system_conflict", "not_selected", "select"),
         ("grid-system", "grid_system_conflict", "separate", "select"),
-        ("grid-system", "grid_system_conflict", "other_file_set", "select"),
     ],
 )
 def test_a_closure_under_the_contract_closes_its_question(ready, monkeypatch, producer, code, reason, closer):
@@ -336,6 +335,7 @@ def test_a_closure_under_the_contract_closes_its_question(ready, monkeypatch, pr
         ("grid-system", "units_answer_contradicts_evidence", "other_file_set"),
         ("structure", "grid_units_doubt", "not_selected"),
         ("grid-system", "grid_system_conflict", "units_answered"),
+        ("grid-system", "grid_system_conflict", "other_file_set"),  # never derived yet: fail closed
     ],
 )
 def test_a_closure_reason_must_fit_the_closed_question(ready, monkeypatch, producer, code, reason):
@@ -345,3 +345,34 @@ def test_a_closure_reason_must_fit_the_closed_question(ready, monkeypatch, produ
     target = inject(work, producer, code)
     close(monkeypatch, work, {target: Closure(select_id(work), reason)})
     assert "cannot close" in refused(work, target)
+
+
+@pytest.mark.parametrize(
+    ("producer", "code", "reason", "closer", "needed"),
+    [
+        ("grid-system", "grid_system_conflict", "not_selected", "units", "grid_system_select"),
+        ("grid-system", "grid_system_conflict", "separate", "units", "grid_system_select"),
+        ("structure", "grid_label_missing", "rejected_systems_only", "units", "grid_system_select"),
+        ("structure", "grid_units_doubt", "units_answered", "select", "units_confirm_all"),
+        ("structure", "grid_units_doubt", "units_answered", "level", "units_confirm_all"),
+    ],
+)
+def test_a_closure_needs_the_closing_question_its_reason_names(
+    ready, monkeypatch, producer, code, reason, closer, needed
+):
+    """An engineer answer to another question does not close: the closer's code must be the one whose
+    answer settles the reason."""
+    from tekla_harness.questions import Closure
+
+    _, work = ready
+    target = inject(work, producer, code)
+    by = {
+        "units": units_id(work),
+        "select": select_id(work),
+        "level": find(
+            questions_of(work, "structure-questions.json"), "level_finished_vs_structural", "set.dxf"
+        )["id"],
+    }[closer]
+    close(monkeypatch, work, {target: Closure(by, reason)})
+    reason_text = refused(work, target)
+    assert f"{by} is not a {needed} question" in reason_text, reason_text

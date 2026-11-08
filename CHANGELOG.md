@@ -381,10 +381,12 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
     questions.md labels the command as one the engineer runs and an agent never runs instead.
     `record_answer` takes `role` as a required keyword (no default; None is a usage error).
   - Review M2: `harness status` and `harness questions-md` accept a `lifecycle.closures` closure only when
-    its reason fits the closed question (not_selected / separate / other_file_set: grid-system
-    `grid_system_conflict`; units_answered: read-structure `grid_units_doubt`; rejected_systems_only:
-    read-structure `grid_*` except `grid_gate1_confirmation`), the question is not the reader's, and it names a live question with an
-    active engineer answer. A refused closure leaves the question open and is a `closures:` gate-1 reason.
+    its reason fits the closed question (not_selected / separate: grid-system `grid_system_conflict`;
+    units_answered: read-structure `grid_units_doubt`; rejected_systems_only: read-structure `grid_*`
+    except `grid_gate1_confirmation`; other_file_set: none yet, nothing derives it), the question is not
+    the reader's, and it names a live question of the code the reason needs (`grid_system_select`, or
+    `units_confirm_all` for units_answered) with an active engineer answer. A refused closure leaves the
+    question open and is a `closures:` gate-1 reason.
   - `harness ask --supplement Q-id --where --found --text [--file --sheet]` adds the reader's evidence to a
     producer's question in `reader-supplements.json` (key = target key, file, file sha256, where; prints
     `new` or `already_supplemented`); exit 2 for an unknown, obsolete or reader-owned target, a withdrawn

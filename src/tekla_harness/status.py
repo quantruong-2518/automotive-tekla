@@ -28,7 +28,8 @@ Tool wave 2:
   * a question `lifecycle.closures` closes (another answer or selection settles it) leaves the `blocking` and
     `blocking_open` counts and is listed in `gate1.closed` with its reason, but only when the closure keeps
     the contract (`check_closures`: its reason fits the closed question's producer and code, the question
-    is not the reader's, and it names a live question the engineer answered). A refused closure leaves the
+    is not the reader's, and it names a live question of the code the reason needs, which the engineer
+    answered; other_file_set is never accepted). A refused closure leaves the
     question open and is a gate-1 reason (`closures: ...`);
   * an active answer to a live gate-relevant question (producers intake, read-structure, grid-system,
     reader: every question gate 1 reads) that the engineer did not give (`answered_by_role` 'simulated', or
@@ -94,6 +95,13 @@ UNITS_DOUBT_CODE = "grid_units_doubt"
 GRID_FAMILY_PREFIX = "grid_"
 # confirming the grids stays a gate-1 step: dropping it is the engineer's decision (DESIGN, "NOT taken")
 NOT_REJECTABLE = frozenset({"grid_gate1_confirmation"})
+# the code of the question whose engineer answer a closure of each reason must name (check_closures)
+CLOSER_CODES = {
+    "not_selected": SELECT_CODE,
+    "separate": SELECT_CODE,
+    "rejected_systems_only": SELECT_CODE,
+    "units_answered": UNITS_CONFIRM_CODE,
+}
 # A printed answer command is the ENGINEER's step, never an agent's (review M1): it is always introduced by
 # ENGINEER_STEP and names `--role engineer` once, after --by (gate 1 counts the engineer's answers only).
 ENGINEER_STEP = "the engineer runs: "
@@ -422,8 +430,10 @@ def _by_engineer(answer: dict[str, Any]) -> bool:
 def _closure_fits(reason: str, entry: dict[str, Any]) -> bool:
     """The closure contract (DESIGN §1 5a-5d): which reason may close which producer's code."""
     producer, code = entry["producer"], entry["code"]
-    if reason in ("not_selected", "separate", "other_file_set"):  # 5a, 5d: a grid-system conflict
+    if reason in ("not_selected", "separate"):  # 5a: a grid-system conflict
         return producer == "grid-system" and code == CONFLICT_CODE
+    # other_file_set (5d) closes nothing: lifecycle never derives it (a cross-set conflict is not raised at
+    # all once the file sets are answered), so a closure claiming it fails closed
     if reason == "units_answered":  # 5c
         return producer == "structure" and code == UNITS_DOUBT_CODE
     if reason == "rejected_systems_only":  # 5b: a read-structure question citing grid families
@@ -436,8 +446,9 @@ def check_closures(
 ) -> tuple[dict[str, Closure], list[str]]:
     """The closures gate 1 accepts, and a gate-1 reason per refused one (review M2). A closure is accepted
     only when its reason fits the closed question (`_closure_fits`), the question is not the reader's (a
-    reader question closes only through its own answer), and it names a live question with an active answer
-    the engineer gave. A refused closure leaves its question open and blocking as before. Closures of keys
+    reader question closes only through its own answer), and it names a live question of the code the reason
+    needs (CLOSER_CODES) with an active answer the engineer gave. other_file_set is never accepted (nothing
+    derives it yet). A refused closure leaves its question open and blocking as before. Closures of keys
     that are unknown or obsolete in the registry are ignored (they block nothing either way)."""
     entries = registry["questions"]
     by_id = {e["id"]: (k, e) for k, e in entries.items()}
@@ -456,6 +467,8 @@ def check_closures(
             why = "it names no question whose answer closes it"
         elif closer is None or closer[1]["status"] == "obsolete":
             why = f"{c.question_id} is not a live question"
+        elif closer[1]["code"] != CLOSER_CODES[c.reason]:
+            why = f"{c.question_id} is not a {CLOSER_CODES[c.reason]} question"
         elif closer[0] not in active:
             why = f"{c.question_id} has no active answer"
         elif not _by_engineer(active[closer[0]]):
