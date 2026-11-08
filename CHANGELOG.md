@@ -369,6 +369,14 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
   `find-text --unassigned`, `harness ask --supplement` / `--withdraw-supplement`.
 
 ### Changed
+- Question lifecycle (tool wave 2, EVAL-2 fix 5):
+  - `grid_system_conflict` keeps its Q-id across a units answer and a select rerun: its key is built from
+    both sides' file, view and family ids and their shared labels; the system ids and the spacing
+    differences (in mm once units are answered) moved into the message. Existing answers to a conflict go
+    stale once (they never closed it). A conflict the `grid_system_select` answer settles carries
+    `closed_by` {select question id, not_selected | separate}, `conflicts[].question_id` names its question,
+    and a system's `conflict` flag stays only while one of its conflicts is open. `lifecycle.closures`
+    returns these closures from a fresh `grid-systems.json`.
 - `knowledge/font-encodings.csv`: the three seed rows are approved by the engineer (2026-11-07) after
   reading decoded samples: `VHARIAL.TTF` and `vntimeh.shx` = TCVN3, `vn_vni.shx` = VNI. Text in these
   fonts is now decoded instead of blocked by the legacy-font gate. The engineer also endorsed the

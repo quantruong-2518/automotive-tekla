@@ -132,6 +132,18 @@ def ready_world(base_world, tmp_path_factory) -> Path:
     return target
 
 
+def ready_gate1(work: Path) -> dict[str, Any]:
+    """gate1 of the ready world: no reason, and the conflict between the two separate buildings closed by the
+    select answer (lifecycle.closures, fix 5a)."""
+    gs = questions_of(work, "grid-system-questions.json")
+    closed = {
+        "id": find(gs, CONFLICT_CODE)["id"],
+        "reason": "separate",
+        "question_id": find(gs, SELECT_CODE)["id"],
+    }
+    return {"ready_for_gate1": True, "reasons": [], "closed": [closed]}
+
+
 @pytest.fixture
 def ready(ready_world, tmp_path) -> tuple[Path, Path]:
     target = tmp_path / "r"
@@ -527,7 +539,7 @@ def test_gate1_is_not_ready_with_every_reason_named(world):
 def test_gate1_is_ready_when_everything_is_answered_and_fresh(ready):
     _, work = ready
     status = build_status(work)
-    assert status["gate1"] == {"ready_for_gate1": True, "reasons": []}
+    assert status["gate1"] == ready_gate1(work)
     for p in status["producers"]:
         assert p["outputs"]["status"] == ("n/a" if p["producer"] == "reader" else "fresh")
     assert by_label(status)["callouts"]["questions"]["blocking_open"] == 0  # none raised by this world
@@ -596,7 +608,7 @@ def test_gate1_needs_axis_assignment_not_just_a_word_answer(ready):
             record_answer(work, fq["id"], "test answer", "me", values_for(fq), role="engineer")
     run_grid_systems(work)
     status = build_status(work)
-    assert status["gate1"] == {"ready_for_gate1": True, "reasons": []}
+    assert status["gate1"] == ready_gate1(work)
     assert all(
         not q["blocking"]
         for q in questions_of(work, "grid-system-questions.json")
@@ -630,7 +642,7 @@ def test_gate1_needs_the_level_questions_answered(ready):
     record_answer(work, "Q-901", "finished", "me", role="engineer")
     after = build_status(work)["gate1"]
     assert not [r for r in after["reasons"] if r.startswith("levels:")]
-    assert after == {"ready_for_gate1": True, "reasons": []}  # the added blocking questions are answered too
+    assert after == ready_gate1(work)  # the added blocking questions are answered too
 
 
 def test_gate1_needs_a_units_answer_for_every_probed_file(ready):
@@ -680,7 +692,7 @@ def test_words_in_the_select_answer_close_no_conflict_and_no_axis_question(world
     run_grid_systems(work)
     assert blocking_now(work) == {
         (SELECT_CODE, "S001"),
-        (CONFLICT_CODE, "S001"),
+        (CONFLICT_CODE, "othe"),  # where names both sides by file and family, no system id
         (SYSTEM_AXIS_CODE, "S001"),
         (SYSTEM_AXIS_CODE, "S002"),
     }
@@ -979,7 +991,7 @@ def test_a_closed_question_leaves_the_blocking_counts(world, monkeypatch):
 
 def test_no_closure_and_engineer_answers_keep_gate1_unchanged(ready):
     _, work = ready
-    assert build_status(work)["gate1"] == {"ready_for_gate1": True, "reasons": []}
+    assert build_status(work)["gate1"] == ready_gate1(work)
 
 
 def test_a_simulated_answer_does_not_open_gate1(ready):
@@ -1005,7 +1017,7 @@ def test_an_answer_without_a_role_counts_as_the_engineer_until_the_flag_flips(re
         a.pop("answered_by_role", None)
     (work / "answers.json").write_text(json.dumps(answers), encoding="utf-8")
     assert status_module.LEGACY_ANSWER_IS_ENGINEER is True
-    assert build_status(work)["gate1"] == {"ready_for_gate1": True, "reasons": []}
+    assert build_status(work)["gate1"] == ready_gate1(work)
     monkeypatch.setattr(status_module, "LEGACY_ANSWER_IS_ENGINEER", False)
     gate1 = build_status(work)["gate1"]
     assert gate1["ready_for_gate1"] is False

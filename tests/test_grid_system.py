@@ -20,10 +20,11 @@ from tekla_harness.grid_system import (
     consumed_answers_digest,
     grid_system_questions,
     render_grid_system_svg,
+    run_grid_systems,
 )
 from tekla_harness.grids import coordinate_string
 from tekla_harness.intake import dump_json
-from tekla_harness.questions import question_key
+from tekla_harness.questions import empty_registry, question_key
 from tekla_harness.schemas import validate
 
 REPO = Path(__file__).resolve().parents[1]
@@ -436,8 +437,9 @@ def test_two_structures_same_labels_different_spacings_are_separate(tmp_path, ex
     conflicts = [q for q in doc["questions"] if q["code"] == "grid_system_conflict"]
     assert len(conflicts) == 1
     q = conflicts[0]
-    assert q["blocking"] and "S001" in q["where"] and "S002" in q["where"]
-    assert "A-B" in q["found"] and "1-2" in q["found"]
+    assert q["blocking"] and "S001" in q["message"] and "S002" in q["message"]
+    assert "A-B" in q["message"] and "1-2" in q["message"]
+    assert q["where"] == "plans.dxf V001/F001 vs plans.dxf V003/F005"  # no positional system id
     # never averaged: each system keeps its own drawn spacings
     assert {d["coordinates"] for d in s2["directions"]} == {"0 3600 4800", "0 2*5400"}
 
@@ -873,7 +875,7 @@ def test_systems_outside_the_selection_raise_no_blocking_question(tmp_path, exam
     assert blocking_of(doc) == [
         ("grid_system_axis_unassigned", "S001"),
         ("grid_system_axis_unassigned", "S002"),
-        ("grid_system_conflict", "S001"),
+        ("grid_system_conflict", "plan"),
         ("grid_system_select", "S001"),
     ]
     select = answer_to(doc, "grid_system_select", {"systems": ["S001"]})
@@ -907,10 +909,149 @@ def test_a_conflict_closes_only_on_structured_values(tmp_path, example):
     )
     apart = build_grid_systems(work, answers=[separate])
     assert apart["conflicts"][0]["closed_by"] == "separate" and not apart["conflicts"][0]["blocking"]
-    assert ("grid_system_conflict", "S001") not in blocking_of(apart)
+    assert ("grid_system_conflict", "plan") not in blocking_of(apart)
     assert ("grid_system_axis_unassigned", "S002") in blocking_of(
         apart
     )  # a selected building still needs X/Y
+
+
+# --- question lifecycle: stable conflict ids, closures (tool wave 2, fix 5a) ---------------------------
+
+
+def _ledger_work(work: Path) -> Path:
+    """Give a Work folder an empty question registry, as `harness intake` would have left it."""
+    registry = empty_registry("demo-project")
+    (work / "question-registry.json").write_text(json.dumps(registry), encoding="utf-8")
+    return work
+
+
+def _set_answers(work: Path, answers: list[dict[str, Any]]) -> None:
+    doc = {"schema_version": "0.1", "project_id": "demo-project", "answers": answers}
+    assert validate("answers", doc) == []
+    (work / "answers.json").write_text(json.dumps(doc), encoding="utf-8")
+
+
+def _gs_questions(work: Path) -> list[dict[str, Any]]:
+    return json.loads((work / "grid-system-questions.json").read_text(encoding="utf-8"))["questions"]
+
+
+def _one(questions: list[dict[str, Any]], code: str) -> dict[str, Any]:
+    (q,) = [q for q in questions if q["code"] == code]
+    return q
+
+
+def test_a_conflict_keeps_its_id_across_a_units_answer_and_a_separate_rerun(tmp_path, example):
+    """EVAL-2 fix 5: the conflict key hashed the difference text, which switches to millimetres once the
+    units are answered, so the same conflict came back under a new Q-id."""
+    work = _ledger_work(_two_buildings(tmp_path, example))
+    run_grid_systems(work, svg=False)
+    first = _one(_gs_questions(work), "grid_system_conflict")
+    assert first["blocking"] and "closed_by" not in first
+    # identity: both sides' file and family ids and the shared labels; no system id, no difference text
+    ref = first["refs"][0]
+    assert ref["where"] == "plans.dxf V001/F001 vs plans.dxf V003/F005"
+    assert (
+        ref["found"]
+        == "V001/F001 x V003/F005: shared labels A B C; V001/F002 x V003/F006: shared labels 1 2 3"
+    )
+    assert "S001" in first["message"] and "A-B: 6000 vs 3600" in first["message"]
+
+    units = {
+        **ans("units_confirm_all", "plans.dxf", {"unit": "mm"}),
+        "key": "1" * 16,
+        "question_id": "Q-900",
+    }
+    _set_answers(work, [units])
+    run_grid_systems(work, svg=False)
+    in_mm = _one(_gs_questions(work), "grid_system_conflict")
+    assert (in_mm["id"], in_mm["key"]) == (first["id"], first["key"])
+    assert "A-B: 6000 vs 3600 mm" in in_mm["message"]
+
+    select = _one(_gs_questions(work), "grid_system_select")
+    separate = {
+        **ans("grid_system_select", None, {"systems": ["S001", "S002"], "separate": ["S001", "S002"]}),
+        "key": select["key"],
+        "question_id": select["id"],
+    }
+    _set_answers(work, [units, separate])
+    run_grid_systems(work, svg=False)
+    closed = _one(_gs_questions(work), "grid_system_conflict")
+    assert (closed["id"], closed["key"]) == (first["id"], first["key"])
+    assert not closed["blocking"]
+    assert closed["closed_by"] == {"question_id": select["id"], "reason": "separate"}
+    doc = json.loads((work / "grid-systems.json").read_text(encoding="utf-8"))
+    (conflict,) = doc["conflicts"]
+    assert conflict["question_id"] == first["id"] and conflict["closed_by"] == "separate"
+    # the relation stays a fact; the flag that asks for action clears
+    assert all("conflict" not in s["flags"] for s in doc["systems"])
+    assert doc["systems"][0]["relations"]["conflicts_with"] == ["S002"]
+
+
+def test_a_conflict_left_out_of_the_selection_keeps_its_id_and_is_closed(tmp_path, example):
+    work = _ledger_work(_two_buildings(tmp_path, example))
+    run_grid_systems(work, svg=False)
+    first = _one(_gs_questions(work), "grid_system_conflict")
+    select = _one(_gs_questions(work), "grid_system_select")
+    chosen = {
+        **ans("grid_system_select", None, {"systems": ["S001"]}),
+        "key": select["key"],
+        "question_id": select["id"],
+    }
+    _set_answers(work, [chosen])
+    run_grid_systems(work, svg=False)
+    closed = _one(_gs_questions(work), "grid_system_conflict")
+    assert closed["id"] == first["id"] and not closed["blocking"]
+    assert closed["closed_by"] == {"question_id": select["id"], "reason": "not_selected"}
+    doc = json.loads((work / "grid-systems.json").read_text(encoding="utf-8"))
+    assert "conflict" not in doc["systems"][0]["flags"]
+
+
+def test_an_open_conflict_keeps_the_conflict_flag(tmp_path, example):
+    work = _ledger_work(_two_buildings(tmp_path, example))
+    run_grid_systems(work, svg=False)
+    doc = json.loads((work / "grid-systems.json").read_text(encoding="utf-8"))
+    assert all("conflict" in s["flags"] for s in doc["systems"])
+    (conflict,) = doc["conflicts"]
+    assert conflict["question_id"] == _one(_gs_questions(work), "grid_system_conflict")["id"]
+
+
+def test_an_answer_to_an_old_style_conflict_key_goes_stale_once(tmp_path, example):
+    """Conflict keys changed with fix 5a: an existing answer to the old key goes stale on the first run and
+    the conflict is asked under a new id; the next run changes nothing."""
+    work = _ledger_work(_two_buildings(tmp_path, example))
+    files = json.loads((work / "inventory.json").read_text(encoding="utf-8"))["files"]
+    digest = files[0]["sha256"]
+    old_ref = {
+        "file": "plans.dxf",
+        "where": "S001 (plans.dxf, sheet model#01, V001/F001) vs S002 (plans.dxf, sheet model#03, V003/F005)",
+        "found": "A-B: 6000 vs 3600; B-C: 6000 vs 4800; 1-2: 7200 vs 5400; 2-3: 7200 vs 5400",
+        "sheet": "model#01",
+    }
+    old_key = question_key("grid_system_conflict", "plans.dxf", digest, [old_ref])
+    registry = empty_registry("demo-project")
+    registry["questions"][old_key] = {
+        "id": "Q-001",
+        "code": "grid_system_conflict",
+        "file": "plans.dxf",
+        "producer": "grid-system",
+        "status": "answered",
+        "first_seen_run": 1,
+        "last_seen_run": 1,
+        "blocking": True,
+        "file_sha256": digest,
+    }
+    registry["next_id"], registry["runs"] = 2, 1
+    (work / "question-registry.json").write_text(json.dumps(registry), encoding="utf-8")
+    old = {**ans("grid_system_conflict", "plans.dxf", {}), "key": old_key, "question_id": "Q-001"}
+    _set_answers(work, [old])
+    result = run_grid_systems(work, svg=False)
+    assert [a["question_id"] for a in result.summary["stale_answers"]] == ["Q-001"]
+    new = _one(_gs_questions(work), "grid_system_conflict")
+    assert new["id"] != "Q-001" and new["answer"] is None
+    answers_after = (work / "answers.json").read_bytes()
+    run_grid_systems(work, svg=False)
+    assert (work / "answers.json").read_bytes() == answers_after
+    assert _one(_gs_questions(work), "grid_system_conflict")["id"] == new["id"]
 
 
 def test_a_units_answer_the_drawing_contradicts_blocks_until_confirmed(tmp_path, example):

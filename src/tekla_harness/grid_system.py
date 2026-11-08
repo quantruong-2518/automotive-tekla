@@ -55,9 +55,11 @@ the SVGs go to `structure/grid-systems/<system_id>.svg` (the folder is cleared f
 `run_grid_systems(work_dir, svg=True)` is `harness grid-system`: it reads `answers.json` through the
 question ledger (active answers only), builds and validates the document, registers its questions as
 producer `grid-system` (`grid_system_questions`: one per (code, blocking flag, file); the project-level
-`grid_system_select` has file null and one ref per system), then writes the registry and answers, then
-`grid-systems.json`, `grid-system-questions.json` and the SVGs (cleared and rewritten, or only cleared
-with `svg=False`, so no `svg` path points at an old drawing).
+`grid_system_select` has file null and one ref per system; a `grid_system_conflict` is keyed by both sides'
+file, view and family ids and their shared labels only, so it keeps its id when units are answered or the
+selection changes, and one the select answer settles carries `closed_by`), then writes the registry and
+answers, then `grid-systems.json`, `grid-system-questions.json` and the SVGs (cleared and rewritten, or only
+cleared with `svg=False`, so no `svg` path points at an old drawing).
 """
 
 from __future__ import annotations
@@ -90,6 +92,7 @@ from tekla_harness.questions import (
     SELECT_CODE,
     SYSTEM_AXIS_CODE,
     UNIT_CODES,
+    Closure,
     QuestionsError,
     dump_json,
     load_ledger,
@@ -581,22 +584,45 @@ def _fits_system(cluster: list[_Member], s: _System) -> list[int] | None:
     return dirs
 
 
-def _system_conflict(a: _System, b: _System) -> tuple[_Fam, _Fam, list[str]] | None:
-    """First conflicting pair of full-member families (representatives first), with every difference of
-    that member pair; None when the systems never disagree on a shared label pair."""
+def _system_conflict(a: _System, b: _System) -> tuple[list[tuple[_Fam, _Fam]], list[str]] | None:
+    """The first pair of full members (representatives first) that disagree on a shared label pair: every
+    conflicting family pair of those two members (a's family first) and every difference; None when the
+    systems never disagree."""
     for ma in a.full():
         for mb in b.full():
             found: list[str] = []
-            first: tuple[_Fam, _Fam] | None = None
+            pairs: list[tuple[_Fam, _Fam]] = []
             for fa in ma.view.fams:
                 for fb in mb.view.fams:
                     c = _compare(fa, fb)
                     if c.relation == "conflict":
-                        first = first or (fa, fb)
+                        pairs.append((fa, fb))
                         found.extend(c.diffs)
-            if first is not None:
-                return first[0], first[1], found
+            if pairs:
+                return pairs, found
     return None
+
+
+def _side(f: _Fam) -> tuple[str, str, str]:
+    return (f.file, f.group_id, f.family_id)
+
+
+def _conflict_identity(pairs: list[tuple[_Fam, _Fam]]) -> tuple[str, str, _Fam]:
+    """where / found of a grid_system_conflict question and the family whose file and sheet it is filed
+    under. Built only from what does not change with an answer: the file, view and family ids of both
+    sides and the labels they share, sides in sorted order (system ids are positional, and the difference
+    text switches to millimetres once units are answered: both go into the message only)."""
+    ordered = sorted(
+        ((min(p, key=_side), max(p, key=_side)) for p in pairs), key=lambda p: (_side(p[0]), _side(p[1]))
+    )
+    first, second = ordered[0]
+    where = " vs ".join(f"{f.file} {f.group_id}/{f.family_id}" for f in (first, second))
+    found = "; ".join(
+        f"{x.group_id}/{x.family_id} x {y.group_id}/{y.family_id}: shared labels "
+        + " ".join(lbl for lbl in x.labels if lbl in y.pos)
+        for x, y in ordered
+    )
+    return where, found, first
 
 
 def _related(a: _System, b: _System) -> bool:
@@ -1099,7 +1125,7 @@ def build_grid_systems(
             warnings.append(f"the {SELECT_CODE} answer names {sid}, which is not a system of this run")
 
     ask = _Ask()
-    clashes: list[tuple[str, str, str, str]] = []
+    clashes: list[tuple[str, str, str, str, str]] = []  # where, found, file, sheet, what differs (message)
     pairs: list[tuple[str, str]] = []
     for i in range(len(systems)):
         for j in range(i + 1, len(systems)):
@@ -1107,17 +1133,17 @@ def build_grid_systems(
             if hit is not None:
                 docs[i]["relations"]["conflicts_with"].append(ids[j])
                 docs[j]["relations"]["conflicts_with"].append(ids[i])
-                fa, fb, diffs = hit
-                where = f"{_where(ids[i], fa)} vs {_where(ids[j], fb)}"
-                clashes.append((where, "; ".join(diffs[:20]), fa.file, fa.sheet))
+                fam_pairs, diffs = hit
+                where, found, filed = _conflict_identity(fam_pairs)
+                fa, fb = fam_pairs[0]
+                what = f"{_where(ids[i], fa)} vs {_where(ids[j], fb)}: {'; '.join(diffs[:20])}"
+                clashes.append((where, found, filed.file, filed.sheet, what))
                 pairs.append((ids[i], ids[j]))
             elif _related(systems[i], systems[j]):
                 docs[i]["relations"]["compatible_with"].append(ids[j])
                 docs[j]["relations"]["compatible_with"].append(ids[i])
     for k, s in enumerate(systems):
         docs[k]["relations"]["subset_of"] = [ids[i] for i in s.subset_of]
-        if docs[k]["relations"]["conflicts_with"]:
-            docs[k]["flags"] = sorted({*docs[k]["flags"], "conflict"})
 
     if docs:
         ask(
@@ -1134,7 +1160,7 @@ def build_grid_systems(
             "no grid system: no view has a usable grid family (see the grids documents' questions)"
         )
     conflicts: list[dict[str, Any]] = []
-    for (where, found, file, sheet), (a, b) in zip(clashes, pairs, strict=True):
+    for (where, found, file, sheet, what), (a, b) in zip(clashes, pairs, strict=True):
         closed_by = (
             "not_selected"
             if a not in selected or b not in selected
@@ -1144,7 +1170,7 @@ def build_grid_systems(
         )
         base = (
             "Two grid systems use the same axis labels with different spacings or order, so they are kept "
-            "apart. Are they different buildings or structures, or is one of them wrong?"
+            f"apart ({what}). Are they different buildings or structures, or is one of them wrong?"
         )
         if closed_by == "not_selected":
             message = (
@@ -1160,6 +1186,9 @@ def build_grid_systems(
                 f"them out, or with separate={a},{b} when they are different buildings, then rerun "
                 "harness grid-system."
             )
+            for sid in (a, b):  # the flag asks for action: only while a conflict of the system is open
+                d = docs[ids.index(sid)]
+                d["flags"] = sorted({*d["flags"], "conflict"})
         raised = ask(CONFLICT_CODE, message, where, found, file, sheet, blocking=closed_by is None)
         conflicts.append(
             {
@@ -1320,6 +1349,20 @@ def grid_system_questions(doc: dict[str, Any]) -> list[dict[str, Any]]:
     return sorted(out, key=lambda q: (not q["blocking"], q["code"], q["file"] or ""))
 
 
+def _link_conflicts(doc: dict[str, Any], questions: list[dict[str, Any]]) -> None:
+    """After the registry gave the ids: each conflict names its question id, and a conflict question the
+    grid_system_select answer closed carries `closed_by` {question_id of the select question, reason}. The
+    same closures are derived by lifecycle.closures for `harness status` and `harness questions-md`."""
+    id_of = {q["key"]: q["id"] for q in questions}
+    select_id = next((q["id"] for q in questions if q["code"] == SELECT_CODE), None)
+    by_key = {q["key"]: q for q in questions}
+    for c in doc["conflicts"]:
+        key = c["question_key"]
+        c["question_id"] = id_of.get(key) if key is not None else None
+        if key is not None and c["closed_by"] is not None and key in by_key:
+            by_key[key]["closed_by"] = Closure(select_id, c["closed_by"]).as_dict()
+
+
 @dataclass
 class GridSystemsResult:
     exit_code: int
@@ -1356,16 +1399,19 @@ def run_grid_systems(work_dir: str | Path, *, svg: bool = True) -> GridSystemsRe
         questions = ledger.sync("grid-system", grid_system_questions(doc), hashes)
     except QuestionsError as exc:
         raise GridSystemError(exc.exit_code, str(exc)) from exc
+    _link_conflicts(doc, questions)
     # the fingerprint of the answers AFTER sync: an answer to a question of this producer that is no longer
     # raised just went stale (it was not applied: answers bind by key), so a rerun is not reported as stale
     doc["answers_sha256"] = consumed_answers_digest(ledger.answers["answers"])
     qdoc = questions_document(doc["project_id"], questions)
-    problems = validate("intake", qdoc)
-    if problems:
-        details = "; ".join(f"{p.path or '/'}: {p.message}" for p in problems[:5])
-        raise GridSystemError(
-            EXIT_INVALID, f"grid-system-questions.json would be invalid, nothing written: {details}"
-        )
+    for name, schema, data in (
+        ("grid-systems.json", "grid-system", doc),
+        ("grid-system-questions.json", "intake", qdoc),
+    ):
+        problems = validate(schema, data)
+        if problems:
+            details = "; ".join(f"{p.path or '/'}: {p.message}" for p in problems[:5])
+            raise GridSystemError(EXIT_INVALID, f"{name} would be invalid, nothing written: {details}")
     try:
         texts = {"grid-systems.json": dump_json(doc), "grid-system-questions.json": dump_json(qdoc)}
         for text in texts.values():
