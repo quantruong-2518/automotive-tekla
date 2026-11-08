@@ -263,6 +263,12 @@ Sources: nuspecs/DLLs (PKG24/25/26), REL24-26, system requirements pages, releas
 17. Whether the CLI needs `CommitChanges` after read-only selection changes (the XML examples call it after `Select`).
 18. `GetObjectsByBoundingBox` is "NOT EXACT"; not to be used for lot queries (documented), confirm by test if ever needed.
 19. Can the CLI run while the Tekla UI is in a modal dialog or busy (macro running via `IsMacroRunning`)?
+20. (ADR-0012) A UDA filter on parts (`LOT`, `RUN_ID`, `SPEC_ID`) returns exactly the tagged objects, including just-inserted uncommitted ones.
+21. (ADR-0012) `GetIdentifierByGUID` (or the chosen lookup) tells "not found" apart from a failure, for a deleted, a never-existing and an uncommitted object.
+22. (ADR-0012) Beam start/end come back in global mm once the global `TransformationPlane` is set, whatever work plane the UI shows.
+23. (ADR-0012) Profile and material strings read back exactly as written by `Insert` (no normalisation such as `HEA300` → `HEA 300`); rotation read back in the same convention as written.
+24. (ADR-0012) A string UDA holds a 64-character `SPEC_ID` without truncation.
+25. (ADR-0012) Setting the three UDAs before `Insert` works and persists (would remove the intent window).
 
 ## Gaps
 

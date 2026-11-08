@@ -75,7 +75,8 @@ Adding a read subcommand requires updating `READ_SUBCOMMANDS` in
 6. Resume: re-running `build` for the same lot and `RUN_ID` skips every spec item whose
    `SPEC_ID` already exists in that lot and run, and builds only the missing ones. If an existing
    object differs from its spec item, stop with exit `1` and ask the engineer. Never create a
-   duplicate `SPEC_ID`.
+   duplicate `SPEC_ID`. Journal, snapshot, matching rules ("differs" includes kind, rotation and
+   class since 2026-11-08), lock and refusals: [ADR-0012](decisions/0012-run-journal-and-resume-planner.md).
 
 ## Open questions
 
