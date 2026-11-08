@@ -34,8 +34,8 @@
     "matching": { "type": "array", "description": "One entry per scanned file.", "items": { "$ref": "#/$defs/matching" } },
     "question_counts": {
       "type": "object",
-      "description": "Per question code, how many things are asked: variant groups, size conflicts, unparsed tables. Codes with none are absent.",
-      "propertyNames": { "enum": ["mark_notation_equivalence", "mark_size_conflict", "schedule_table_unparsed"] },
+      "description": "Per question code, how many things are asked: variant groups, size conflicts, unparsed tables, and for member_mark_prefix_meaning the distinct plan-mark prefixes over the project. Codes with none are absent.",
+      "propertyNames": { "enum": ["mark_notation_equivalence", "mark_size_conflict", "member_mark_prefix_meaning", "schedule_table_unparsed"] },
       "additionalProperties": { "type": "integer", "minimum": 1 }
     },
     "summary": { "$ref": "#/$defs/summary" },
@@ -204,7 +204,7 @@
         "space": { "type": "string", "minLength": 1, "description": "Space of the texts and lines ('model' also for a paper sheet that shows model space)." },
         "bbox": { "$ref": "#/$defs/bbox" },
         "detection": { "enum": ["line_grid", "text_alignment"] },
-        "anchor_entry_id": { "$ref": "#/$defs/entry_id", "description": "The header keyword, or (header-blocked tables) the mark-shaped text the grid was found from." },
+        "anchor_entry_id": { "$ref": "#/$defs/entry_id", "description": "The header keyword, or the mark-shaped text the grid was found from (header-blocked tables, and line-grid tables with no header keyword)." },
         "header_blocked": { "type": "boolean" },
         "header_block_reasons": { "type": "array", "items": { "type": "string" } },
         "blocked_columns": {
@@ -233,7 +233,7 @@
               "index": { "type": "integer", "minimum": 0 },
               "x0": { "type": "number" },
               "x1": { "type": "number" },
-              "role": { "enum": ["mark", "b", "h", "bxh", null], "description": "From an allowed header keyword; null otherwise." }
+              "role": { "enum": ["mark", "b", "h", "bxh", null], "description": "From an allowed header keyword, or \"mark\" for the column a keyword-less table was found from (its mark text); null otherwise." }
             }
           }
         },

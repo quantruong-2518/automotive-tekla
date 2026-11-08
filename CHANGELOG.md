@@ -367,6 +367,9 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
   once); `harness ask` gives `member_mark_prefix_meaning` to marks and `file_set_relation` to intake;
   `read_dxf.measure_dimension`. Not implemented yet (exit 3): `harness dimensions`, `sheet-text` /
   `find-text --unassigned`, `harness ask --supplement` / `--withdraw-supplement`.
+- `marks` schema: `question_counts` accepts `member_mark_prefix_meaning` (tool wave 2, D6: marks asks the
+  plan-mark prefix question instead of callouts); `anchor_entry_id` and `columns.role` descriptions cover
+  line-grid tables found from a mark text with no header keyword. `$id` stays `0.1`.
 
 ### Changed
 - Question lifecycle (tool wave 2, EVAL-2 fix 5):

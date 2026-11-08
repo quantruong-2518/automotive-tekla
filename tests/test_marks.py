@@ -191,7 +191,7 @@ def test_example_is_valid(example):
         lambda d: d["plan_marks"][0].update(confidence="high"),
         lambda d: d["plan_marks"][0].update(form="title"),  # a title needs its member word
         lambda d: next(t for t in d["tables"] if t["header_blocked"]).update(mark_column=0),
-        lambda d: d["question_counts"].update(member_mark_prefix_meaning=1),
+        lambda d: d["question_counts"].update(callout_ambiguous=1),  # another producer's code
     ],
 )
 def test_schema_rejects_damaged_documents(example, damage):
