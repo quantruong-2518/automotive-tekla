@@ -562,6 +562,10 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
     a simulated or role-less answer leaves it in `blocking_open` / `blocking_open_ids`, out of `answered`,
     and in questions.md section 2, where the answer is shown labelled "(mô phỏng)" or "(chưa rõ vai
     trò)". Every non-engineer answer questions.md prints carries that label.
+  - questions.md no longer says a grid-system conflict was "closed by the grid_system_select answer"
+    when it is only non-blocking while the file sets are asked: it says the conflict waits for the
+    `file_set_relation` question named in grid-systems.json `file_sets`. Any other open, non-blocking
+    conflict shows how to close it.
 - `guard_tekla_write.py` now exits 2 (the blocking code) on any internal error instead of
   relying on an undocumented `onFailure` setting; the setting was removed.
 - `guard_tekla_write.py` no longer blocks commands that only mention `tekla-cli` as data

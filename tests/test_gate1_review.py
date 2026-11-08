@@ -3,6 +3,7 @@
 1. Only the engineer's answer settles a question of a gate producer (intake, read-structure, grid-system,
    reader): a simulated or role-less answer leaves it open in `harness status` and in questions.md, where
    the answer is shown with its role.
+2. A grid-system conflict waiting for the file-set answer is pending, not closed, in questions.md.
 
 The two-sheet world is test_status.py's; the one-grid files are built here (one grid per file, so two
 files with the same labels and different spacings conflict across files).
@@ -215,3 +216,44 @@ def test_an_answered_line_names_a_non_engineer_role():
         "mô phỏng" not in _answered_lines([engineer])[0] and "vai trò" not in _answered_lines([engineer])[0]
     )
     assert item("structure", "simulated").is_open and not item("structure", "engineer").is_open
+
+
+# --- 2. a conflict pending on the file sets is not "closed" -------------------------------------------
+
+
+def test_a_conflict_pending_on_the_file_sets_says_so_and_not_that_it_closed(two_files):
+    """Review probe p2b: questions.md said the pending conflict was closed by the select answer."""
+    _, work = two_files
+    doc = load(work / "grid-systems.json")
+    assert doc["file_sets"]["status"] == "pending"
+    (conflict,) = doc["conflicts"]
+    assert conflict["blocking"] is False and conflict["closed_by"] is None
+    text = render_questions_md(work).text
+    block = block_of(text, conflict["question_id"])
+    assert f"##### {conflict['question_id']} " in sections(text)["3"]
+    file_set = doc["file_sets"]["question_id"]
+    assert f"đang chờ câu {file_set} ({code_span('file_set_relation')})" in block, block
+    assert "đã đóng" not in block and "không còn chặn" not in block
+    assert MD_ENGINEER in block
+
+
+def test_a_non_blocking_conflict_with_no_closure_and_no_pending_file_set_shows_how_to_close(two_files):
+    """Fail closed: without a closure or a pending file set, the block says how to close it."""
+    _, work = two_files
+    doc = load(work / "grid-systems.json")
+    doc["file_sets"]["status"] = "answered"  # the pending reason is gone; nothing closed the conflict
+    (work / "grid-systems.json").write_text(json.dumps(doc), encoding="utf-8")
+    block = block_of(render_questions_md(work).text, doc["conflicts"][0]["question_id"])
+    assert "đang chờ" not in block and "đã đóng" not in block and "không còn chặn" not in block
+    assert "- **Cách đóng" in block and "Trạng thái" not in block
+
+
+def test_a_conflict_the_select_answer_closed_is_listed_as_closed(ready):
+    _, work = ready
+    conflict = find(questions_of(work, "grid-system-questions.json"), CONFLICT_CODE)
+    (line,) = [
+        ln
+        for ln in sections(render_questions_md(work).text)["4"].splitlines()
+        if ln.startswith(f"- {conflict['id']} ")
+    ]
+    assert "đã đóng" in line and code_span("separate") in line

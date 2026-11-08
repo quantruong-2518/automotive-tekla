@@ -15,7 +15,9 @@ Sources (all read-only):
     engineer's is labelled "(mô phỏng)" or "(chưa rõ vai trò)";
   * `harness status` (`status.build_status`): the gate-1 reasons and the per-step counts;
   * `grid-systems.json` + its SVGs and `structure-summary.json`: the proposals shown next to the questions
-    they inform. A proposal is always labelled "ĐỀ XUẤT — chưa xác nhận" and is never an answer;
+    they inform. A proposal is always labelled "ĐỀ XUẤT — chưa xác nhận" and is never an answer. A
+    grid_system_conflict that grid-systems.json left non-blocking with no closure while its `file_sets`
+    are pending is shown as waiting for that file_set_relation question, never as closed;
   * `status.closure_state` (the closures `harness status` accepts): a closed question is not
     open; it is listed in section 4 with why it closed. `supplements.load_supplements`: the reader's active
     supplements are printed under the question they supplement, verbatim.
@@ -162,6 +164,8 @@ class Context:
     grids_state: str = "missing"  # status of the grid-system outputs: fresh | stale | missing
     families: dict[str, dict[str, Any]] = field(default_factory=dict)  # file -> structure-summary grids
     select_ids: list[str] = field(default_factory=list)  # ids of the grid_system_select question(s)
+    conflicts: dict[str, dict[str, Any]] = field(default_factory=dict)  # grid-systems.json conflicts by key
+    pending_file_set: str | None = None  # id of the file_set_relation question grid-systems.json waits for
     unit_answers: list[dict[str, Any]] = field(default_factory=list)  # active answers with a unit value
 
 
@@ -273,7 +277,12 @@ def _load_context(work: Path, out_dir: Path, status: dict[str, Any]) -> Context:
     ctx.grids_state = grid_step["outputs"]["status"]
     grid_path = work / "grid-systems.json"
     if grid_path.is_file():
-        ctx.systems = _read_valid(grid_path, "grid-system")["systems"]
+        grid_doc = _read_valid(grid_path, "grid-system")
+        ctx.systems = grid_doc["systems"]
+        ctx.conflicts = {c["question_key"]: c for c in grid_doc["conflicts"] if c["question_key"]}
+        file_sets = grid_doc.get("file_sets")
+        if file_sets is not None and file_sets["status"] == "pending":
+            ctx.pending_file_set = file_sets["question_id"]
     summary_path = work / "structure-summary.json"
     if summary_path.is_file():
         summary = _read_valid(summary_path, "intake", "structure_summary")
@@ -449,6 +458,18 @@ def _need_impact(item: Item) -> tuple[str, str, bool]:
     return row[1], row[2], True
 
 
+def pending_file_set(item: Item, ctx: Context) -> str | None:
+    """The file_set_relation question id an open conflict waits for: grid-systems.json left it non-blocking
+    with no closure while that question is pending. None otherwise: an open conflict is never shown as
+    closed here (a real closure moves it to section 4), it says how to close it."""
+    conflict = ctx.conflicts.get(item.key)
+    if item.code != CONFLICT_CODE or item.blocking or conflict is None:
+        return None
+    if conflict["blocking"] or conflict["closed_by"] is not None:
+        return None
+    return ctx.pending_file_set
+
+
 def question_lines(item: Item, ctx: Context, level: str = "#####") -> list[str]:
     need, impact, _ = _need_impact(item)
     label = "CHẶN" if item.blocking else "không chặn"
@@ -493,9 +514,14 @@ def question_lines(item: Item, ctx: Context, level: str = "#####") -> list[str]:
             + block[0].replace(" — trả lời", "; câu trả lời hiện có", 1)
         )
         lines += block[1:]
-    if item.code == CONFLICT_CODE and not item.blocking:
+    pending = pending_file_set(item, ctx)
+    if pending is not None:
+        rerun = code_span("harness grid-system " + WORK_PLACEHOLDER)
         lines.append(
-            f"- **Trạng thái:** không còn chặn: câu trả lời {code_span(SELECT_CODE)} đã đóng xung đột này."
+            f"- **Trạng thái:** chưa chặn, đang chờ câu {pending} ({code_span(FILE_SET_CODE)}): hai hệ lưới "
+            "nằm ở hai file bản vẽ khác nhau, có thể thuộc hai dự án riêng. Kỹ sư trả lời câu "
+            f"{pending} trước (kỹ sư tự chạy, tác tử không chạy thay), rồi chạy lại {rerun}; sau đó hai hệ "
+            "chỉ được so với nhau khi cùng một bộ file."
         )
     elif item.code == CONFLICT_CODE:  # `harness answer` refuses it: it closes only through the select answer
         select = ", ".join(ctx.select_ids) or code_span(SELECT_CODE)
