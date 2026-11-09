@@ -109,8 +109,8 @@ Severity: `critical` · `major` · `minor`.
 
 - Source: independent design review of slice S1b (ADR-0010 Amendment 1), 2026-11-08
 - Classification: safety layer · Severity: minor (the receipt is not a gate; gate approval stays
-  with the engineer) · Status: **implemented** (approved by the engineer 2026-11-08; branch
-  `feat/rti-0008-receipt-guard`)
+  with the engineer) · Status: **done** (Unreleased; approved by the engineer 2026-11-08; PR #8, master
+  `3307060`; a live check in a new Claude Code session is still to do)
 - Root cause: the receipt is a plain JSON file holding the spec's SHA-256. Any agent with file
   write access (`builder` has Write) can create a receipt for a spec that was never validated,
   and the CLI cannot tell. Signing adds nothing while the key sits on the same machine.
@@ -143,8 +143,8 @@ Severity: `critical` · `major` · `minor`.
 ## RTI-0009 — Write guard reads a multi-line command as one command
 
 - Source: independent review of RTI-0008, 2026-11-08
-- Classification: tooling (safety layer) · Severity: critical · Status: **implemented**
-  (branch `feat/rti-0008-receipt-guard`; awaiting engineer approval with RTI-0008)
+- Classification: tooling (safety layer) · Severity: critical · Status: **done**
+  (Unreleased; merged by the engineer with RTI-0008 in PR #8, 2026-11-09)
 - Root cause: `_split` in `guard_tekla_write.py` let `shlex` treat a newline as whitespace, so
   `cd projects/p` + newline + `tekla-cli build …` became one segment whose command word `cd`
   is inert, and the write passed for any agent. The `Bash(tekla-cli build *)` ask rule still

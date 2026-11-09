@@ -10,6 +10,8 @@ the guard hook, permissions and schemas can rely on it. Open API facts behind it
 - Target: Tekla Structures **2024** (Diamond). NuGet `Tekla.Structures.Model` and
   `Tekla.Structures.Catalogs` **2024.0.4** (the pin does not depend on the service pack),
   `net48`, `x64`. Later versions (2025, 2026) are separate builds, each verified on its own.
+  Under review (engineer, 2026-11-09): the company runs Tekla **2026** Diamond; the target is
+  confirmed when Step 3 resumes after Steps 1–2 ([roadmap](roadmap.md), Step 3).
 - The executable is named **`tekla-cli.exe`** (`AssemblyName` `tekla-cli`). Agents call it only
   by that name, never through `dotnet run`, `dotnet exec` or `dotnet watch`. The guard hook
   denies those routes outside `builder` (RTI-0006).
