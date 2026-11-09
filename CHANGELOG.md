@@ -680,6 +680,18 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
       the question on the engineer's `no_grid=yes` only; a simulated one closes nothing. The question's
       message, the `grid systems:` reasons, `harness answer --help` and `harness questions-md` (a "Hoặc"
       line with the command, in Vietnamese) print the option.
+    - Fix (review C1, EVAL-3 b1): `harness marks` no longer calls a partial family complete. A heading
+      that lists marks (`dẦm ct-1,ct-2`, `CỘT C1, C2, C3`, `DẦM D1 & D2`, `DETAIL OF CP1 & CP2`) gives one
+      heading per mark when every item after a `,` or `&` is a whole mark of the same family; before, only
+      the first was read (290: `CT` = `ct-1` alone, complete). A list in shorthand (286 `dẦm d2-4, 5`,
+      `dẦm d2, 3, 4, 5 , 6, 7, m-12`) is never expanded and names no mark (no false `d2`); it is listed in
+      `warnings` with its entry id and keeps the families it may name incomplete. `complete` now needs a
+      parsed schedule, or detail headings and plain plan marks that name the same keys (headings alone
+      list the drawn details, not every member), and no blocked plain text anywhere in the file (a blocked
+      text may be a heading). Known set: 290 `CT` = ct-1, ct-2; complete sets 8 → 3 (433 `C`, Steel_02
+      `C`, `MB`); 286 loses 7 heading matches `d2-4` … `dm-4` (they came only from shorthand lists; now
+      plan-only) and the false schedule-only `d2`; 290 gains schedule-only `d2`, `d3`, `d4` (from
+      `dẦm d1 , d2`, `dẦm d5 , d4 , d3`) and 3 notation-variant groups.
 
 ### Changed
 - Question lifecycle (tool wave 2, EVAL-2 fix 5):

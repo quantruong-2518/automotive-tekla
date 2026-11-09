@@ -77,9 +77,12 @@ viewports: the table is in the texts' own coordinates, `space` says which):
 Matching, per file, only between allowed plan marks and allowed mark-column cells of tables whose header
 is not blocked, and (tool wave 3, a4) RC detail headings as a second source: a title-form plan mark
 (`DẦM D1 (SL= 02)`, `ĐÀI CỌC ĐC2`) and an English `DETAIL OF/ON <mark>` line are headings, never the plan
-side of the comparison. `compared_with` says what matched or was compared (schedule when a row exists,
-else detail_heading), `detail_headings` lists the headings of a key and `matching[].detail_headings` counts
-them. Keys: NFC + casefold + all whitespace removed. Equal keys match; nothing else ever does.
+side of the comparison. A heading list (`DẦM D1, D2`, `DETAIL OF CP1 & CP2`) is one heading per mark when
+every item is a whole mark of the same family; a list in shorthand (`dẦm d2-4, 5`) names no mark and is
+listed in `warnings` (review C1). `compared_with` says what matched or was compared (schedule when a row
+exists, else detail_heading), `detail_headings` lists the headings of a key and
+`matching[].detail_headings` counts them. Keys: NFC + casefold + all whitespace removed. Equal keys
+match; nothing else ever does.
 Two keys with the same structure (prefix, the numbers as integers, suffix, compared case-insensitively)
 but different keys, e.g. `D1.1` / `D1-1` or `C-01` / `C1`, are a `notation_variant`: never merged, asked
 once per file as `mark_notation_equivalence` (blocking for lot specs). A matched plan mark with a section
@@ -323,36 +326,82 @@ def parse_mark(text: str, case_uncertain: bool = False, *, footing_m: bool = Fal
     return _mark_from(m, t)
 
 
-def parse_title(text: str, case_uncertain: bool = False) -> tuple[str, Mark] | None:
-    """(member word as written, mark) when the line is '<member word> <mark> ...'; else None."""
+# review C1: a heading may name several marks, 'DẦM D1, D2', 'dẦm ct-1,ct-2', 'DETAIL OF CP1 & CP2'
+_LIST_SEP = re.compile(r"\s*[,&]\s*")
+# a list item: a whole mark (with an optional section); the last one may carry a tail such as '(sl= 07)'
+_LIST_ITEM = re.compile(_BODY + _SIZE + r"(?=$|[\s,;:&(])")
+
+
+def _heading_marks(rest: str, case_uncertain: bool) -> list[Mark] | None:
+    """The marks a heading names after its member word / 'DETAIL OF' (`rest`): None when it starts with no
+    mark; one mark, or a list read as written when every item after a ',' or '&' is a whole mark of the
+    same family (prefix, casefolded); [] for a list in shorthand ('d2-4, 5', 'd2, 3, 4', another family
+    in the list): never expanded, and its first mark is not taken either ('d2, 3' means no mark 'd2'). A
+    word after the comma that has no mark shape ('DẦM D1, TẦNG 2') ends the heading, not a list."""
+    head = _MARK_HEAD.match(rest)
+    if head is None or scan_line(rest[: head.end()], case_uncertain):
+        return None
+    first = _mark_from(head, rest[: head.end()])
+    if first is None:
+        return None
+    marks, pos = [first], head.end()
+    while (sep := _LIST_SEP.match(rest, pos)) is not None:
+        tail = rest[sep.end() :]
+        item = _LIST_ITEM.match(tail)
+        if item is None:
+            if tail[:1].isdigit():
+                return []  # shorthand: a bare number names a mark only by inference
+            break  # prose after the separator
+        mark = None if scan_line(tail[: item.end()], case_uncertain) else _mark_from(item, tail)
+        if mark is None or mark.prefix.casefold() != first.prefix.casefold():
+            return []
+        marks.append(mark)
+        pos = sep.end() + item.end()
+    return marks
+
+
+def heading_families(text: str) -> set[str]:
+    """Families (prefix, upper-cased) of the mark-shaped tokens of a heading line: what a shorthand list
+    may name."""
+    return {m["prefix"].upper() for m in _LIST_ITEM.finditer(text) if m["prefix"] not in _SPACING_LETTERS}
+
+
+def parse_title_marks(text: str, case_uncertain: bool = False) -> tuple[str, list[Mark]] | None:
+    """(member word as written, marks) when the line is '<member word> <mark> ...' (see `_heading_marks`:
+    [] for a list in shorthand); else None."""
     t = " ".join(unicodedata.normalize("NFC", text).split())
     m = _TITLE.match(t)
     if m is None:
         return None
-    rest = m["rest"]
-    head = _MARK_HEAD.match(rest)
-    if head is None or scan_line(rest[: head.end()], case_uncertain):
+    marks = _heading_marks(m["rest"], case_uncertain)
+    return None if marks is None else (m["word"], marks)
+
+
+def parse_title(text: str, case_uncertain: bool = False) -> tuple[str, Mark] | None:
+    """(member word as written, mark) when the line is '<member word> <mark> ...' naming exactly one mark;
+    else None (a heading list is read by `parse_title_marks`)."""
+    found = parse_title_marks(text, case_uncertain)
+    if found is None or len(found[1]) != 1:
         return None
-    mark = _mark_from(head, rest[: head.end()])
-    return None if mark is None else (m["word"], mark)
+    return found[0], found[1][0]
 
 
 # an English detail heading without a member word: 'DETAIL OF CP1', 'DETAIL ON AB-20B' (161)
 _DETAIL_OF = re.compile(r"^detail\s+(?:of|on)\s+(?P<rest>\S.*)$", re.IGNORECASE)
 
 
-def parse_detail_of(text: str, case_uncertain: bool = False) -> Mark | None:
-    """The mark of a 'DETAIL OF <mark> ...' / 'DETAIL ON <mark> ...' line; else None. Only a heading (a
-    second comparison source), never a plan mark: it has no member word."""
+def parse_detail_of_marks(text: str, case_uncertain: bool = False) -> list[Mark] | None:
+    """The marks of a 'DETAIL OF <mark> ...' / 'DETAIL ON <mark> ...' line (a list as `_heading_marks`);
+    else None. Only a heading (a second comparison source), never a plan mark: it has no member word."""
     t = " ".join(unicodedata.normalize("NFC", text).split())
     m = _DETAIL_OF.match(t)
-    if m is None:
-        return None
-    rest = m["rest"]
-    head = _MARK_HEAD.match(rest)
-    if head is None or scan_line(rest[: head.end()], case_uncertain):
-        return None
-    return _mark_from(head, rest[: head.end()])
+    return None if m is None else _heading_marks(m["rest"], case_uncertain)
+
+
+def parse_detail_of(text: str, case_uncertain: bool = False) -> Mark | None:
+    """The mark of a 'DETAIL OF <mark>' line naming exactly one mark; else None."""
+    marks = parse_detail_of_marks(text, case_uncertain)
+    return marks[0] if marks is not None and len(marks) == 1 else None
 
 
 def _header_text(text: str) -> str:
@@ -770,6 +819,9 @@ class _FileOut:
     unparsed: list[dict[str, Any]] = field(default_factory=list)
     blocked: list[dict[str, Any]] = field(default_factory=list)
     headings: list[dict[str, Any]] = field(default_factory=list)  # internal: detail headings (a4)
+    # internal (review C1): heading lists in shorthand, (entry id, line, families it may name)
+    shorthand: list[tuple[str, str, set[str]]] = field(default_factory=list)
+    blocked_text: bool = False  # internal (review C1): a plain text (no table cell) the gate blocks
 
 
 def _space_tolerances(entries: list[dict[str, Any]]) -> dict[str, float]:
@@ -1026,28 +1078,39 @@ def _scan_file(
                 )
     footing = footing_m_labels([t.entry for t in texts], sheet_of)
     for t in texts:
-        if t.id in in_table or t.block is not None:
+        if t.id in in_table:
+            continue
+        if t.block is not None:
+            out.blocked_text = True  # may be a heading naming members of any family (`_mark_sets`)
             continue
         sh = sheet_of.get(t.id)
-        found = _plan_marks(loaded.rel, sh, t.entry, t.id in footing)
+        found = _plan_marks(loaded.rel, sh, t.entry, t.id in footing, out.shorthand)
         out.plan.extend(found)
-        out.headings.extend(_detail_of_headings(sh, t.entry, {p["display_text"] for p in found}))
+        out.headings.extend(
+            _detail_of_headings(sh, t.entry, {p["display_text"] for p in found}, out.shorthand)
+        )
     return out, grid_info
 
 
 def _detail_of_headings(
-    sheet: dict[str, Any] | None, entry: dict[str, Any], plan_lines: set[str]
+    sheet: dict[str, Any] | None,
+    entry: dict[str, Any],
+    plan_lines: set[str],
+    shorthand: list[tuple[str, str, set[str]]],
 ) -> list[dict[str, Any]]:
-    """Detail headings of an entry that are no plan mark ('DETAIL OF CP1'); title-form plan marks are
-    headings too (`_match_file`)."""
+    """Detail headings of an entry that are no plan mark ('DETAIL OF CP1', every mark of 'DETAIL OF CP1 &
+    CP2'); title-form plan marks are headings too (`_match_file`). A list in shorthand goes to
+    `shorthand`."""
     out = []
     cu = entry["decode"]["case_uncertain"]
     for line in entry["display_text"].split("\n"):
         text = " ".join(line.split())[:LINE_CHARS]
         if not text or text in plan_lines:
             continue
-        mark = parse_detail_of(line, cu)
-        if mark is not None:
+        marks = parse_detail_of_marks(line, cu)
+        if marks == []:
+            shorthand.append((entry["id"], text, heading_families(text)))
+        for mark in marks or ():
             out.append(
                 {
                     "key": mark.key,
@@ -1065,8 +1128,14 @@ def _detail_of_headings(
 
 
 def _plan_marks(
-    rel: str, sheet: dict[str, Any] | None, entry: dict[str, Any], footing_m: bool = False
+    rel: str,
+    sheet: dict[str, Any] | None,
+    entry: dict[str, Any],
+    footing_m: bool = False,
+    shorthand: list[tuple[str, str, set[str]]] | None = None,
 ) -> list[dict[str, Any]]:
+    """Plan marks of an entry, one per line, and one per mark of a title list ('DẦM D1, D2'); a title list
+    in shorthand names no mark and goes to `shorthand`."""
     out = []
     cu = entry["decode"]["case_uncertain"]
     for line in entry["display_text"].split("\n"):
@@ -1074,40 +1143,51 @@ def _plan_marks(
             continue
         title = None
         mark = parse_mark(line, cu, footing_m=footing_m)
+        found_marks = [mark] if mark is not None else []
         if mark is None:
-            found = parse_title(line, cu)
+            found = parse_title_marks(line, cu)
             if found is None:
                 continue
-            title, mark = found
-        conf = _confidence("medium", entry, ())
-        flags = list(entry["flags"])
-        if cu:
-            flags.append("case_uncertain")
-        doc: dict[str, Any] = {
-            "id": "",
-            "file": rel,
-            "sheet": None if sheet is None else sheet["sheet_id"],
-            "sheet_number": None if sheet is None else printed_number(sheet),
-            "space": entry["space"],
-            "text_ref": {"file": rel, "entry_id": entry["id"]},
-            "display_text": " ".join(line.split())[:LINE_CHARS],
-            "position": {"x": entry["position"]["x"], "y": entry["position"]["y"]},
-            "mark": mark.text,
-            "key": mark.key,
-            "lexical": mark.lexical(),
-            "size": mark.size,
-            "form": "title"
-            if title
-            else ("with_size" if mark.size else ("sub_number" if len(mark.numbers) > 1 else "plain")),
-            "title_member_word": None if title is None else {"word": title, "confidence": conf},
-            "in_callouts": title is None and mark.size is None and member_mark(line, cu) is not None,
-            "confidence": conf,
-            "flags": flags,
-            "provenance": _provenance(rel, sheet, entry),
-        }
-        doc["_structure"] = mark.structure
-        out.append(doc)
+            title, found_marks = found
+            if not found_marks and shorthand is not None:
+                text = " ".join(line.split())[:LINE_CHARS]
+                shorthand.append((entry["id"], text, heading_families(text)))
+        out.extend(_plan_doc(rel, sheet, entry, line, m, title) for m in found_marks)
     return out
+
+
+def _plan_doc(
+    rel: str, sheet: dict[str, Any] | None, entry: dict[str, Any], line: str, mark: Mark, title: str | None
+) -> dict[str, Any]:
+    cu = entry["decode"]["case_uncertain"]
+    conf = _confidence("medium", entry, ())
+    flags = list(entry["flags"])
+    if cu:
+        flags.append("case_uncertain")
+    doc: dict[str, Any] = {
+        "id": "",
+        "file": rel,
+        "sheet": None if sheet is None else sheet["sheet_id"],
+        "sheet_number": None if sheet is None else printed_number(sheet),
+        "space": entry["space"],
+        "text_ref": {"file": rel, "entry_id": entry["id"]},
+        "display_text": " ".join(line.split())[:LINE_CHARS],
+        "position": {"x": entry["position"]["x"], "y": entry["position"]["y"]},
+        "mark": mark.text,
+        "key": mark.key,
+        "lexical": mark.lexical(),
+        "size": mark.size,
+        "form": "title"
+        if title
+        else ("with_size" if mark.size else ("sub_number" if len(mark.numbers) > 1 else "plain")),
+        "title_member_word": None if title is None else {"word": title, "confidence": conf},
+        "in_callouts": title is None and mark.size is None and member_mark(line, cu) is not None,
+        "confidence": conf,
+        "flags": flags,
+        "provenance": _provenance(rel, sheet, entry),
+    }
+    doc["_structure"] = mark.structure
+    return doc
 
 
 def _schedule_mark(cell: dict[str, Any], entry: dict[str, Any]) -> tuple[Mark | None, str]:
@@ -1628,6 +1708,8 @@ def extract_marks(
     unparsed: list[dict[str, Any]] = []
     blocked: list[dict[str, Any]] = []
     headings: dict[str, list[dict[str, Any]]] = {}
+    shorthand: dict[str, set[str]] = {}  # file -> families a heading list in shorthand may name
+    blocked_text: set[str] = set()  # files with a plain text the gate blocks
     for row in sorted(inv.doc["files"], key=lambda r: r["path"]):
         if row["format"] not in ("dwg", "dxf"):
             continue
@@ -1664,6 +1746,16 @@ def extract_marks(
             b["table"] = out.tables[b.pop("_t")]["id"]
         plan.extend(out.plan)
         headings[loaded.rel] = out.headings
+        shorthand[loaded.rel] = set()
+        for entry_id, text, families in out.shorthand:
+            shorthand[loaded.rel] |= families
+            warnings.append(
+                f"{loaded.rel}: {entry_id} '{text}': a heading list in shorthand (not every item is a whole "
+                f"mark of one family) is not expanded and names no mark; mark sets not complete: "
+                f"{', '.join(sorted(families))}"
+            )
+        if out.blocked_text:
+            blocked_text.add(loaded.rel)
         tables.extend(out.tables)
         unparsed.extend(out.unparsed)
         blocked.extend(out.blocked)
@@ -1678,8 +1770,16 @@ def extract_marks(
         mine_t = [t for t in tables if t["file"] == f["path"]]
         match = _match_file(f["path"], mine_p, mine_t, headings.get(f["path"], []))
         matching.append(match)
-        uncertain = _may_hide_rows(f, mine_t)
-        mark_sets += _mark_sets(f["path"], mine_p, mine_t, headings.get(f["path"], []), match, uncertain)
+        uncertain = _may_hide_rows(f, mine_t) or f["path"] in blocked_text
+        mark_sets += _mark_sets(
+            f["path"],
+            mine_p,
+            mine_t,
+            headings.get(f["path"], []),
+            match,
+            uncertain,
+            shorthand.get(f["path"], set()),
+        )
     for p in plan:
         p.pop("_structure", None)
     for t in tables:
@@ -1725,21 +1825,27 @@ def _mark_sets(
     detail_of: list[dict[str, Any]],
     match: dict[str, Any],
     uncertain: bool,
+    shorthand: set[str],
 ) -> list[dict[str, Any]]:
     """W6: one set per mark family (prefix, upper-cased as in member_mark_prefix_meaning) of the file, for
     the report to copy. `members`: one entry per key (the first text met: plan marks and titles in scan
     order, then DETAIL OF headings, then schedule cells), in natural order (numbers as integers, then
-    suffix); a gap stays a gap. `source`: where the members come from. `complete` is true only when a
-    parsed schedule or the detail-heading sweep lists the family AND nothing says the list may be short:
-    no plan mark of the family is plan_only, the family has no notation variant, and the file has no
-    unparsed table, header-blocked table or blocked mark (those may hide rows of any family). Otherwise the
-    report writes 'ít nhất' (at least)."""
+    suffix); a gap stays a gap. `source`: where the members come from. `complete` is true only when
+    (review C1) a parsed schedule lists the family, or its detail headings and its plain plan marks name
+    the same keys (a detail sweep lists the drawn details, not every member: headings alone never
+    complete a family), AND nothing says the list may be short: no plan mark of the family is plan_only,
+    the family has no notation variant and no heading list in shorthand (`shorthand`: families such a
+    list may name), and the file has no unparsed table, header-blocked table, blocked mark or blocked
+    plain text (`uncertain`: those may hide rows or headings of any family). Otherwise the report writes
+    'ít nhất' (at least)."""
     found: dict[str, dict[str, tuple[str, tuple[str, tuple[int, ...], str], str]]] = {}
+    keys_by: dict[tuple[str, str], set[str]] = {}  # (family, source) -> keys
 
     def add(structure: tuple[str, tuple[int, ...], str], key: str, text: str, source: str) -> None:
         family = structure[0].upper()
         found.setdefault(family, {}).setdefault(key, (text, structure, source))
         sources.setdefault(family, set()).add(source)
+        keys_by.setdefault((family, source), set()).add(key)
 
     sources: dict[str, set[str]] = {}
     for p in plan:
@@ -1758,8 +1864,11 @@ def _mark_sets(
     out = []
     for family in sorted(found):
         members = found[family]
-        covered = bool(sources[family] & {"schedule", "detail_heading"})
-        short = uncertain or family in variant_families or bool(plan_only & set(members))
+        heads, plain = keys_by.get((family, "detail_heading")), keys_by.get((family, "plan_marks"))
+        covered = "schedule" in sources[family] or heads == plain  # a family has a source: never both None
+        short = (
+            uncertain or family in variant_families or family in shorthand or bool(plan_only & set(members))
+        )
         order = sorted(members, key=lambda k: (members[k][1][1], members[k][1][2], k))
         out.append(
             {

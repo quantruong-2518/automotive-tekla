@@ -210,7 +210,7 @@ def marks_doc(tmp_path, s1: list[str], s2: list[str] | None = None) -> dict[str,
     return extract_marks(work, tmp_path / "input")
 
 
-def test_a_family_a_heading_sweep_covers_is_complete(tmp_path):
+def test_a_family_whose_headings_and_plan_marks_agree_is_complete(tmp_path):
     from tekla_harness.schemas import validate
 
     s1 = ["DẦM D1 (SL= 02)", "DẦM D2", "D1", "D2", "ĐÀI CỌC DC1", "M1", "M2", "M3", "M5"]
@@ -225,9 +225,10 @@ def test_a_family_a_heading_sweep_covers_is_complete(tmp_path):
         "complete": True,
         "source": ["detail_heading", "plan_marks"],
     }
+    # review C1: a detail sweep lists the drawn details, not every member: headings alone never complete
     assert (sets["DC"]["members"], sets["DC"]["complete"], sets["DC"]["source"]) == (
         ["DC1"],
-        True,
+        False,
         ["detail_heading"],
     )
     # plan marks alone never make a complete set, and a gap stays a gap
@@ -236,6 +237,124 @@ def test_a_family_a_heading_sweep_covers_is_complete(tmp_path):
         False,
         ["plan_marks"],
     )
+
+
+def test_a_heading_member_no_plan_mark_shows_makes_its_family_incomplete(tmp_path):
+    """Review C1: headings and plain plan marks agree only when they name the same keys."""
+    sets = sets_of(marks_doc(tmp_path, ["DẦM D1", "DẦM D9", "D1"]))
+    assert sets["D"]["members"] == ["D1", "D9"] and sets["D"]["complete"] is False
+
+
+# --- review C1: heading lists and blocked plain text --------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("text", "word", "marks"),
+    [
+        ("dẦm ct-1,ct-2", "dẦm", ["ct-1", "ct-2"]),  # EVAL-3 290: the key has D-CT1 and D-CT2
+        ("CỘT C1, C2, C3", "CỘT", ["C1", "C2", "C3"]),
+        ("DẦM D1 & D2", "DẦM", ["D1", "D2"]),
+        ("dẦm d-15 , d-14 , d-12", "dẦm", ["d-15", "d-14", "d-12"]),  # 290, order as written
+        ("DẦM D1, D2 (SL= 02)", "DẦM", ["D1", "D2"]),  # the last item may carry a tail
+        ("DẦM D1(220x300), D2(220x300)", "DẦM", ["D1", "D2"]),
+        ("DẦM D5 (SL= 02)", "DẦM", ["D5"]),  # no list
+        ("DẦM D1, TẦNG 2", "DẦM", ["D1"]),  # prose after the comma: not a list
+        ("dẦm d2-4, 5 (sl= 01)", "dẦm", []),  # 286 shorthand: never expanded, never 'd2-4' alone
+        ("dẦm d2, 3, 4, 5 , 6, 7, m-12(sl= 07)", "dẦm", []),  # 286: no false 'd2'
+        ("DẦM D1, C2", "DẦM", []),  # another family in the list
+        ("DẦM D1, d2", "DẦM", ["D1", "d2"]),  # one family whatever the case
+        ("CỘT C1, C200", "CỘT", []),  # 'C200' is a section label (callouts claims it): no whole mark
+    ],
+)
+def test_a_heading_list_is_expanded_only_when_every_item_is_a_whole_mark(text, word, marks):
+    from tekla_harness.marks import parse_title_marks
+
+    found = parse_title_marks(text)
+    assert found is not None and found[0] == word and [m.text for m in found[1]] == marks
+
+
+@pytest.mark.parametrize("text", ["dẦm ct-1,ct-2", "CỘT C1, C2", "dẦm d2-4, 5", "DẦM D1, C2"])
+def test_parse_title_names_one_mark_or_none(text):
+    from tekla_harness.marks import parse_title
+
+    assert parse_title(text) is None  # a list (or shorthand) is no single title mark (schedule cells)
+
+
+@pytest.mark.parametrize(
+    ("text", "marks"),
+    [
+        ("DETAIL OF CP1 & CP2", ["CP1", "CP2"]),
+        ("DETAIL ON AB-20B, AB-20C", ["AB-20B", "AB-20C"]),
+        ("DETAIL OF CP1, 2", []),
+        ("DETAIL OF CP1", ["CP1"]),
+    ],
+)
+def test_detail_of_lists(text, marks):
+    from tekla_harness.marks import parse_detail_of_marks
+
+    found = parse_detail_of_marks(text)
+    assert found is not None and [m.text for m in found] == marks
+
+
+def test_every_mark_of_a_heading_list_is_a_heading(tmp_path):
+    doc = marks_doc(tmp_path, ["dẦm ct-1,ct-2", "D1", "DẦM D1 & D2", "DETAIL OF CP1 & CP2"])
+    titles = [(p["mark"], p["display_text"], p["form"]) for p in doc["plan_marks"] if p["form"] == "title"]
+    assert titles == [
+        ("ct-1", "dẦm ct-1,ct-2", "title"),
+        ("ct-2", "dẦm ct-1,ct-2", "title"),
+        ("D1", "DẦM D1 & D2", "title"),
+        ("D2", "DẦM D1 & D2", "title"),
+    ]
+    (m,) = doc["matching"]
+    assert [h["text"] for h in by_key(m["matched"])["d1"]["detail_headings"]] == ["DẦM D1 & D2"]
+    assert [h["text"] for h in by_key(m["schedule_only"])["d2"]["detail_headings"]] == ["DẦM D1 & D2"]
+    sets = sets_of(doc)
+    assert (sets["CT"]["members"], sets["CT"]["complete"]) == (["ct-1", "ct-2"], False)  # headings only
+    assert (sets["CP"]["members"], sets["CP"]["complete"]) == (["CP1", "CP2"], False)
+
+
+def test_a_shorthand_heading_list_names_no_mark_and_keeps_its_family_incomplete(tmp_path):
+    s1 = [
+        "dẦm d2-4, 5 (sl= 01)",
+        "dẦm d2, 3, 4, 5 , 6, 7, m-12(sl= 07)",
+        "D2-4",
+        "D2-5",
+        "DẦM D2-4",
+        "DẦM D2-5",
+        "DETAIL OF CP1, 2",
+        "CP1",
+        "DETAIL OF CP1",
+    ]
+    doc = marks_doc(tmp_path, s1)
+    keys = {p["key"] for p in doc["plan_marks"]}
+    assert keys == {"d2-4", "d2-5", "cp1"}  # no false 'd2', nothing taken from a shorthand list
+    sets = sets_of(doc)
+    # headings and plan marks agree, but a heading of the family could not be read as marks
+    assert sets["D"]["members"] == ["D2-4", "D2-5"] and sets["D"]["complete"] is False
+    assert sets["CP"]["members"] == ["CP1"] and sets["CP"]["complete"] is False
+    noted = [w for w in doc["warnings"] if "shorthand" in w]
+    assert len(noted) == 3 and all(w.startswith("plans/set.dxf: T") for w in noted)
+    assert "'DETAIL OF CP1, 2'" in noted[2] and noted[2].endswith("not complete: CP")
+    assert "'dẦm d2-4, 5 (sl= 01)'" in noted[0] and noted[0].endswith("mark sets not complete: D")
+    assert noted[1].endswith("not complete: D, M")  # 'm-12' is mark-shaped: its family may be named too
+
+
+def test_a_blocked_plain_text_keeps_every_family_of_its_file_incomplete(tmp_path):
+    """Review C1: a blocked text (unknown encoding) may be a heading that names members, so no family of
+    the file is complete (file-wide: a heading of the family may sit on any sheet)."""
+    from _callout_fixtures import build_work
+    from tekla_harness.marks import extract_marks
+
+    s1 = ["DẦM D1", "D1"]
+    clean = extract_marks(
+        build_work(tmp_path / "a", s1=s1, styled=[], s2=[], paper=[]), tmp_path / "a" / "input"
+    )
+    assert sets_of(clean)["D"]["complete"] is True
+    styled = [("DÂM D2", "VntimeH")]  # non-ASCII in an unknown encoding: blocked, never read
+    work = build_work(tmp_path / "b", s1=s1, styled=styled, s2=[], paper=[])
+    blocked = extract_marks(work, tmp_path / "b" / "input")
+    assert blocked["files"][0]["blocked_marks"] == 0  # no table: the entry is plain text
+    assert sets_of(blocked)["D"]["complete"] is False
 
 
 def test_a_plan_mark_no_source_lists_makes_its_family_incomplete(no_schedule):
@@ -324,7 +443,7 @@ def test_mark_sets_read_only_mark_shaped_cells_of_readable_tables():
         table(False, [("x 1", "X 1", None), ("d4", "D4", ("d", (4,), ""))]),  # 'X 1' is no mark shape
         table(True, [("q1", "Q1", ("q", (1,), ""))]),  # a header-blocked table is never read
     ]
-    sets = _mark_sets("f.dxf", [], tables, [], {"plan_only": [], "notation_variants": []}, False)
+    sets = _mark_sets("f.dxf", [], tables, [], {"plan_only": [], "notation_variants": []}, False, set())
     assert sets == [
         {"file": "f.dxf", "family": "D", "members": ["D4"], "complete": True, "source": ["schedule"]}
     ]
