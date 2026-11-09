@@ -581,6 +581,9 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
     families (`where` = `<file> <view>/<family> x <view>/<family>`), not by its positional system id, which
     moves to the message (`Grid system S00n: …`). Adding an unrelated drawing file no longer re-asks it or
     leaves the engineer's X/Y answer stale. Existing X/Y answers go stale once, on the first rerun.
+  - `status` schema: the `blocking_open` / `answered` descriptions say that only the engineer's answer
+    counts for those producers; the `grid-system` example shows the new axis `where` and message (no
+    structural change, `$id` stays 0.1).
 - `guard_tekla_write.py` now exits 2 (the blocking code) on any internal error instead of
   relying on an undocumented `onFailure` setting; the setting was removed.
 - `guard_tekla_write.py` no longer blocks commands that only mention `tekla-cli` as data
