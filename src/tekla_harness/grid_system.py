@@ -69,7 +69,9 @@ Rules (deterministic; the thresholds are heuristics, see the schema description)
    its given directions, cumulative positions, no rounding step; file sets as in rule 9). While that
    answer is active the question stays raised (its answer would go stale otherwise). A non-engineer,
    words-only or malformed answer builds nothing (warned), and the question is raised only while the file
-   has no usable system (so such an answer goes stale once the file is covered again). The given
+   has no usable system (so such an answer goes stale once the file is covered again). The engineer's
+   `no_grid=yes` (alone: the file holds no plan that needs a grid) builds nothing and keeps the question
+   raised, answered, while it stands; `harness status` closes the question on it. The given
    spacings are compared with the linear dimensions grids.py placed between two of the given axes
    (labels case-blind, spans as sums; DRAFTING_TOL): a disagreement raises a blocking
    `grid_answer_contradicts_drawing` quoting both, and a grid nothing could be checked against is warned.
@@ -106,6 +108,7 @@ from pathlib import Path
 from typing import Any
 from xml.sax.saxutils import escape
 
+from tekla_harness.answers import NO_GRID_KEY, is_no_grid
 from tekla_harness.grids import (
     DRAFTING_TOL,
     FAMILY_ANGLE_TOL,
@@ -1460,18 +1463,19 @@ def _ask_given_grids(
     selected: set[str],
     missing: dict[str, tuple[str, str, str]],
     engineer_answered: set[str],
+    no_grid: set[str],
     given: list[_GivenGrid],
     given_ids: list[str],
     inputs: _Inputs,
     warnings: list[str],
 ) -> None:
     """ADR-0013 §1 and §5. grid_system_missing for every read file that no selected two-direction DETECTED
-    system covers, and for every file whose engineer answer built a system (`engineer_answered`: the
-    question stays raised under its key, so the answer stays bound and the system it built stays:
-    Ledger.sync makes an answer to a question no longer raised stale; an answer that builds nothing does
-    not keep it raised). grid_answer_contradicts_drawing for every answer-built system that a linear
-    dimension between two of its axes disagrees with; a system nothing could be checked against is
-    warned."""
+    system covers, and for every file whose engineer answer built a system or is no_grid=yes (`no_grid`)
+    (`engineer_answered`: the question stays raised under its key, so the answer stays bound and the
+    system it built stays: Ledger.sync makes an answer to a question no longer raised stale; an answer that
+    builds nothing does not keep it raised). grid_answer_contradicts_drawing for every answer-built
+    system that a linear dimension between two of its axes disagrees with; a system nothing could be
+    checked against is warned."""
     usable: set[str] = set()
     detected: dict[str, list[str]] = {f: [] for f in missing}
     for d, s in zip(docs, systems, strict=False):  # the detected systems come first in docs
@@ -1487,12 +1491,17 @@ def _ask_given_grids(
     for f, (where, found, _key) in missing.items():
         if f in usable and f not in engineer_answered:
             continue
-        lead = (
-            f"Answered: {built[f]} was built from the engineer's answer; it goes through "
-            f"{SELECT_CODE}, Tekla X / Y and units like a detected system. "
-            if f in built
-            else ""
-        )
+        lead = ""
+        if f in built:
+            lead = (
+                f"Answered: {built[f]} was built from the engineer's answer; it goes through "
+                f"{SELECT_CODE}, Tekla X / Y and units like a detected system. "
+            )
+        elif f in no_grid:
+            lead = (
+                f"Answered: the engineer states that {f} holds no plan that needs a grid "
+                f"({NO_GRID_KEY}=yes): no grid system is built for it. "
+            )
         ask(
             GRID_MISSING_CODE,
             f"{lead}Gate 1: {f} has no usable grid system (two directions of at least two labelled axes "
@@ -1501,8 +1510,9 @@ def _ask_given_grids(
             "spacings in drawing units, in drawing order: --value dir1_labels=1,2,3 --value "
             "dir1_spacings=3130,3540 --value dir2_labels=A,B --value dir2_spacings=4250 (one spacing fewer "
             "than labels in each direction), plus --value sheet=<sheet id> when it is read off one sheet. "
-            "Only the engineer's answer (--role engineer) builds a grid system; then rerun harness "
-            "grid-system.",
+            f"When the file holds no plan that needs a grid (notes, details or sections only), answer "
+            f"--value {NO_GRID_KEY}=yes alone instead. Only the engineer's answer (--role engineer) builds a "
+            "grid system or closes this question; then rerun harness grid-system.",
             where,
             found,
             f,
@@ -1633,6 +1643,7 @@ def build_grid_systems(
     # ENGINEER answer with structured values builds a system after the detected ones (their ids stay)
     missing: dict[str, tuple[str, str, str]] = {}  # file -> where, found, key
     engineer_answered: set[str] = set()
+    no_grid: set[str] = set()  # files the engineer answered no_grid=yes for (ADR-0013 §2)
     given: list[_GivenGrid] = []
     for f in file_paths:
         where, found = f"{f}: no usable grid system", inputs.facts[f]["found"]
@@ -1643,6 +1654,10 @@ def build_grid_systems(
             continue
         if not _by_engineer(answer):
             warnings.append(_not_engineer(answer, "recorded, builds nothing"))
+            continue
+        if is_no_grid(answer.get("values")):  # the engineer: no plan that needs a grid; builds nothing
+            no_grid.add(f)
+            engineer_answered.add(f)  # the statement stays bound to the question while it stands
             continue
         grid, why = _given_grid(answer, f)
         if grid is None:  # the question is raised only while the file is not covered (review M2)
@@ -1880,7 +1895,7 @@ def build_grid_systems(
             c["file"],
         )
     _ask_given_grids(
-        ask, docs, systems, selected, missing, engineer_answered, given, given_ids, inputs, warnings
+        ask, docs, systems, selected, missing, engineer_answered, no_grid, given, given_ids, inputs, warnings
     )
     for code, n in sorted(ask.counts.items()):
         if n > MAX_QUESTIONS_PER_CODE:

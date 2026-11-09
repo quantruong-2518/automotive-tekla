@@ -68,6 +68,7 @@ from pathlib import Path
 from typing import Any
 
 from tekla_harness import lifecycle
+from tekla_harness.answers import NO_GRID_KEY, is_no_grid
 from tekla_harness.grid_system import (
     CONSUMED_CODES,
     consumed_answers_digest,
@@ -198,13 +199,14 @@ def answer_closes(
 ) -> bool:
     """The answer takes its question out of the open ones: it counts (answer_counts), the code is one an
     answer closes (an answer to a grid_system_conflict question never does), and, for a code closed by the
-    built result (CLOSED_BY_THE_BUILT_GRID: grid_system_missing), its key is in `built`: the keys whose
-    answer built a used system in a fresh grid-systems.json (built_grid_answers). A grid_system_missing
-    answer's values alone never close it (ADR-0013 decision 6), words only even less."""
+    built result (CLOSED_BY_THE_BUILT_GRID: grid_system_missing), it is no_grid=yes (the engineer states
+    the file holds no plan that needs a grid, ADR-0013 §2) or its key is in `built`: the keys whose answer
+    built a used system in a fresh grid-systems.json (built_grid_answers). A grid_system_missing answer's
+    grid values alone never close it (ADR-0013 decision 6), words only even less."""
     if answer is None or not answer_counts(producer, answer) or code in NOT_CLOSED_BY_AN_ANSWER:
         return False
-    if code in CLOSED_BY_THE_BUILT_GRID:
-        return answer.get("key") in built
+    if code in CLOSED_BY_THE_BUILT_GRID:  # or the engineer states the file needs no grid (ADR-0013 §2)
+        return is_no_grid(answer.get("values")) or answer.get("key") in built
     return True
 
 
@@ -852,7 +854,8 @@ def _grid_missing_reasons(
         head = f"grid systems: {e['id']} {e['code']} ({e['file'] or 'project'})"
         command = (
             f"{ANSWER.format(work_dir=work_dir, id=e['id'])} {values} "
-            f"[--value {GRID_ANSWER_SHEET_KEY}=<sheet id>]"
+            f"[--value {GRID_ANSWER_SHEET_KEY}=<sheet id>]; or, when the file holds no plan that needs a "
+            f"grid, {ANSWER.format(work_dir=work_dir, id=e['id'])} --value {NO_GRID_KEY}=yes"
         )
         if words_only(e["code"], active[k]):
             reasons.append(

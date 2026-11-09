@@ -310,6 +310,54 @@ def test_an_answer_built_system_that_disagrees_with_a_detected_one_keeps_gate1_s
     assert build_status(w3)["gate1"]["ready_for_gate1"] is True
 
 
+# --- no_grid=yes (ADR-0013 decision 2) ----------------------------------------------------------------------
+
+
+def test_the_engineers_no_grid_closes_the_question_and_gate1_opens_after_the_rerun(w3):
+    q = missing_q(w3)
+    record_answer(w3, q["id"], "chỉ có ghi chú", "A. Nguyen", {"no_grid": "yes"}, role="engineer")
+    status = build_status(w3)
+    assert q["id"] not in grid_step(status)["blocking_open_ids"]  # closed by the statement itself
+    assert reasons_about(status, q["id"]) == []
+    for _ in range(2):  # the answer stays bound across reruns
+        run_grid_systems(w3)
+        assert built(w3) == []
+        rows = [a for a in load(w3 / "answers.json")["answers"] if a["key"] == q["key"]]
+        assert [a["status"] for a in rows] == ["active"]
+    gate1 = build_status(w3)["gate1"]
+    assert (gate1["ready_for_gate1"], gate1["reasons"]) == (True, [])
+
+
+def test_a_simulated_no_grid_closes_nothing(w3):
+    q = missing_q(w3)
+    record_answer(w3, q["id"], "chỉ có ghi chú", "agent", {"no_grid": "yes"}, role="simulated")
+    run_grid_systems(w3)
+    status = build_status(w3)
+    assert q["id"] in grid_step(status)["blocking_open_ids"]
+    assert status["gate1"]["ready_for_gate1"] is False
+    assert any(r.startswith(f"answers: {q['id']} {GRID_MISSING_CODE}") for r in status["gate1"]["reasons"])
+
+
+def test_the_words_only_reason_offers_no_grid(w3):
+    q = missing_q(w3)
+    record_answer(w3, q["id"], "không có lưới", "A. Nguyen", {}, role="engineer")
+    run_grid_systems(w3)
+    (reason,) = reasons_about(build_status(w3), q["id"])
+    assert "--value no_grid=yes" in reason and "no plan that needs a grid" in reason
+
+
+def test_questions_md_offers_no_grid_in_vietnamese(w3):
+    q = missing_q(w3)
+    lines = render_questions_md(w3).text.splitlines()
+    heading = next(i for i, line in enumerate(lines) if line.startswith("#") and q["id"] in line)
+    block = "\n".join(lines[heading : heading + 30])
+    assert "--value no_grid=yes" in block and "không có mặt bằng" in block
+    record_answer(w3, q["id"], "chỉ có ghi chú", "A. Nguyen", {"no_grid": "yes"}, role="engineer")
+    lines = render_questions_md(w3).text.splitlines()
+    section4 = next(i for i, line in enumerate(lines) if line.startswith("## 4. "))
+    assert not any(line.startswith("#") and q["id"] in line for line in lines[:section4])
+
+
 def test_questions_md_shows_a_grid_answer_that_built_nothing_as_open(w3):
     q = missing_q(w3)
     record_answer(w3, q["id"], "grid", "A. Nguyen", GRID, role="engineer")

@@ -193,3 +193,68 @@ def test_cli_answer_with_the_grid_keys(work, capsys):
     assert main(argv) == 0
     out = json.loads(capsys.readouterr().out)
     assert out["answer"]["values"] == STORED
+
+
+# --- no_grid=yes (ADR-0013 decision 2): the engineer states the file holds no plan that needs a grid --------
+
+
+def test_no_grid_yes_alone_is_accepted_and_stored_verbatim():
+    assert check_values(GRID_MISSING_CODE, {"no_grid": "yes"}) == []
+    assert grid_answer_values({"no_grid": "yes"}) == {"no_grid": "yes"}
+    assert validate("answers", answers_doc({"no_grid": "yes"})) == []
+
+
+@pytest.mark.parametrize(
+    ("values", "words"),
+    [
+        ({"no_grid": "yes", **GRID}, "alone"),
+        ({"no_grid": "yes", "sheet": "model#05"}, "alone"),
+        ({"no_grid": "yes", "dir1_labels": "1,2"}, "alone"),
+        ({"no_grid": "no"}, "'no'"),
+        ({"no_grid": "Yes "}, "'Yes '"),
+        ({"no_grid": ""}, "''"),
+    ],
+)
+def test_no_grid_is_refused_with_another_key_or_another_value(values, words):
+    problems = check_values(GRID_MISSING_CODE, values)
+    assert problems and words in "; ".join(problems), problems
+    assert "no_grid=yes" in "; ".join(problems)
+
+
+@pytest.mark.parametrize(
+    "stored",
+    [
+        {"no_grid": "yes", **STORED},
+        {"no_grid": "no"},
+        {"no_grid": "yes", "sheet": "model#05"},
+        {"no_grid": True},
+    ],
+)
+def test_the_schema_keeps_no_grid_alone_and_yes(stored):
+    assert validate("answers", answers_doc(stored)) != []
+
+
+@pytest.mark.parametrize("role", ["engineer", "simulated"])
+def test_record_answer_takes_no_grid_from_any_role(work, role):
+    """Only the engineer's no_grid closes the question (harness status); a simulated one is recorded."""
+    path, qid = work
+    result = record_answer(path, qid, "chỉ có ghi chú", "A. Nguyen", {"no_grid": "yes"}, role=role)
+    assert result["answer"]["values"] == {"no_grid": "yes"}
+    assert validate("answers", load(path / "answers.json")) == []
+
+
+def test_record_answer_refuses_no_grid_with_grid_keys_and_writes_nothing(work):
+    path, qid = work
+    before = {p.name: p.read_bytes() for p in path.glob("*.json")}
+    with pytest.raises(QuestionsError) as caught:
+        record_answer(path, qid, "t", "A. Nguyen", {"no_grid": "yes", **GRID}, role="engineer")
+    assert caught.value.exit_code == 1 and "alone" in str(caught.value)
+    assert {p.name: p.read_bytes() for p in path.glob("*.json")} == before
+
+
+def test_cli_answer_with_no_grid(work, capsys):
+    path, qid = work
+    argv = ["answer", str(path), qid, "--text", "ghi chú", "--by", "A. Nguyen", "--role", "engineer"]
+    assert main([*argv, "--value", "no_grid=yes"]) == 0
+    assert json.loads(capsys.readouterr().out)["answer"]["values"] == {"no_grid": "yes"}
+    assert main([*argv, "--value", "no_grid=yes", "--value", "sheet=model#05"]) == 1

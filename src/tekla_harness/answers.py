@@ -35,6 +35,8 @@ Rules:
                                       per direction at least 2 distinct labels and one spacing fewer, each a
                                       plain decimal > 0 in drawing units; stored as arrays: labels strings,
                                       spacings numbers, an integer kept an integer)
+                                      or no_grid=yes, alone (ADR-0013 §2: the file holds no plan that
+                                      needs a grid; only the engineer's closes the question)
     every other code takes no value;
   * grid_system_conflict cannot be answered: a conflict closes only through the grid_system_select answer
     (`systems` without one of the two, or `separate` with both), never through words;
@@ -182,12 +184,30 @@ def check_values(code: str, values: dict[str, str]) -> list[str]:
     return [f"questions with code '{code}' take no value, got: {', '.join(sorted(values))}"] if values else []
 
 
+NO_GRID_KEY, NO_GRID_YES = "no_grid", "yes"  # ADR-0013 §2: the file holds no plan that needs a grid
+
+
+def is_no_grid(values: Any) -> bool:
+    """The stored values of a grid_system_missing answer are exactly no_grid=yes."""
+    return values == {NO_GRID_KEY: NO_GRID_YES}
+
+
 def _grid_problems(values: dict[str, str]) -> list[str]:
-    """check_values for grid_system_missing (ADR-0013 §2): {} (words only), or the four keys of
-    GRID_ANSWER_KEYS plus the optional sheet; per direction at least two distinct, non-blank labels and
-    exactly one spacing fewer, each a plain decimal number > 0."""
+    """check_values for grid_system_missing (ADR-0013 §2): {} (words only), no_grid=yes alone, or the four
+    keys of GRID_ANSWER_KEYS plus the optional sheet; per direction at least two distinct, non-blank labels
+    and exactly one spacing fewer, each a plain decimal number > 0."""
     if not values:
         return []
+    if NO_GRID_KEY in values:
+        other = sorted(k for k in values if k != NO_GRID_KEY)
+        bad = (
+            [f"{NO_GRID_KEY}=yes stands alone, without {', '.join(other)} (it says the file has no grid)"]
+            if other
+            else []
+        )
+        if values[NO_GRID_KEY] != NO_GRID_YES:
+            bad.append(f"{NO_GRID_KEY}: '{values[NO_GRID_KEY]}' is not 'yes' (the only value is no_grid=yes)")
+        return bad
     allowed = (*GRID_ANSWER_KEYS, GRID_ANSWER_SHEET_KEY)
     bad = [f"'{k}' is not one of {', '.join(allowed)}" for k in values if k not in allowed]
     bad += [

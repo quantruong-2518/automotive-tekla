@@ -347,6 +347,7 @@ def test_answer_help_names_the_grid_system_missing_keys(capsys):
     for key in ("dir1_labels", "dir1_spacings", "dir2_labels", "dir2_spacings", "sheet="):
         assert key in text
     assert "grid_answer_contradicts_drawing" in text
+    assert "no_grid=yes" in text and "alone" in text  # ADR-0013 decision 2
 
 
 def test_env_check_outputs_json(capsys):

@@ -32,6 +32,12 @@ TOPICS: tuple[tuple[str, str], ...] = (
 )
 TOPIC_TITLE = dict(TOPICS)
 
+# grid_system_missing: the second way to answer (ADR-0013 §2, no_grid=yes alone), printed under the command
+NO_GRID_VI = (
+    "Nếu file này không có mặt bằng cần lưới trục (chỉ có ghi chú, chi tiết hoặc mặt cắt), kỹ sư trả lời "
+    "thay bằng"
+)
+
 # code -> (topic, need_vi, impact_vi)
 CODES: dict[str, tuple[str, str, str]] = {
     # --- units ---
@@ -401,8 +407,10 @@ CODES: dict[str, tuple[str, str, str]] = {
         "lưới trục trên bản vẽ và cho nhãn cùng khoảng cách của cả hai phương, theo đơn vị bản vẽ, theo "
         "thứ tự trên bản vẽ: --value dir1_labels=1,2,3 --value dir1_spacings=3130,3540 --value "
         "dir2_labels=A,B --value dir2_spacings=4250 (mỗi phương có số khoảng cách ít hơn số nhãn một); "
-        "thêm --value sheet=model#05 nếu đọc từ một tờ cụ thể. Chỉ câu trả lời của kỹ sư (--role engineer) "
-        "mới tạo được hệ lưới; sau đó chạy lại lệnh grid-system.",
+        "thêm --value sheet=model#05 nếu đọc từ một tờ cụ thể. Nếu file không có mặt bằng cần lưới trục "
+        "(chỉ có ghi chú, chi tiết hoặc mặt cắt) thì trả lời riêng --value no_grid=yes. Chỉ câu trả lời "
+        "của kỹ sư (--role engineer) mới tạo được hệ lưới hoặc đóng được câu này; sau đó chạy lại lệnh "
+        "grid-system.",
         "Lưới trục của file này; không có nó thì cổng 1 không mở được.",
     ),
     "grid_answer_contradicts_drawing": (

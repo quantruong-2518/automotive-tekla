@@ -671,6 +671,15 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
       short: no plan-only mark in the family, no notation variant, and no unparsed table, header-blocked
       table or blocked mark in the file. Otherwise the report writes "ít nhất". 433: `M1`…`M8` and `GM1`…`GM5`,
       `GM7`, `GM8`, both incomplete (plan marks only).
+  - Tool wave 3, package GRIDGATE:
+    - `grid_system_missing` takes `no_grid=yes`, alone (ADR-0013 decision 2): the engineer states that
+      the file holds no plan that needs a grid (notes, details or sections only). `harness answer`
+      accepts it from any role and refuses it with any other key or value (exit 1); `answers` schema:
+      `values.no_grid` const `yes`, alone (`$id` still 0.1). `harness grid-system` builds nothing for it
+      and keeps the question raised, answered, while the engineer's answer stands. `harness status` closes
+      the question on the engineer's `no_grid=yes` only; a simulated one closes nothing. The question's
+      message, the `grid systems:` reasons, `harness answer --help` and `harness questions-md` (a "Hoặc"
+      line with the command, in Vietnamese) print the option.
 
 ### Changed
 - Question lifecycle (tool wave 2, EVAL-2 fix 5):

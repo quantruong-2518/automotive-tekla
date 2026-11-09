@@ -53,6 +53,7 @@ from pathlib import Path
 from typing import Any
 
 from tekla_harness import supplements
+from tekla_harness.answers import NO_GRID_KEY
 from tekla_harness.questions import (
     AXIS_CODE,
     AXIS_DIRECTIONS,
@@ -74,7 +75,7 @@ from tekla_harness.questions import (
     load_ledger,
     write_text_atomic,
 )
-from tekla_harness.questions_md_vi import CODES, TOPICS, topic_of
+from tekla_harness.questions_md_vi import CODES, NO_GRID_VI, TOPICS, topic_of
 from tekla_harness.schemas import validate
 from tekla_harness.status import (
     NOT_CLOSED_BY_AN_ANSWER,
@@ -560,6 +561,12 @@ def question_lines(item: Item, ctx: Context, level: str = "#####") -> list[str]:
             + block[0].replace(" — trả lời", "; câu trả lời hiện có", 1)
         )
         lines += block[1:]
+    if item.code == GRID_MISSING_CODE:  # the second way to answer it: no_grid=yes alone (ADR-0013 §2)
+        no_grid = (
+            f'uv run harness answer {WORK_PLACEHOLDER} {item.id} --text "..." --by "..." --role engineer '
+            f"--value {NO_GRID_KEY}=yes"
+        )
+        lines.append(f"- **Hoặc ({ENGINEER_STEP_VI}):** {NO_GRID_VI} {code_span(no_grid)}")
     pending = pending_file_set(item, ctx)
     if pending is not None:
         rerun = code_span("harness grid-system " + WORK_PLACEHOLDER)

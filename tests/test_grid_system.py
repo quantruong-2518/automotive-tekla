@@ -1877,6 +1877,52 @@ def test_two_answer_built_systems_are_compared(tmp_path, example):
     assert "1-2: 3130 vs 3000" in q["message"]
 
 
+# --- no_grid=yes (ADR-0013 decision 2) ------------------------------------------------------------------
+
+
+def test_the_question_offers_no_grid_for_a_file_without_a_plan(tmp_path, example):
+    q = _missing(build_grid_systems(_no_grid(tmp_path, example)))
+    assert "--value no_grid=yes" in q["message"] and "no plan that needs a grid" in q["message"]
+
+
+def test_the_engineers_no_grid_builds_nothing_and_keeps_the_question_answered(tmp_path, example):
+    work = _ledger_work(_no_grid(tmp_path, example))
+    run_grid_systems(work, svg=False)
+    q = _one(_gs_questions(work), MISSING)
+    _set_answers(
+        work, [{**ans(MISSING, "house.dxf", {"no_grid": "yes"}), "key": q["key"], "question_id": q["id"]}]
+    )
+    for _ in range(2):  # the answer stays bound: the question is raised under its key, never stale
+        run_grid_systems(work, svg=False)
+        doc = _gs_doc(work)
+        assert _built(doc) == [] and [s["system_id"] for s in doc["systems"]] == ["S001"]
+        assert not any("builds nothing" in w for w in doc["warnings"])
+        again = _one(_gs_questions(work), MISSING)
+        assert (again["id"], again["key"], again["answer"]["status"]) == (q["id"], q["key"], "active")
+        assert again["message"].startswith("Answered: the engineer states that house.dxf holds no plan")
+
+
+def test_a_simulated_no_grid_is_warned_and_builds_nothing(tmp_path, example):
+    work = _no_grid(tmp_path, example)
+    answer = sim(answer_to(build_grid_systems(work), MISSING, {"no_grid": "yes"}))
+    out = build_grid_systems(work, answers=[answer])
+    assert _built(out) == [] and _missing(out)["blocking"]
+    assert not _missing(out)["message"].startswith("Answered")
+    assert any("non-engineer role" in w and "builds nothing" in w for w in out["warnings"])
+
+
+def test_an_engineers_no_grid_keeps_the_question_raised_after_the_file_is_covered(tmp_path, example):
+    """Unlike a words-only answer (M2), no_grid=yes is the engineer's statement about the file: it stays
+    bound (active) while it stands."""
+    work = _two_files(tmp_path, example)
+    only_a = answer_to(build_grid_systems(work), "grid_system_select", {"systems": ["S001"]})
+    no_grid = answer_to(build_grid_systems(work, answers=[only_a]), MISSING, {"no_grid": "yes"})
+    again = build_grid_systems(work, answers=[only_a, no_grid])
+    both = answer_to(again, "grid_system_select", {"systems": ["S001", "S002"], "separate": ["S001", "S002"]})
+    final = build_grid_systems(work, answers=[both, no_grid])
+    assert [q["file"] for q in final["questions"] if q["code"] == MISSING] == ["b.dxf"]
+
+
 # --- review M2: only an answer that builds a grid keeps grid_system_missing raised -------------------------
 
 

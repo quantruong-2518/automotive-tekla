@@ -139,13 +139,18 @@
           "then": {
             "properties": {
               "values": {
-                "description": "ADR-0013 §2: the grid the engineer reads off the drawing for a file without a usable grid system, in drawing units: {\"dir1_labels\": [\"1\", \"2\", \"3\"], \"dir1_spacings\": [3130, 3540], \"dir2_labels\": [\"A\", \"B\"], \"dir2_spacings\": [4250], \"sheet\": \"model#05\"}. On the command line: --value dir1_labels=1,2,3 --value dir1_spacings=3130,3540 --value dir2_labels=A,B --value dir2_spacings=4250 [--value sheet=model#05]. Both directions are required; each spacings list has one item fewer than its labels (harness answer checks the counts); labels are distinct. {} is an answer in words only: it is recorded and builds no grid system. Only an active answer with answered_by_role engineer builds one (harness grid-system, source engineer_answer).",
+                "description": "ADR-0013 §2: the grid the engineer reads off the drawing for a file without a usable grid system, in drawing units: {\"dir1_labels\": [\"1\", \"2\", \"3\"], \"dir1_spacings\": [3130, 3540], \"dir2_labels\": [\"A\", \"B\"], \"dir2_spacings\": [4250], \"sheet\": \"model#05\"}. On the command line: --value dir1_labels=1,2,3 --value dir1_spacings=3130,3540 --value dir2_labels=A,B --value dir2_spacings=4250 [--value sheet=model#05]. Both directions are required; each spacings list has one item fewer than its labels (harness answer checks the counts); labels are distinct. {} is an answer in words only: it is recorded and builds no grid system. Only an active answer with answered_by_role engineer builds one (harness grid-system, source engineer_answer). Or {\"no_grid\": \"yes\"}, alone (--value no_grid=yes): the engineer states that this file holds no plan that needs a grid (notes, details or sections only); it builds nothing, and only the engineer's closes the question (harness status).",
                 "anyOf": [
                   { "maxProperties": 0 },
-                  { "required": ["dir1_labels", "dir1_spacings", "dir2_labels", "dir2_spacings"] }
+                  {
+                    "required": ["dir1_labels", "dir1_spacings", "dir2_labels", "dir2_spacings"],
+                    "not": { "required": ["no_grid"] }
+                  },
+                  { "required": ["no_grid"], "maxProperties": 1 }
                 ],
                 "additionalProperties": false,
                 "properties": {
+                  "no_grid": { "const": "yes", "description": "ADR-0013 §2: the file holds no plan that needs a grid. Alone or not at all." },
                   "dir1_labels": { "$ref": "#/$defs/grid_labels" },
                   "dir1_spacings": { "$ref": "#/$defs/grid_spacings" },
                   "dir2_labels": { "$ref": "#/$defs/grid_labels" },
