@@ -2,8 +2,8 @@
 
 Read-only: nothing is written. Everything is recomputed from the sources of truth, never from the question
 documents (they can be stale after `harness answer` or a producer rerun); the one exception is `closed_by`,
-read from them only to check a closure a producer wrote (closure_state), so an unreadable question document
-is an error (exit 1):
+read from them only to check a closure a producer wrote (closure_state), so an unreadable question document,
+or one its schema refuses, is an error (exit 1):
 
   * per producer (intake, read-structure, callouts, grid-system, reader): question counts from
     `question-registry.json` + `answers.json` (total, blocking, blocking_open, answered), the stale answers,
@@ -613,14 +613,19 @@ def _refusal_reason(
 def _written_closures(work: Path, registry: dict[str, Any]) -> dict[str, dict[str, Any]]:
     """key -> `closed_by` of the live questions a producer already wrote as closed: non-blocking in the
     registry and carrying `closed_by` in its question document (grid-system writes these for a conflict the
-    select answer settles). Read-only; an unreadable document is an error."""
+    select answer settles). Read-only; an unreadable document, or one its schema (intake, kind questions)
+    refuses, is an error (exit 1)."""
     out: dict[str, dict[str, Any]] = {}
     for name in QUESTION_DOCUMENTS:
         if not (work / name).is_file():
             continue
         doc = _read_json(work / name, name)
-        for q in doc.get("questions", []) if isinstance(doc, dict) else []:
-            if not isinstance(q, dict) or not isinstance(q.get("closed_by"), dict):
+        problems = validate("intake", doc)
+        if problems or not isinstance(doc, dict) or doc.get("kind") != "questions":
+            why = f"{problems[0].path}: {problems[0].message}" if problems else "kind is not 'questions'"
+            raise StatusError(EXIT_INVALID, f"{name} is invalid (intake schema): {why}")
+        for q in doc["questions"]:
+            if not isinstance(q.get("closed_by"), dict):
                 continue
             entry = registry["questions"].get(q.get("key"))
             if entry is not None and entry["status"] != "obsolete" and entry.get("blocking", True) is False:

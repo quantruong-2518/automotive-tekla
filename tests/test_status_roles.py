@@ -508,12 +508,6 @@ def test_the_conflict_grid_system_closed_stays_closed(ready):
             {"question_id": "UNITS", "reason": "rejected_systems_only"},
             "is not a grid_system_select question",
         ),
-        (
-            "structure-questions.json",
-            "grid_family_axis_assignment",
-            {"question_id": "SELECT", "reason": "x"},
-            "unknown closure reason",
-        ),
     ],
 )
 def test_a_written_closure_outside_the_contract_counts_as_blocking(
@@ -537,6 +531,20 @@ def test_a_written_closure_outside_the_contract_counts_as_blocking(
     counts = {p["producer"]: p["questions"] for p in status["producers"]}[label]
     old = {p["producer"]: p["questions"] for p in before["producers"]}[label]
     assert counts["blocking"] == old["blocking"] + 1  # both questions were non-blocking before
+
+
+def test_a_written_closure_with_an_unknown_reason_makes_the_document_invalid(ready):
+    """The question schema lists the closure reasons: a document naming another one is exit 1 (F3), not a
+    closure to check."""
+    from tekla_harness.status import StatusError
+
+    _, work = ready
+    write_closed_by(
+        work, "structure-questions.json", "grid_family_axis_assignment", {"question_id": "Q-1", "reason": "x"}
+    )
+    with pytest.raises(StatusError) as caught:
+        build_status(work)
+    assert caught.value.exit_code == 1 and "structure-questions.json is invalid" in str(caught.value)
 
 
 def test_a_refused_written_closure_beats_the_lifecycle_closure_of_the_same_question(ready):

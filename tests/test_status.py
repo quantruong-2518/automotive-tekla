@@ -445,8 +445,8 @@ def test_status_counts_come_from_the_registry_and_answers_not_from_the_question_
         assert len(labels[label]["blocking_open_ids"]) == counts["blocking_open"]
     q = find(questions_of(work, "structure-questions.json"), "grid_label_missing", "set.dxf")
     record_answer(work, q["id"], "ok", "me", role="engineer")
-    for name in QUESTION_FILES:  # question documents that are wrong or gone change nothing
-        (work / name).write_text("{}", encoding="utf-8")
+    for name in QUESTION_FILES:  # question documents that are gone change nothing
+        (work / name).unlink()
     after = by_label(build_status(work))["read-structure"]["questions"]
     assert (
         after["answered"] == 1

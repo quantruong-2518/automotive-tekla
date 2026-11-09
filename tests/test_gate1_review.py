@@ -5,6 +5,7 @@
    the answer is shown with its role.
 2. A grid-system conflict waiting for the file-set answer is pending, not closed, in questions.md.
 3. Every gate-1 reason and questions.md line that tells someone to answer frames it as the engineer's step.
+5. A damaged question document is exit 1 in `harness status`, not a traceback.
 
 The two-sheet world is test_status.py's; the one-grid files are built here (one grid per file, so two
 files with the same labels and different spacings conflict across files).
@@ -27,7 +28,7 @@ from tekla_harness.answers import record_answer
 from tekla_harness.grid_system import run_grid_systems
 from tekla_harness.questions import empty_answers
 from tekla_harness.questions_md import Item, _answered_lines, code_span, render_questions_md
-from tekla_harness.status import build_status
+from tekla_harness.status import StatusError, build_status
 from test_status import (  # noqa: F401  (pytest fixtures, used by name)
     CONFLICT_CODE,
     answer_blocking,
@@ -327,3 +328,23 @@ def test_every_questions_md_line_that_tells_how_to_answer_is_the_engineers_step(
         assert any("**Cách đóng" in ln for ln in lines) or w == two_files[1]
         for ln in lines:
             assert MD_ENGINEER in ln, ln
+
+
+# --- 5. a damaged question document is exit 1 -------------------------------------------------------------
+
+
+def test_a_damaged_question_document_is_exit_1_in_status_not_a_traceback(ready, capsys):
+    """Review probe p5: a question whose key is a list crashed `_written_closures` (TypeError)."""
+    from tekla_harness.cli import main
+
+    _, work = ready
+    path = work / "grid-system-questions.json"
+    doc = load(path)
+    doc["questions"][0]["closed_by"] = {"question_id": "Q-1", "reason": "separate"}
+    doc["questions"][0]["key"] = ["x"]
+    path.write_text(json.dumps(doc), encoding="utf-8")
+    with pytest.raises(StatusError) as caught:
+        build_status(work)
+    assert caught.value.exit_code == 1 and "grid-system-questions.json" in str(caught.value)
+    assert main(["status", str(work)]) == 1
+    assert "Traceback" not in capsys.readouterr().err

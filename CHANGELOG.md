@@ -570,6 +570,9 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
     `the engineer says …`, `the engineer runs: harness answer …`): the select, axis, conflict, file-set,
     units-disagree and units-contradiction reasons; the conflict reason now prints the select answer
     command. questions.md "Cách đóng" lines carry "kỹ sư tự chạy, tác tử không chạy thay".
+  - `harness status` validates each question document it reads for written closures against its schema:
+    a damaged one (e.g. a list as a question key, an unknown closure reason) is exit 1 naming the
+    document, not a traceback.
 - `guard_tekla_write.py` now exits 2 (the blocking code) on any internal error instead of
   relying on an undocumented `onFailure` setting; the setting was removed.
 - `guard_tekla_write.py` no longer blocks commands that only mention `tekla-cli` as data
