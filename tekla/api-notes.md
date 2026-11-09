@@ -1,6 +1,7 @@
 # Tekla Open API notes (Step 3 input)
 
 Purpose: everything needed to start `TeklaCore` + the console CLI against **Tekla Structures 2024 (Diamond)**, with the 2025/2026 deltas.
+Under review (engineer, 2026-11-09): the company runs Tekla **2026** Diamond; the target is confirmed when Step 3 resumes after Steps 1–2 ([roadmap](../docs/roadmap.md), Step 3). The 2026 deltas below were not researched in depth.
 Date accessed: **2026-11-06**. Authored by a research agent on a Linux machine with no Tekla installed.
 
 **Status of these notes: doc-sourced, NOT run-verified.** Nothing here was executed against Tekla. Every claim carries a status:

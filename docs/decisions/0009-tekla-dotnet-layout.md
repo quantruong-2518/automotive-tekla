@@ -1,6 +1,7 @@
 # 0009. .NET layout, build and test rules for the Tekla CLI
 
-- Status: accepted
+- Status: accepted. Tekla version under review (engineer, 2026-11-09): the company runs 2026
+  Diamond; the NuGet pin changes by amendment when Step 3 resumes ([roadmap](../roadmap.md)).
 - Date: 2026-11-07
 - Decided by: engineer (start Step 3 now, develop the Tekla-free part on WSL), layout proposed
   by the orchestrator
