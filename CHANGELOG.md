@@ -688,7 +688,7 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
       `warnings` with its entry id and keeps the families it may name incomplete. `complete` now needs a
       parsed schedule, or detail headings and plain plan marks that name the same keys (headings alone
       list the drawn details, not every member), and no blocked plain text anywhere in the file (a blocked
-      text may be a heading). Known set: 290 `CT` = ct-1, ct-2; complete sets 8 → 3 (433 `C`, Steel_02
+      text may be a heading). Known set: 290 `CT` = ct-1, ct-2; complete sets 10 → 3 (433 `C`, Steel_02
       `C`, `MB`); 286 loses 7 heading matches `d2-4` … `dm-4` (they came only from shorthand lists; now
       plan-only) and the false schedule-only `d2`; 290 gains schedule-only `d2`, `d3`, `d4` (from
       `dẦm d1 , d2`, `dẦm d5 , d4 , d3`) and 3 notation-variant groups.
