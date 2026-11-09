@@ -534,6 +534,15 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
     (`.Vn`/`Vn` then letters, digits, spaces). Style names such as `VN-ABC` or `VNARIALH-BOLD` no longer
     veto their family's hint (`.VnAvantH` → capital); `vntimeh.shx` used as a style name no longer reads
     the `x` of its extension as "not capital" (its case is now reported as uncertain).
+  - `legacy_ascii_suspect` (`harness extract-text`): an unknown-encoding run also counts as legacy when its
+    style name, font file or family (inline font: its name) looks like a legacy Vietnamese font
+    (`encoding.legacy_font_name`: `vncc-rms.shx`, `vnsimli.shx`), with no non-ASCII sibling needed; the
+    sibling rule is keyed by the font file, so styles on one file share the evidence. New shape: an
+    uppercase vowel between lowercase letters (`dAy`, `tEn`, `cOng trInh`). No longer suspect: `/a` plus a
+    digit (`%%c8a100/a200`, `1:100/a3`), one letter ending the token after a slash (`C/C`, `N/A`, `b/h`,
+    `1/A`) unless two letters stand before it (`BO/R`), and CamelCase words (`TieRod`, `HoleSize`). On
+    dwgshare 461 the 16 Telex-style texts of the `vncc-rms.shx` / `vncc-sim.shx` styles are blocked
+    (except `s.l`, `stt`): `haFn 200` is no longer two plan marks with a `HAFN` prefix question.
 - `guard_tekla_write.py` now exits 2 (the blocking code) on any internal error instead of
   relying on an undocumented `onFailure` setting; the setting was removed.
 - `guard_tekla_write.py` no longer blocks commands that only mention `tekla-cli` as data

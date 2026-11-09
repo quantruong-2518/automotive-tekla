@@ -56,6 +56,7 @@ from __future__ import annotations
 import re
 import unicodedata
 from dataclasses import dataclass, field
+from pathlib import PureWindowsPath
 from typing import Any, Literal, cast
 
 Encoding = Literal["tcvn3", "vni"]
@@ -459,6 +460,17 @@ _LEGACY_STYLE = re.compile(r"\.?vn(?!i-)", re.IGNORECASE)
 # NarrowH"), so its last letter can be the capital-font "H". Style names "VN-ABC", "VNARIALH-BOLD" (dwgshare
 # 270) and "vntimeh.shx" start like one but are not: their last letter says nothing about case.
 _FONT_LIKE_STYLE = re.compile(r"\.?vn[a-z0-9 ]*", re.IGNORECASE)
+
+
+def legacy_font_name(name: str | None) -> bool:
+    """True when a style name, font file (its leaf) or family looks like a legacy Vietnamese font name:
+    ".Vn..." or "Vn..." ("vncc-rms.shx", "vnsimli.shx", "VntimeH"), but not "VNI-...".
+
+    A naming hint only, like `font_hint`: it does not give an encoding. extract_text uses it to judge ASCII
+    text of unknown encoding (`looks_legacy_ascii`)."""
+    if not name:
+        return False
+    return bool(_LEGACY_STYLE.match(_clean_font_name(PureWindowsPath(name).name)))
 
 
 HintField = Literal["name", "font", "family"]

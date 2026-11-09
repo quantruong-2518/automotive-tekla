@@ -36,7 +36,7 @@ import re
 from collections import Counter
 from collections.abc import Iterator
 from dataclasses import dataclass, field, replace
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Any
 
 from ezdxf import const as dxf_const
@@ -57,6 +57,7 @@ from tekla_harness.encoding import (
     font_hint,
     has_lone_surrogate,
     has_unicode_vietnamese,
+    legacy_font_name,
     scrub_surrogates,
 )
 from tekla_harness.knowledge import FontEncodingRow, FontEncodingTable, default_font_encodings
@@ -201,7 +202,8 @@ def _has_unknown_code(text: str) -> bool:
     return any(not _SPECIAL_RE.fullmatch(m.group(0)) for m in _ANY_SPECIAL_RE.finditer(text))
 
 
-_SuspectRun = tuple[tuple[str, str], str]  # (font key: ("style", name) | ("font", inline family), encoding)
+# (font key: ("file", font file leaf) | ("style", name) | ("font", inline family), encoding, legacy font name)
+_SuspectRun = tuple[tuple[str, str], str, bool]
 
 
 @dataclass(frozen=True)
@@ -321,6 +323,21 @@ class _Context:
                 self.style_cache[style] = (None, False)
         return self.style_cache[style]
 
+    def font_key(self, style: str | None) -> tuple[str, str]:
+        """The font a style run is drawn with, for the sibling rule (`_flag_legacy_ascii`): its font file's
+        leaf, case-folded, so styles sharing one file share the evidence; the style name without a file."""
+        font_file, _exists = self.style_font(style)
+        if font_file:
+            return ("file", PureWindowsPath(font_file).name.casefold())
+        return ("style", style or "")
+
+    def style_names(self, style: str | None) -> tuple[str, ...]:
+        """Style name, font file and TrueType family of a text style (the names `font_hint` reads)."""
+        if not style:
+            return ()
+        font_file, _exists = self.style_font(style)
+        return tuple(n for n in (style, font_file, self.style_family(style)) if n)
+
     def style_family(self, style: str) -> str | None:
         """TrueType family of a text style (read_dxf.text_style_family); None when absent or empty."""
         if style not in self.family_cache:
@@ -401,13 +418,14 @@ def _decode_text(ctx: _Context, raw: str, style: str | None, *, mtext: bool) -> 
     results = [_decode_run(ctx, run, decision) for run in runs]
     suspect: list[_SuspectRun] = []  # the runs that look legacy
     for run, r in zip(runs, results, strict=True):
-        key = ("style", style or "") if run.font is None else ("font", run.font.casefold())
+        key = ctx.font_key(style) if run.font is None else ("font", run.font.casefold())
         if r.unknown_non_ascii:
             ctx.unknown_non_ascii_fonts.add(key)
         if r.encoding in ("tcvn3", "vni", "unknown") and any(
             piece.isascii() and looks_legacy_ascii(piece) for piece in r.literals
         ):
-            suspect.append((key, r.encoding))
+            names = ctx.style_names(style) if run.font is None else (run.font,)
+            suspect.append((key, r.encoding, any(legacy_font_name(n) for n in names)))
 
     encodings = [r.encoding for r in results]
     used = encodings[0] if len(set(encodings)) == 1 else "mixed"
@@ -509,24 +527,52 @@ def _min_conf(a: str, b: str) -> str:
 # Vietnamese letters are all bytes >= 0x80), so the shapes come from the observed strings, kept narrow:
 #   * a slash before a unit denominator is not suspect ('kG/cm2', 'T/m2', 'kN/m', 'Kg/M2'), nor before a word
 #     of three or more letters ('Cu/PVC/PVC', seen in a TCVN3 capital-font style of dwgshare 461);
+#   * a slash before 'a' and a digit is a bar spacing or a paper size ('%%c8a100/a200', '1:100/a3'), and one
+#     letter that ends the token after a slash is an abbreviation or a grid sub-axis ('C/C', 'N/A', 'b/h',
+#     '1/A'), unless two letters stand before the slash ('BO/R', the 'BO/R 300mm' of dwgshare 267);
 #   * a tone letter needs a lowercase vowel just before it, or an uppercase A E O that follows a lowercase
-#     letter ('tiESt'), so all-capital words ('EST', 'HEA 300', 'S355JR') and marks ('D1', 'C2') never match.
-# Only texts in a TCVN3 / VNI run, or in an unknown-encoding font that also holds non-ASCII text of unknown
-# encoding (its "siblings"), are flagged (default D2, reversible: suspect patterns only, not all ASCII).
-_SLASH_LETTER = re.compile(r"/(?!(?i:mm|cm|dm|m)[23]?(?![A-Za-z0-9]))(?![A-Za-z]{3})[A-Za-z{}]")
+#     letter ('tiESt'), so all-capital words ('EST', 'HEA 300', 'S355JR') and marks ('D1', 'C2') never match;
+#   * an uppercase vowel between two lowercase letters is a circumflex vowel written as a capital ('dAy',
+#     'tEn vAJt', 'cOng trInh', dwgshare 461), never a unit ('kA') or a mark;
+#   * both letter shapes are judged per word, and a CamelCase word is English, not Telex: a capitalised first
+#     part, then humps of an uppercase letter and two or more lowercase letters with a vowel ('TieRod',
+#     'BaseRing', 'HoleSize'); 'DiJa' (one letter after the hump) stays suspect.
+# A text is flagged when such a run is in a TCVN3 / VNI font, or in an unknown-encoding font that has a legacy
+# Vietnamese name (`encoding.legacy_font_name` of the style name, font file or family; inline font: its
+# family), or that also holds non-ASCII text of unknown encoding (its "siblings", judged per font file: two
+# styles on one file share it). Default D2, reversible: suspect patterns only, not all ASCII.
+_SLASH_LETTER = re.compile(
+    r"/(?!(?i:mm|cm|dm|m)[23]?(?![A-Za-z0-9]))"  # a unit denominator
+    r"(?![A-Za-z]{3})"  # a word
+    r"(?!a\d)"  # a bar spacing or a paper size
+    r"(?:(?<=[A-Za-z]{2}/)|(?![A-Za-z](?![A-Za-z0-9{}])))"  # one letter ending the token
+    r"[A-Za-z{}]"
+)
+_WORD = re.compile(r"[A-Za-z]+")
 _TONE_LETTER = re.compile(r"(?:[aeiouy]|(?<=[a-z])[AEO])[SFRXJ]")
+_CAPITAL_VOWEL = re.compile(r"(?<=[a-z])[AEIOUY](?=[a-z])")
+_CAMEL_CASE = re.compile(r"[A-Z][a-z]+(?:[A-Z](?=[a-z]*[aeiouy])[a-z]{2,})+")
 
 
 def looks_legacy_ascii(text: str) -> bool:
     """True when ASCII `text` has a shape legacy Vietnamese fonts give when written in ASCII (see above)."""
-    return bool(_SLASH_LETTER.search(text) or _TONE_LETTER.search(text))
+    if _SLASH_LETTER.search(text):
+        return True
+    return any(
+        not _CAMEL_CASE.fullmatch(word) and (_TONE_LETTER.search(word) or _CAPITAL_VOWEL.search(word))
+        for word in _WORD.findall(text)
+    )
 
 
 def _flag_legacy_ascii(ctx: _Context) -> None:
     """Flag `legacy_ascii_suspect` (confidence low) on each pure-ASCII entry with a legacy-looking run in a
-    TCVN3 / VNI font, or in an unknown-encoding font that holds non-ASCII text of unknown encoding."""
+    TCVN3 / VNI font, in an unknown-encoding font with a legacy name, or in one that holds non-ASCII text of
+    unknown encoding."""
     for entry, runs in ctx.ascii_suspects:
-        if any(enc in ("tcvn3", "vni") or key in ctx.unknown_non_ascii_fonts for key, enc in runs):
+        if any(
+            enc in ("tcvn3", "vni") or legacy_name or key in ctx.unknown_non_ascii_fonts
+            for key, enc, legacy_name in runs
+        ):
             entry["flags"].append("legacy_ascii_suspect")
             entry["confidence"] = "low"
 

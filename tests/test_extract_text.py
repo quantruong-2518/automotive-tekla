@@ -23,9 +23,10 @@ from ezdxf.tools.text import plain_mtext
 from tekla_harness import extract_text as mod
 from tekla_harness import read_dxf
 from tekla_harness.cli import main
-from tekla_harness.extract_text import MAX_BLOCK_DEPTH, extract_text, mtext_runs
+from tekla_harness.extract_text import MAX_BLOCK_DEPTH, extract_text, looks_legacy_ascii, mtext_runs
 from tekla_harness.knowledge import EMPTY_TABLE, KnowledgeError
 from tekla_harness.schemas import validate
+from tekla_harness.text_gate import meaning_block_reason
 from test_knowledge import approved, row, table_of
 
 REPO = Path(__file__).resolve().parents[1]
@@ -826,12 +827,19 @@ def test_a_legacy_family_comes_before_the_knowledge_table(tmp_path):
 # letter or brace ('4/g14', 'BT LO/ST #100'), and an uppercase tone letter S F R X J after a vowel
 # ('chi tiESt kim thu seSt', 'haFn 200'). Invented strings of the same shapes are used here.
 SUSPECT = ["4/g14", "/G10", "1/G16", "BT LO/ST #100", "3 L/}/{/SI %%c6", "chi tiESt kim thu seSt", "haFn 200",
-           "coJC vaF", "DiJa", "tieRp", "keXt"]  # fmt: skip
+           "coJC vaF", "DiJa", "tieRp", "keXt",
+           # review of tool wave 2 (F1): slash shapes that must stay suspect, and the uppercase vowel with no
+           # tone letter inside a lowercase word (dwgshare 461 'dAy thu', 'tEn vAJt tU')
+           "/ST", "/G16", "2/G20", "BO/R 300", "T/U{Fng", "dAy", "tEn", "cOng trInh", "trInh", "thUc",
+           "TruoSng", "liEn kESt coJC vaF dAy tiESp DiJa"]  # fmt: skip
 # Structural ASCII that must stay readable: grid labels, marks, levels, dimensions, rebar callouts, units.
 CLEAN = ["A", "Z", "D1", "C2", "+3.850", "4500", "%%c8a150", "4%%c16", "1/2", "%%c10a200/150",
          "D1.11(220X450)", "CB300-V", "S355JR", "HEA 300", "Rb = 115 kG/cm2", "q = 2 T/m2", "2800Kg/M2",
          "MPa", "kN/m", "M20", "d1", "Q235B", "2L65x8", "TB-01", "GHI CHU", "cU/pvc/pvc 2X4 e1,5",
-         "Cu/XLPE/PVC 2(1X16)", "ROOF", "BASE PLATE", "CASE A"]  # fmt: skip
+         "Cu/XLPE/PVC 2(1X16)", "ROOF", "BASE PLATE", "CASE A",
+         # review of tool wave 2 (F1): false positives of the slash and tone rules (461 '1:100/a3' x12)
+         "1:100/a3", "%%c8a100/a200", "<> C/C", "O/O", "N/A", "b/h", "L/d", "W/O", "M/C",
+         "TieRod", "BaseRing", "HoleSize", "1/A", "12/B", "A/1", "B1a", "C2a", "kA", "mA 20"]  # fmt: skip
 
 
 def suspect_fixture(style: str, *, sibling: str | None = None):
@@ -874,6 +882,66 @@ def test_an_unknown_style_counts_only_with_a_non_ascii_sibling_of_unknown_encodi
     # a sibling proved Unicode by its code points is no evidence of a legacy font
     unicode_fixture = suspect_fixture("Plain", sibling="Ký hiệu")
     assert not any(flagged(index(build(tmp_path, unicode_fixture, name="u.dxf"))).values())
+
+
+def test_the_shapes_on_their_own():
+    assert [t for t in SUSPECT if not looks_legacy_ascii(t)] == []
+    assert [t for t in CLEAN if looks_legacy_ascii(t)] == []
+    # not ASCII, so never judged in an index (the gate decides it by encoding): the shape itself is clean
+    assert not looks_legacy_ascii("Ø6a100/a200")
+
+
+@pytest.mark.parametrize(
+    ("name", "font", "family"),
+    [
+        ("DWGshare.com_21", "vncc-rms.shx", None),  # dwgshare 461: the font file is the only legacy name
+        ("VnSim", "plain.shx", None),  # the style name
+        ("kt..9", "plain.shx", "VnSimH"),  # the TrueType family (no dot: encoding unknown)
+    ],
+)
+def test_a_legacy_font_name_of_unknown_encoding_needs_no_sibling(tmp_path, name, font, family):
+    # review of tool wave 2 (F1, critical): 461 styles on vncc-rms.shx / vncc-sim.shx hold only ASCII
+    # Telex-style Vietnamese ('haFn 200' became plan marks); no non-ASCII sibling exists in them
+    def fn(doc):
+        family_style(doc, name, font, family)
+        msp = doc.modelspace()
+        for i, text in enumerate(SUSPECT + CLEAN):
+            text_at(msp, text, name, insert=(0, 9 * i))
+
+    result = index(build(tmp_path, fn))
+    got = flagged(result)
+    assert {t for t in SUSPECT if not got[t]} == set()
+    assert {t for t in CLEAN if got[t]} == set()
+    assert all(meaning_block_reason(only(result, raw_text=t)) == "legacy_ascii_suspect" for t in SUSPECT)
+
+
+def test_a_legacy_inline_font_name_of_unknown_encoding_needs_no_sibling(tmp_path):
+    def fn(doc):
+        msp = doc.modelspace()
+        msp.add_mtext("{\\fvncc-rms|c0;haFn 200} D1", dxfattribs={"style": "Plain", "insert": (0, 0)})
+        msp.add_mtext("{\\fPlainFont|c0;haFn 200} D1", dxfattribs={"style": "Plain", "insert": (0, 50)})
+
+    assert flagged(index(build(tmp_path, fn))) == {
+        "{\\fvncc-rms|c0;haFn 200} D1": True,
+        "{\\fPlainFont|c0;haFn 200} D1": False,
+    }
+
+
+def test_a_sibling_counts_for_every_style_on_the_same_font_file(tmp_path):
+    # review of tool wave 2 (F1): the sibling rule is about the font, so it is keyed by the font file
+    def fn(doc):
+        doc.styles.add("ROMANS", font="romans.shx")
+        doc.styles.add("rms", font="ROMANS.SHX")
+        doc.styles.add("nofile", font="")
+        doc.styles.add("nofile2", font="")
+        msp = doc.modelspace()
+        text_at(msp, "/D\xc2/FU COC", "ROMANS")
+        text_at(msp, "2/g12", "rms", insert=(0, 9))
+        text_at(msp, "/D\xc2/FU COC", "nofile", insert=(0, 18))
+        text_at(msp, "4/g14", "nofile2", insert=(0, 27))  # no font file: keyed by the style name
+
+    got = flagged(index(build(tmp_path, fn)))
+    assert got == {"2/g12": True, "4/g14": False}
 
 
 def test_a_unicode_style_is_never_suspect(tmp_path):

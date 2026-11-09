@@ -28,6 +28,7 @@ from tekla_harness.encoding import (
     guess_encoding_from_font,
     has_lone_surrogate,
     has_unicode_vietnamese,
+    legacy_font_name,
     scrub_surrogates,
 )
 
@@ -525,6 +526,25 @@ def test_capital_hint_from_the_family(style, family, capital):
 )
 def test_a_style_name_that_is_not_a_font_name_gives_no_capital_hint(style, family, capital):
     assert font_hint(style, "VHAVAN_2.TTF", family).capital_font is capital
+
+
+@pytest.mark.parametrize(
+    ("name", "expected"),
+    [
+        ("vncc-rms.shx", True),  # dwgshare 461 DWGshare.com_21
+        ("vncc-sim.shx", True),
+        ("C:\\Fonts\\VNSIMLI.SHX", True),  # the leaf of a path
+        (".VnTime", True),
+        ("VntimeH", True),
+        ("VNI-Times", False),  # VNI keeps its own rule (font_hint decides it)
+        ("romans.shx", False),
+        ("DWGshare.com_21", False),
+        ("", False),
+        (None, False),
+    ],
+)
+def test_legacy_font_name(name, expected):
+    assert legacy_font_name(name) is expected
 
 
 def test_decided_by_names_the_field_that_gave_the_encoding():
