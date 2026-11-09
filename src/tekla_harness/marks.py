@@ -1052,6 +1052,7 @@ def _detail_of_headings(
                 {
                     "key": mark.key,
                     "mark": mark.text,
+                    "structure": mark.structure,
                     "ref": {
                         "entry_id": entry["id"],
                         "sheet": None if sheet is None else sheet["sheet_id"],
@@ -1655,12 +1656,18 @@ def extract_marks(
     for n, p in enumerate(plan, start=1):
         p["id"] = f"P{n:06d}"
     matching = []
+    mark_sets: list[dict[str, Any]] = []
     for f in files:
         if f["status"] != "scanned":
             continue
         mine_p = [p for p in plan if p["file"] == f["path"]]
         mine_t = [t for t in tables if t["file"] == f["path"]]
-        matching.append(_match_file(f["path"], mine_p, mine_t, headings.get(f["path"], [])))
+        match = _match_file(f["path"], mine_p, mine_t, headings.get(f["path"], []))
+        matching.append(match)
+        uncertain = bool(f["unparsed_tables"] or f["blocked_marks"]) or any(
+            t["header_blocked"] for t in mine_t
+        )
+        mark_sets += _mark_sets(f["path"], mine_p, mine_t, headings.get(f["path"], []), match, uncertain)
     for p in plan:
         p.pop("_structure", None)
     for t in tables:
@@ -1686,7 +1693,66 @@ def extract_marks(
     }
     doc["question_counts"] = question_counts(marks_questions(doc))
     doc["summary"] = _summary(doc)
+    doc["summary"]["mark_sets"] = mark_sets
     return _check(doc)
+
+
+SET_SOURCES = ("schedule", "detail_heading", "plan_marks")
+
+
+def _mark_sets(
+    file: str,
+    plan: list[dict[str, Any]],
+    tables: list[dict[str, Any]],
+    detail_of: list[dict[str, Any]],
+    match: dict[str, Any],
+    uncertain: bool,
+) -> list[dict[str, Any]]:
+    """W6: one set per mark family (prefix, upper-cased as in member_mark_prefix_meaning) of the file, for
+    the report to copy. `members`: one entry per key (the first text met: plan marks and titles in scan
+    order, then DETAIL OF headings, then schedule cells), in natural order (numbers as integers, then
+    suffix); a gap stays a gap. `source`: where the members come from. `complete` is true only when a
+    parsed schedule or the detail-heading sweep lists the family AND nothing says the list may be short:
+    no plan mark of the family is plan_only, the family has no notation variant, and the file has no
+    unparsed table, header-blocked table or blocked mark (those may hide rows of any family). Otherwise the
+    report writes 'ít nhất' (at least)."""
+    found: dict[str, dict[str, tuple[str, tuple[str, tuple[int, ...], str], str]]] = {}
+
+    def add(structure: tuple[str, tuple[int, ...], str], key: str, text: str, source: str) -> None:
+        family = structure[0].upper()
+        found.setdefault(family, {}).setdefault(key, (text, structure, source))
+        sources.setdefault(family, set()).add(source)
+
+    sources: dict[str, set[str]] = {}
+    for p in plan:
+        add(p["_structure"], p["key"], p["mark"], "detail_heading" if p["form"] == "title" else "plan_marks")
+    for h in detail_of:
+        add(h["structure"], h["key"], h["mark"], "detail_heading")
+    for t in tables:
+        if t["header_blocked"] or t["mark_column"] is None:
+            continue
+        for row in t["rows"]:
+            for m in row["marks"]:
+                if m["_structure"] is not None:
+                    add(m["_structure"], m["key"], m["text"], "schedule")
+    plan_only = {x["key"] for x in match["plan_only"]}
+    variant_families = {v["structure"]["prefix"].upper() for v in match["notation_variants"]}
+    out = []
+    for family in sorted(found):
+        members = found[family]
+        covered = bool(sources[family] & {"schedule", "detail_heading"})
+        short = uncertain or family in variant_families or bool(plan_only & set(members))
+        order = sorted(members, key=lambda k: (members[k][1][1], members[k][1][2], k))
+        out.append(
+            {
+                "file": file,
+                "family": family,
+                "members": [members[k][0] for k in order],
+                "complete": covered and not short,
+                "source": [s for s in SET_SOURCES if s in sources[family]],
+            }
+        )
+    return out
 
 
 def _summary(doc: dict[str, Any]) -> dict[str, Any]:

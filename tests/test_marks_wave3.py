@@ -166,3 +166,73 @@ def test_with_neither_source_nothing_is_compared(tmp_path):
     (m,) = extract_marks(work, tmp_path / "input")["matching"]
     assert (m["schedule_tables"], m["detail_headings"]) == (0, 0)
     assert m["matched"] == m["schedule_only"] == m["plan_only"] == []  # not compared is no finding
+
+
+# --- W6: mark sets per file and family --------------------------------------------------------------------
+
+
+def sets_of(doc: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    return {s["family"]: s for s in doc["summary"]["mark_sets"]}
+
+
+def marks_doc(tmp_path, s1: list[str], s2: list[str] | None = None) -> dict[str, Any]:
+    from _callout_fixtures import build_work
+    from tekla_harness.marks import extract_marks
+
+    work = build_work(tmp_path, s1=s1, styled=[], s2=s2 or [], paper=[])
+    return extract_marks(work, tmp_path / "input")
+
+
+def test_a_family_a_heading_sweep_covers_is_complete(tmp_path):
+    from tekla_harness.schemas import validate
+
+    s1 = ["DẦM D1 (SL= 02)", "DẦM D2", "D1", "D2", "ĐÀI CỌC DC1", "M1", "M2", "M3", "M5"]
+    doc = marks_doc(tmp_path, s1, ["D2"])
+    assert validate("marks", doc) == []
+    sets = sets_of(doc)
+    assert set(sets) == {"D", "DC", "M"}
+    assert sets["D"] == {
+        "file": "plans/set.dxf",
+        "family": "D",
+        "members": ["D1", "D2"],
+        "complete": True,
+        "source": ["detail_heading", "plan_marks"],
+    }
+    assert (sets["DC"]["members"], sets["DC"]["complete"], sets["DC"]["source"]) == (
+        ["DC1"],
+        True,
+        ["detail_heading"],
+    )
+    # plan marks alone never make a complete set, and a gap stays a gap
+    assert (sets["M"]["members"], sets["M"]["complete"], sets["M"]["source"]) == (
+        ["M1", "M2", "M3", "M5"],
+        False,
+        ["plan_marks"],
+    )
+
+
+def test_a_plan_mark_no_source_lists_makes_its_family_incomplete(no_schedule):
+    d = sets_of(no_schedule)["D"]
+    assert d["members"] == ["D1", "D2", "D9"] and d["complete"] is False  # D2 is plan-only
+
+
+def test_a_notation_variant_makes_its_family_incomplete(tmp_path):
+    doc = marks_doc(tmp_path, ["DẦM D1-1", "DẦM D1.1", "D1-1", "D1.1", "DẦM C1", "C1"])
+    sets = sets_of(doc)
+    assert sets["D"]["members"] == ["D1-1", "D1.1"] and sets["D"]["complete"] is False
+    assert sets["C"]["complete"] is True
+
+
+def test_members_are_in_natural_order_with_one_entry_per_key(tmp_path):
+    doc = marks_doc(tmp_path, ["DẦM D10", "DẦM D2", "DẦM D1a", "DẦM D1", "D2", "d2", "D10"])
+    d = sets_of(doc)["D"]
+    assert d["members"] == ["D1", "D1a", "D2", "D10"]  # 'D2' and 'd2' are one key; the first drawn wins
+
+
+def test_a_schedule_is_a_source_but_unread_tables_keep_every_set_incomplete(heading_doc):
+    sets = sets_of(heading_doc)
+    assert "schedule" in sets["D"]["source"] and "schedule" in sets["C"]["source"]
+    assert "D7" not in sets["D"]["members"] and "D8" not in sets["D"]["members"]  # blocked rows: never read
+    # the fixture holds an unparsed table and a header-blocked one: rows may be missing anywhere in the file
+    assert not any(s["complete"] for s in heading_doc["summary"]["mark_sets"])
+    assert sets["AB"]["members"] == ["AB-20B"] and sets["CP"]["source"] == ["detail_heading"]

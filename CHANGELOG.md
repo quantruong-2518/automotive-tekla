@@ -661,6 +661,13 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
       file with a schedule or a heading; a file with neither is not compared (`none` is never written).
       Changed: a title that used to match a schedule row (`COLUMN C2`) is now a schedule-only key with
       that heading.
+    - `harness marks` (W6) writes `summary.mark_sets`: one set per file and mark family (prefix,
+      upper-cased as in `member_mark_prefix_meaning`) with `members` (one per key, as drawn, natural order,
+      gaps kept), `source` (`schedule`, `detail_heading`, `plan_marks`) and `complete`. `complete` is true
+      only when a parsed schedule or the heading sweep lists the family and nothing says the list may be
+      short: no plan-only mark in the family, no notation variant, and no unparsed table, header-blocked
+      table or blocked mark in the file. Otherwise the report writes "ít nhất". 433: `M1`…`M8` and `GM1`…`GM5`,
+      `GM7`, `GM8`, both incomplete (plan marks only).
 
 ### Changed
 - Question lifecycle (tool wave 2, EVAL-2 fix 5):
