@@ -21,7 +21,10 @@ designations"):
     (`diameter_sign_literal_non_unicode`): U+00D8 is also byte 0xD8 of single-byte code pages.
   * Tool wave 3, W1b (docs/research/diameter-glyph-u-grave.md): a character in diameter position that is
     not a verified diameter sign (`2ù20`, `ù14a150`, `2Þ16`, U+2300, U+2205) is an unparsed rebar callout
-    with `unparsed_code` symbol_glyph_unverified, never decoded (`_GLYPH` says which shapes count).
+    with `unparsed_code` symbol_glyph_unverified, never decoded (`_GLYPH` says which shapes count). Such
+    callouts joined by '+' or '/' (`2ù20+2ù18`, `2ù20/2ù18`) are ONE such candidate (review M2). A glyph
+    before or between digits that no shape reads (bare `ù12`, `ù8@150`, a mark letter `Ô1`) is listed in
+    `rejected` (`diameter_glyph_no_notation`): never a candidate, so a slab panel `Ô1` raises no question.
   * Precedence on a line (a character belongs to one candidate): ambiguous rebar forms, verified rebar
     forms, `L=`, grades, steel sections, plates, bolts, loose diameter-sign forms, glyphs. A line with no
     candidate whose whole text looks like a member mark is a `member_mark` (practice only, never verified).
@@ -170,6 +173,23 @@ _GLYPH = re.compile(
     + r")\s*\d{1,2})"
     + _R
 )
+# review M2: glyph callouts joined by '+' or '/' (`2ù20+2ù18`, `2ù20/2ù18`), one candidate as their Ø twins
+# (`_PLUS_JOIN`); each part has one of the `_GLYPH` shapes
+_GLYPH_PART = (
+    r"(?:\d{1,3}\s*"
+    + _GLYPH_ANY
+    + r"\s*\d{1,2}(?:"
+    + _GLYPH_SPACING
+    + r")?|"
+    + _GLYPH_ANY
+    + r"\s*\d{1,2}"
+    + _GLYPH_SPACING
+    + r"|"
+    + _GLYPH_SYMBOL
+    + r"\s*\d{1,2})"
+)
+_GLYPH_JOIN = re.compile(_L + _GLYPH_PART + r"(?:\s*[+/]\s*" + _GLYPH_PART + r")+(?![\w/@=])")
+_GLYPH_CHAR = re.compile(_GLYPH_ANY)
 
 _REBAR_GRADE = re.compile(r"\bCB(?P<ys>240|300|400|500|600)-?(?P<surf>[TV])\b")
 _LEGACY = re.compile(r"\b(?P<p>C|A-?)(?P<g>I{1,3}|IV)\b")
@@ -480,6 +500,22 @@ def _glyph(m: re.Match[str]) -> _Hit:
     return _unparsed("rebar_callout", m, rule, why, SYMBOL_GLYPH)
 
 
+def _glyph_join(m: re.Match[str]) -> _Hit:
+    found = _GLYPH_CHAR.search(m.group(0))
+    assert found is not None  # every part holds a glyph
+    glyph = found.group(0)
+    rule = (
+        "SYMBOL_GLYPH_JOIN (docs/research/diameter-glyph-u-grave.md: bar groups joined by '+' or '/' with a "
+        "character that is not a verified diameter sign in diameter position; never decoded)"
+    )
+    why = (
+        f"bar groups joined by '+' or '/' where the character '{glyph}' (U+{ord(glyph):04X}) stands where a "
+        "diameter sign stands, but it is not Ø or %%c: never decoded, the meaning depends on a font "
+        "nobody verified (research note diameter-glyph-u-grave.md); with Ø the join itself is ambiguous"
+    )
+    return _unparsed("rebar_callout", m, rule, why, SYMBOL_GLYPH)
+
+
 def _hole(m: re.Match[str]) -> _Hit:
     rule = _cite("BOLT_HOLE", "section 5.3, ambiguous #14")
     why = "hole diameter notation ('lỗ Ø22'): hole size, standard or oversize unverified"
@@ -577,6 +613,7 @@ _SCANNERS: tuple[Callable[[str, _Line], None], ...] = (
     _pattern(_PLATE, _plate),
     _bolts,
     _pattern(_LOOSE_DIA, _loose_dia),
+    _pattern(_GLYPH_JOIN, _glyph_join),
     _pattern(_GLYPH, _glyph),
 )
 
@@ -614,10 +651,15 @@ def is_sheet_code(line: str, case_uncertain: bool) -> bool:
 
 # rejected[] reason codes: text that matched a candidate pattern and is no candidate (callouts schema)
 NO_NOTATION = "diameter_sign_no_notation"
+GLYPH_NO_NOTATION = "diameter_glyph_no_notation"
 SHEET_CODE = "sheet_code"
 REJECT_REASONS = {
     NO_NOTATION: "a diameter sign that no callout pattern reads: no number right after it, or glued to the "
     "token before or after it",
+    GLYPH_NO_NOTATION: "a character that is not a verified diameter sign stands in diameter position (a "
+    "letter alone before a number or between numbers, U+2300 / U+2205 anywhere) but no callout shape reads "
+    "it (bare 'ù12', 'ù8@150'; or a mark letter such as 'Ô1'): never decoded (research note "
+    "diameter-glyph-u-grave.md)",
     SHEET_CODE: "the whole text is a sheet code (research parsing pattern 3), not a member mark",
     "claimed_by_title_block": "the title-block extractor took this text as a field value or label",
     "claimed_by_grids": "the grid extractor took this text (a grid bubble label)",
@@ -633,6 +675,28 @@ def _uncovered_signs(line: str, hits: list[_Hit]) -> list[str]:
     for tok in _TOKEN.finditer(line):
         for sign in _DIA_SIGN.finditer(line, tok.start(), tok.end()):
             if not any(h.start <= sign.start() < h.end for h in hits):
+                out.append(tok.group(0))
+                break
+    return out
+
+
+# a glyph letter with no letter before it (not the end of a word: 'là 20', 'lÀ9' stay out; a letter after
+# it is ruled out by the digit `_uncovered_glyphs` asks for)
+_LONE_GLYPH = re.compile(r"(?<![^\W\d_])(?:" + _GLYPH_LETTER + r")|" + _GLYPH_SYMBOL)
+
+
+def _uncovered_glyphs(line: str, hits: list[_Hit]) -> list[str]:
+    """Review M2: the line's tokens holding a glyph in diameter position that no hit covers, in order. A
+    glyph letter counts when a digit follows it directly ('ù12'), or a digit precedes it directly and one
+    follows after optional blanks ('2ù 20'); U+2300 / U+2205 count anywhere (as a diameter sign)."""
+    out = []
+    for tok in _TOKEN.finditer(line):
+        for g in _LONE_GLYPH.finditer(line, tok.start(), tok.end()):
+            i = g.start()
+            symbol = g.group(0) in "⌀∅"
+            follows = line[i + 1 : i + 2].isdigit()
+            between = i > 0 and line[i - 1].isdigit() and line[i + 1 :].lstrip()[:1].isdigit()
+            if (symbol or follows or between) and not any(h.start <= i < h.end for h in hits):
                 out.append(tok.group(0))
                 break
     return out
@@ -701,6 +765,7 @@ def _entry_hits(
             elif is_sheet_code(line, cu):
                 rejects.append((line.strip(), "member_mark", SHEET_CODE))
         rejects.extend((tok, "rebar_callout", NO_NOTATION) for tok in _uncovered_signs(line, hits))
+        rejects.extend((tok, "rebar_callout", GLYPH_NO_NOTATION) for tok in _uncovered_glyphs(line, hits))
         for hit in hits:
             if literal_sign_unsafe and re.search("[" + DIA_CHARS + "]", line[hit.start : hit.end]):
                 hit.derived_flags += ("diameter_sign_literal_non_unicode",)

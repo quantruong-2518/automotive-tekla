@@ -95,6 +95,7 @@ def test_a_glyph_in_diameter_position_is_an_unparsed_candidate(line):
     assert hit.cap == "low"
     assert (hit.start, hit.end) == (0, len(line))
     assert "never decoded" in (hit.reason or "") and "diameter-glyph-u-grave.md" in hit.rule
+    assert hit.rule.startswith("SYMBOL_GLYPH (")  # one callout, not a join
 
 
 def test_a_glyph_callout_keeps_its_neighbours():
@@ -127,6 +128,68 @@ def test_a_glyph_callout_keeps_its_neighbours():
 )
 def test_not_a_glyph_callout(line):
     assert all(h.code != GLYPH for h in scan_line(line))
+
+
+# --- review M2: joined glyph callouts are one candidate; a bare glyph is rejected, never dropped ----------
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        f"2{U_GRAVE}20+2{U_GRAVE}18",  # the Ø twin is one rebar_plus_join candidate
+        f"2{U_GRAVE}20 + 2{U_GRAVE}18",
+        f"2{U_GRAVE}20/2{U_GRAVE}18",  # slash: the Ø twin is a loose candidate + a rejected sign
+        f"2{THORN}16+2{THORN}18",
+        f"{U_GRAVE}12a150+2{U_GRAVE}18",
+        "2⌀16+2⌀18",
+        "⌀16+⌀18",  # the symbols also alone with a number
+    ],
+)
+def test_joined_glyph_callouts_are_one_unparsed_candidate(line):
+    (hit,) = scan_line(line)
+    assert (hit.kind, hit.parsed, hit.ambiguity, hit.code) == ("rebar_callout", None, None, GLYPH)
+    assert (hit.start, hit.end) == (0, len(line))
+    assert "never decoded" in (hit.reason or "") and "joined" in (hit.reason or "")
+    assert hit.rule.startswith("SYMBOL_GLYPH_JOIN (")
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        f"2{U_GRAVE}20+2{U_GRAVE}18x",  # glued to the token after
+        f"a2{U_GRAVE}20+2{U_GRAVE}18",  # glued to the token before
+        "Ô1+Ô2",  # a lone letter + number is no callout part, joined or not
+        f"{U_GRAVE}12+{U_GRAVE}13",
+    ],
+)
+def test_not_a_joined_glyph_callout(line):
+    assert all(h.code != GLYPH for h in scan_line(line))
+
+
+@pytest.mark.parametrize(
+    ("line", "tokens"),
+    [
+        (f"{U_GRAVE}12", [f"{U_GRAVE}12"]),  # bare glyph + number: no callout shape (Ø twin: loose form)
+        (f"{U_GRAVE}8@150", [f"{U_GRAVE}8@150"]),
+        ("Ô1", ["Ô1"]),  # a slab panel mark or a glyph: not decided, but listed
+        (f"a2{U_GRAVE}20", [f"a2{U_GRAVE}20"]),  # between digits, glued to the token before
+        (f"2{U_GRAVE} x", []),  # no digit after
+        ("⌀<10mm", ["⌀<10mm"]),  # a diameter-like symbol no pattern reads
+        ("ở 2", []),  # a one-letter Vietnamese word before a number
+        ("là 20", []),
+        ("ĐÁ 1x2", []),
+        ("lÀ9", []),  # part of a word
+        ("Đ1", []),  # a mark letter
+        (f"2{U_GRAVE}20", []),  # covered by its candidate
+        (f"{DIA}12", []),  # a verified sign: _uncovered_signs' job
+        (f"{U_GRAVE}12{U_GRAVE}13", [f"{U_GRAVE}12{U_GRAVE}13"]),  # one row per token
+        (f"2{U_GRAVE}20+2{U_GRAVE}18x", [f"2{U_GRAVE}20+2{U_GRAVE}18x"]),  # no candidate: listed
+    ],
+)
+def test_an_uncovered_glyph_in_diameter_position_is_listed(line, tokens):
+    from tekla_harness.callouts import _uncovered_glyphs
+
+    assert _uncovered_glyphs(line, scan_line(line)) == tokens
 
 
 # --- the work folder ------------------------------------------------------------------------------------
@@ -164,6 +227,27 @@ def test_glyph_callouts_are_listed_unparsed_with_their_code(glyph_doc):
     assert all(c["parsed"] is None and c["confidence"] == "low" for c in glyphs)
     assert {c["kind"] for c in glyphs} == {"rebar_callout"}
     assert {c["encoding"] for c in glyphs} == {"unicode", "vni"}  # both allowed by the gate, neither decoded
+
+
+MORE_GLYPHS = [
+    (f"2{U_GRAVE}20+2{U_GRAVE}18", "Arial"),
+    (f"2{U_GRAVE}20/2{U_GRAVE}18", "Arial"),
+    (f"{U_GRAVE}12", "Arial"),
+    (f"{U_GRAVE}8@150", "Arial"),
+]
+
+
+def test_no_glyph_in_diameter_position_is_dropped_silently(tmp_path):
+    """Review M2: every text holding a glyph before or between digits is a candidate or rejected."""
+    work = build_work(tmp_path, s1=[], styled=MORE_GLYPHS, s2=[], paper=[], extra_styles=GLYPH_STYLES)
+    doc = extract_callouts(work)
+    assert validate("callouts", doc) == []
+    glyphs = [c["display_text"] for c in doc["candidates"] if c.get("unparsed_code") == GLYPH]
+    assert glyphs == [f"2{U_GRAVE}20+2{U_GRAVE}18", f"2{U_GRAVE}20/2{U_GRAVE}18"]
+    rows = [r for r in doc["rejected"] if r["reason_code"] == "diameter_glyph_no_notation"]
+    assert [r["display_text"] for r in rows] == [f"{U_GRAVE}12", f"{U_GRAVE}8@150"]
+    assert all(r["kind"] == "rebar_callout" and "never decoded" in r["reason"] for r in rows)
+    assert doc["summary"]["rejected_by_reason"]["diameter_glyph_no_notation"] == 2
 
 
 def test_every_unparsed_candidate_has_a_code_and_no_parsed_one_has(glyph_doc):

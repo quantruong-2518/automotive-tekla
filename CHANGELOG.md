@@ -692,6 +692,14 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
       `C`, `MB`); 286 loses 7 heading matches `d2-4` … `dm-4` (they came only from shorthand lists; now
       plan-only) and the false schedule-only `d2`; 290 gains schedule-only `d2`, `d3`, `d4` (from
       `dẦm d1 , d2`, `dẦm d5 , d4 , d3`) and 3 notation-variant groups.
+    - Fix (review M2): `harness callouts` no longer drops glyph callouts outside the two narrow shapes.
+      Glyph callouts joined by `+` or `/` (`2ù20+2ù18`, `2ù20 + 2ù18`, `2ù20/2ù18`, `2Þ16+2Þ18`) are one
+      unparsed `rebar_callout` with `symbol_glyph_unverified` (rule `SYMBOL_GLYPH_JOIN`), as their Ø twins
+      are one candidate; before, they gave no candidate and no `rejected` row (the spaced form gave two).
+      A glyph before or between digits that no shape reads (bare `ù12`, `ù8@150`, `Ô1`) and a U+2300 /
+      U+2205 no pattern reads are listed in `rejected` with `diameter_glyph_no_notation`: not a candidate,
+      so a slab-panel letter raises no blocking question. Known drawings: no change (none of these forms
+      occurs; 290 keeps 507 `ù` + 31 `Þ` candidates).
 
 ### Changed
 - Question lifecycle (tool wave 2, EVAL-2 fix 5):
