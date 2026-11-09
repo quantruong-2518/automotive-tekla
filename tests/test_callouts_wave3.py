@@ -356,3 +356,60 @@ def test_run_writes_callout_unparsed_questions_that_validate(glyph_work, tmp_pat
     codes = [q["code"] for q in qdoc["questions"]]
     assert codes.count("callout_unparsed") == 3
     assert all(q["id"].startswith("Q-") for q in qdoc["questions"])
+
+
+# --- a title-block candidate found by shape alone does not consume a real mark ---------------------------
+# EVAL-3 286 model#04: the lower-right fallback took the tie-beam mark 'gĐ-3' as the sheet number, and
+# every reader then dropped it as claimed; 'gĐ-1' and 'gĐ-2' sit on the same sheet in the same style.
+# On 461 the same fallback finds real sheet numbers ('Đn-05'), one per sheet, with no such family.
+
+FAMILY_TEXTS = ["GD-1", "GD-2", "GD-3", "SX-5", "GE-1"]
+
+
+@pytest.fixture(scope="module")
+def family_work(tmp_path_factory) -> Path:
+    work = build_work(
+        tmp_path_factory.mktemp("family"),
+        s1=FAMILY_TEXTS,
+        styled=[("GE-2", ".VnTimeH")],  # same family, another style: no evidence
+        s2=[],
+        paper=[],
+    )
+    index = json.loads((work / "text" / f"{REL}.json").read_text(encoding="utf-8"))
+    ids = {e["display_text"]: e for e in index["entries"]}
+    path = work / "structure" / f"{REL}.sheets.json"
+    sheets = json.loads(path.read_text(encoding="utf-8"))
+    (s1,) = [s for s in sheets["sheets"] if s["sheet_id"] == "model#01"]
+    kinds = (("GD-3", "pattern"), ("SX-5", "pattern"), ("GE-1", "pattern"), ("GD-2", "adjacent_label"))
+    for text, kind in kinds:
+        e = ids[text]
+        s1["title_block"]["candidates"].append(
+            {
+                "field": "sheet_number",
+                "value": text,
+                "evidence": {
+                    "kind": kind,
+                    "key": "sheet_code_lower_right" if kind == "pattern" else "SỐ BẢN VẼ",
+                    "value_text_id": e["id"],
+                    "label_text_id": None,
+                    "position": [e["position"]["x"], e["position"]["y"]],
+                },
+                "confidence": "low",
+                "provenance": {"file": REL, "sheet": "model#01", "method": "dxf_entity"},
+            }
+        )
+    path.write_text(json.dumps(sheets, ensure_ascii=False), encoding="utf-8")
+    return work
+
+
+def test_a_shape_only_title_candidate_from_a_mark_family_is_released(family_work):
+    from tekla_harness.marks import extract_marks
+
+    doc = extract_callouts(family_work)
+    marks = {c["display_text"] for c in doc["candidates"] if c["kind"] == "member_mark"}
+    assert "GD-3" in marks  # pattern kind, siblings GD-1 (GD-2 is claimed by a label) in its style
+    assert not {"SX-5", "GE-1", "GD-2"} & marks  # no family / another style only / label evidence
+    assert set(rejected(doc, "claimed_by_title_block")) >= {"SX-5", "GE-1", "GD-2"}
+    assert "GD-3" not in rejected(doc, "claimed_by_title_block")
+    plan = {p["mark"] for p in extract_marks(family_work)["plan_marks"]}
+    assert "GD-3" in plan and not {"SX-5", "GE-1", "GD-2"} & plan

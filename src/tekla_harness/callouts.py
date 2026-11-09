@@ -680,15 +680,53 @@ def _entry_hits(
     return out, rejects
 
 
+# the prefix of a mark-shaped text (marks.py's grammar, without the section): `gĐ-3`, `Đn - 05`, `GM1`
+_FAMILY = re.compile(r"^(?P<prefix>[A-Za-zĐđ]{1,4})\s?-?\s?\d{1,3}(?:[.\-]\d{1,3})?[A-Za-z']?$")
+
+
+def _family_key(entry: dict[str, Any]) -> tuple[str, str | None, float | None] | None:
+    """(prefix casefolded, style, height) of a text whose whole text has a mark's shape, else None."""
+    m = _FAMILY.match(entry["display_text"].strip())
+    return None if m is None else (m["prefix"].casefold(), entry["style"], entry["height"])
+
+
+def _released_pattern_values(loaded: LoadedFile) -> set[str]:
+    """Value texts of title-block candidates found by shape alone (evidence kind `pattern`: the lower-right
+    sheet-code fallback, no tag and no label) that belong to a mark family drawn on the same sheet: another
+    text of the sheet that no title-block candidate took has the same prefix, style and height and a mark's
+    shape (EVAL-3 286 model#04: `gĐ-3` next to `gĐ-1`, `gĐ-2`). Such a text is a member mark, not the sheet
+    number, so it is not claimed. A printed sheet number found the same way (461 `Đn-05`, one per sheet)
+    has no such family and stays claimed."""
+    if loaded.sheets is None or loaded.text_index is None:
+        return set()
+    entries = {e["id"]: e for e in loaded.text_index["entries"]}
+    out: set[str] = set()
+    for sh in loaded.sheets["sheets"]:
+        cands = sh["title_block"]["candidates"]
+        taken = {c["evidence"]["value_text_id"] for c in cands} | {
+            c["evidence"]["label_text_id"] for c in cands if c["evidence"]["label_text_id"]
+        }
+        families = {_family_key(entries[t]) for t in sh["text_ids"] if t in entries and t not in taken}
+        families.discard(None)
+        for c in cands:
+            value = entries.get(c["evidence"]["value_text_id"])
+            if c["evidence"]["kind"] == "pattern" and value is not None and _family_key(value) in families:
+                out.add(value["id"])
+    return out
+
+
 def _claimed_text_ids(inv_work: Path, loaded: LoadedFile, warnings: list[str]) -> dict[str, str]:
     """Text ids that title-block, grid and level extraction already used, each with the extractor that
-    took it first (title_block, grids, levels)."""
+    took it first (title_block, grids, levels). A shape-only title-block candidate that belongs to a mark
+    family is not claimed (`_released_pattern_values`)."""
     ids: dict[str, str] = {}
+    released = _released_pattern_values(loaded)
     if loaded.sheets is not None:
         for sh in loaded.sheets["sheets"]:
             for cand in sh["title_block"]["candidates"]:
                 ev = cand["evidence"]
-                ids.setdefault(ev["value_text_id"], "title_block")
+                if ev["value_text_id"] not in released:
+                    ids.setdefault(ev["value_text_id"], "title_block")
                 if ev["label_text_id"]:
                     ids.setdefault(ev["label_text_id"], "title_block")
 

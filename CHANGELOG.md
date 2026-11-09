@@ -639,6 +639,11 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
       ambiguity, no member mark, no legacy grade group). Subject = the code with the true count; refs = the
       first five examples (text entry ids, verbatim, scan order) and one `sheets` ref with the count per
       sheet. On EVAL-3's set this asks the 554 unparsed Ø-callouts and drawing 290's 538 glyph callouts.
+    - Fix: a title-block candidate found by shape alone (the lower-right sheet-code fallback, evidence kind
+      `pattern`) no longer consumes a real mark in `harness callouts` and `harness marks` when the sheet
+      holds a family of that mark (another unclaimed mark-shaped text with the same prefix, style and
+      height): 286's tie-beam mark `gĐ-3` is a mark again. Sheet numbers found the same way without such a
+      family (461 `Đn-05`) stay claimed.
 
 ### Changed
 - Question lifecycle (tool wave 2, EVAL-2 fix 5):
