@@ -501,6 +501,15 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
     the producer declared its code superseded by an answer to another code (`Ledger.sync(...,
     superseded_by={code: answer_code})`, only while such an answer is active), else the latest run no
     longer raises it. Set on the transition, kept while obsolete, dropped when the key is raised again.
+  - Tool wave 3, seam: new question codes `sheet_number_gap`, `callout_unparsed`, `legacy_ascii_text`,
+    `grid_system_missing`, `grid_answer_contradicts_drawing` (shared constants in `questions`, with the
+    `grid_system_missing` value keys) and their proposed Vietnamese rows in `harness questions-md`, whose
+    answer command for `grid_system_missing` prints the ADR-0013 keys. New flags, parsed and checked
+    (exit 2 on misuse) but not implemented yet (exit 3, nothing written) until their package lands:
+    `harness ask --amend Q-id [--text T] [--places P ...]` (package C; `--places` only with `--amend`) and
+    `harness sheet-text W FILE SHEET --region x0,y0,x1,y1` (package T; four finite numbers, x0 < x1,
+    y0 < y1, a sheet id and no `--unassigned`). `harness find-text` warns with `blocked_in_scope` when the
+    output has it. `harness answer --help` names the `grid_system_missing` keys.
 
 ### Changed
 - Question lifecycle (tool wave 2, EVAL-2 fix 5):

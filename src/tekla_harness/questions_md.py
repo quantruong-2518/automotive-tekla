@@ -56,6 +56,9 @@ from tekla_harness.questions import (
     CONFLICT_CODE,
     CONTRADICTION_CODE,
     FILE_SET_CODE,
+    GRID_ANSWER_KEYS,
+    GRID_ANSWER_SHEET_KEY,
+    GRID_MISSING_CODE,
     PREFIX_CODE,
     QUESTION_DOCUMENTS,
     SELECT_CODE,
@@ -319,6 +322,10 @@ def answer_values(item: Item, answered_unit: str | None = None) -> list[str]:
         return ["?systems=S001,S002", "?separate=S001,S002"]
     if item.code == FILE_SET_CODE:  # every file of the question exactly once, one set per building
         return ["set1=<file>,<file>", "?set2=<file>,..."]
+    if item.code == GRID_MISSING_CODE:  # ADR-0013 §2: both directions, spacings one fewer than labels
+        templates = {"labels": "<label>,<label>,...", "spacings": "<spacing>,..."}
+        keys = [f"{key}={templates[key.split('_')[1]]}" for key in GRID_ANSWER_KEYS]
+        return [*keys, f"?{GRID_ANSWER_SHEET_KEY}=<sheet id>"]
     return []
 
 

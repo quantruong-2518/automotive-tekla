@@ -96,6 +96,16 @@ AXIS_DIRECTIONS = ("dir1", "dir2")  # value keys of a grid_system_axis_unassigne
 # set1=a.dwg,b.dwg set2=c.dwg, every file of the question's refs exactly once
 FILE_SET_CODE = "file_set_relation"
 FILE_SET_KEY = re.compile(r"set[1-9][0-9]*")
+# tool wave 3 codes (names frozen: the EVAL-4 metrics use them), with their producers:
+SHEET_GAP_CODE = "sheet_number_gap"  # read-structure (sheets), not blocking: gaps in a file's sheet numbers
+CALLOUT_UNPARSED_CODE = "callout_unparsed"  # callouts: one per file and unparsed_code; blocks lot specs
+LEGACY_ASCII_CODE = "legacy_ascii_text"  # intake (read-dxf), not blocking: one per file and text style
+GRID_MISSING_CODE = "grid_system_missing"  # grid-system, blocking (ADR-0013): a file with no usable system
+GRID_CONTRADICTS_CODE = "grid_answer_contradicts_drawing"  # grid-system, blocking (ADR-0013 §5)
+# value keys of a grid_system_missing answer (ADR-0013 §2): comma-separated labels and spacings per
+# direction, both directions required; GRID_ANSWER_SHEET_KEY is optional
+GRID_ANSWER_KEYS = ("dir1_labels", "dir1_spacings", "dir2_labels", "dir2_spacings")
+GRID_ANSWER_SHEET_KEY = "sheet"
 # who gave an answer (answers.json answered_by_role): gate 1 counts the engineer's answers only
 ROLES = ("engineer", "simulated")
 # why a question is closed without an answer of its own (intake schema closed_by.reason; lifecycle.py)

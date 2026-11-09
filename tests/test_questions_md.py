@@ -57,8 +57,31 @@ PRODUCER_CODES = (  # noqa: SIM905
     "level_single_occurrence "
     "callout_ambiguous grade_legacy_mapping member_mark_prefix_meaning "
     "grid_system_select grid_system_conflict grid_system_units_unconfirmed grid_system_axis_unassigned "
-    "file_set_relation"
+    "file_set_relation "
+    # tool wave 3 (raised once packages S, M, T and G land)
+    "sheet_number_gap callout_unparsed legacy_ascii_text grid_system_missing grid_answer_contradicts_drawing"
 ).split()
+
+
+def test_wave3_codes_are_shared_constants_with_their_topics():
+    from tekla_harness import questions
+
+    codes = {
+        questions.SHEET_GAP_CODE: "sheets",
+        questions.CALLOUT_UNPARSED_CODE: "marks",
+        questions.LEGACY_ASCII_CODE: "fonts",
+        questions.GRID_MISSING_CODE: "grids",
+        questions.GRID_CONTRADICTS_CODE: "grids",
+    }
+    assert set(codes) == set(PRODUCER_CODES[-5:])
+    assert {c: questions_md_vi.CODES[c][0] for c in codes} == codes
+
+
+def test_grid_system_missing_row_prints_the_answer_keys():
+    from tekla_harness.questions import GRID_ANSWER_KEYS
+
+    need = questions_md_vi.CODES["grid_system_missing"][1]
+    assert all(f"{key}=" in need for key in (*GRID_ANSWER_KEYS, "sheet"))
 
 
 def load(path: Path) -> Any:
@@ -544,6 +567,23 @@ def test_file_set_template_names_the_sets_answers_py_requires():
     assert command.endswith("--value set1=<file>,<file> [--value set2=<file>,...]")
     assert check_values("file_set_relation", {"set1": "a.dxf,b.dxf"}) == []
     assert questions_md_vi.topic_of("file_set_relation", "intake") == "convert"
+
+
+def test_grid_system_missing_template_names_the_adr_0013_keys():
+    item = Item(
+        id="Q-070", key="d" * 16, code="grid_system_missing", blocking=True, file="a.dxf",
+        message="m", count=1, truncated=False, refs=[{"file": "a.dxf", "where": "a.dxf", "found": "x"}],
+        subjects=None, source="grid-system-questions.json", producer="grid-system", topic="grids",
+        answer=None,
+    )  # fmt: skip
+    command = answer_command(item)
+    assert command.endswith(
+        "--value dir1_labels=<label>,<label>,... --value dir1_spacings=<spacing>,... "
+        "--value dir2_labels=<label>,<label>,... --value dir2_spacings=<spacing>,... "
+        "[--value sheet=<sheet id>]"
+    )
+    contradiction = Item(**{**item.__dict__, "code": "grid_answer_contradicts_drawing"})
+    assert "--value" not in answer_command(contradiction)
 
 
 def first_blocking_open(world: Path) -> dict[str, Any]:

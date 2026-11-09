@@ -9,12 +9,13 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import math
 import sys
 from pathlib import Path
 
 from tekla_harness import __version__, dimensions, findings, marks, questions_md
 from tekla_harness.answers import parse_values, record_answer
-from tekla_harness.ask import ask_question, withdraw_question
+from tekla_harness.ask import amend_question, ask_question, withdraw_question
 from tekla_harness.cache import ReadCache
 from tekla_harness.callouts import run_callouts
 from tekla_harness.convert import DEFAULT_TIMEOUT_S, NoConverterError, dwg_to_dxf
@@ -32,6 +33,7 @@ from tekla_harness.sheet_text import (
     ReaderError,
     find_text,
     list_sheets,
+    sheet_region,
     sheet_text,
     truncation_warning,
 )
@@ -351,16 +353,53 @@ def _cmd_list_sheets(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
-def _cmd_sheet_text(args: argparse.Namespace) -> int:
+def _not_implemented(exc: NotImplementedError) -> int:
+    """A seam stub that its package has not replaced yet (tool wave 3): exit 3, nothing run or written.
+    Only the stub calls are wrapped, so any other NotImplementedError still surfaces as a bug."""
+    print(f"{exc}: nothing was run or written", file=sys.stderr)
+    return EXIT_ENV
+
+
+def _region(text: str) -> tuple[float, float, float, float]:
+    """`--region x0,y0,x1,y1`: four finite numbers with x0 < x1 and y0 < y1 (argparse type)."""
+    parts = text.split(",")
     try:
-        doc = sheet_text(
-            Path(args.work_dir),
-            args.file,
-            args.sheet_id,
-            contains=args.contains,
-            max_entries=args.max,
-            unassigned=args.unassigned,
-        )
+        x0, y0, x1, y1 = (float(p) for p in parts)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"'{text}' is not four numbers x0,y0,x1,y1") from None
+    if not all(math.isfinite(v) for v in (x0, y0, x1, y1)):
+        raise argparse.ArgumentTypeError(f"'{text}': every coordinate must be a finite number")
+    if not (x0 < x1 and y0 < y1):
+        raise argparse.ArgumentTypeError(f"'{text}': need x0 < x1 and y0 < y1 (the box's corners)")
+    return x0, y0, x1, y1
+
+
+def _cmd_sheet_text(args: argparse.Namespace) -> int:
+    if args.region is not None and (args.sheet_id is None or args.unassigned):
+        print("--region reads a box of ONE sheet: give its sheet id, without --unassigned", file=sys.stderr)
+        return EXIT_USAGE
+    try:
+        if args.region is not None:
+            try:
+                doc = sheet_region(
+                    Path(args.work_dir),
+                    args.file,
+                    args.sheet_id,
+                    args.region,
+                    contains=args.contains,
+                    max_entries=args.max,
+                )
+            except NotImplementedError as exc:  # the seam stub only (package T)
+                return _not_implemented(exc)
+        else:
+            doc = sheet_text(
+                Path(args.work_dir),
+                args.file,
+                args.sheet_id,
+                contains=args.contains,
+                max_entries=args.max,
+                unassigned=args.unassigned,
+            )
     except ReaderError as exc:
         print(str(exc), file=sys.stderr)
         return exc.exit_code
@@ -390,7 +429,13 @@ def _cmd_find_text(args: argparse.Namespace) -> int:
             f"rerun with --max {counts['hits']} (or without --max) to get all of them",
             file=sys.stderr,
         )
-    if counts["blocked_entries_not_searchable"]:
+    if counts.get("blocked_in_scope"):  # W4 (package T): blocked entries are never matched
+        print(
+            f"find-text: {counts['blocked_in_scope']} blocked (legacy-font) entries in the searched scope "
+            "are never matched: the search is incomplete over them; read them by entry id or with sheet-text",
+            file=sys.stderr,
+        )
+    elif counts.get("blocked_entries_not_searchable"):  # deprecated count, until package T lands
         print(
             f"find-text: {counts['blocked_entries_not_searchable']} blocked (legacy-font) entries were "
             "matched on their stored text only: the search is incomplete over them",
@@ -454,15 +499,31 @@ def _cmd_ask(args: argparse.Namespace) -> int:
     try:
         modes = [
             f"--{name.replace('_', '-')}"
-            for name in ("withdraw", "supplement", "withdraw_supplement")
+            for name in ("withdraw", "supplement", "withdraw_supplement", "amend")
             if getattr(args, name) is not None
         ]
         if len(modes) > 1:
             raise QuestionsError(2, f"{' and '.join(modes)} cannot be combined")
+        if args.places is not None and args.amend is None:
+            raise QuestionsError(2, "--places goes with --amend only")
         given = [f"--{name}" for name in question_fields if getattr(args, name) is not None] + (
             ["--blocking"] if args.blocking else []
         )
-        if args.withdraw is not None or args.withdraw_supplement is not None:
+        if args.amend is not None:
+            wrong = [f for f in given if f != "--text"] + (["--reason"] if args.reason is not None else [])
+            if wrong:
+                raise QuestionsError(2, f"--amend takes only --text and --places (got {', '.join(wrong)})")
+            if args.text is None and args.places is None:
+                raise QuestionsError(2, "--amend needs --text, --places or both: what to change")
+            if args.text is not None and not args.text.strip():
+                raise QuestionsError(2, "--text is empty: write the amended question in Vietnamese")
+            if args.places is not None and not all(p.strip() for p in args.places):
+                raise QuestionsError(2, "--places: a place is empty")
+            try:
+                result = amend_question(Path(args.work_dir), args.amend, text=args.text, places=args.places)
+            except NotImplementedError as exc:  # the seam stub only (package C)
+                return _not_implemented(exc)
+        elif args.withdraw is not None or args.withdraw_supplement is not None:
             flag = "--withdraw" if args.withdraw is not None else "--withdraw-supplement"
             if given or args.reason is None:
                 raise QuestionsError(
@@ -641,6 +702,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="instead of a sheet id: the entries on no sheet or on several (sheet id 'unassigned'); "
         "the way to read a file on which list-sheets finds no sheet",
     )
+    p_st.add_argument(
+        "--region",
+        type=_region,
+        metavar="X0,Y0,X1,Y1",
+        help="with a sheet id: only the entries inside this box (coordinates of the sheet's space, as in "
+        "list-sheets' frame), grouped into rows and cells, e.g. to read one notes-table cell",
+    )
     p_st.add_argument("--contains", help="keep only entries whose text contains this (NFC, case-insensitive)")
     p_st.add_argument(
         "--max",
@@ -720,7 +788,11 @@ def build_parser() -> argparse.ArgumentParser:
             "(and set2=..., every file of the question exactly once); grid_system_select takes optional "
             "systems=S001,S002 (the systems the project uses) and separate=S001,S002 (selected systems "
             "that are different buildings, which closes their conflict); grid_system_conflict cannot be "
-            "answered: answer grid_system_select instead; every other question takes no value. Rerun "
+            "answered: answer grid_system_select instead; grid_system_missing (ADR-0013) takes the grid "
+            "the engineer reads off the drawing, both directions, drawing units: dir1_labels=1,2,3 "
+            "dir1_spacings=3130,3540 dir2_labels=A,B dir2_spacings=4250 (one spacing fewer than labels) "
+            "and optional sheet=model#05, and only an engineer-role answer builds a grid system; "
+            "grid_answer_contradicts_drawing takes no value; every other question takes no value. Rerun "
             "harness grid-system after a units, select or axis answer. A question whose file changed since "
             "it was raised is refused: rerun the command that raised it. --role is required: engineer for "
             "the engineer's own answer, simulated for an agent standing in for the engineer (gate 1 does "
@@ -753,7 +825,8 @@ def build_parser() -> argparse.ArgumentParser:
             "--file is an inventory path (omit it for a project-level question); --code is your own "
             "lowercase snake_case code (not one a producer owns, exit 2); --text is the question in "
             "Vietnamese, printed verbatim in questions.md. "
-            "--withdraw Q-id --reason '...' retires a reader question. Questions go to "
+            "--withdraw Q-id --reason '...' retires a reader question; --amend Q-id [--text '...'] "
+            "[--places P ...] changes its wording or places without a new id. Questions go to "
             "reader-questions.json; answer them with `harness answer`. Exit codes: 1 file not in the "
             "inventory or invalid documents, 2 usage or a code owned by a producer."
         ),
@@ -777,6 +850,20 @@ def build_parser() -> argparse.ArgumentParser:
         "--withdraw-supplement", metavar="KEY", help="withdraw a supplement by its key (needs --reason)"
     )
     p_ask.add_argument("--reason", help="why the question or supplement is withdrawn")
+    p_ask.add_argument(
+        "--amend",
+        metavar="Q-ID",
+        help="amend a live reader question in place (same id; history kept in its `amendments`): "
+        "with --text (new wording) and/or --places; refused for obsolete, withdrawn, answered or "
+        "producer questions",
+    )
+    p_ask.add_argument(
+        "--places",
+        nargs="+",
+        metavar="PLACE",
+        help="with --amend: every place the question applies to (e.g. 'model#05 axis 3-4' 'model#07'), "
+        "replacing the previous list",
+    )
     p_ask.set_defaults(func=_cmd_ask)
 
     # Commands whose module owns its arguments and its run (add_arguments / run / COMMAND / HELP).

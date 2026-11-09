@@ -724,3 +724,24 @@ def find_text(
         "warnings": warnings,
     }
     return _check_output(doc)
+
+
+def sheet_region(
+    work_dir: Path | str,
+    file_rel: str,
+    sheet_id: str,
+    region: tuple[float, float, float, float],
+    *,
+    contains: str | None = None,
+    max_entries: int | None = None,
+    check_inputs: bool = False,
+) -> dict[str, Any]:
+    """The entries of one sheet inside `region` (x0, y0, x1, y1 in the sheet's space, x0 < x1, y0 < y1),
+    as `harness sheet-text W FILE SHEET --region x0,y0,x1,y1` prints them.
+
+    Contract (tool wave 3 seam, sheet-text schema; package T implements it): a `sheet_text` document whose
+    query carries `region`, with top-level `region` and `rows` (reading-order rows, each split into cells
+    by x gaps; a cell lists its entry ids, display text, meaning and blocked_reason). The legacy-font gate
+    is unchanged: blocked entries stay blocked. Raises ReaderError.
+    """
+    raise NotImplementedError("harness sheet-text --region is not implemented yet (tool wave 3, package T)")

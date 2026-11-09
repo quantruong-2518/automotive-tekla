@@ -164,6 +164,14 @@ CODES: dict[str, tuple[str, str, str]] = {
         "thể trở thành một dòng đã duyệt trong knowledge/font-encodings.csv.",
         "Tên tờ, ghi chú, ký hiệu cấu kiện và bảng viết bằng các kiểu chữ này có thể đọc sai.",
     ),
+    "legacy_ascii_text": (
+        "fonts",
+        "Kiểu chữ này dùng phông tiếng Việt cũ nhưng chữ lưu trong file chỉ gồm ký tự ASCII, nên chưa biết "
+        "chữ hiển thị là gì (ví dụ ghi chú thép trên chi tiết dầm, cột). Mở bản vẽ, xem vài chữ ví dụ "
+        "(mã chữ T… ở mục Đã thấy) và cho biết kiểu chữ này chứa gì và có đọc được không. Câu trả lời chỉ "
+        "ghi lại cách bạn đọc kiểu chữ đó; không chuyển mã gì.",
+        "Mọi chữ của kiểu này vẫn bị chặn (không được dùng làm giá trị) cho đến khi có cách đọc được duyệt.",
+    ),
     # --- sheets ---
     "sheets_not_detected": (
         "sheets",
@@ -210,6 +218,13 @@ CODES: dict[str, tuple[str, str, str]] = {
         "Có nhóm hình chữ nhật cùng cỡ chứa chữ nhưng không đúng tỷ lệ hoặc kích thước của một tờ. Có cái "
         "nào là khung tờ không?",
         "Có thể còn tờ chưa được nhận ra.",
+    ),
+    "sheet_number_gap": (
+        "sheets",
+        "Dãy số hiệu tờ của file này bị hụt (ví dụ có KC-24 và KC-26 nhưng không có KC-25). Xem các số "
+        "còn thiếu và các tờ hai bên ở mục Đã thấy: tờ đó bị thiếu trong bộ, đánh số nhảy có chủ ý, hay "
+        "số hiệu bị đọc sai?",
+        "Biết bộ bản vẽ đã đủ tờ chưa.",
     ),
     "sheet_number_duplicate": (
         "sheets",
@@ -379,6 +394,24 @@ CODES: dict[str, tuple[str, str, str]] = {
         "trục. Sau đó chạy lại lệnh grid-system.",
         "Hướng X/Y của lưới trong Tekla.",
     ),
+    "grid_system_missing": (
+        "grids",
+        "Cổng 1: file này có mặt bằng nhưng công cụ không tìm được hệ lưới trục dùng được (cần ít nhất hai "
+        "trục có nhãn ở mỗi phương). Những gì đã tìm thấy (bóng trục, nhãn, hệ bị loại) ở mục Đã thấy. Đọc "
+        "lưới trục trên bản vẽ và cho nhãn cùng khoảng cách của cả hai phương, theo đơn vị bản vẽ, theo "
+        "thứ tự trên bản vẽ: --value dir1_labels=1,2,3 --value dir1_spacings=3130,3540 --value "
+        "dir2_labels=A,B --value dir2_spacings=4250 (mỗi phương có số khoảng cách ít hơn số nhãn một); "
+        "thêm --value sheet=model#05 nếu đọc từ một tờ cụ thể. Chỉ câu trả lời của kỹ sư (--role engineer) "
+        "mới tạo được hệ lưới; sau đó chạy lại lệnh grid-system.",
+        "Lưới trục của file này; không có nó thì cổng 1 không mở được.",
+    ),
+    "grid_answer_contradicts_drawing": (
+        "grids",
+        "Khoảng cách lưới trục kỹ sư đã cho khác với kích thước vẽ giữa hai trục đó trên bản vẽ (cả hai giá "
+        "trị ở mục Đã thấy). Kiểm tra lại: sửa câu trả lời grid_system_missing nếu nhập sai, hoặc xác nhận "
+        "câu trả lời là đúng (bản vẽ ghi sai). Câu này không nhận giá trị.",
+        "Khoảng cách lưới trục dùng để dựng mô hình.",
+    ),
     # --- levels ---
     "level_storey_selection": (
         "levels",
@@ -438,6 +471,14 @@ CODES: dict[str, tuple[str, str, str]] = {
         "hỏi riêng; câu hỏi của từng cách ghi nằm ở chỗ đầu tiên của nó. Trả lời bằng lời, theo từng "
         "cách ghi.",
         "Thép, kích thước hoặc ký hiệu đọc từ các ghi chú đó.",
+    ),
+    "callout_unparsed": (
+        "marks",
+        "Một số ghi chú thép, thép hình, bản mã hoặc bu lông trong file này giống một cách ghi nhưng không "
+        "đọc được thành giá trị (mỗi câu là một nhóm lý do, xem mục Đã thấy: số lượng, 5 chữ ví dụ và các "
+        "tờ). Ví dụ một ký tự lạ đứng ở chỗ ký hiệu đường kính Ø. Xem các chữ ví dụ trên bản vẽ và cho biết "
+        "cách ghi đó nghĩa là gì, hoặc chúng có cần đọc không.",
+        "Thép và cấu kiện ghi bằng các ghi chú đó chưa đưa được vào lô dựng mô hình.",
     ),
     "grade_legacy_mapping": (
         "marks",

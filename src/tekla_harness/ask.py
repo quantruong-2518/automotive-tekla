@@ -285,3 +285,21 @@ def withdraw_question(work_dir: Path | str, question_id: str, reason: str) -> di
     doc["questions"] = [q for q in doc["questions"] if q["key"] != key]
     _finish(ledger, doc)
     return {"id": question_id, "key": key, "status": "withdrawn"}
+
+
+def amend_question(
+    work_dir: Path | str,
+    question_id: str,
+    *,
+    text: str | None = None,
+    places: list[str] | None = None,
+) -> dict[str, str]:
+    """Amend a live reader question in place (`harness ask --amend Q-id [--text T] [--places P ...]`).
+
+    Contract (tool wave 3 seam; package C implements it): the id and key never change; `text` replaces the
+    question's message, `places` replaces its `places` list (intake schema, reader questions only); each
+    call appends {at: registry run counter, text?: the replaced message, places?: the replaced places} to
+    the question's `amendments` (history kept). Refused (exit 2) for an unknown, obsolete, withdrawn,
+    answered or non-reader question. Returns {"id", "key", "status": "amended"}.
+    """
+    raise NotImplementedError("harness ask --amend is not implemented yet (tool wave 3, package C)")
