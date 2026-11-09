@@ -97,7 +97,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import math
 import re
 import shutil
 import statistics
@@ -108,7 +107,7 @@ from pathlib import Path
 from typing import Any
 from xml.sax.saxutils import escape
 
-from tekla_harness.answers import NO_GRID_KEY, is_no_grid
+from tekla_harness.answers import MAX_SPACING, NO_GRID_KEY, is_no_grid, spacing_in_range
 from tekla_harness.grids import (
     DRAFTING_TOL,
     FAMILY_ANGLE_TOL,
@@ -1272,11 +1271,24 @@ class _GivenGrid:
     sheet: str | None
 
 
+def _given_spacing(value: Any) -> float | None:
+    """A hand-written spacing as a float, or None when it is not a number, overflows a float (a 400-digit
+    integer, review m1) or is not > 0 and at most MAX_SPACING."""
+    if not isinstance(value, int | float) or isinstance(value, bool):
+        return None
+    try:
+        number = float(value)
+    except OverflowError:
+        return None
+    return number if spacing_in_range(number) else None
+
+
 def _given_grid(answer: dict[str, Any], file: str) -> tuple[_GivenGrid | None, str | None]:
     """The grid an active engineer answer gives (ADR-0013 §2), or None and why it builds nothing: words only
     (no value), or values that are not exactly the four keys (plus an optional sheet) with, per direction,
-    at least two distinct non-blank labels and one finite spacing > 0 fewer. Checked here as well as by
-    `harness answer`: answers.json may have been written by hand."""
+    at least two non-blank labels, distinct ignoring case, and one spacing fewer, each > 0 and at most
+    MAX_SPACING (a number too large for a float included). Checked here as well as by `harness answer`:
+    answers.json may have been written by hand."""
     values = answer.get("values")
     if answer.get("file") != file:
         return None, f"it names file {answer.get('file')!r}, not {file!r}"
@@ -1292,19 +1304,19 @@ def _given_grid(answer: dict[str, Any], file: str) -> tuple[_GivenGrid | None, s
             isinstance(labels, list)
             and len(labels) >= 2
             and all(isinstance(x, str) and x.strip() for x in labels)
-            and len({x.strip() for x in labels}) == len(labels)
+            and len({x.strip().casefold() for x in labels}) == len(labels)  # case-blind: review m2
         ):
-            return None, f"{name}_labels is not two or more distinct, non-blank labels ({labels!r})"
-        if not (
-            isinstance(spacings, list)
-            and len(spacings) == len(labels) - 1
-            and all(
-                isinstance(v, int | float) and not isinstance(v, bool) and math.isfinite(v) and v > 0
-                for v in spacings
+            return None, (
+                f"{name}_labels is not two or more distinct (ignoring case), non-blank labels ({labels!r})"
             )
-        ):
-            return None, f"{name}_spacings is not {len(labels) - 1} number(s) > 0 ({spacings!r})"
-        directions.append(([x.strip() for x in labels], [float(v) for v in spacings]))
+        numbers = [_given_spacing(v) for v in spacings] if isinstance(spacings, list) else []
+        if not (isinstance(spacings, list) and len(spacings) == len(labels) - 1 and None not in numbers):
+            shown = repr(spacings) if len(repr(spacings)) <= 200 else repr(spacings)[:200] + "..."
+            return None, (
+                f"{name}_spacings is not {len(labels) - 1} number(s) > 0 and at most {MAX_SPACING:.0f} "
+                f"({shown})"
+            )
+        directions.append(([x.strip() for x in labels], [v for v in numbers if v is not None]))
     sheet = values.get(GRID_ANSWER_SHEET_KEY)
     if sheet is not None and not (isinstance(sheet, str) and sheet.strip()):
         return None, f"its sheet {sheet!r} is blank"

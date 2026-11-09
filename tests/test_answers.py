@@ -195,6 +195,41 @@ def test_cli_answer_with_the_grid_keys(work, capsys):
     assert out["answer"]["values"] == STORED
 
 
+# --- review m1, m2: a spacing too large to be a grid; labels equal once case-folded ----------------------
+
+
+@pytest.mark.parametrize(
+    "spacing",
+    ["9" * 400 + ".5", "9" * 400, "1000000.5", "2000000"],
+    ids=["400-digit-decimal", "400-digit-integer", "just-above", "two-km"],
+)
+def test_a_spacing_above_the_bound_is_refused(spacing):
+    (problem,) = check_values(GRID_MISSING_CODE, {**GRID, "dir1_spacings": f"3130,{spacing}"})
+    assert "at most 1000000" in problem and "one fewer" not in problem
+
+
+def test_a_spacing_at_the_bound_is_accepted():
+    assert check_values(GRID_MISSING_CODE, {**GRID, "dir1_spacings": "3130,1000000"}) == []
+
+
+def test_record_answer_refuses_a_huge_spacing_without_crashing(work):
+    path, qid = work
+    before = {p.name: p.read_bytes() for p in path.glob("*.json")}
+    for spacing in ("9" * 400 + ".5", "9" * 400):
+        with pytest.raises(QuestionsError) as caught:
+            record_answer(path, qid, "t", "A", {**GRID, "dir1_spacings": f"3130,{spacing}"}, role="engineer")
+        assert caught.value.exit_code == 1
+    assert {p.name: p.read_bytes() for p in path.glob("*.json")} == before
+
+
+@pytest.mark.parametrize(("labels", "spacings"), [("A,a", "4250"), ("a,B,A", "4250,3730"), ("Ab,aB", "4250")])
+def test_labels_equal_once_case_folded_are_refused(labels, spacings):
+    """The drawing check compares labels case-blind (_given_vs_dimensions): A and a are one axis there."""
+    values = {**GRID, "dir2_labels": labels, "dir2_spacings": spacings}
+    (problem,) = check_values(GRID_MISSING_CODE, values)
+    assert "distinct" in problem and "case" in problem
+
+
 # --- no_grid=yes (ADR-0013 decision 2): the engineer states the file holds no plan that needs a grid --------
 
 

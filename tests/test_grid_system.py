@@ -1647,7 +1647,11 @@ def test_an_answer_without_a_sheet_builds_a_system_on_no_sheet(tmp_path, example
         {"values": {**GRID, "dir1_spacings": [3130, True, 3520, 4590]}},
         {"values": {**GRID, "dir1_spacings": [3130, 0, 3520, 4590]}},
         {"values": {**GRID, "dir1_spacings": [3130, float("inf"), 3520, 4590]}},
+        {"values": {**GRID, "dir1_spacings": [3130, 10**400, 3520, 4590]}},  # review m1: float() overflows
+        {"values": {**GRID, "dir1_spacings": [3130, 1000000.5, 3520, 4590]}},  # above MAX_SPACING
         {"values": {**GRID, "dir2_labels": ["A", "A", "C"]}},
+        {"values": {**GRID, "dir2_labels": ["A", "a", "C"]}},  # review m2: one axis, case-blind
+        {"values": {**GRID, "dir2_labels": ["A", "A ", "C"]}},
         {"values": {**GRID, "dir2_labels": ["A", " ", "C"]}},
         {"values": {**GRID, "dir2_labels": ["A"], "dir2_spacings": []}},
         {"values": {**GRID, "dir3_labels": ["X", "Y"]}},

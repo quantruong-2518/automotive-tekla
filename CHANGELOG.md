@@ -758,6 +758,11 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
     conflict question's key names the answered question's key, not the system id. A
     `grid_system_missing` answer that builds nothing (words only, malformed) no longer keeps the question
     raised: once the file is covered by a selected system again, it is not asked and the answer goes stale.
+  - `harness answer` refuses a `grid_system_missing` spacing above `MAX_SPACING` (1000000 drawing units)
+    or one that is not finite as a float (a 400-digit number crashed it with `inf`), and labels that are
+    equal ignoring case (`A,a`: the drawing check reads them as one axis); exit 1, nothing written.
+    `harness grid-system` builds nothing from such a hand-written answer and warns, instead of crashing
+    (`OverflowError` on a 400-digit integer).
 - Tool wave 2, package F2 (review of P4, marks and dimensions):
   - `harness dimensions` measures block content on its block definition (ezdxf `origin_of_copy`), not on
     the virtual copy: a linear dimension stored without an angle in an INSERT rotated by 90 degrees

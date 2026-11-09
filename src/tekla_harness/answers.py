@@ -32,8 +32,9 @@ Rules:
         grid_system_missing           dir1_labels=1,2,3 dir1_spacings=3130,3540 dir2_labels=A,B
                                       dir2_spacings=4250 [sheet=model#05]   (ADR-0013 §2: the four keys
                                       together, or none for an answer in words only that builds nothing;
-                                      per direction at least 2 distinct labels and one spacing fewer, each a
-                                      plain decimal > 0 in drawing units; stored as arrays: labels strings,
+                                      per direction at least 2 labels distinct ignoring case and one spacing
+                                      fewer, each a plain decimal > 0 and at most MAX_SPACING (1000000) in
+                                      drawing units; stored as arrays: labels strings,
                                       spacings numbers, an integer kept an integer)
                                       or no_grid=yes, alone (ADR-0013 §2: the file holds no plan that
                                       needs a grid; only the engineer's closes the question)
@@ -59,6 +60,7 @@ changed, 2 usage (unknown or obsolete id, blank text or name, bad `--value`, no 
 from __future__ import annotations
 
 import json
+import math
 import re
 from datetime import date
 from pathlib import Path
@@ -229,10 +231,17 @@ def _grid_problems(values: dict[str, str]) -> list[str]:
                 bad.append(f"{labels_key}: give at least 2 labels")
             elif len(set(labels)) != len(labels):
                 bad.append(f"{labels_key}: the labels must be distinct")
+            elif len({label.casefold() for label in labels}) != len(labels):  # review m2
+                bad.append(
+                    f"{labels_key}: the labels must be distinct ignoring case (the drawing check reads A "
+                    "and a as one axis)"
+                )
         if spacings is not None:
             wrong = [s for s in spacings if not _spacing_ok(s)]
             bad += [
-                f"{spacings_key}: '{s}' is not a number > 0 (plain decimal, drawing units)" for s in wrong
+                f"{spacings_key}: '{s}' is not a number > 0 and at most {MAX_SPACING:.0f} (plain decimal, "
+                "drawing units)"
+                for s in wrong
             ]
             if not wrong and labels is not None and len(spacings) != len(labels) - 1:
                 bad.append(
@@ -243,11 +252,20 @@ def _grid_problems(values: dict[str, str]) -> list[str]:
 
 
 SPACING = re.compile(r"[0-9]+(?:\.[0-9]*)?|\.[0-9]+")
+# the largest grid spacing an answer may give, in drawing units: 1 km in millimetres, the smallest unit
+# (review m1: a 400-digit number was inf as a float, or an int too large for one)
+MAX_SPACING = 1_000_000.0
+
+
+def spacing_in_range(value: float) -> bool:
+    """A finite spacing > 0 and at most MAX_SPACING (drawing units)."""
+    return math.isfinite(value) and 0 < value <= MAX_SPACING
 
 
 def _spacing_ok(text: str) -> bool:
-    """A plain ASCII decimal (no sign, exponent, underscore, inf or nan) greater than 0."""
-    return SPACING.fullmatch(text) is not None and float(text) > 0
+    """A plain ASCII decimal (no sign, exponent, underscore, inf or nan) greater than 0 and at most
+    MAX_SPACING."""
+    return SPACING.fullmatch(text) is not None and spacing_in_range(float(text))
 
 
 def _spacing(text: str) -> int | float:
