@@ -205,3 +205,32 @@ Severity: `critical` · `major` · `minor`.
 - Regression test: the guard hook denies `harness answer W Q-1 --text x --by y --role engineer`
   from the model and allows `--role simulated`; a `status` run after a simulated answer prints no
   `--role engineer` command addressed to an agent.
+
+## RTI-0012 — `harness callouts` drops rebar callouts whose diameter sign is an unexpected glyph
+
+- Source: EVAL-3 (290 'ù' callouts, reader Q-144) and research note
+  `docs/research/diameter-glyph-u-grave.md`, 2026-11-09
+- Classification: tool · Severity: major · Status: **accepted**, fix in tool wave 3 (package M)
+- Root cause: the callout candidate scan only starts at Ø or `%%c`. In dwgshare 290, 507 callouts write the
+  diameter as `ù` (style `Arial`, TrueType family `CIC Arial Narrow E`), and 31 VNI-style callouts write it
+  as `Þ`. They get no candidate at all: they are neither parsed, nor listed as unparsed, nor blocked, and
+  no question is raised. All rebar of that house is missing from the counts without any sign.
+- Proposed fix: a diameter-position glyph that is not Ø or `%%c` is a candidate. It is listed as unparsed
+  with reason `symbol_glyph_unverified` and asked (`callout_unparsed`). It is never decoded until the
+  engineer approves a scoped knowledge row (the research note finds no safe rule today: byte 0xF9 is the
+  TCVN3 letter ự in sibling styles).
+- Regression test: a fixture with `2ù20` and `ù10a150` in a unicode-decoded style gives unparsed
+  candidates with that reason and one `callout_unparsed` question. No entry is silently dropped.
+
+## RTI-0013 — A style named like a Windows font hides its TrueType family from the font hint
+
+- Source: research note `docs/research/diameter-glyph-u-grave.md`, 2026-11-09
+- Classification: tool · Severity: major · Status: **proposed** (needs engineer decision; not in tool wave 3)
+- Root cause: `encoding.font_hint` decides `unicode` from the style name (`Arial`) before it looks at the
+  style's TrueType family (`CIC Arial Narrow E`), which can be a legacy Vietnamese font. The knowledge
+  table is consulted only after `unknown`, so even an approved row for that family would never be read.
+- Proposed fix: when the TrueType family is present and differs from the style name's font, the family
+  decides. Unknown families are `unknown`, not `unicode`. This blocks more text (290's M1 would rise), so it
+  needs the engineer's decision and a corpus measurement before it lands.
+- Regression test: a style named `Arial` with family `CIC Arial Narrow E` is not hinted `unicode`; a
+  style named `Arial` with family `Arial` still is.
