@@ -47,9 +47,13 @@ Tool wave 2:
 
 Tool wave 3:
   * `gate1.closed` is always written ([] when nothing is closed);
-  * an answer to grid_system_missing closes it only with its grid values (VALUES_NEEDED_TO_CLOSE,
-    ADR-0013 decision 2): the engineer's answer in words only builds nothing, so the question stays in
-    `blocking_open` and a `grid systems:` reason gives the command with the values.
+  * an answer to grid_system_missing closes it only from the built result (ADR-0013 decision 6,
+    built_grid_answers): the engineer's answer, and a fresh grid-systems.json holding a system built from
+    it (`source_answer.key` is the question's key) that the select answer uses. Its values alone close
+    nothing; an answer in words only builds nothing either. Such a question stays in `blocking_open` and a
+    `grid systems:` reason says what closes it: the values, valid values, or selecting the system again;
+  * who answered is part of the grid-system answers fingerprint (consumed_answers_digest), and every used
+    system needs `units.status` confirmed and, once its units and X/Y are, a `tekla_grid`.
 
 Exit codes (AGENTS.md): 0 for any readable work folder (status is information, not a verdict), 1 an
 unreadable or invalid document, 2 not a work folder.
@@ -123,6 +127,10 @@ NOT_CLOSED_BY_AN_ANSWER = frozenset({CONFLICT_CODE})
 # an answer to these closes them only with its structured values: an answer in words only builds nothing, so
 # the file still has no usable grid system (ADR-0013 decision 2, even when the engineer gave it)
 VALUES_NEEDED_TO_CLOSE = frozenset({GRID_MISSING_CODE})
+# an answer to these closes them only from the built result, never from its values alone (ADR-0013 decision
+# 6): a fresh grid-systems.json holds a USED system built from it (built_grid_answers)
+CLOSED_BY_THE_BUILT_GRID = frozenset({GRID_MISSING_CODE})
+GRID_SYSTEMS_FILE = "grid-systems.json"
 # codes a gate check reads from every active answer, whatever its question's registry state: units_by_file
 # (units) and harness grid-system (CONSUMED_CODES). A non-engineer answer of these to a question that is not
 # live is a gate-1 reason too (_retired_answers)
@@ -185,15 +193,19 @@ def words_only(code: str, answer: dict[str, Any] | None) -> bool:
     return answer is not None and code in VALUES_NEEDED_TO_CLOSE and not answer["values"]
 
 
-def answer_closes(producer: str, code: str, answer: dict[str, Any] | None) -> bool:
+def answer_closes(
+    producer: str, code: str, answer: dict[str, Any] | None, built: frozenset[str] = frozenset()
+) -> bool:
     """The answer takes its question out of the open ones: it counts (answer_counts), the code is one an
-    answer closes (an answer to a grid_system_conflict question never does), and it carries the values its
-    code needs to close (a words-only grid_system_missing answer does not: words_only)."""
-    return (
-        answer_counts(producer, answer)
-        and code not in NOT_CLOSED_BY_AN_ANSWER
-        and not words_only(code, answer)
-    )
+    answer closes (an answer to a grid_system_conflict question never does), and, for a code closed by the
+    built result (CLOSED_BY_THE_BUILT_GRID: grid_system_missing), its key is in `built`: the keys whose
+    answer built a used system in a fresh grid-systems.json (built_grid_answers). A grid_system_missing
+    answer's values alone never close it (ADR-0013 decision 6), words only even less."""
+    if answer is None or not answer_counts(producer, answer) or code in NOT_CLOSED_BY_AN_ANSWER:
+        return False
+    if code in CLOSED_BY_THE_BUILT_GRID:
+        return answer.get("key") in built
+    return True
 
 
 def _question_counts(
@@ -202,14 +214,19 @@ def _question_counts(
     producer: str,
     closed: frozenset[str],
     forced: frozenset[str] = frozenset(),
+    built: frozenset[str] = frozenset(),
 ) -> tuple[dict[str, int], list[str]]:
     """`closed`: keys of the accepted closures; they block nothing. `forced`: non-blocking questions whose
-    written closure was refused; they count as blocking (closure_state)."""
+    written closure was refused; they count as blocking (closure_state). `built`: see answer_closes."""
     entries = {k: e for k, e in registry["questions"].items() if e["producer"] == producer}
     live = {k: e for k, e in entries.items() if e["status"] != "obsolete"}
     blocking = {k: e for k, e in live.items() if (e.get("blocking", True) or k in forced) and k not in closed}
     open_ids = sorted(
-        (e["id"] for k, e in blocking.items() if not answer_closes(producer, e["code"], active.get(k))),
+        (
+            e["id"]
+            for k, e in blocking.items()
+            if not answer_closes(producer, e["code"], active.get(k), built)
+        ),
         key=_id_number,
     )
     counts = {
@@ -425,6 +442,80 @@ def _units_reasons(
     return reasons
 
 
+def _select_answer(
+    registry: dict[str, Any], active: dict[str, dict[str, Any]]
+) -> tuple[list[tuple[str, dict[str, Any]]], dict[str, Any] | None]:
+    """The live grid_system_select questions (key, entry) and the first active answer to one of them."""
+    select = [
+        (k, e)
+        for k, e in registry["questions"].items()
+        if e["code"] == SELECT_CODE and e["producer"] == "grid-system" and e["status"] != "obsolete"
+    ]
+    return select, next((active[k] for k, _ in select if k in active), None)
+
+
+def _select_command(select: list[tuple[str, dict[str, Any]]], work_dir: str) -> str:
+    """A command names one question: the latest select question (an answer to any live one is read)."""
+    return ANSWER.format(
+        work_dir=work_dir,
+        id=max((e["id"] for _, e in select), key=_id_number) if select else f"<{SELECT_CODE} id>",
+    )
+
+
+def _used(answer: dict[str, Any] | None, system_ids: list[str]) -> list[str]:
+    """The systems the select answer uses: its systems= value, else every system."""
+    chosen = answer["values"].get("systems") if answer is not None else None
+    return list(chosen) if chosen else list(system_ids)
+
+
+def _built_answers(
+    work: Path,
+    registry: dict[str, Any],
+    active: dict[str, dict[str, Any]],
+    answers: list[dict[str, Any]],
+    inventory_sha: str,
+) -> dict[str, tuple[str, bool]] | None:
+    """grid_system_missing key -> (id of the system built from its answer, whether the select answer uses
+    it), from grid-systems.json; None when that document is absent, unreadable, or not fresh (built from
+    another inventory or before the latest answers it reads: then it shows nothing that is current, and the
+    outputs check says so)."""
+    try:
+        doc = json.loads((work / GRID_SYSTEMS_FILE).read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    if (
+        not isinstance(doc, dict)
+        or doc.get("inventory_sha256") != inventory_sha
+        or doc.get("answers_sha256") != consumed_answers_digest(answers)
+    ):
+        return None
+    systems = [s for s in doc.get("systems") or [] if isinstance(s, dict)]
+    used = set(_used(_select_answer(registry, active)[1], [str(s.get("system_id")) for s in systems]))
+    return {
+        str(s["source_answer"]["key"]): (str(s["system_id"]), s["system_id"] in used)
+        for s in systems
+        if s.get("source") == "engineer_answer" and isinstance(s.get("source_answer"), dict)
+    }
+
+
+def _closing(built: dict[str, tuple[str, bool]] | None) -> frozenset[str]:
+    return frozenset(k for k, (_, used) in (built or {}).items() if used)
+
+
+def built_grid_answers(work: Path, ledger: Ledger) -> frozenset[str]:
+    """The grid_system_missing keys a fresh grid-systems.json holds a USED system built from (ADR-0013
+    decisions 1 and 6): the only grid_system_missing questions an answer closes (answer_closes). Used by
+    `harness status` and questions-md."""
+    try:
+        inventory_sha = hashlib.sha256((work / "inventory.json").read_bytes()).hexdigest()
+    except OSError:
+        return frozenset()
+    built = _built_answers(
+        work, ledger.registry, active_answers(ledger.answers), ledger.answers["answers"], inventory_sha
+    )
+    return _closing(built)
+
+
 def _grid_reasons(
     work: Path,
     registry: dict[str, Any],
@@ -434,28 +525,19 @@ def _grid_reasons(
 ) -> list[str]:
     if outputs["status"] != "fresh":
         return [f"grid systems: not checked, the grid-system outputs are {outputs['status']}"]
-    doc = _read_json(work / "grid-systems.json", "grid-systems.json")
+    doc = _read_json(work / GRID_SYSTEMS_FILE, GRID_SYSTEMS_FILE)
     systems = {s["system_id"]: s for s in doc["systems"]}
     if not systems:
         return ["grid systems: none found in the drawings (no view has a usable grid family)"]
-    select = [
-        (k, e)
-        for k, e in registry["questions"].items()
-        if e["code"] == SELECT_CODE and e["producer"] == "grid-system" and e["status"] != "obsolete"
-    ]
-    answer = next((active[k] for k, _ in select if k in active), None)
+    select, answer = _select_answer(registry, active)
     select_ids = ", ".join(e["id"] for _, e in select) or SELECT_CODE
-    # a command names one question: the latest select question (an answer to any live one is read)
-    select_command = ANSWER.format(
-        work_dir=work_dir,
-        id=max((e["id"] for _, e in select), key=_id_number) if select else f"<{SELECT_CODE} id>",
-    )
+    select_command = _select_command(select, work_dir)
     if answer is None:
         return [
             f"grid systems: {SELECT_CODE} ({select_ids}) is not answered: the engineer says which systems "
             f"are the project's grids ({select_command} [--value systems=S001,S002])"
         ]
-    used = answer["values"].get("systems") or list(systems)
+    used = _used(answer, list(systems))
     separate = set(answer["values"].get("separate") or [])
     id_of = {k: e["id"] for k, e in registry["questions"].items() if e["status"] != "obsolete"}
     reasons = [
@@ -479,6 +561,19 @@ def _grid_reasons(
             reasons.append(
                 f"grid systems: {sid} has no Tekla X/Y ({axis['reason']}): {how} (or the engineer answers "
                 "grid_family_axis_assignment per family), then rerun harness grid-system"
+            )
+        units = system["units"]
+        if units["status"] != "confirmed":  # proposed_simulated or not_confirmed: nothing converted
+            reasons.append(
+                f"grid systems: {sid} units are {units['status']} ({units['reason']}): the engineer answers "
+                f"the {UNITS_CONFIRM_CODE} question of each of its files (--value unit=...), then rerun "
+                "harness grid-system"
+            )
+        elif axis["status"] == "answered" and system.get("tekla_grid") is None:
+            # fail closed: units and X/Y read as confirmed, but no Tekla grid was written
+            reasons.append(
+                f"grid systems: {sid} has no Tekla grid (tekla_grid is null although its units and X/Y are "
+                "confirmed): rerun harness grid-system"
             )
     # an unanswered live file_set_relation question: a conflict grid-system left non-blocking without a
     # closure is pending on it (the two systems may be separate projects), so it is the question to answer
@@ -731,25 +826,55 @@ def _role_reasons(non_engineer: list[dict[str, Any]], work_dir: str) -> list[str
     ]
 
 
-def _words_only_reasons(
-    registry: dict[str, Any], active: dict[str, dict[str, Any]], work_dir: str
+def _grid_missing_reasons(
+    registry: dict[str, Any],
+    active: dict[str, dict[str, Any]],
+    built: dict[str, tuple[str, bool]] | None,
+    work_dir: str,
 ) -> list[str]:
-    """A live question whose ENGINEER answer is in words only although its code needs values to close
-    (VALUES_NEEDED_TO_CLOSE): the reason gives the command with the values. A non-engineer answer is already
-    a reason of its own (_role_reasons)."""
+    """A live grid_system_missing question whose ENGINEER answer does not close it (answer_closes), with
+    the step that does: an answer in words only (VALUES_NEEDED_TO_CLOSE) builds nothing; with values, the
+    fresh grid-systems.json (`built`, see _built_answers) built no system from it, or the select answer
+    leaves that system out. While grid-systems.json is not fresh, the outputs reason asks for the rerun. A
+    non-engineer answer is already a reason of its own (_role_reasons)."""
     values = " ".join(f"--value {k}=<{k.split('_')[1][:-1]}>,..." for k in GRID_ANSWER_KEYS)
-    return [
-        f"grid systems: {e['id']} {e['code']} ({e['file'] or 'project'}) was answered in words only, which "
-        "builds no grid system, so the question stays open: the engineer gives the grid "
-        f"({ANSWER.format(work_dir=work_dir, id=e['id'])} {values} [--value {GRID_ANSWER_SHEET_KEY}=<sheet "
-        "id>]), then rerun harness grid-system"
-        for k, e in sorted(registry["questions"].items(), key=lambda kv: _id_number(kv[1]["id"]))
-        if e["status"] != "obsolete"
-        and e["producer"] in GATE_ANSWER_PRODUCERS
-        and k in active
-        and _by_engineer(active[k])
-        and words_only(e["code"], active[k])
-    ]
+    reasons = []
+    for k, e in sorted(registry["questions"].items(), key=lambda kv: _id_number(kv[1]["id"])):
+        if (
+            e["status"] == "obsolete"
+            or e["code"] not in CLOSED_BY_THE_BUILT_GRID
+            or e["producer"] not in GATE_ANSWER_PRODUCERS
+            or k not in active
+            or not _by_engineer(active[k])
+            or answer_closes(e["producer"], e["code"], active[k], _closing(built))
+        ):
+            continue
+        head = f"grid systems: {e['id']} {e['code']} ({e['file'] or 'project'})"
+        command = (
+            f"{ANSWER.format(work_dir=work_dir, id=e['id'])} {values} "
+            f"[--value {GRID_ANSWER_SHEET_KEY}=<sheet id>]"
+        )
+        if words_only(e["code"], active[k]):
+            reasons.append(
+                f"{head} was answered in words only, which builds no grid system, so the question stays "
+                f"open: the engineer gives the grid ({command}), then rerun harness grid-system"
+            )
+        elif built is not None and k in built:
+            sid = built[k][0]
+            select, _ = _select_answer(registry, active)
+            reasons.append(
+                f"{head}: {sid}, built from its answer, is left out by the {SELECT_CODE} answer, so the file "
+                "has no used grid system and the question stays open: the engineer selects it again "
+                f"({_select_command(select, work_dir)} --value systems=...,{sid}) or answers {e['id']} "
+                "again, then rerun harness grid-system"
+            )
+        elif built is not None:
+            reasons.append(
+                f"{head} was answered with grid values, but the latest grid-systems.json built no grid "
+                "system from them (harness grid-system warns why), so the question stays open: the engineer "
+                f"answers again with valid values ({command}), then rerun harness grid-system"
+            )
+    return reasons
 
 
 def _level_reasons(registry: dict[str, Any], active: dict[str, dict[str, Any]]) -> list[str]:
@@ -796,10 +921,13 @@ def build_status(work_dir: str | Path) -> dict[str, Any]:
         raise StatusError(exc.exit_code, str(exc)) from exc
     closures, refused_closures = state.accepted, state.reasons
     closed_keys = frozenset(closures)
+    built = _built_answers(work, registry, active, answers, inventory_sha)
 
     producers: list[dict[str, Any]] = []
     for label, producer in PRODUCERS:
-        counts, open_ids = _question_counts(registry, active, producer, closed_keys, state.forced)
+        counts, open_ids = _question_counts(
+            registry, active, producer, closed_keys, state.forced, _closing(built)
+        )
         producers.append(
             {
                 "producer": label,
@@ -817,7 +945,7 @@ def build_status(work_dir: str | Path) -> dict[str, Any]:
     )
     reasons += _unreadable_reasons(inventory, registry)
     reasons += _grid_reasons(work, registry, active, by_label["grid-system"]["outputs"], shown)
-    reasons += _words_only_reasons(registry, active, shown)
+    reasons += _grid_missing_reasons(registry, active, built, shown)
     reasons += _level_reasons(registry, active)
     non_engineer = _non_engineer_answers(registry, active)
     reasons += _role_reasons(non_engineer, shown)

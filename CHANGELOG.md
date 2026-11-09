@@ -730,6 +730,17 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
     legacy-font gate blocks, on a sheet or not (null for a skipped file).
 
 ### Fixed
+- Tool wave 3, package GRIDGATE (review of packages G and C; ADR-0013 decisions 2 and 6):
+  - Gate 1 no longer opens on a grid that was never built or confirmed. `harness status` closes
+    `grid_system_missing` only from the built result: the engineer's answer and a fresh
+    `grid-systems.json` holding a system whose `source_answer.key` is the question's key, which the
+    `grid_system_select` answer uses. Grid values alone close nothing; a values answer that built nothing,
+    or whose system the select answer leaves out, stays in `blocking_open` with a `grid systems:` reason
+    (`harness questions-md` shows it as "chưa đóng"). Who answered (`answered_by_role`) is part of the
+    answers fingerprint of `grid-systems.json`, so an answer the engineer gives again with the same values
+    after a simulated one makes it stale until `harness grid-system` reruns; every existing
+    `grid-systems.json` reads as stale once. Every used system needs `units.status` confirmed and, once
+    its units and X/Y are, a non-null `tekla_grid`.
 - Tool wave 2, package F2 (review of P4, marks and dimensions):
   - `harness dimensions` measures block content on its block definition (ezdxf `origin_of_copy`), not on
     the virtual copy: a linear dimension stored without an angle in an INSERT rotated by 90 degrees

@@ -175,23 +175,25 @@ def test_an_engineer_words_only_grid_system_missing_answer_does_not_close_it(rea
     assert "[--value sheet=" in reason and "harness grid-system" in reason
 
 
-def test_an_engineer_answer_with_the_grid_values_closes_it(ready):
+def test_an_engineer_answer_with_the_grid_values_alone_does_not_close_it(ready):
+    """ADR-0013 decision 6 (review C1): the question closes only from the built result, a fresh
+    grid-systems.json holding a system built from this answer (test_grid_gate.py), never from the values."""
     _, work = ready
     qid = inject_missing(work)
     record_answer(work, qid, "lưới 1-3, A-B", "A. Nguyen", GRID, role="engineer")
     status = build_status(work)
-    assert qid not in by_label(status)["grid-system"]["blocking_open_ids"]
+    assert qid in by_label(status)["grid-system"]["blocking_open_ids"]
     assert words_only_reasons(status, qid) == []
-    assert by_label(status)["grid-system"]["questions"]["blocking_open"] == 0
+    assert status["gate1"]["ready_for_gate1"] is False
 
 
-def test_a_words_only_answer_superseded_by_values_closes_it(ready):
+def test_a_words_only_answer_superseded_by_values_is_no_longer_words_only(ready):
     _, work = ready
     qid = inject_missing(work)
     record_answer(work, qid, "chưa đọc được", "A. Nguyen", {}, role="engineer")
     record_answer(work, qid, "lưới 1-3, A-B", "A. Nguyen", GRID, role="engineer")
     status = build_status(work)
-    assert qid not in by_label(status)["grid-system"]["blocking_open_ids"]
+    assert qid in by_label(status)["grid-system"]["blocking_open_ids"]  # not built yet
     assert words_only_reasons(status, qid) == []
 
 

@@ -825,16 +825,19 @@ CONSUMED_CODES = frozenset(
 
 def consumed_answers_digest(answers: list[dict[str, Any]] | None) -> str:
     """sha256 over the active answers this module reads (units, family and system axis assignment, the
-    grid_system_select answer, units contradiction confirmations, the file_set_relation answer): code, file,
-    key, values. `harness status` compares it with the current answers.json to see whether grid-systems.json
-    is stale. Who answered is not part of it (yet): an engineer's answer that replaces a simulated one with
-    the same values leaves the document 'fresh' but still proposed, which blocks, never opens, gate 1."""
+    grid_system_select answer, units contradiction confirmations, the file_set_relation answer, the
+    grid_system_missing answers): code, file, key, values and who answered (`answered_by_role`, None when
+    none was recorded). `harness status` compares it with the current answers.json to see whether
+    grid-systems.json is stale. Who answered is part of it (ADR-0013 decision 6): only the engineer's
+    answers decide here, so an engineer's answer that replaces a simulated one with the same values makes
+    the document stale until grid-system reruns."""
     rows = sorted(
         (
             str(a.get("code")),
             str(a.get("file")),
             str(a.get("key")),
             json.dumps(a.get("values"), sort_keys=True),
+            str(a.get("answered_by_role")),
         )
         for a in _active(answers)
         if a.get("code") in UNIT_CODES or a.get("code") in CONSUMED_CODES

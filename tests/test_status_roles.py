@@ -152,7 +152,11 @@ def test_one_legacy_units_answer_blocks_gate1_until_the_engineer_answers_again(r
     gate1 = build_status(work)["gate1"]
     assert gate1["ready_for_gate1"] is False
     assert [a["question_id"] for a in gate1["non_engineer_answers"]] == [q["id"]]
-    reason, still_open = gate1["reasons"]
+    # who answered is part of the grid-system answers fingerprint (ADR-0013 decision 6): the outputs that
+    # read the units are stale too, until the engineer's own answer restores the fingerprint
+    not_checked, reason, still_open, stale = gate1["reasons"]
+    assert not_checked == "grid systems: not checked, the grid-system outputs are stale"
+    assert stale.startswith("grid-system: outputs stale")
     assert still_open == f"intake: 1 blocking question(s) open ({q['id']})"  # not settled either (F3)
     assert reason.startswith(f"answers: {q['id']} units_confirm_all (set.dxf) was answered by no recorded")
     record_answer(work, q["id"], "mm", "the engineer", {"unit": "mm"}, role="engineer")

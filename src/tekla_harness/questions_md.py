@@ -13,7 +13,9 @@ Sources (all read-only):
     answer to a question gate 1 reads settles it only when the engineer gave it (status.answer_closes):
     a simulated or role-less one stays open with the answer shown; every answer that is not the
     engineer's is labelled "(mô phỏng)" or "(chưa rõ vai trò)". The engineer's words-only answer to a code
-    that needs values to close (status.words_only: grid_system_missing) stays open too, shown as not closed;
+    that needs values to close (status.words_only: grid_system_missing) stays open too, shown as not closed,
+    and so does the engineer's grid_system_missing answer with values until a fresh grid-systems.json holds
+    a used system built from it (status.built_grid_answers, ADR-0013 decision 6);
   * `harness status` (`status.build_status`): the gate-1 reasons and the per-step counts;
   * `grid-systems.json` + its SVGs and `structure-summary.json`: the proposals shown next to the questions
     they inform. A proposal is always labelled "ĐỀ XUẤT — chưa xác nhận" and is never an answer. A
@@ -80,6 +82,7 @@ from tekla_harness.status import (
     answer_closes,
     answer_counts,
     build_status,
+    built_grid_answers,
     closure_state,
     words_only,
 )
@@ -150,15 +153,17 @@ class Item:
     answer: dict[str, Any] | None
     closed_by: Closure | None = None
     supplements: list[dict[str, Any]] = field(default_factory=list)
+    # grid_system_missing keys a fresh grid-systems.json holds a used system built from (built_grid_answers)
+    built: frozenset[str] = frozenset()
 
     @property
     def is_open(self) -> bool:
         """Open until answered or closed (lifecycle), except that an answer never closes a code no answer
-        closes, and a gate producer's question needs the engineer's answer (the same rules as `harness
-        status`: status.answer_closes)."""
+        closes, a gate producer's question needs the engineer's answer, and grid_system_missing closes only
+        from the built result (the same rules as `harness status`: status.answer_closes)."""
         if self.closed_by is not None:
             return False
-        return not answer_closes(self.producer, self.code, self.answer)
+        return not answer_closes(self.producer, self.code, self.answer, self.built)
 
 
 @dataclass
@@ -537,6 +542,17 @@ def question_lines(item: Item, ctx: Context, level: str = "#####") -> list[str]:
             + block[0].replace(" — trả lời", "; câu trả lời hiện có", 1)
         )
         lines += block[1:]
+    elif item.code == GRID_MISSING_CODE and answer_counts(item.producer, item.answer):
+        # the engineer's grid values: the question closes only from the built result (ADR-0013 decision 6)
+        block = _answer_block(item.answer)
+        rerun = code_span("harness grid-system " + WORK_PLACEHOLDER)
+        lines.append(
+            "- **Trả lời:** chưa đóng: câu này chỉ đóng khi kết quả hệ lưới mới nhất có hệ lưới dựng từ câu "
+            f"trả lời này và hệ đó được chọn; chạy lại {rerun}, rồi xem lý do ở mục 1 (giá trị không hợp lệ "
+            f"thì kỹ sư trả lời lại, hệ bị bỏ ra thì kỹ sư chọn lại ở câu {code_span(SELECT_CODE)})"
+            + block[0].replace(" — trả lời", "; câu trả lời hiện có", 1)
+        )
+        lines += block[1:]
     else:  # not the engineer's answer to a question gate 1 reads (status.answer_counts): shown, not counted
         block = _answer_block(item.answer)
         lines.append(
@@ -835,6 +851,7 @@ def render_questions_md(work_dir: Path | str, out: Path | str | None = None) -> 
         ledger = load_ledger(work, status["project_id"], create=False)
         supplement_rows = supplements.load_supplements(work)
         closures = closure_state(work, ledger)  # the closures harness status accepts
+        built = built_grid_answers(work, ledger)  # the grid_system_missing answers that built a used system
     except (StatusError, QuestionsError) as exc:
         raise QuestionsMdError(exc.exit_code, str(exc)) from exc
     items, missing = load_items(work, ledger.registry, ledger.answers)
@@ -845,6 +862,7 @@ def render_questions_md(work_dir: Path | str, out: Path | str | None = None) -> 
         item.closed_by = closures.accepted.get(item.key)
         item.blocking = item.blocking or item.key in closures.forced  # a refused written closure blocks
         item.supplements = by_target.get(item.key, [])
+        item.built = built
     ctx = _load_context(work, out_path.parent, status)
     ctx.select_ids = sorted((i.id for i in items if i.code == SELECT_CODE), key=_id_number)
     ctx.unit_answers = [
