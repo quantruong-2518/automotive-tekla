@@ -14,7 +14,8 @@ here. It extends the mark grammar (`in_callouts` says when callouts also lists t
   * sub-numbered marks `D1.1`, `D1-1` (numbers kept as written), letter suffixes in either case
     (`D1a`, `D1.9A`), lower-case prefixes (`gm1`; a lone lower-case `a` or `s` is the spacing letter of a
     bar callout, never a mark), and a section in brackets `D1.1(220X350)`, `C1 (220x220)`: `b` and `h`
-    are the two numbers as written, in drawing units, never converted (separator x, X or U+00D7);
+    are the two numbers as written, in drawing units, never converted (separator x, X or U+00D7); a
+    length in brackets instead, `LT1(L=4700)` (tool wave 3), stays in `display_text` only (no size);
   * a member-type word in front of the mark, as in a detail title (`DẦM D1.1`, `CỘT C1`, `ĐÀI CỌC DC1`,
     `GIẰNG MÓNG GM1`, `BEAM B1`, `COLUMN C1`): recorded as `title_member_word` evidence (confidence at
     most medium). It is NOT a prefix meaning: prefix meanings come only from `member_mark_prefix_meaning`
@@ -181,7 +182,9 @@ _BODY = (
     r"(?P<prefix>[A-Za-zĐđ]{1,4})(?P<sep1>\s?-?\s?)(?P<n1>\d{1,3})"
     r"(?:(?P<sep2>[.\-])(?P<n2>\d{1,3}))?(?P<suffix>[A-Za-z']?)"
 )
-_MARK = re.compile("^" + _BODY + _SIZE + "$")
+# a length in brackets after a lintel mark, `LT1(L=4700)` (267): kept only in display_text, never a size
+_LENGTH = r"\s*\(\s*L\s*=\s*\d+(?:[.,]\d+)?\s*\)"
+_MARK = re.compile("^" + _BODY + "(?:" + _SIZE + "|(?P<length>" + _LENGTH + "))$")
 _MARK_HEAD = re.compile("^" + _BODY + _SIZE + r"(?=$|[\s,;:])")
 _SPACING_LETTERS = frozenset({"a", "s"})  # Ø8a150: a lone lower-case a / s is a spacing, not a mark
 
@@ -306,7 +309,9 @@ def parse_mark(text: str, case_uncertain: bool = False, *, footing_m: bool = Fal
     bolt label the callouts patterns see in it does not stop it."""
     t = unicodedata.normalize("NFC", text).strip()
     m = _MARK.match(t)
-    if m is None or (not footing_m and scan_line(t, case_uncertain)):
+    # with a length only the mark itself is scanned: callouts reads 'L=4700' as a bar length
+    scanned = t[: m.start("length")] if m is not None and m["length"] else t
+    if m is None or (not footing_m and scan_line(scanned, case_uncertain)):
         return None
     return _mark_from(m, t)
 

@@ -648,6 +648,8 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
       and `harness marks` when its footing family stands next to it: a whole `M<n-1>` or `M<n+1>` that is
       no bolt size, on the same sheet, in the same style and height. 433's footing `M8` (T000555, next to
       `M7`) joins M1–M7; bolt labels elsewhere (161, Steel) are unchanged.
+    - `harness marks` reads a mark followed by a length in brackets, `LT1(L=4700)` (267's lintels), as the
+      plan mark `LT1`; the length stays in `display_text` only (no size). 267 gains 41 lintel plan marks.
 
 ### Changed
 - Question lifecycle (tool wave 2, EVAL-2 fix 5):
