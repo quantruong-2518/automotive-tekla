@@ -12,7 +12,9 @@ or one its schema refuses, is an error (exit 1):
     built from (`inventory_sha256`); grid-system also fingerprints the units and axis answers it read
     (`answers_sha256`). Intake's own documents are fresh when they exist (inventory.json is the reference).
   * `gate1.ready_for_gate1`, true only when `reasons` is empty (see schemas/status.schema.json for the
-    exact rules): every probed DXF/DWG has an active answer on its own units_confirm_all question, its unit
+    exact rules): every DXF/DWG intake could not read has a live intake question (read_failed ...) that the
+    blocking-question rule below keeps open until the engineer answers it (none at all: a `files:`
+    reason); every other probed DXF/DWG has an active answer on its own units_confirm_all question, its unit
     answers agree, and the answered unit is not contradicted by the drawing's dimensions (or that was
     confirmed on the units_answer_contradicts_evidence question); grid systems found, grid_system_select
     answered, every used system axis-assigned (family or system answers) and no conflict between two used
@@ -86,6 +88,10 @@ EXIT_OK, EXIT_INVALID, EXIT_USAGE = 0, 1, 2
 MAX_IDS = 50  # question ids listed per producer
 REASON_IDS = 10  # question ids named in one gate-1 reason
 LEVEL_CODES = ("level_storey_selection", "level_finished_vs_structural")
+# intake's blocking questions about a drawing file it could not read (intake._failure_groups,
+# _conversion_groups); such a file has no units row (_unreadable_reasons)
+UNREADABLE = "unreadable"
+READ_FAILURE_CODES = ("read_failed", "conversion_empty", "no_reader_implemented")
 # status name -> registry producer, in the order they run
 PRODUCERS = (
     ("intake", "intake"),
@@ -297,6 +303,28 @@ def _spacing_medians(work: Path, inventory_sha: str) -> dict[str, dict[str, Any]
     }
 
 
+def _drawing_rows(inventory: dict[str, Any]) -> list[dict[str, Any]]:
+    return [r for r in inventory["files"] if r["format"] in ("dwg", "dxf")]
+
+
+def _unreadable_reasons(inventory: dict[str, Any], registry: dict[str, Any]) -> list[str]:
+    """A DXF/DWG that intake could not read (outcome unreadable, or no probe) has no units row: it stays a
+    gate-1 reason through its own blocking intake question (READ_FAILURE_CODES) until the engineer answers
+    it. Fail closed: when no live intake question of those codes names the file, the file is a reason of
+    its own."""
+    asked = {
+        e["file"]
+        for e in registry["questions"].values()
+        if e["producer"] == "intake" and e["code"] in READ_FAILURE_CODES and e["status"] != "obsolete"
+    }
+    return [
+        f"files: {r['path']} is unreadable and no live intake question ({', '.join(READ_FAILURE_CODES)}) "
+        "names it: rerun harness intake"
+        for r in _drawing_rows(inventory)
+        if (r["outcome"] == UNREADABLE or r["probe"] is None) and r["path"] not in asked
+    ]
+
+
 def _units_reasons(
     inventory: dict[str, Any],
     registry: dict[str, Any],
@@ -305,12 +333,14 @@ def _units_reasons(
     spacing_medians: dict[str, dict[str, Any] | None],
     work_dir: str,
 ) -> list[str]:
-    """Per probed DXF/DWG: its units_confirm_all answered with a unit, unit answers that agree, and an
-    answered unit the drawing's dimensions and grid spacings do not contradict (units_suspect test, grid
-    plausibility range) unless confirmed on purpose.
+    """Per probed DXF/DWG intake could read (an unreadable one: _unreadable_reasons): its units_confirm_all
+    answered with a unit, unit answers that agree, and an answered unit the drawing's dimensions and grid
+    spacings do not contradict (units_suspect test, grid plausibility range) unless confirmed on purpose.
     `answers`: every answer of answers.json; only the active ones count."""
     rows = {
-        r["path"]: r for r in inventory["files"] if r["format"] in ("dwg", "dxf") and r["probe"] is not None
+        r["path"]: r
+        for r in _drawing_rows(inventory)
+        if r["probe"] is not None and r["outcome"] != UNREADABLE
     }
     current = [a for a in answers if a["status"] == "active"]
     statuses = units_by_file(current, list(rows), [])
@@ -740,6 +770,7 @@ def build_status(work_dir: str | Path) -> dict[str, Any]:
     reasons = _units_reasons(
         inventory, registry, active, answers, _spacing_medians(work, inventory_sha), shown
     )
+    reasons += _unreadable_reasons(inventory, registry)
     reasons += _grid_reasons(work, registry, active, by_label["grid-system"]["outputs"], shown)
     reasons += _level_reasons(registry, active)
     non_engineer = _non_engineer_answers(registry, active)

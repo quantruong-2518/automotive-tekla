@@ -722,6 +722,7 @@ REASONS: tuple[tuple[re.Pattern[str], Callable[[re.Match[str]], str]], ...] = (
 # verbatim after a Vietnamese category instead of being translated here.
 CATEGORIES = (
     ("units", "đơn vị"),
+    ("files", "file bản vẽ"),
     ("grid systems", "hệ lưới"),
     ("levels", "cao độ"),
     ("answers", "câu trả lời"),

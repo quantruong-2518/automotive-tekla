@@ -7,6 +7,7 @@
 3. Every gate-1 reason and questions.md line that tells someone to answer frames it as the engineer's step.
 5. A damaged question document is exit 1 in `harness status`, not a traceback.
 6. `harness ask` does not turn a stray NotImplementedError into an environment error.
+7. An unreadable DXF is not a units row; it stays a gate-1 reason through its own intake question.
 
 The two-sheet world is test_status.py's; the one-grid files are built here (one grid per file, so two
 files with the same labels and different spacings conflict across files).
@@ -366,3 +367,46 @@ def test_ask_does_not_turn_a_not_implemented_error_into_exit_3(world, monkeypatc
     monkeypatch.setattr(cli, "ask_question", boom)
     with pytest.raises(NotImplementedError):
         cli.main(["ask", str(work), "--code", "reader_gap", "--where", "w", "--found", "f", "--text", "t"])
+
+
+# --- 7. an unreadable DXF is not a units row -------------------------------------------------------------
+
+
+@pytest.fixture
+def unreadable(tmp_path) -> Path:
+    root = tmp_path / "input"
+    root.mkdir()
+    one_grid(root / "a.dxf", [0, 6000, 12000, 18000], "S-101")
+    (root / "broken.dxf").write_text(
+        "0\nSECTION\n2\nHEADER\n9\n$ACADVER\n1\nAC1032\n0\nENDSEC\n0\nGARBAGE\n", encoding="utf-8"
+    )
+    rerun_all(root, tmp_path / "work")
+    return tmp_path / "work"
+
+
+def test_an_unreadable_dxf_is_a_reason_through_its_intake_question_not_a_units_rerun(unreadable):
+    """Review probe p3: 'units: broken.dxf ... rerun harness intake', which a rerun never clears."""
+    work = unreadable
+    row = next(r for r in load(work / "inventory.json")["files"] if r["path"] == "broken.dxf")
+    assert row["outcome"] == "unreadable" and row["units"] is None
+    failed = find(questions_of(work, "questions.json"), "read_failed", "broken.dxf")
+    reasons = build_status(work)["gate1"]["reasons"]
+    assert not [r for r in reasons if r.startswith("units:") and "broken.dxf" in r], reasons
+    (intake,) = [r for r in reasons if r.startswith("intake: ")]
+    assert failed["id"] in intake
+    # the engineer decides what to do with the file: its question no longer blocks
+    record_answer(work, failed["id"], "not part of this project", "the engineer", role="engineer")
+    assert not [r for r in build_status(work)["gate1"]["reasons"] if "broken.dxf" in r]
+
+
+def test_an_unreadable_dxf_without_a_live_intake_question_is_a_reason_of_its_own(unreadable):
+    """Fail closed: nothing else would name the file."""
+    work = unreadable
+    failed = find(questions_of(work, "questions.json"), "read_failed", "broken.dxf")
+    registry = load(work / "question-registry.json")
+    registry["questions"][failed["key"]]["status"] = "obsolete"
+    (work / "question-registry.json").write_text(json.dumps(registry), encoding="utf-8")
+    gate1 = build_status(work)["gate1"]
+    assert gate1["ready_for_gate1"] is False
+    (reason,) = [r for r in gate1["reasons"] if "broken.dxf" in r]
+    assert reason.startswith("files: broken.dxf is unreadable") and "rerun harness intake" in reason, reason

@@ -573,6 +573,10 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
   - `harness status` validates each question document it reads for written closures against its schema:
     a damaged one (e.g. a list as a question key, an unknown closure reason) is exit 1 naming the
     document, not a traceback.
+  - An unreadable DXF/DWG no longer gets the units reason "rerun harness intake", which no rerun clears:
+    it stays a gate-1 reason through its own blocking intake question (`read_failed`,
+    `conversion_empty`, `no_reader_implemented`) until the engineer answers it, and is a `files:` reason
+    when no such question is live.
 - `guard_tekla_write.py` now exits 2 (the blocking code) on any internal error instead of
   relying on an undocumented `onFailure` setting; the setting was removed.
 - `guard_tekla_write.py` no longer blocks commands that only mention `tekla-cli` as data
