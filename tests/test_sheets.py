@@ -145,6 +145,8 @@ def test_missing_number_and_revision_are_questions(tmp_path):
 def test_sheet_code_pattern_in_lower_right_quadrant_is_low(tmp_path):
     def extra(msp, w, h):
         msp.add_text("KC-05", height=250, dxfattribs={"insert": (w - 3000, 1000)})
+        # the second sheet's number at the same corner position backs the first (review M3)
+        msp.add_text("KC-06", height=250, dxfattribs={"insert": (2 * w + 5000 - 3000, 1000)})
 
     _, result = run(_frames_only(tmp_path, extra))
     number = sheet(result, "model#01")["title_block"]["sheet_number"]
@@ -160,11 +162,16 @@ _Spec = tuple[str, float, float, float]  # (text, u, v, height)
 
 
 def _numbered(
-    tmp_path: Path, sheets: Sequence[Sequence[_Spec]], *, rotation: float = 0.0, portrait: bool = False
+    tmp_path: Path,
+    sheets: Sequence[Sequence[_Spec]],
+    *,
+    rotation: float = 0.0,
+    portrait: bool = False,
+    loose: Sequence[str] = (),
 ) -> Path:
     """Landscape frames side by side, each with 6 distinct notes and the given texts, all at `rotation`
     (0 or 270). A 270 frame is a landscape sheet drawn turned clockwise: its reading 'right' is world -y,
-    its reading 'up' is world +x."""
+    its reading 'up' is world +x. `loose` texts lie below every frame, on no sheet."""
     doc = new("R2018", setup=True)
     msp = doc.modelspace()
     long_side, short_side = 42420.0, 30000.0
@@ -186,6 +193,8 @@ def _numbered(
             )
         for text, u, v, th in specs:
             msp.add_text(text, height=th, dxfattribs={"insert": world(x0, u, v), "rotation": rotation})
+    for i, text in enumerate(loose):
+        msp.add_text(text, height=250, dxfattribs={"insert": (i * 3000, -20000)})
     path = tmp_path / "numbered.dxf"
     doc.saveas(path)
     return path
@@ -227,8 +236,13 @@ def test_a_position_that_repeats_across_sheets_beats_a_taller_one(tmp_path):
 
 
 def test_two_equal_corner_codes_are_a_conflict_not_a_pick(tmp_path):
-    _, result = run(_numbered(tmp_path, [[("KC-01", 0.92, 0.05, 300), ("KC-09", 0.80, 0.12, 300)], []]))
-    assert _numbers(result)[0] is None
+    # both positions repeat on the second sheet and both codes are as tall: no pick on either sheet
+    sheets = [
+        [("KC-01", 0.92, 0.05, 300), ("KC-09", 0.80, 0.12, 300)],
+        [("KC-02", 0.92, 0.05, 300), ("KC-08", 0.80, 0.12, 300)],
+    ]
+    _, result = run(_numbered(tmp_path, sheets))
+    assert _numbers(result) == [None, None]
     q = next(q for q in result["questions"] if q["code"] == "title_field_conflict")
     assert q["blocking"] and q["found"] == "KC-01 | KC-09"
 
@@ -243,8 +257,9 @@ def test_a_corner_code_that_is_also_drawn_on_the_sheet_is_a_mark(tmp_path):
 
 def test_a_code_listed_once_on_another_sheet_is_still_a_number(tmp_path):
     # a drawing list on sheet 1 names the number of sheet 2 once: it stays a sheet number (270 has one)
-    _, result = run(_numbered(tmp_path, [[("KC-02", 0.5, 0.7, 200)], [("KC-02", 0.92, 0.05, 300)]]))
-    assert _numbers(result) == [None, "KC-02"]
+    sheets = [[("KC-01", 0.92, 0.05, 300), ("KC-02", 0.5, 0.7, 200)], [("KC-02", 0.92, 0.05, 300)]]
+    _, result = run(_numbered(tmp_path, sheets))
+    assert _numbers(result) == ["KC-01", "KC-02"]
 
 
 def test_a_rotated_frame_reads_its_number_in_its_own_corner(tmp_path):
@@ -255,21 +270,32 @@ def test_a_rotated_frame_reads_its_number_in_its_own_corner(tmp_path):
     assert _numbers(result) == ["Kc - 13", "Kc - 14"]
 
 
-def test_without_a_repeated_position_the_taller_code_wins(tmp_path):
-    _, result = run(_numbered(tmp_path, [[("KC-07", 0.80, 0.15, 300), ("D-1", 0.92, 0.05, 200)], []]))
-    assert _numbers(result)[0] == "KC-07"
+def test_among_repeated_positions_the_taller_code_wins(tmp_path):
+    sheets = [
+        [("KC-07", 0.80, 0.15, 300), ("D-1", 0.92, 0.05, 200)],
+        [("KC-08", 0.80, 0.15, 300), ("E-2", 0.92, 0.05, 200)],
+    ]
+    _, result = run(_numbered(tmp_path, sheets))
+    assert _numbers(result) == ["KC-07", "KC-08"]
     assert any("'D-1'" in w and "a taller code" in w for w in result["warnings"])
 
 
-def test_a_repeated_position_is_preferred_and_the_loser_is_reported(tmp_path):
-    sheets = [[("KC-01", 0.92, 0.05, 300)], [("KC-02", 0.92, 0.05, 300), ("A-1", 0.80, 0.15, 500)]]
+@pytest.mark.parametrize("height", [500, 300])
+def test_a_repeated_position_is_preferred_and_the_loser_is_reported(tmp_path, height):
+    sheets = [[("KC-01", 0.92, 0.05, 300)], [("KC-02", 0.92, 0.05, 300), ("A-1", 0.80, 0.15, height)]]
     _, result = run(_numbered(tmp_path, sheets))
+    assert _numbers(result) == ["KC-01", "KC-02"]
     assert any("'A-1'" in w and "repeated on other sheets" in w for w in result["warnings"])
+
+
+def test_two_codes_close_together_on_one_sheet_do_not_back_each_other(tmp_path):
+    _, result = run(_numbered(tmp_path, [[("KC-05", 0.92, 0.05, 300), ("D-1", 0.93, 0.06, 200)], []]))
+    assert _numbers(result) == [None, None]
 
 
 @pytest.mark.parametrize(("u", "v", "found"), [(0.70, 0.10, False), (0.80, 0.25, False), (0.78, 0.17, True)])
 def test_the_corner_is_a_quarter_along_and_a_fifth_up(tmp_path, u, v, found):
-    _, result = run(_numbered(tmp_path, [[("KC-05", u, v, 300)], []]))
+    _, result = run(_numbered(tmp_path, [[("KC-05", u, v, 300)], [("KC-06", u, v, 300)]]))
     assert (_numbers(result)[0] == "KC-05") is found
 
 
@@ -282,10 +308,153 @@ def test_a_mark_family_on_the_sheet_disqualifies_its_corner_code(tmp_path):
 
 
 def test_a_code_seen_twice_outside_every_title_block_is_a_mark(tmp_path):
-    sheets = [[("KC-09", 0.92, 0.05, 300)], [("KC-09", 0.4, 0.5, 110), ("KC-09", 0.5, 0.6, 110)]]
+    # twice on no sheet at all (a body text on another sheet that equals a corner code is a reference)
+    sheets = [[("KC-09", 0.92, 0.05, 300)], [("KC-10", 0.92, 0.05, 300)], [("KC-11", 0.92, 0.05, 300)]]
+    _, result = run(_numbered(tmp_path, sheets, loose=["KC-09", "KC-09"]))
+    assert _numbers(result) == [None, "KC-10", "KC-11"]
+    assert any("'KC-09'" in w and "2 times outside" in w for w in result["warnings"])
+
+
+# --- review M3: a corner pick needs backing; M4: a code that is another sheet's number is a reference ----
+
+
+def test_a_corner_code_whose_position_repeats_nowhere_is_not_a_number(tmp_path):
+    # the printed numbers S101 / S102 are not code-shaped; a lone mark sits in each corner at its own spot
+    sheets = [
+        [("S101", 0.95, 0.03, 350), ("C-1", 0.80, 0.12, 250)],
+        [("S102", 0.95, 0.03, 350), ("D-4", 0.85, 0.15, 250)],
+    ]
     _, result = run(_numbered(tmp_path, sheets))
     assert _numbers(result) == [None, None]
-    assert any("'KC-09'" in w and "2 times outside" in w for w in result["warnings"])
+    missing = next(q for q in result["questions"] if q["code"] == "sheet_number_missing")
+    assert missing["blocking"] and missing["where"] == "model#01, model#02"
+    assert any("'C-1'" in w and "no other sheet's corner" in w for w in result["warnings"])
+    assert any("'D-4'" in w and "no other sheet's corner" in w for w in result["warnings"])
+
+
+def test_a_one_sheet_file_takes_no_corner_code(tmp_path):
+    _, result = run(_numbered(tmp_path, [[("KC-05", 0.92, 0.05, 300)]]))
+    assert _numbers(result) == [None]
+    assert "sheet_number_missing" in codes(result)
+    assert any("'KC-05'" in w and "no other sheet's corner" in w for w in result["warnings"])
+
+
+def test_a_corner_code_backed_only_by_a_mark_at_that_spot_is_not_a_number(tmp_path):
+    # the only other code at the same corner position is a mark (twice on its sheet): no backing
+    sheets = [[("KC-01", 0.92, 0.05, 300)], [("GD-1", 0.92, 0.05, 300), ("GD-1", 0.4, 0.5, 110)]]
+    _, result = run(_numbered(tmp_path, sheets))
+    assert _numbers(result) == [None, None]
+
+
+def test_a_detail_reference_to_another_sheet_is_not_mark_evidence(tmp_path):
+    # S-501 is referenced once on each of two sheets and printed in the corner of the third
+    sheets = [
+        [("S-101", 0.95, 0.03, 350), ("S-501", 0.4, 0.5, 200)],
+        [("S-102", 0.95, 0.03, 350), ("S-501", 0.5, 0.5, 200)],
+        [("S-501", 0.95, 0.03, 350)],
+    ]
+    _, result = run(_numbered(tmp_path, sheets))
+    assert _numbers(result) == ["S-101", "S-102", "S-501"]
+    assert "sheet_number_missing" not in codes(result)
+
+
+def test_references_to_sibling_sheets_are_no_mark_family(tmp_path):
+    sheets = [
+        [("S-101", 0.95, 0.03, 350), ("S-201", 0.4, 0.5, 200), ("S-202", 0.5, 0.5, 200)],
+        [("S-201", 0.95, 0.03, 350)],
+        [("S-202", 0.95, 0.03, 350)],
+    ]
+    _, result = run(_numbered(tmp_path, sheets))
+    assert _numbers(result) == ["S-101", "S-201", "S-202"]
+
+
+def test_an_index_sheet_listing_the_series_keeps_its_own_number(tmp_path):
+    listing = [("S-101", 0.3, 0.7, 200), ("S-102", 0.3, 0.65, 200), ("S-103", 0.3, 0.6, 200)]
+    sheets = [
+        [("S-001", 0.95, 0.03, 350), *listing],
+        [("S-101", 0.95, 0.03, 350)],
+        [("S-102", 0.95, 0.03, 350)],
+        [("S-103", 0.95, 0.03, 350)],
+    ]
+    _, result = run(_numbered(tmp_path, sheets))
+    assert _numbers(result) == ["S-001", "S-101", "S-102", "S-103"]
+
+
+def test_references_to_sheets_outside_the_file_still_read_as_a_family_and_are_asked(tmp_path):
+    # documented limit: S-201 / S-202 are no sheet of this file, so they still count as a mark family;
+    # the sheet then has no number and is asked, never given a wrong one
+    sheets = [
+        [("S-101", 0.95, 0.03, 350), ("S-201", 0.4, 0.5, 200), ("S-202", 0.5, 0.5, 200)],
+        [("S-102", 0.95, 0.03, 350)],
+        [("S-103", 0.95, 0.03, 350)],
+    ]
+    _, result = run(_numbered(tmp_path, sheets))
+    assert _numbers(result) == [None, "S-102", "S-103"]
+    assert next(q for q in result["questions"] if q["code"] == "sheet_number_missing")["where"] == "model#01"
+
+
+def test_a_code_backed_only_by_a_rejected_mark_is_not_a_number(tmp_path):
+    # backing comes from corner codes that are not marks: S-101 is taken for a mark family, so S-102 has
+    # nothing at its position and is asked as well
+    sheets = [
+        [("S-101", 0.95, 0.03, 350), ("S-201", 0.4, 0.5, 200), ("S-202", 0.5, 0.5, 200)],
+        [("S-102", 0.95, 0.03, 350)],
+    ]
+    _, result = run(_numbered(tmp_path, sheets))
+    assert _numbers(result) == [None, None]
+    missing = next(q for q in result["questions"] if q["code"] == "sheet_number_missing")
+    assert missing["where"] == "model#01, model#02"
+
+
+def test_referable_sheets_are_judged_once_with_every_body_text_counted(tmp_path):
+    # documented limit: S-101 references S-201 and S-202, so before references are known it looks like a
+    # mark family and is not referable; the two S-101 references then count as marks and S-101 is asked.
+    # One pass keeps the result independent of sheet order and never lets marks referable through a cascade.
+    sheets = [
+        [("S-201", 0.95, 0.03, 350)],
+        [("S-202", 0.95, 0.03, 350)],
+        [("S-101", 0.95, 0.03, 350), ("S-201", 0.4, 0.5, 200), ("S-202", 0.5, 0.5, 200)],
+        [("S-102", 0.95, 0.03, 350), ("S-101", 0.4, 0.5, 200)],
+        [("S-103", 0.95, 0.03, 350), ("S-101", 0.4, 0.5, 200)],
+    ]
+    _, result = run(_numbered(tmp_path, sheets))
+    assert _numbers(result) == ["S-201", "S-202", None, "S-102", "S-103"]
+    assert any("'S-101'" in w and "2 times outside" in w for w in result["warnings"])
+
+
+def test_a_corner_code_drawn_twice_on_its_sheet_is_no_sheet_to_reference(tmp_path):
+    # GD-1 is a mark on sheet 1 (twice there), so GD-1 on sheet 2 is mark evidence, not a reference
+    sheets = [
+        [("GD-1", 0.92, 0.05, 300), ("GD-1", 0.4, 0.5, 110)],
+        [("GD-3", 0.92, 0.05, 300), ("GD-1", 0.4, 0.5, 110), ("GD-2", 0.5, 0.5, 110)],
+        [("KC-03", 0.92, 0.05, 300)],
+        [("KC-04", 0.92, 0.05, 300)],
+    ]
+    _, result = run(_numbered(tmp_path, sheets))
+    assert _numbers(result) == [None, None, "KC-03", "KC-04"]
+    assert any("'GD-3'" in w and "mark family" in w for w in result["warnings"])
+
+
+def test_a_corner_mark_of_another_sheet_does_not_hide_a_mark_family(tmp_path):
+    # 286: gĐ-3 next to gĐ-1 and gĐ-2 is a mark; gĐ-1 also sits in another sheet's corner, where it is a
+    # mark of its own family (gĐ-5, gĐ-6), so it is no sheet that the plan could reference
+    sheets = [
+        [
+            ("GD-3", 0.92, 0.05, 300),
+            ("GD-1", 0.4, 0.5, 110),
+            ("GD-2", 0.5, 0.5, 110),
+            ("KC-01", 0.95, 0.03, 350),
+        ],
+        [
+            ("GD-1", 0.92, 0.05, 300),
+            ("GD-5", 0.4, 0.5, 110),
+            ("GD-6", 0.5, 0.5, 110),
+            ("KC-02", 0.95, 0.03, 350),
+        ],
+    ]
+    _, result = run(_numbered(tmp_path, sheets))
+    assert _numbers(result) == ["KC-01", "KC-02"]
+    assert any("'GD-3'" in w and "mark family" in w for w in result["warnings"])
 
 
 def test_model_marks_shown_on_a_layout_sheet_are_never_its_number(tmp_path):
@@ -311,15 +480,18 @@ def test_model_marks_shown_on_a_layout_sheet_are_never_its_number(tmp_path):
 
 
 def test_a_portrait_frame_also_reads_upright_numbers(tmp_path):
-    _, result = run(_numbered(tmp_path, [[("KC-03", 0.92, 0.05, 300)], []], portrait=True))
-    assert _numbers(result)[0] == "KC-03"
+    sheets = [[("KC-03", 0.92, 0.05, 300)], [("KC-04", 0.92, 0.05, 300)]]
+    _, result = run(_numbered(tmp_path, sheets, portrait=True))
+    assert _numbers(result) == ["KC-03", "KC-04"]
 
 
 def test_a_rotated_code_in_a_horizontal_frame_is_not_a_number(tmp_path):
     def extra(msp, w, h):
         # read at 90 degrees this is its own lower-right corner (world upper right); a landscape frame is
-        # read at 0 degrees only
-        msp.add_text("KC-05", height=250, dxfattribs={"insert": (0.95 * w, 0.85 * h), "rotation": 90})
+        # read at 0 degrees only. The same spot on the second frame would back it if it counted.
+        for k, code in enumerate(("KC-05", "KC-06")):
+            x = k * (w + 5000) + 0.95 * w
+            msp.add_text(code, height=250, dxfattribs={"insert": (x, 0.85 * h), "rotation": 90})
 
     _, result = run(_frames_only(tmp_path, extra))
     assert sheet(result, "model#01")["title_block"]["sheet_number"] is None

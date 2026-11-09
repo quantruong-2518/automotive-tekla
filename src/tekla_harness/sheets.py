@@ -38,8 +38,11 @@ Algorithm (deterministic, every threshold is a named constant below):
    frame along the text's reading direction and the lowest CORNER_V across it. A portrait frame is
    also read at 90 and 270 degrees (a landscape sheet drawn turned). A member mark is never a number
    (`_pick_corner_numbers`: the same code twice on its sheet, a mark family on its sheet, or the code
-   twice outside every title block of the file); among the rest a position repeated in other sheets'
-   corners wins, then the tallest; ties stay a conflict, and every corner code not taken is a warning.
+   twice outside every title block of the file; a text equal to another sheet's corner code is a
+   reference to that sheet, not mark evidence); among the rest a position repeated in other sheets'
+   corners wins, then the tallest. A code whose position repeats in no other sheet's corner is never
+   taken (nothing backs it; a one-sheet file has nothing to back it with). Ties stay a conflict, and
+   every corner code not taken is a warning.
    Constant text of the frame's own block is template text and never a value. A field value is chosen
    only when ALL its candidates agree; any disagreement is a title_field_conflict question (blocking
    for sheet_number and revision).
@@ -1000,21 +1003,40 @@ def _pick_corner_numbers(
     1. A member mark is never a sheet number. A corner code is a mark when the same code appears on
        another text of its own sheet (a sheet prints its number once), when two or more other texts of its
        sheet share its letters with other numbers (a mark family such as gĐ-1, gĐ-2), or when the code
-       appears two or more times outside every title-block corner of the file. A single listing on another
-       sheet is allowed: a drawing list names each sheet once (270 has one).
+       appears two or more times outside every title-block corner of the file. A text on a sheet whose code
+       is the corner code of ANOTHER sheet of the file is a reference to that sheet (a detail callout, a
+       drawing list, an index sheet), never mark evidence; only corner codes that pass the two own-sheet
+       checks count as sheets that can be referenced. References to sheets outside the file cannot be told
+       apart: they still count, so the sheet is asked (sheet_number_missing), never given a wrong number.
     2. A code at a position that repeats in another sheet's corner (within CORNER_POS_TOL) beats one that
        does not; then the tallest wins. Codes that tie on both are all kept, so they become a
-       title_field_conflict question, never a silent choice."""
-    outside = Counter(unplaced_codes)
-    for texts in body.values():
-        outside.update(_code_key(e["display_text"]) for e in texts)
-    marks: dict[int, str] = {}
-    for sid, hits in corner.items():
-        own = Counter(_code_key(e["display_text"]) for e in body.get(sid, []))
+       title_field_conflict question, never a silent choice.
+    3. A pick needs that backing (review M3): when no code of a sheet's corner sits at a position repeated
+       in another sheet's corner (a one-sheet file never has one), nothing is picked; each code is a
+       warning and the sheet gets sheet_number_missing."""
+
+    def own_counts(sid: str, hits: list[_CornerHit], refs: set[str]):
+        own = Counter(k for e in body.get(sid, []) if (k := _code_key(e["display_text"])) not in refs)
         own.update(h.key for h in hits)
         families: Counter[str] = Counter()
         for key, n in own.items():
             families[re.match(r"[a-z]*", key).group(0)] += n  # type: ignore[union-attr]
+        return own, families
+
+    # corner codes that pass the own-sheet checks with every body text counted: the sheets a body text can
+    # reference. A body text equal to its OWN sheet's corner code makes that code a twice-seen mark, which
+    # is never referable, so a referable code always names another sheet.
+    referable: set[str] = set()
+    for sid, hits in corner.items():
+        own, families = own_counts(sid, hits, set())
+        referable.update(h.key for h in hits if own[h.key] < 2 and families[h.prefix] - own[h.key] < 2)
+
+    outside = Counter(unplaced_codes)
+    for texts in body.values():
+        outside.update(k for e in texts if (k := _code_key(e["display_text"])) not in referable)
+    marks: dict[int, str] = {}
+    for sid, hits in corner.items():
+        own, families = own_counts(sid, hits, referable)
         for h in hits:
             others = families[h.prefix] - own[h.key]
             if own[h.key] >= 2:
@@ -1039,19 +1061,24 @@ def _pick_corner_numbers(
             return (repeats, float(h.entry.get("height") or 0.0))
 
         ranked = [(rank(h), h) for h in hits if id(h) not in marks]
-        best = max((r for r, _ in ranked), default=None)
-        chosen = [
-            h for r, h in ranked if best is not None and r[0] == best[0] and _same_height(r[1], best[1])
-        ]
+        best = max((r for r, _ in ranked), default=(False, 0.0))
+        backed = best[0]  # rule 3: some code of this corner sits at a position repeated elsewhere
+        chosen = [h for r, h in ranked if backed and r[0] and _same_height(r[1], best[1])]
         if chosen:
             picks[sid] = chosen
         for r, h in ranked:
-            if h not in chosen and best is not None:
-                why = "a code at a position repeated on other sheets" if r[0] != best[0] else "a taller code"
-                warnings.append(
-                    f"{sid}: corner code '{h.entry['display_text'].strip()}' ({h.entry['id']}) is "
-                    f"not the sheet number: {why} was preferred."
-                )
+            if h in chosen:
+                continue
+            if not backed:
+                why = "its position repeats in no other sheet's corner, so nothing backs it as a sheet number"
+            elif not r[0]:
+                why = "a code at a position repeated on other sheets was preferred"
+            else:
+                why = "a taller code was preferred"
+            warnings.append(
+                f"{sid}: corner code '{h.entry['display_text'].strip()}' ({h.entry['id']}) is "
+                f"not the sheet number: {why}."
+            )
         for h in hits:
             if id(h) in marks:
                 warnings.append(

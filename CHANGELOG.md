@@ -537,6 +537,17 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
       model text shown on a layout sheet is never in that sheet's corner. Corpus: 285 model#03
       `kc- 03`, 290 model#16-18 `Kc - 13` and 267 model#16-20 / #43-44 are now read; the false
       `gĐ-3` on 286 model#04 is gone.
+    - Sheets (safety): a corner code is taken as the sheet number only when its position repeats in
+      another sheet's corner. A code with no such backing (and every code of a one-sheet file) is a
+      warning, and the sheet gets the blocking `sheet_number_missing`; before, a lone mark in the corner
+      (`C-1` next to a number like `S101` that is not code-shaped) became the number with no question.
+      Codes without a separator (`S101`) are still not sheet codes: on the known files that shape picks
+      up stirrup spacings (`a100`, `a200`).
+    - Sheets: a text equal to another sheet's corner code is a reference to that sheet (a detail callout,
+      a drawing list, an index sheet), not evidence that the corner code is a mark, so a number referenced
+      from two sheets or a sheet that references its siblings keeps its number. Only corner codes that pass
+      their own sheet's mark checks count as sheets to reference. References to sheets outside the file
+      still count as marks, so that sheet is asked. No known file changes.
     - Sheets: new non-blocking question `sheet_number_gap`, one per file, when the chosen sheet numbers
       of a letter series skip numbers that no sheet of any series carries (one counter may run over
       several series, as Kc and KT on 290). `found` gives each missing number or range with the sheets
