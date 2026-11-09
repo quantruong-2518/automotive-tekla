@@ -582,6 +582,18 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
       role leaves the file sets pending; a `units_answer_contradicts_evidence` confirmation counts only from
       the engineer. Each such answer is named in `warnings`. A conflict that the engineer's file-set answer
       retires records `obsolete_reason` "superseded by an answer to file_set_relation".
+    - ADR-0013 route in `harness grid-system`: every read drawing file that no selected two-direction
+      detected system covers gets a blocking `grid_system_missing` question (`found` quotes the bubbles,
+      labels and axes grids.py found; the message names the file's detected systems and why none is
+      usable, and the `--value` keys). An active answer by the engineer with `dir1_labels`,
+      `dir1_spacings`, `dir2_labels`, `dir2_spacings` (and optional `sheet`) builds a system with
+      `source: engineer_answer` and `source_answer`, numbered after the detected systems; it is selected,
+      given Tekla X/Y and units like a detected one, and the question stays raised while that answer is
+      active, so the answer and the system survive reruns. A simulated, role-less, words-only or malformed
+      answer builds nothing and is warned. The given spacings are checked against the linear dimensions
+      between two of the given axes (labels case-blind, spans as sums, drafting tolerance): a
+      disagreement raises a blocking `grid_answer_contradicts_drawing` quoting both values; a grid with no
+      dimension to check is warned. `grid_system_missing` answers are part of the answers digest.
 
 ### Changed
 - Question lifecycle (tool wave 2, EVAL-2 fix 5):

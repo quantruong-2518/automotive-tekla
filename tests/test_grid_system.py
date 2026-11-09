@@ -53,7 +53,9 @@ def fam(
     evidence: list[dict[str, Any]] | None = None,
     conf: str = "medium",
     offsets: list[float] | None = None,
+    dims: dict[int, list[dict[str, Any]]] | None = None,
 ) -> dict[str, Any]:
+    """`dims`: spacing index -> grids.py dimension_evidence entries (dim() builds one)."""
     if offsets is None:
         offsets = [0.0]
         for s in spacings:
@@ -67,6 +69,21 @@ def fam(
         "complete": complete,
         "evidence": evidence or [],
         "conf": conf,
+        "dims": dims or {},
+    }
+
+
+def dim(a: str, b: str, displayed: float, *, text: str = "", status: str = "measured") -> dict[str, Any]:
+    """A grids.py dimension_evidence entry: a linear dimension from axis a to axis b."""
+    return {
+        "handle": f"D{a}{b}",
+        "from_label": a,
+        "to_label": b,
+        "measured": displayed,
+        "dimlfac": 1.0,
+        "displayed": displayed,
+        "text": text,
+        "status": status,
     }
 
 
@@ -120,7 +137,7 @@ def _family_json(
                     "provenance": _prov(file, sheet, "derived"),
                     "confidence": spec["conf"],
                 },
-                "dimension_evidence": [],
+                "dimension_evidence": spec.get("dims", {}).get(k, []),
                 "evidence": spec["evidence"] if k == 0 else [],
             }
         )
@@ -180,7 +197,9 @@ class Work:
         duplicates: dict[str, str] | None = None,
         content: str | None = None,
         median: dict[str, Any] | None = None,
+        unpaired: list[str] | None = None,
     ) -> None:
+        """`unpaired`: labels of bubbles that grids.py found but paired with no line (listed, model#09)."""
         duplicates = duplicates or {}
         dxf_sha = sha("dxf:" + (content or path))
         counter = [0]
@@ -206,13 +225,28 @@ class Work:
             "file": file_obj,
             "groups": groups,
             "cross_checks": [],
-            "unpaired_bubbles": {"count": 0, "listed": []},
+            "unpaired_bubbles": {
+                "count": len(unpaired or []),
+                "listed": [
+                    {
+                        "center": [1000.0 * k, -500.0],
+                        "radius": 400.0,
+                        "label": label,
+                        "label_source": "text",
+                        "tag": None,
+                        "text_id": f"T{k + 1:06d}",
+                        "block_path": [],
+                        "sheet": "model#09",
+                    }
+                    for k, label in enumerate(unpaired or [])
+                ],
+            },
             "summary": {
-                "circles": 0,
-                "bubbles_labelled": 0,
+                "circles": len(unpaired or []) + counter[0],
+                "bubbles_labelled": len(unpaired or []) + counter[0],
                 "bubbles_ambiguous_label": 0,
                 "bubbles_other_text": 0,
-                "bubbles_paired": 0,
+                "bubbles_paired": counter[0],
                 "axes": counter[0],
                 "groups": len(groups),
                 "families": sum(len(g["families"]) for g in groups),
@@ -1462,6 +1496,269 @@ def test_a_non_engineer_confirmation_of_a_contradicted_unit_confirms_nothing(tmp
     assert "units_answer_contradicts_evidence" in codes(proposed)
     assert proposed["files"][0]["units_answer"] == {"status": "proposed_simulated", "unit": "m"}
     assert proposed["systems"][0]["units"]["reason"] == "units answered by a non-engineer role"
+
+
+# --- ADR-0013: a grid system from the engineer's answer (grid_system_missing) --------------------------
+
+MISSING = "grid_system_missing"
+CONTRADICTS = "grid_answer_contradicts_drawing"
+GRID = {
+    "dir1_labels": ["1", "2", "3", "4", "5"],
+    "dir1_spacings": [3130, 3540, 3520, 4590],
+    "dir2_labels": ["A", "B", "C"],
+    "dir2_spacings": [4250, 3730.0],
+    "sheet": "model#05",
+}
+
+
+def _no_grid(
+    tmp_path: Path, example: Any, labels: list[str] | None = None, dims: dict[int, Any] | None = None
+) -> Path:
+    """house.dxf: one direction of axes only (A B C, horizontal lines) and three bubbles 1 2 3 on no line."""
+    w = Work(tmp_path, example)
+    letters = labels or ["A", "B", "C"]
+    w.add_file(
+        "house.dxf",
+        [view("V001", "model#05", fam("F001", letters, [4250.0, 3730.0], angle=0.0, dims=dims))],
+        unpaired=["1", "2", "3"],
+    )
+    return w.finish()
+
+
+def _missing(doc: dict[str, Any], file: str = "house.dxf") -> dict[str, Any]:
+    (q,) = [q for q in doc["questions"] if q["code"] == MISSING and q["file"] == file]
+    return q
+
+
+def _built(doc: dict[str, Any]) -> list[dict[str, Any]]:
+    return [s for s in doc["systems"] if s.get("source") == "engineer_answer"]
+
+
+def test_a_file_with_no_usable_grid_system_asks_for_one(tmp_path, example):
+    doc = build_grid_systems(_no_grid(tmp_path, example))
+    check_invariants(doc)
+    q = _missing(doc)
+    assert q["blocking"] and q["where"] == "house.dxf: no usable grid system" and "sheet" not in q
+    assert q["found"].startswith("6 labelled bubble(s), 3 paired with a line, 3 axis(es) in 1 famil")
+    assert "unpaired bubble labels: 1 2 3" in q["found"] and "axis labels: A B C" in q["found"]
+    for key in ("dir1_labels=", "dir1_spacings=", "dir2_labels=", "dir2_spacings=", "--role engineer"):
+        assert key in q["message"], key
+    assert "S001" in q["message"] and "single direction" in q["message"]  # what was found, in words
+    # a file with a two-direction system is not asked
+    assert MISSING not in codes(build_grid_systems(_cm_work(tmp_path / "plan", example)))
+
+
+def test_a_file_whose_systems_the_engineer_rejected_asks_for_a_grid(tmp_path, example):
+    work = _two_files(tmp_path, example)
+    doc = build_grid_systems(work)
+    assert MISSING not in codes(doc)
+    select = answer_to(doc, "grid_system_select", {"systems": ["S001"]})
+    rejected = build_grid_systems(work, answers=[select])
+    assert [q["file"] for q in rejected["questions"] if q["code"] == MISSING] == ["b.dxf"]
+    assert "not selected" in _missing(rejected, "b.dxf")["message"]
+    # the same selection proposed by an agent rejects nothing
+    assert MISSING not in codes(build_grid_systems(work, answers=[sim(select)]))
+
+
+def test_the_engineer_answer_builds_a_grid_system(tmp_path, example):
+    work = _no_grid(tmp_path, example)
+    doc = build_grid_systems(work)
+    answer = {**answer_to(doc, MISSING, GRID), "question_id": "Q-031"}
+    out = build_grid_systems(work, answers=[answer])
+    check_invariants(out)
+    (s,) = _built(out)
+    assert s["system_id"] == "S002"  # after the detected systems: their ids do not move
+    assert s["source_answer"] == {"question_id": "Q-031", "key": answer["key"]}
+    one, two = s["directions"]
+    assert (one["labels"], one["spacings"], one["coordinates"]) == (
+        ["1", "2", "3", "4", "5"],
+        [3130.0, 3540.0, 3520.0, 4590.0],
+        "0 3130 3540 3520 4590",
+    )
+    assert (two["labels"], two["coordinates"], two["unit"]) == (["A", "B", "C"], "0 4250 3730", "mm")
+    assert one["provenance"] == {
+        "file": "house.dxf",
+        "sheet": "model#05",
+        "method": "engineer_answer",
+        "question_id": "Q-031",
+    }
+    assert (one["representative"], one["families"], one["rounding_step"], one["angle_deg"]) == (
+        None,
+        0,
+        None,
+        None,
+    )
+    ev = s["evidence"]
+    assert (ev["views"], ev["independent_views"], ev["sheets"], ev["files"], ev["contributors"]) == (
+        0,
+        0,
+        1,
+        1,
+        [],
+    )
+    assert s["units"]["status"] == "not_confirmed" and s["axis_assignment"]["status"] == "not_answered"
+    assert {"units_not_confirmed", "axis_unassigned"} <= set(s["flags"]) and s["confidence"] == "medium"
+    # the question stays raised under the same key (its answer must not go stale), and the system goes
+    # through the same gate-1 steps: select, X/Y, units
+    assert _missing(out)["found"] == _missing(doc)["found"]
+    assert any(q["code"] == "grid_system_select" and "S002" in q["where"] for q in out["questions"])
+    axis = answer_to(out, "grid_system_axis_unassigned", {"dir1": "X", "dir2": "Y"}, "S002")
+    assert next(q for q in keyed(out) if q["key"] == axis["key"])["blocking"]
+    done = build_grid_systems(
+        work, answers=[answer, axis, ans("units_confirm_all", "house.dxf", {"unit": "mm"})]
+    )
+    check_invariants(done)
+    (s,) = _built(done)
+    assert s["tekla_grid"] == {
+        "unit": "mm",
+        "coordinate_x": "0 3130 3540 3520 4590",
+        "label_x": "1 2 3 4 5",
+        "coordinate_y": "0 4250 3730",
+        "label_y": "A B C",
+    }
+    assert s["units"]["status"] == "confirmed" and s["axis_assignment"]["status"] == "answered"
+
+
+def test_an_engineer_answer_in_words_only_is_warned_as_such(tmp_path, example):
+    work = _no_grid(tmp_path, example)
+    words = answer_to(build_grid_systems(work), MISSING, {})
+    out = build_grid_systems(work, answers=[words])
+    assert _built(out) == [] and any("in words only" in w for w in out["warnings"])
+
+
+def test_an_answer_without_a_sheet_builds_a_system_on_no_sheet(tmp_path, example):
+    work = _no_grid(tmp_path, example)
+    values = {k: v for k, v in GRID.items() if k != "sheet"}
+    out = build_grid_systems(work, answers=[answer_to(build_grid_systems(work), MISSING, values)])
+    check_invariants(out)
+    (s,) = _built(out)
+    assert s["evidence"]["sheets"] == 0
+    assert {d["provenance"]["sheet"] for d in s["directions"]} == {"unknown"}
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"answered_by_role": "simulated"},
+        {"answered_by_role": None},
+        {"values": {}},
+        {"values": {k: v for k, v in GRID.items() if not k.startswith("dir2")}},
+        {"values": {**GRID, "dir1_spacings": [3130, 3540, 3520]}},
+        {"values": {**GRID, "dir1_spacings": [3130, True, 3520, 4590]}},
+        {"values": {**GRID, "dir1_spacings": [3130, 0, 3520, 4590]}},
+        {"values": {**GRID, "dir1_spacings": [3130, float("inf"), 3520, 4590]}},
+        {"values": {**GRID, "dir2_labels": ["A", "A", "C"]}},
+        {"values": {**GRID, "dir2_labels": ["A", " ", "C"]}},
+        {"values": {**GRID, "dir2_labels": ["A"], "dir2_spacings": []}},
+        {"values": {**GRID, "dir3_labels": ["X", "Y"]}},
+        {"values": {**GRID, "sheet": " "}},
+        {"values": {**GRID, "dir1_labels": "1,2,3,4,5"}},
+        {"file": "other.dxf"},
+    ],
+    ids=lambda c: next(iter(c)) + ":" + str(next(iter(c.values())))[:24],
+)
+def test_an_answer_that_is_not_the_engineers_structured_grid_builds_nothing(tmp_path, example, change):
+    work = _no_grid(tmp_path, example)
+    doc = build_grid_systems(work)
+    answer = {**answer_to(doc, MISSING, GRID), **change}
+    if change.get("answered_by_role", "") is None:
+        del answer["answered_by_role"]
+    out = build_grid_systems(work, answers=[answer])
+    check_invariants(out)
+    assert _built(out) == [] and [s["system_id"] for s in out["systems"]] == ["S001"]
+    assert _missing(out)["blocking"]
+    assert any(MISSING in w and "builds nothing" in w for w in out["warnings"]), out["warnings"]
+
+
+def test_the_answer_built_system_survives_reruns(tmp_path, example):
+    """Ledger.sync makes an answer stale when its question is not raised: the question must stay raised once
+    its answer built the system (run, answer, run, run)."""
+    work = _ledger_work(_no_grid(tmp_path, example))
+    run_grid_systems(work, svg=False)
+    q = _one(_gs_questions(work), MISSING)
+    _set_answers(work, [{**ans(MISSING, "house.dxf", GRID), "key": q["key"], "question_id": q["id"]}])
+    for _ in range(2):
+        run_grid_systems(work, svg=False)
+        assert [s["source_answer"]["question_id"] for s in _built(_gs_doc(work))] == [q["id"]]
+        again = _one(_gs_questions(work), MISSING)
+        assert (again["id"], again["key"], again["answer"]["status"]) == (q["id"], q["key"], "active")
+
+
+def test_a_rejected_system_then_an_answer_does_not_oscillate(tmp_path, example):
+    """Select S001 (b.dxf's S002 rejected) -> b.dxf is asked -> its answer builds S003, which changes the
+    select question (its answer goes stale, S002 is selected again) -> the grid answer stays bound anyway."""
+    work = _ledger_work(_two_files(tmp_path, example))
+    run_grid_systems(work, svg=False)
+    select = _one(_gs_questions(work), "grid_system_select")
+    chosen = {
+        **ans("grid_system_select", None, {"systems": ["S001"]}),
+        "key": select["key"],
+        "question_id": select["id"],
+    }
+    _set_answers(work, [chosen])
+    run_grid_systems(work, svg=False)
+    q = next(q for q in _gs_questions(work) if q["code"] == MISSING and q["file"] == "b.dxf")
+    grid = {**ans(MISSING, "b.dxf", GRID), "key": q["key"], "question_id": q["id"]}
+    _set_answers(work, [chosen, grid])
+    for _ in range(3):
+        run_grid_systems(work, svg=False)
+        assert [s["system_id"] for s in _built(_gs_doc(work))] == ["S003"]
+        answers = json.loads((work / "answers.json").read_text(encoding="utf-8"))["answers"]
+        assert next(a for a in answers if a["key"] == q["key"])["status"] == "active"
+
+
+@pytest.mark.parametrize("labels", [["A", "B", "C"], ["a", "b", "c"]])
+def test_a_given_spacing_that_a_dimension_contradicts_raises_a_question(tmp_path, example, labels):
+    """ADR-0013 §5 (285 KC-03: B-A reads 4260 where the grid is 4250). Drawing labels match case-blind
+    (285's TCVN3 capitals decode as 'a b c')."""
+    a, b, c = labels
+    dims = {0: [dim(a, b, 4260.0, text="4260", status="differs")], 1: [dim(b, c, 3730.0), dim(a, c, 7980.0)]}
+    work = _no_grid(tmp_path, example, labels=labels, dims=dims)
+    answer = answer_to(build_grid_systems(work), MISSING, GRID)
+    out = build_grid_systems(work, answers=[answer])
+    check_invariants(out)
+    (q,) = [q for q in out["questions"] if q["code"] == CONTRADICTS]
+    assert q["blocking"] and q["file"] == "house.dxf" and answer["key"] in q["where"]
+    assert f"{a}-{b}: answer 4250 vs dimension" in q["found"] and "4260" in q["found"]
+    assert f"{b}-{c}" not in q["found"] and f"{a}-{c}" not in q["found"]  # 3730 and 4250 + 3730 agree
+    assert len(_built(out)) == 1  # the engineer stays authoritative: the system is built
+
+
+@pytest.mark.parametrize(
+    ("dims", "raised"),
+    [
+        ({0: [dim("A", "B", 4250.8)]}, False),  # within the drafting tolerance (2e-4 of 4250 = 0.85)
+        ({0: [dim("A", "B", 4251.0)]}, True),
+        ({1: [dim("A", "C", 8000.0)]}, True),  # a span checks the sum of the given spacings
+        ({0: [dim("A", "B", 4260.0, text="x", status="not_numeric") | {"displayed": None}]}, False),
+    ],
+)
+def test_which_dimensions_contradict_a_given_grid(tmp_path, example, dims, raised):
+    work = _no_grid(tmp_path, example, dims=dims)
+    out = build_grid_systems(work, answers=[answer_to(build_grid_systems(work), MISSING, GRID)])
+    assert (CONTRADICTS in codes(out)) is raised
+
+
+def test_a_given_grid_with_no_dimension_to_check_says_so(tmp_path, example):
+    work = _no_grid(tmp_path, example)
+    out = build_grid_systems(work, answers=[answer_to(build_grid_systems(work), MISSING, GRID)])
+    assert CONTRADICTS not in codes(out)
+    assert any("not checked" in w and "house.dxf" in w for w in out["warnings"])
+
+
+def test_the_answers_digest_covers_the_grid_answer():
+    base = [ans("units_suspect", "a.dxf", {"unit": "cm"})]
+    assert consumed_answers_digest([*base, ans(MISSING, "a.dxf", GRID)]) != consumed_answers_digest(base)
+
+
+def test_an_answer_built_system_is_drawn(tmp_path, example):
+    work = _no_grid(tmp_path, example)
+    answer = answer_to(build_grid_systems(work), MISSING, GRID)
+    doc = build_grid_systems(work, answers=[answer], write=True)
+    (s,) = _built(doc)
+    svg = (work / s["svg"]).read_text(encoding="utf-8")
+    ET.fromstring(svg)
+    assert "1 2 3 4 5" in svg and "0 4250 3730" in svg
 
 
 # --- SVG -------------------------------------------------------------------------------------------
