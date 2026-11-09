@@ -1,14 +1,15 @@
 # Skill eval 3 (2026-11-09) — rev 5 skills after tool wave 2, known set and held-out set
 
 Protocol: `eval3/EVAL-3-PROTOCOL.md` (pre-registered 2026-11-07, amended before the run in §8a items
-1–6). Outputs, friction logs, metrics, judge reports and the answer key stay in the session scratchpad,
-not in git: they derive from personal-use drawings.
+1–6). Outputs, friction logs, metrics, judge reports and the answer key are not in git (they derive
+from personal-use drawings). They are archived, without the repo copy, in the git-ignored
+`projects/_evals/eval3-2026-11-09/` of the engineer's checkout. EVAL-4's R arm uses them as its prior.
 
 ## Verdict: FAIL — another tool wave before the shadow pilot
 
 The H arm fails criterion 1: both judges put R1 below 95 % (90.4 % and 92.4 %, mean 91.4 %). No
-wrong claim was consequential. Criteria 2–7 hold, both traps were caught blind, and no document opened
-or claimed gate 1. The R arm shows no regression: every criterion is equal to or above eval2-l3.
+wrong claim was consequential. Criteria 2–6 hold and criterion 7 holds by the letter (see below). Both
+traps were caught blind, and no document opened or claimed gate 1. The R arm shows no regression: every criterion is equal to or above eval2-l3.
 
 Why it fails: the agents stayed honest, but the tools left large parts of the held-out drawings unread
 without a question. No grid was found for two of the four buildings. The rebar of a third was dropped.
