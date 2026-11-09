@@ -315,6 +315,23 @@
       "additionalProperties": false,
       "properties": { "table": { "$ref": "#/$defs/table_id" }, "row": { "type": "integer", "minimum": 1 }, "entry_id": { "$ref": "#/$defs/entry_id" } }
     },
+    "detail_ref": {
+      "type": "object",
+      "description": "Tool wave 3 (a4): an RC detail or section heading that names a mark (an allowed text entry; blocked text is never a heading).",
+      "required": ["entry_id", "sheet", "text"],
+      "additionalProperties": false,
+      "properties": {
+        "entry_id": { "$ref": "#/$defs/entry_id" },
+        "sheet": { "type": ["string", "null"], "description": "Detector sheet id; null for a text on no sheet." },
+        "text": { "type": "string", "minLength": 1, "description": "The heading as displayed." }
+      }
+    },
+    "compared_source": {
+      "description": "compared_with detail_heading needs its detail_headings (schedule may then be empty); any other match keeps at least one schedule row.",
+      "if": { "properties": { "compared_with": { "const": "detail_heading" } }, "required": ["compared_with"] },
+      "then": { "required": ["detail_headings"] },
+      "else": { "properties": { "schedule": { "minItems": 1 } } }
+    },
     "matching": {
       "type": "object",
       "required": ["file", "schedule_tables", "matched", "schedule_only", "plan_only", "notation_variants", "size_conflicts"],
@@ -322,6 +339,7 @@
       "properties": {
         "file": { "type": "string", "minLength": 1 },
         "schedule_tables": { "type": "integer", "minimum": 0, "description": "Tables of this file whose header is not blocked. plan_only is listed only when this is at least 1." },
+        "detail_headings": { "type": "integer", "minimum": 0, "description": "Tool wave 3 (a4): RC detail and section headings of this file that name a mark (DẦM D1 (SL= 02), CỘT C9, ĐÀI CỌC ĐC2) and were compared with the plan marks as a second comparison source." },
         "matched": {
           "type": "array",
           "items": {
@@ -332,14 +350,21 @@
               "key": { "type": "string", "minLength": 1 },
               "mark": { "type": "string", "minLength": 1 },
               "plan_marks": { "type": "array", "items": { "$ref": "#/$defs/plan_id" }, "minItems": 1 },
-              "schedule": { "type": "array", "items": { "$ref": "#/$defs/schedule_ref" }, "minItems": 1 },
+              "schedule": { "type": "array", "items": { "$ref": "#/$defs/schedule_ref" }, "description": "At least one row, except for a match found only through detail headings (compared_with detail_heading)." },
               "confidence": { "$ref": "#/$defs/confidence_not_high" },
               "size_compared": { "type": "boolean", "description": "Whether the plan size was compared with the schedule row." },
-              "size_not_compared_reason": { "type": "string", "minLength": 1, "description": "Only when size_compared is false: why (e.g. the plan mark has no size, the size cells are blocked)." }
+              "size_not_compared_reason": { "type": "string", "minLength": 1, "description": "Only when size_compared is false: why (e.g. the plan mark has no size, the size cells are blocked)." },
+              "compared_with": { "enum": ["schedule", "detail_heading"], "description": "Tool wave 3 (a4): the source that matched the plan mark: a parsed schedule table (rows in `schedule`) or only RC detail headings (`detail_headings`)." },
+              "detail_headings": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/detail_ref" }, "description": "The detail headings that name this mark." }
             },
-            "if": { "properties": { "size_compared": { "const": false } }, "required": ["size_compared"] },
-            "then": { "required": ["size_not_compared_reason"] },
-            "else": { "not": { "required": ["size_not_compared_reason"] } }
+            "allOf": [
+              {
+                "if": { "properties": { "size_compared": { "const": false } }, "required": ["size_compared"] },
+                "then": { "required": ["size_not_compared_reason"] },
+                "else": { "not": { "required": ["size_not_compared_reason"] } }
+              },
+              { "$ref": "#/$defs/compared_source" }
+            ]
           }
         },
         "schedule_only": {
@@ -351,8 +376,11 @@
             "properties": {
               "key": { "type": "string", "minLength": 1 },
               "mark": { "type": "string", "minLength": 1 },
-              "schedule": { "type": "array", "items": { "$ref": "#/$defs/schedule_ref" }, "minItems": 1 }
-            }
+              "schedule": { "type": "array", "items": { "$ref": "#/$defs/schedule_ref" }, "description": "At least one row, except for a mark only a detail heading names (compared_with detail_heading)." },
+              "compared_with": { "enum": ["schedule", "detail_heading"], "description": "Tool wave 3 (a4): where this mark without a plan mark comes from." },
+              "detail_headings": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/detail_ref" } }
+            },
+            "allOf": [{ "$ref": "#/$defs/compared_source" }]
           }
         },
         "plan_only": {
@@ -364,7 +392,8 @@
             "properties": {
               "key": { "type": "string", "minLength": 1 },
               "mark": { "type": "string", "minLength": 1 },
-              "plan_marks": { "type": "array", "items": { "$ref": "#/$defs/plan_id" }, "minItems": 1 }
+              "plan_marks": { "type": "array", "items": { "$ref": "#/$defs/plan_id" }, "minItems": 1 },
+              "compared_with": { "enum": ["schedule", "detail_heading", "none"], "description": "Tool wave 3 (a4): what this plan mark was compared with and not found in: schedule (parsed tables, and headings if any), detail_heading (headings only: the file has no parsed schedule), or none (the file has neither, so the mark was not compared at all: plan_only is then not a finding)." }
             }
           }
         },
@@ -476,6 +505,28 @@
                   "sheet_number": { "$ref": "#/$defs/sheet_number" }
                 },
                 "additionalProperties": { "type": "integer", "minimum": 0 }
+              }
+            },
+            "mark_sets": {
+              "type": "array",
+              "description": "Tool wave 3 (W6): one entry per file and mark family (prefix, as in member_mark_prefix_meaning), for the report to copy instead of listing the marks it happened to cite. complete is true only when a parsed schedule or the detail-heading sweep covers the family; otherwise the report writes 'ít nhất' (at least).",
+              "items": {
+                "type": "object",
+                "required": ["file", "family", "members", "complete", "source"],
+                "additionalProperties": false,
+                "properties": {
+                  "file": { "type": "string", "minLength": 1 },
+                  "family": { "type": "string", "minLength": 1, "description": "The marks' common prefix, as drawn (e.g. 'ĐC', 'M', 'D')." },
+                  "members": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "minLength": 1 }, "description": "Every mark of the family found in the file, as drawn, in natural order; gaps stay gaps (never written as a range)." },
+                  "complete": { "type": "boolean" },
+                  "source": {
+                    "type": "array",
+                    "minItems": 1,
+                    "uniqueItems": true,
+                    "items": { "enum": ["schedule", "detail_heading", "plan_marks"] },
+                    "description": "Where the members come from: parsed schedule tables, RC detail headings, plan marks."
+                  }
+                }
               }
             },
             "size_comparisons": {

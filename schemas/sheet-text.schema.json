@@ -139,7 +139,38 @@
           "properties": {
             "unassigned": { "type": "boolean", "description": "True when the request was --unassigned instead of a sheet id." },
             "contains": { "type": ["string", "null"], "description": "Case-insensitive substring (NFC + casefold, diacritics significant); null = no filter." },
-            "max_entries": { "type": ["integer", "null"], "minimum": 1, "description": "Effective cap: --max, else 400, else null (unbounded) when contains filters." }
+            "max_entries": { "type": ["integer", "null"], "minimum": 1, "description": "Effective cap: --max, else 400, else null (unbounded) when contains filters." },
+            "region": { "$ref": "#/$defs/bbox", "description": "Tool wave 3 (a5): sheet-text --region x0,y0,x1,y1, in the coordinates of the sheet's space (x0 < x1, y0 < y1)." }
+          }
+        },
+        "region": { "$ref": "#/$defs/bbox", "description": "Tool wave 3 (a5): present exactly when query.region is: the box read. `entries` then holds only the entries whose insertion point lies in it, and `rows` groups them." },
+        "rows": {
+          "type": "array",
+          "description": "Tool wave 3 (a5), only with a region: the region's entries in reading order (top down), one row per reading-order row, its cells split where the x gap between neighbouring entries exceeds the sheet's text-height threshold (left to right). A blank cell is never invented: a cell exists only where an entry is. Blocked entries stay blocked (the legacy-font gate is unchanged).",
+          "items": {
+            "type": "object",
+            "required": ["y", "cells"],
+            "additionalProperties": false,
+            "properties": {
+              "y": { "type": "number", "description": "The row's reference y (its first entry's y)." },
+              "cells": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "object",
+                  "required": ["entry_ids", "display_text", "meaning", "blocked_reason"],
+                  "additionalProperties": false,
+                  "properties": {
+                    "entry_ids": { "type": "array", "minItems": 1, "items": { "type": "string", "pattern": "^T[0-9]{6,}$" }, "description": "The cell's entries, left to right." },
+                    "display_text": { "type": "string", "description": "The entries' display_text joined by one space, exactly as `entries` show them (a blocked entry as stored: quote it, never read it)." },
+                    "meaning": { "$ref": "#/$defs/meaning", "description": "blocked when any entry of the cell is blocked." },
+                    "blocked_reason": { "$ref": "#/$defs/blocked_reason", "description": "The first blocked entry's reason; null when allowed." },
+                    "x0": { "type": "number", "description": "Leftmost insertion x of the cell's entries." },
+                    "x1": { "type": "number", "description": "Rightmost insertion x of the cell's entries." }
+                  }
+                }
+              }
+            }
           }
         },
         "counts": {
@@ -173,11 +204,14 @@
             "question_ids": {
               "type": "array",
               "items": { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/question_id" },
-              "description": "Non-obsolete questions of this file (question-registry.json) with code font_encoding_proposed, font_encoding_conflict, text_encoding_hint or encoding_unknown_non_ascii: the engineer's answers unblock the gate. Empty when no blocked entry has a reason such an answer can lift (none blocked, or all legacy_ascii_suspect: ASCII text stays ASCII in every encoding)."
+              "description": "Non-obsolete questions of this file (question-registry.json) with code font_encoding_proposed, font_encoding_conflict, text_encoding_hint or encoding_unknown_non_ascii: the engineer's answers unblock the gate. Empty when no blocked entry has a reason such an answer can lift (none blocked, or all legacy_ascii_suspect: ASCII text stays ASCII in every encoding). Tool wave 3 (W3): for legacy_ascii_suspect entries, the file's legacy_ascii_text questions (one per file and style, raised by intake) are listed too; their answer records the engineer's reading of the style and decodes nothing."
             }
           }
         }
-      }
+      },
+      "if": { "properties": { "query": { "required": ["region"] } }, "required": ["query"] },
+      "then": { "required": ["region", "rows"] },
+      "else": { "not": { "anyOf": [{ "required": ["region"] }, { "required": ["rows"] }] } }
     },
     "entry": {
       "type": "object",
@@ -235,7 +269,8 @@
         "counts": {
           "type": "object",
           "description": "True counts, whatever was returned.",
-          "required": ["hits", "returned", "omitted", "truncated", "blocked_entries_not_searchable", "unassigned_entries_not_searched"],
+          "required": ["hits", "returned", "omitted", "truncated", "unassigned_entries_not_searched"],
+          "anyOf": [{ "required": ["blocked_in_scope"] }, { "required": ["blocked_entries_not_searchable"] }],
           "additionalProperties": false,
           "properties": {
             "hits": { "type": "integer", "minimum": 0 },
@@ -245,7 +280,12 @@
             "blocked_entries_not_searchable": {
               "type": "integer",
               "minimum": 0,
-              "description": "Blocked entries examined (whether they matched or not). They were matched on their stored text only, which rarely contains a Vietnamese word: the search is INCOMPLETE over them."
+              "description": "Deprecated (tool wave 3, replaced by blocked_in_scope): blocked entries examined (whether they matched or not), matched on their stored text only."
+            },
+            "blocked_in_scope": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Tool wave 3 (W4): blocked entries in the searched files or sheets, whatever the query (the same number for every --contains). find-text never matches a blocked entry, on its raw or any decoded or normalised text, so a count that depended on the query would leak what the blocked text says; read blocked entries by entry id or sheet listing only."
             },
             "unassigned_entries_not_searched": { "type": "integer", "minimum": 0, "description": "Entries on no sheet or on several sheets (sheets document); not searched." },
             "unassigned_entries_searched": { "type": "integer", "minimum": 0, "description": "With --unassigned: the entries on no sheet or on several that were searched." }

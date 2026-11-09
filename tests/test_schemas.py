@@ -289,6 +289,251 @@ def test_status_gate1_closed_and_non_engineer_answers(example):
     assert validate("status", doc)
 
 
+# --- tool wave 3 seam: new codes and fields (all optional, $id stays 0.1) -------------------------
+
+
+GRID_ANSWER_VALUES = {
+    "dir1_labels": ["1", "2", "3"],
+    "dir1_spacings": [3130, 3540.5],
+    "dir2_labels": ["A", "B"],
+    "dir2_spacings": [4250],
+}
+
+
+def test_answers_grid_system_missing_values(example):
+    doc = example("answers")
+    answer = doc["answers"][0]
+    answer.update(code="grid_system_missing", file="S-101.dwg", values=dict(GRID_ANSWER_VALUES))
+    assert validate("answers", doc) == []
+    answer["values"]["sheet"] = "model#05"
+    assert validate("answers", doc) == []
+    answer["values"] = {}  # words only: recorded, builds nothing
+    assert validate("answers", doc) == []
+    for bad in (
+        {k: v for k, v in GRID_ANSWER_VALUES.items() if k != "dir2_spacings"},
+        {**GRID_ANSWER_VALUES, "dir1_spacings": [3130, 0]},
+        {**GRID_ANSWER_VALUES, "dir1_labels": "1,2,3"},
+        {**GRID_ANSWER_VALUES, "dir1_labels": ["1"], "dir1_spacings": []},
+        {**GRID_ANSWER_VALUES, "dir1_labels": ["1", "1", "2"]},
+        {**GRID_ANSWER_VALUES, "dir3_labels": ["X", "Y"]},
+        {**GRID_ANSWER_VALUES, "sheet": ""},
+    ):
+        answer["values"] = bad
+        assert validate("answers", doc), bad
+    answer.update(code="grid_answer_contradicts_drawing", values={"unit": "mm"})
+    assert validate("answers", doc)  # takes no value
+    answer["values"] = {}
+    assert validate("answers", doc) == []
+
+
+def test_registry_obsolete_reason_only_on_obsolete_entries(example):
+    doc = example("question-registry")
+    entries = list(doc["questions"].values())
+    obsolete = next(e for e in entries if e["status"] == "obsolete")
+    live = next(e for e in entries if e["status"] != "obsolete")
+    obsolete["obsolete_reason"] = "the latest intake run no longer raises it"
+    assert validate("question-registry", doc) == []
+    live["obsolete_reason"] = "the input file changed since the question was raised"
+    assert validate("question-registry", doc)
+    del live["obsolete_reason"]
+    obsolete["obsolete_reason"] = ""
+    assert validate("question-registry", doc)
+
+
+def test_grid_system_answer_example_and_detected_guards(example):
+    doc = example("grid-system-answer")
+    assert validate("grid-system", doc) == []
+    answered = next(s for s in doc["systems"] if s.get("source") == "engineer_answer")
+    assert answered["evidence"]["contributors"] == []
+    assert answered["directions"][0]["representative"] is None
+    codes = {q["code"] for q in doc["questions"]}
+    assert {"grid_system_missing", "grid_answer_contradicts_drawing"} <= codes
+
+    no_answer = copy.deepcopy(doc)
+    del next(s for s in no_answer["systems"] if s.get("source") == "engineer_answer")["source_answer"]
+    assert validate("grid-system", no_answer)
+    detected_with_answer = copy.deepcopy(doc)
+    detected = next(s for s in detected_with_answer["systems"] if s.get("source") != "engineer_answer")
+    detected["source_answer"] = answered["source_answer"]
+    assert validate("grid-system", detected_with_answer)
+    for mutate in (
+        lambda s: s["evidence"].update(contributors=[]),
+        lambda s: s["evidence"].update(views=0),
+        lambda s: s["directions"][0].update(representative=None),
+        lambda s: s["directions"][0].update(families=0),
+    ):
+        bad = copy.deepcopy(doc)
+        mutate(next(s for s in bad["systems"] if s.get("source") != "engineer_answer"))
+        assert validate("grid-system", bad)
+    bad = copy.deepcopy(doc)
+    answered_bad = next(s for s in bad["systems"] if s.get("source") == "engineer_answer")
+    answered_bad["directions"][0]["provenance"]["method"] = "derived"
+    assert validate("grid-system", bad)
+
+
+def test_grid_system_proposed_simulated_statuses(example):
+    doc = example("grid-system")
+    system = doc["systems"][0]
+    system["units"] = {
+        "declared": "mm",
+        "answered": "mm",
+        "status": "proposed_simulated",
+        "reason": "units answered by a non-engineer role",
+    }
+    system["axis_assignment"] = {"status": "proposed_simulated", "reason": "simulated answer Q-024"}
+    doc["conflicts"][0]["proposed_closed_by"] = "separate"
+    assert validate("grid-system", doc) == []
+    doc["conflicts"][0]["closed_by"] = "proposed_simulated"  # never a closure reason
+    assert validate("grid-system", doc)
+    doc["conflicts"][0]["closed_by"] = None
+    doc["conflicts"][0]["proposed_closed_by"] = "answered"
+    assert validate("grid-system", doc)
+
+
+def test_marks_mark_sets_and_compared_with(example):
+    doc = example("marks")
+    doc["summary"]["mark_sets"] = [
+        {
+            "file": "plans/set.dxf",
+            "family": "D",
+            "members": ["D1", "D2", "D9"],
+            "complete": True,
+            "source": ["schedule", "plan_marks"],
+        },
+        {
+            "file": "plans/set.dxf",
+            "family": "B",
+            "members": ["B7"],
+            "complete": False,
+            "source": ["plan_marks"],
+        },
+    ]
+    file_match = doc["matching"][0]
+    file_match["detail_headings"] = 1
+    file_match["matched"][0]["compared_with"] = "schedule"
+    heading = {"entry_id": "T000070", "sheet": "model#02", "text": "DẦM D2 (SL= 02)"}
+    file_match["matched"][2].update(compared_with="detail_heading", schedule=[], detail_headings=[heading])
+    file_match["plan_only"][0]["compared_with"] = "none"
+    file_match["schedule_only"][0]["compared_with"] = "schedule"
+    assert validate("marks", doc) == []
+
+    for path, value in (
+        (("summary", "mark_sets", 0, "complete"), "yes"),
+        (("summary", "mark_sets", 0, "source"), []),
+        (("summary", "mark_sets", 0, "source"), ["guess"]),
+        (("summary", "mark_sets", 0, "members"), []),
+        (("matching", 0, "plan_only", 0, "compared_with"), "both"),
+        (("matching", 0, "matched", 0, "compared_with"), "none"),
+        (("matching", 0, "matched", 2, "detail_headings"), []),
+    ):
+        bad = copy.deepcopy(doc)
+        node = bad
+        for key in path[:-1]:
+            node = node[key]
+        node[path[-1]] = value
+        assert validate("marks", bad), path
+    bad = copy.deepcopy(doc)
+    bad["matching"][0]["matched"][0]["schedule"] = []  # a schedule match keeps its schedule row
+    assert validate("marks", bad)
+
+
+def test_callouts_unparsed_code_rejected_and_unparsed_question(example):
+    doc = example("callouts")
+    unparsed = next(c for c in doc["candidates"] if c["parsed"] is None)
+    parsed = next(c for c in doc["candidates"] if c["parsed"] is not None)
+    unparsed["unparsed_code"] = "symbol_glyph_unverified"
+    doc["rejected"] = [
+        {
+            "file": unparsed["file"],
+            "sheet": "model#01",
+            "entry_id": "T000099",
+            "display_text": "KC-03",
+            "reason_code": "claimed_by_title_block",
+            "reason": "the text is the sheet number of the title block",
+        }
+    ]
+    doc["summary"]["unparsed_by_code"] = {"symbol_glyph_unverified": 1}
+    doc["summary"]["rejected"] = 1
+    doc["summary"]["rejected_by_reason"] = {"claimed_by_title_block": 1}
+    doc["question_counts"]["callout_unparsed"] = 2
+    assert validate("callouts", doc) == []
+
+    bad = copy.deepcopy(doc)
+    next(c for c in bad["candidates"] if c["id"] == parsed["id"])["unparsed_code"] = "notation_unverified"
+    assert validate("callouts", bad)  # a parsed candidate has no unparsed code
+    bad = copy.deepcopy(doc)
+    next(c for c in bad["candidates"] if c["id"] == unparsed["id"])["unparsed_code"] = "decoded_u_grave"
+    assert validate("callouts", bad)
+    bad = copy.deepcopy(doc)
+    del bad["rejected"][0]["reason"]
+    assert validate("callouts", bad)  # nothing is rejected without a reason
+
+
+def test_sheet_text_region_rows(example):
+    doc = example("sheet-region")
+    assert validate("sheet-text", doc) == []
+    cells = [c for r in doc["rows"] for c in r["cells"]]
+    assert any(c["meaning"] == "blocked" for c in cells)
+    bad = copy.deepcopy(doc)
+    del bad["rows"]
+    assert validate("sheet-text", bad)  # a region query always returns its rows
+    bad = copy.deepcopy(doc)
+    bad["rows"][0]["cells"][0]["entry_ids"] = []
+    assert validate("sheet-text", bad)
+    bad = copy.deepcopy(doc)
+    bad["query"]["region"] = [0, 0, 1]
+    assert validate("sheet-text", bad)
+    plain = example("sheet-text")
+    plain["rows"] = doc["rows"]
+    assert validate("sheet-text", plain)  # rows only answer a region query
+
+
+def test_find_text_blocked_in_scope(example):
+    found = example("find-text")
+    found["counts"]["blocked_in_scope"] = 3
+    del found["counts"]["blocked_entries_not_searchable"]
+    assert validate("sheet-text", found) == []
+    found["counts"]["blocked_in_scope"] = -1
+    assert validate("sheet-text", found)
+    del found["counts"]["blocked_in_scope"]  # one of the two blocked counts is always there
+    assert validate("sheet-text", found)
+
+
+def test_reader_questions_schema(example):
+    doc = example("reader-questions")
+    assert validate("reader-questions", doc) == []
+    assert validate("intake", doc) == []  # the reader document stays a questions document
+    amended = next(q for q in doc["questions"] if q.get("amendments"))
+    assert amended["places"]
+    for mutate in (
+        lambda q: q["refs"].append(dict(q["refs"][0])),
+        lambda q: q["amendments"].append({"at": 9}),
+        lambda q: q["amendments"].append({"at": 0, "text": "x"}),
+        lambda q: q.update(places=[]),
+        lambda q: q.update(count=2),
+    ):
+        bad = copy.deepcopy(doc)
+        mutate(next(q for q in bad["questions"] if q["id"] == amended["id"]))
+        assert validate("reader-questions", bad)
+    bad = copy.deepcopy(doc)
+    bad["kind"] = "inventory"
+    assert validate("reader-questions", bad)
+
+
+def test_status_gate1_closed_may_be_empty(example):
+    # W5: status always writes gate1.closed (package C). Required in the schema only once status.py does:
+    # making it required here broke tests/test_ask.py (status omits an empty list today).
+    doc = example("status")
+    doc["gate1"]["closed"] = []
+    assert validate("status", doc) == []
+
+
+def test_wave3_schemas_keep_id_0_1():
+    for name in ("reader-questions", "grid-system", "marks", "callouts", "sheet-text", "answers"):
+        schema: dict = validator(name).schema  # type: ignore[assignment]
+        assert schema["$id"] == f"urn:tekla-harness:schema:{name}:0.1"
+
+
 @pytest.mark.parametrize(
     ("name", "schema"),
     [

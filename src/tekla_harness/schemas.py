@@ -40,6 +40,7 @@ SCHEMA_NAMES = (
     "supplements",
     "spec-receipt",
     "run-journal",
+    "reader-questions",
 )
 MAX_LOT = 2**31 - 1  # the C# reader parses lot as int32
 _REPO_SCHEMAS = Path(__file__).resolve().parents[2] / "schemas"

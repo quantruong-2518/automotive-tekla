@@ -470,6 +470,32 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
     as `DẦM D3` count, schedule cells do not); `marks.json` `question_counts` counts the prefixes. Callouts
     still lists `member_mark` candidates but no longer asks; an answer to callouts' old question goes stale
     once at the next callouts run and the engineer answers the marks question (default D6, reversible).
+- Tool wave 3 (EVAL-3 fixes; the packages fill in the behaviour):
+  - Tool wave 3, seam. Schemas, all new fields optional, `$id` still `0.1`:
+    - `answers`: `grid_system_missing` values `dir1_labels`, `dir1_spacings`, `dir2_labels`,
+      `dir2_spacings` (arrays; both directions, or none) and optional `sheet` (ADR-0013 §2);
+      `grid_answer_contradicts_drawing` takes no value.
+    - `question-registry`: `obsolete_reason`, only on obsolete entries.
+    - `grid-system`: question codes `grid_system_missing` and `grid_answer_contradicts_drawing`; system
+      `source` (`detected` | `engineer_answer`) and `source_answer` (question id, key); a system built from
+      an answer has no view, contributor or representative family, and its provenance method is
+      `engineer_answer`; status `proposed_simulated` for `units.status`, `axis_assignment.status` and
+      `files[].units_answer.status`, units reason `units answered by a non-engineer role`; conflict
+      `proposed_closed_by` (what a non-engineer select answer would close; it closes nothing).
+    - `marks`: `summary.mark_sets` (`file`, `family`, `members`, `complete`, `source`); `compared_with` on
+      matched, schedule-only and plan-only marks (`schedule` | `detail_heading`, plus `none` for plan-only),
+      `detail_headings` refs (a heading-only match needs no schedule row) and the per-file
+      `detail_headings` count.
+    - `callouts`: candidate `unparsed_code` (reason family, incl. `symbol_glyph_unverified`), top-level
+      `rejected` matches with `reason_code` and `reason`, summary `unparsed_by_code`, `rejected`,
+      `rejected_by_reason`, question count `callout_unparsed`.
+    - `sheet-text`: `query.region`, `region` and `rows` (cells of entry ids with display text and the
+      gate's meaning) for a region read; find-text `counts.blocked_in_scope` (query-independent); one of
+      it and the deprecated `blocked_entries_not_searchable` is required.
+    - `intake` question `places` and `amendments` (reader questions); new schema `reader-questions`
+      (`harness validate reader-questions`), with example; examples `grid-system-answer` and
+      `sheet-region`.
+    - `status`: `gate1.closed` stays optional until `harness status` always writes it.
 
 ### Changed
 - Question lifecycle (tool wave 2, EVAL-2 fix 5):

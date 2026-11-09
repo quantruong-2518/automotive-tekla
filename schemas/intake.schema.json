@@ -406,6 +406,28 @@
             "question_id": { "anyOf": [{ "type": "null" }, { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/question_id" }] },
             "reason": { "enum": ["not_selected", "separate", "units_answered", "rejected_systems_only", "other_file_set"] }
           }
+        },
+        "places": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "pattern": "\\S" },
+          "description": "Reader questions only (tool wave 3, harness ask --amend --places): every place the question applies to, as the reader wrote them (e.g. 'model#05 axis 3-4'), besides the ref's `where`, which stays the question's identity. Replaced as a whole by each --places amendment."
+        },
+        "amendments": {
+          "type": "array",
+          "minItems": 1,
+          "description": "Reader questions only (tool wave 3, harness ask --amend): the history of in-place amendments, oldest first. Each records the registry run counter at the amendment (`at`; no clock time, so documents stay deterministic) and the values it REPLACED: `text` the previous message, `places` the previous places ([] when there were none). The current values are `message` and `places`; id and key never change.",
+          "items": {
+            "type": "object",
+            "required": ["at"],
+            "minProperties": 2,
+            "additionalProperties": false,
+            "properties": {
+              "at": { "type": "integer", "minimum": 1, "description": "question-registry.json `runs` value of the amendment." },
+              "text": { "type": "string", "minLength": 1, "description": "The message before this amendment." },
+              "places": { "type": "array", "items": { "type": "string", "pattern": "\\S" }, "description": "The places before this amendment." }
+            }
+          }
         }
       }
     },

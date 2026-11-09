@@ -33,10 +33,28 @@
       "description": "Text entries the legacy-font gate blocks (text_gate.py: non-ASCII text in an unknown, proposed or contradicted encoding) that would otherwise have yielded a candidate: listed verbatim with the reason, never read. In scan order.",
       "items": { "$ref": "#/$defs/blocked_entry" }
     },
+    "rejected": {
+      "type": "array",
+      "description": "Tool wave 3: text that matched a candidate pattern and was NOT made a candidate, each with its reason, so that every match is accounted for: a candidate (parsed, or unparsed with unparsed_reason and unparsed_code), a blocked entry, or a rejected one here. In scan order.",
+      "items": {
+        "type": "object",
+        "required": ["file", "sheet", "entry_id", "display_text", "reason_code", "reason"],
+        "additionalProperties": false,
+        "properties": {
+          "file": { "type": "string", "minLength": 1 },
+          "sheet": { "type": ["string", "null"], "description": "Detector sheet id; null for a text on no sheet." },
+          "entry_id": { "type": "string", "pattern": "^T[0-9]{6,}$" },
+          "display_text": { "type": "string", "minLength": 1, "description": "The matched characters, verbatim." },
+          "kind": { "$ref": "#/$defs/kind", "description": "The candidate kind the text would have had." },
+          "reason_code": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$", "description": "Short reason family, e.g. claimed_by_title_block, claimed_by_grids, claimed_by_levels, sheet_code." },
+          "reason": { "type": "string", "minLength": 1, "description": "Why, in English." }
+        }
+      }
+    },
     "question_counts": {
       "type": "object",
-      "description": "Per question code, how many things are asked over the whole project: one callout_ambiguous per ambiguous notation, one member_mark_prefix_meaning per member mark prefix, 1 grade_legacy_mapping when legacy grade groups appear. Codes with none are absent. callouts-questions.json splits these per file.",
-      "propertyNames": { "enum": ["callout_ambiguous", "member_mark_prefix_meaning", "grade_legacy_mapping"] },
+      "description": "Per question code, how many things are asked over the whole project: one callout_ambiguous per ambiguous notation, one member_mark_prefix_meaning per member mark prefix, 1 grade_legacy_mapping when legacy grade groups appear, and (tool wave 3) one callout_unparsed per file and unparsed_code. Codes with none are absent. callouts-questions.json splits these per file.",
+      "propertyNames": { "enum": ["callout_ambiguous", "member_mark_prefix_meaning", "grade_legacy_mapping", "callout_unparsed"] },
       "additionalProperties": { "type": "integer", "minimum": 1 }
     },
     "summary": { "$ref": "#/$defs/summary" },
@@ -113,6 +131,10 @@
         "parsed": { "anyOf": [{ "type": "null" }, { "$ref": "#/$defs/parsed" }] },
         "rule": { "type": "string", "minLength": 1, "description": "Pattern or detector id plus the research section that verifies it (or says it is unverified)." },
         "unparsed_reason": { "type": ["string", "null"], "description": "Why `parsed` is null; null when parsed." },
+        "unparsed_code": {
+          "enum": ["ambiguous_notation", "grade_unverified", "notation_unverified", "conflicting_values", "member_mark_undefined", "symbol_glyph_unverified"],
+          "description": "Tool wave 3: the reason family of an unparsed candidate (absent on a parsed one), which callout_unparsed groups by: ambiguous_notation (a notation with several readings, see `ambiguity`); grade_unverified (a grade spelling or number outside the verified list); notation_unverified (a section, plate, hole, bolt or diameter form whose field order or meaning is unverified); conflicting_values (one line gives several values, e.g. two bolt classes); member_mark_undefined (mark letters without a verified meaning); symbol_glyph_unverified (W1/W1b: a character in diameter position that is not Ø or %%c, e.g. 'ù' in an Arial style or 'Þ' in a VNI style: never decoded, asked)."
+        },
         "ambiguity": { "type": ["string", "null"], "pattern": "^[a-z][a-z0-9_]*$", "description": "Notation id of the callout_ambiguous question this candidate is referenced from; null when none." },
         "lexical": {
           "type": "object",
@@ -135,7 +157,7 @@
         }
       },
       "allOf": [
-        { "if": { "properties": { "parsed": { "type": "null" } } }, "then": { "properties": { "unparsed_reason": { "type": "string", "minLength": 1 } } }, "else": { "properties": { "unparsed_reason": { "type": "null" } } } },
+        { "if": { "properties": { "parsed": { "type": "null" } } }, "then": { "properties": { "unparsed_reason": { "type": "string", "minLength": 1 } } }, "else": { "properties": { "unparsed_reason": { "type": "null" } }, "not": { "required": ["unparsed_code"] } } },
         { "if": { "properties": { "kind": { "const": "member_mark" } } }, "then": { "required": ["lexical"], "properties": { "parsed": { "type": "null" }, "confidence": { "const": "low" } } }, "else": { "not": { "required": ["lexical"] } } }
       ]
     },
@@ -252,6 +274,14 @@
         },
         "member_mark_prefixes": { "type": "integer", "minimum": 0 },
         "unparsed_by_reason": { "type": "object", "additionalProperties": { "type": "integer", "minimum": 1 }, "description": "Unparsed candidates per unparsed_reason." },
+        "unparsed_by_code": {
+          "type": "object",
+          "propertyNames": { "enum": ["ambiguous_notation", "grade_unverified", "notation_unverified", "conflicting_values", "member_mark_undefined", "symbol_glyph_unverified"] },
+          "additionalProperties": { "type": "integer", "minimum": 1 },
+          "description": "Tool wave 3: unparsed candidates per unparsed_code."
+        },
+        "rejected": { "type": "integer", "minimum": 0, "description": "Tool wave 3: length of the document's rejected list." },
+        "rejected_by_reason": { "type": "object", "additionalProperties": { "type": "integer", "minimum": 1 }, "description": "Tool wave 3: rejected matches per reason_code." },
         "files_scanned": { "type": "integer", "minimum": 0 },
         "files_skipped": { "type": "integer", "minimum": 0 },
         "blocked_entries": { "type": "integer", "minimum": 0, "description": "Length of the document's blocked_entries." }

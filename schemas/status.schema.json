@@ -27,7 +27,7 @@
         "reasons": { "type": "array", "items": { "type": "string", "minLength": 1 }, "description": "What still stops gate 1; empty exactly when ready_for_gate1 is true." },
         "closed": {
           "type": "array",
-          "description": "Live questions closed without an answer of their own (lifecycle.closures); they are left out of every blocking count. Present only when not empty.",
+          "description": "Live questions closed without an answer of their own (lifecycle.closures); they are left out of every blocking count. Tool wave 3 (W5): harness status will always write it, [] when nothing is closed (package C); it stays optional in the schema until then, so an older status output still validates.",
           "items": {
             "type": "object",
             "required": ["id", "reason"],

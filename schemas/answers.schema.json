@@ -13,6 +13,19 @@
   },
   "$defs": {
     "unit": { "enum": ["mm", "cm", "m", "in", "ft"] },
+    "grid_labels": {
+      "type": "array",
+      "description": "Axis labels of one grid direction in drawing order (grid_system_missing).",
+      "minItems": 2,
+      "uniqueItems": true,
+      "items": { "type": "string", "pattern": "\\S" }
+    },
+    "grid_spacings": {
+      "type": "array",
+      "description": "Distances between consecutive axes of one direction, drawing units, one fewer than the labels (grid_system_missing).",
+      "minItems": 1,
+      "items": { "type": "number", "exclusiveMinimum": 0 }
+    },
     "answer": {
       "type": "object",
       "required": ["key", "question_id", "code", "file", "answer_text", "values", "answered_by", "answered_on", "status"],
@@ -122,9 +135,31 @@
           }
         },
         {
+          "if": { "properties": { "code": { "const": "grid_system_missing" } }, "required": ["code"] },
+          "then": {
+            "properties": {
+              "values": {
+                "description": "ADR-0013 §2: the grid the engineer reads off the drawing for a file without a usable grid system, in drawing units: {\"dir1_labels\": [\"1\", \"2\", \"3\"], \"dir1_spacings\": [3130, 3540], \"dir2_labels\": [\"A\", \"B\"], \"dir2_spacings\": [4250], \"sheet\": \"model#05\"}. On the command line: --value dir1_labels=1,2,3 --value dir1_spacings=3130,3540 --value dir2_labels=A,B --value dir2_spacings=4250 [--value sheet=model#05]. Both directions are required; each spacings list has one item fewer than its labels (harness answer checks the counts); labels are distinct. {} is an answer in words only: it is recorded and builds no grid system. Only an active answer with answered_by_role engineer builds one (harness grid-system, source engineer_answer).",
+                "anyOf": [
+                  { "maxProperties": 0 },
+                  { "required": ["dir1_labels", "dir1_spacings", "dir2_labels", "dir2_spacings"] }
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "dir1_labels": { "$ref": "#/$defs/grid_labels" },
+                  "dir1_spacings": { "$ref": "#/$defs/grid_spacings" },
+                  "dir2_labels": { "$ref": "#/$defs/grid_labels" },
+                  "dir2_spacings": { "$ref": "#/$defs/grid_spacings" },
+                  "sheet": { "type": "string", "pattern": "\\S", "description": "Detector sheet id the grid was read from (optional)." }
+                }
+              }
+            }
+          }
+        },
+        {
           "if": {
             "properties": {
-              "code": { "not": { "enum": ["units_confirm_all", "units_conflict", "units_suspect", "units_unknown", "grid_units_doubt", "units_answer_contradicts_evidence", "grid_family_axis_assignment", "grid_system_axis_unassigned", "member_mark_prefix_meaning", "grid_system_select", "file_set_relation"] } }
+              "code": { "not": { "enum": ["units_confirm_all", "units_conflict", "units_suspect", "units_unknown", "grid_units_doubt", "units_answer_contradicts_evidence", "grid_family_axis_assignment", "grid_system_axis_unassigned", "member_mark_prefix_meaning", "grid_system_select", "file_set_relation", "grid_system_missing"] } }
             },
             "required": ["code"]
           },
