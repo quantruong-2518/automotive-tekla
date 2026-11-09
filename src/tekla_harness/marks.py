@@ -82,8 +82,10 @@ once per file as `mark_notation_equivalence` (blocking for lot specs). A matched
 compared; a difference is a blocking `mark_size_conflict` quoting both entry ids. Every matched key says
 `size_compared` (true when at least one plan mark and row pair had both sizes) and otherwise
 `size_not_compared_reason`: the plan marks have no size, or per row the table has no size column, the
-header cells that could name one are blocked, the size cells are blocked, or they are not numbers
-(`summary.size_comparisons` counts both). `plan_only` is listed only for a file with at least one
+header cells that could name one are blocked (a blocked column whose readable cells are numbers or
+`b x h` values, or none of whose cells is readable), the size cells are blocked, they are not numbers,
+or the row has no size cells (`summary.size_comparisons` counts both). A blocked header cell in no
+column is not listed in `blocked_columns`. `plan_only` is listed only for a file with at least one
 matchable schedule. `summary.by_sheet` counts plan marks, tables, rows, unparsed tables and blocked marks
 per detector sheet (sheet null: on no sheet).
 
@@ -246,6 +248,7 @@ NO_SIZE_COLUMN = "the schedule table has no size column"
 SIZE_HEADER_BLOCKED = "the schedule header cells that could name a size column are blocked"
 SIZE_CELLS_BLOCKED = "the schedule size cells are blocked"
 SIZE_NOT_NUMBERS = "the schedule size cells are not numbers"
+SIZE_CELLS_MISSING = "the schedule row has no size cells"
 _SIZE_VALUE = re.compile(r"^\s*(\d+(?:[.,]\d+)?)\s*[xX\u00d7]\s*(\d+(?:[.,]\d+)?)\s*$")
 _NUMBER = re.compile(r"^\s*(\d+(?:[.,]\d+)?)\s*$")
 _INTEGER = re.compile(r"^\s*\d+\s*$")
@@ -1061,8 +1064,9 @@ def _table_doc(rel: str, sheet: dict[str, Any] | None, space: str, tb: _Table) -
     blocked_columns = [
         {"column": c, "entry_id": t.id, "reason": t.block}
         for c, t in ordered_header
-        if t.block is not None and not tb.header_blocked and c != tb.mark_column
+        if t.block is not None and not tb.header_blocked and c is not None and c != tb.mark_column
     ]
+    size_header_blocked = _blocked_may_name_size(tb, roles, {b["column"] for b in blocked_columns})
     rows = []
     for index, (box, cells) in enumerate(tb.rows, start=1):
         cell_docs = [_cell_doc(c, t) for c, t in cells]
@@ -1088,7 +1092,7 @@ def _table_doc(rel: str, sheet: dict[str, Any] | None, space: str, tb: _Table) -
                         "_structure": None if mark is None else mark.structure,
                     }
                 )
-        size, size_reason = _row_size(cells, roles, bool(blocked_columns))
+        size, size_reason = _row_size(cells, roles, size_header_blocked)
         rows.append(
             {
                 "index": index,
@@ -1139,15 +1143,36 @@ def _table_doc(rel: str, sheet: dict[str, Any] | None, space: str, tb: _Table) -
     }
 
 
+def _blocked_may_name_size(tb: _Table, roles: dict[int, str], blocked: set[int]) -> bool:
+    """True when the blocked header cells could name the size column(s) the readable header lacks: a
+    blocked column whose readable cells are `b x h` values gives both, one whose readable cells are numbers
+    gives one of b / h, one with no readable cell may give anything (review F2 item 3). Read only when the
+    readable header names no complete size (`_row_size`)."""
+    named = set(roles.values())
+    singles = 0
+    for col in blocked:
+        texts = [
+            " ".join(t.entry["display_text"].split())
+            for _, cells in tb.rows
+            for c, t in cells
+            if c == col and t.block is None
+        ]
+        if not texts or any(_SIZE_VALUE.match(x) for x in texts):
+            return True
+        singles += any(_NUMBER.match(x) for x in texts)
+    return singles >= len({"b", "h"} - named)
+
+
 def _row_size(
     cells: list[tuple[int | None, _Text]], roles: dict[int, str], header_cells_blocked: bool
 ) -> tuple[dict[str, Any] | None, str | None]:
-    """The row's (b, h) from its size columns, else None and why (a SIZE_* reason)."""
+    """The row's (b, h) from its size columns, else None and why (a SIZE_* reason). `header_cells_blocked`:
+    blocked header cells may name the missing size column (`_blocked_may_name_size`)."""
     named = set(roles.values())
     if "bxh" not in named and not {"b", "h"} <= named:
         return None, SIZE_HEADER_BLOCKED if header_cells_blocked else NO_SIZE_COLUMN
     found: dict[str, tuple[int | float, str]] = {}
-    blocked = False
+    blocked = unreadable = False
     for col, t in cells:
         role = roles.get(col) if col is not None else None
         if role is None:
@@ -1156,17 +1181,18 @@ def _row_size(
             blocked = True
             continue
         text = " ".join(t.entry["display_text"].split())
-        if role == "bxh":
-            m = _SIZE_VALUE.match(text)
-            if m:
-                found.setdefault("b", (_num(m[1]), t.id))
-                found.setdefault("h", (_num(m[2]), t.id))
+        m = (_SIZE_VALUE if role == "bxh" else _NUMBER).match(text)
+        if m is None:
+            unreadable = True
+        elif role == "bxh":
+            found.setdefault("b", (_num(m[1]), t.id))
+            found.setdefault("h", (_num(m[2]), t.id))
         else:
-            m = _NUMBER.match(text)
-            if m:
-                found.setdefault(role, (_num(m[1]), t.id))
+            found.setdefault(role, (_num(m[1]), t.id))
     if "b" not in found or "h" not in found:
-        return None, SIZE_CELLS_BLOCKED if blocked else SIZE_NOT_NUMBERS
+        if blocked:
+            return None, SIZE_CELLS_BLOCKED
+        return None, SIZE_NOT_NUMBERS if unreadable else SIZE_CELLS_MISSING
     size = {"b": found["b"][0], "h": found["h"][0], "entry_ids": sorted({found["b"][1], found["h"][1]})}
     return size, None
 

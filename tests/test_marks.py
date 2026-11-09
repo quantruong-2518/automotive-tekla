@@ -26,6 +26,8 @@ from tekla_harness.callouts import run_callouts
 from tekla_harness.cli import main
 from tekla_harness.marks import (
     _inferred_mark_column_ok,
+    _Table,
+    _table_doc,
     _Text,
     extract_marks,
     header_keyword,
@@ -623,6 +625,105 @@ def test_every_match_says_whether_its_size_was_compared(doc, gate):
     assert not matching(gate)["size_conflicts"]
     assert matched(gate, "e2")["size_not_compared_reason"] == SIZE_CELLS_BLOCKED
     assert matched(gate, "e3")["size_not_compared_reason"] == NO_PLAN_SIZE
+
+
+def test_a_blocked_header_cell_that_may_name_the_missing_size_column_is_said(inferred):
+    """Table K names b only; its blocked KÍNH column holds numbers, so it may be the h column."""
+    assert matched(inferred, "k1")["size_not_compared_reason"] == SIZE_HEADER_BLOCKED
+
+
+SIZE_NOT_NUMBERS = "the schedule size cells are not numbers"
+SIZE_CELLS_MISSING = "the schedule row has no size cells"
+BLOCKED = "encoding_unknown"
+
+
+def _entry_text(eid: str, text: str, block: str | None = None, x: float = 0.0) -> _Text:
+    entry = {
+        "id": eid,
+        "display_text": text,
+        "confidence": "medium",
+        "flags": [],
+        "decode": {"case_uncertain": False, "unmapped_count": 0, "nfd_damaged": False},
+    }
+    return _Text(entry, (x, 0.0, x + 1.0, 1.0), x + 0.5, 0.5, 1.0, block)
+
+
+def _doc_of(header: list[tuple[int | None, str, str | None]], rows: list[list[tuple[int, str, str | None]]]):
+    """_table_doc of a keyword table: header and rows as (column, text, block reason)."""
+    n = iter(range(1, 1000))
+    head = [(c, _entry_text(f"T{next(n):06d}", t, b, float(c or 0) * 10)) for c, t, b in header]
+    body: list[tuple[tuple[float, float, float, float], list[tuple[int | None, _Text]]]] = []
+    for row in rows:
+        cells: list[tuple[int | None, _Text]] = [
+            (c, _entry_text(f"T{next(n):06d}", t, b, c * 10.0)) for c, t, b in row
+        ]
+        body.append(((0.0, 0.0, 1.0, 1.0), cells))
+    columns = [(i * 10.0, i * 10.0 + 10.0) for i in range(4)]
+    tb = _Table("line_grid", (0.0, 0.0, 40.0, 10.0), columns, head, body, 0, False, head[0][1])
+    return _table_doc(REL, None, "model", tb)
+
+
+KW = (0, "KÝ HIỆU", None)
+
+
+@pytest.mark.parametrize(
+    ("header", "row", "reason"),
+    [
+        # a blocked column whose readable cells are words cannot be a size column
+        ([KW, (1, "Abçd", BLOCKED)], [(0, "X1", None), (1, "thép", None)], NO_SIZE_COLUMN),
+        # one numeric blocked column cannot give both b and h
+        ([KW, (1, "Abçd", BLOCKED)], [(0, "X1", None), (1, "16", None)], NO_SIZE_COLUMN),
+        (
+            [KW, (1, "Abçd", BLOCKED), (2, "Xyèz", BLOCKED)],
+            [(0, "X1", None), (1, "220", None), (2, "300", None)],
+            SIZE_HEADER_BLOCKED,
+        ),
+        ([KW, (1, "Abçd", BLOCKED)], [(0, "X1", None), (1, "220x300", None)], SIZE_HEADER_BLOCKED),
+        (
+            [KW, (1, "b", None), (2, "Abçd", BLOCKED)],
+            [(0, "X1", None), (1, "220", None), (2, "300", None)],
+            SIZE_HEADER_BLOCKED,
+        ),
+        (
+            [KW, (1, "b", None), (2, "Abçd", BLOCKED)],
+            [(0, "X1", None), (1, "220", None), (2, "Ø16", None)],
+            NO_SIZE_COLUMN,
+        ),
+        # a blocked column with no readable cell: it may be anything
+        (
+            [KW, (1, "b", None), (2, "Abçd", BLOCKED)],
+            [(0, "X1", None), (1, "220", None), (2, "3ç0", BLOCKED)],
+            SIZE_HEADER_BLOCKED,
+        ),
+        # the size columns are named: why this row has no size
+        ([KW, (1, "b", None), (2, "h", None)], [(0, "X1", None), (1, "220", None)], SIZE_CELLS_MISSING),
+        ([KW, (1, "b x h", None)], [(0, "X1", None)], SIZE_CELLS_MISSING),
+        (
+            [KW, (1, "b", None), (2, "h", None)],
+            [(0, "X1", None), (1, "220", None), (2, "abc", None)],
+            SIZE_NOT_NUMBERS,
+        ),
+        (
+            [KW, (1, "b", None), (2, "h", None)],
+            [(0, "X1", None), (1, "220", None), (2, "3ç0", BLOCKED)],
+            SIZE_CELLS_BLOCKED,
+        ),
+        ([KW, (1, "b", None), (2, "h", None)], [(0, "X1", None), (1, "220", None), (2, "300", None)], None),
+    ],
+)
+def test_each_size_reason_is_exact(header, row, reason):
+    """Review F2 item 3: SIZE_HEADER_BLOCKED only when a blocked column could give the missing size
+    (its readable cells are numbers or b x h, or none is readable); absent size cells are not 'not
+    numbers'."""
+    t = _doc_of(header, [row])
+    assert t["rows"][0]["_size_reason"] == reason
+    assert (t["rows"][0]["size"] is None) is (reason is not None)
+
+
+def test_a_header_cell_in_no_column_is_no_blocked_column():
+    t = _doc_of([KW, (1, "b", None), (None, "Abçd", BLOCKED)], [[(0, "X1", None), (1, "220", None)]])
+    assert t["blocked_columns"] == []
+    assert t["rows"][0]["_size_reason"] == NO_SIZE_COLUMN
 
 
 def test_summary_counts_size_comparisons(doc, gate):

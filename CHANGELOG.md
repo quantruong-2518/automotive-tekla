@@ -500,6 +500,11 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
     mark-shaped cells become schedule marks. Otherwise it is header-blocked, as before wave 2 (sample 270:
     bar schedules keyed on the 'STT' row numbers, keys '1'..'11', '(sl:01)'; sample 461: plumbing lists
     whose first data row sat in the header band, keys 'd110', 'selta').
+  - `harness marks` size reasons are exact: "the schedule header cells that could name a size column are
+    blocked" only when a blocked column could give the missing size (its readable cells are numbers or
+    `b x h` values, or none is readable), else "the schedule table has no size column"; a row with no
+    cell in its size columns says "the schedule row has no size cells" (was "... are not numbers");
+    `blocked_columns` no longer lists a header cell that lies in no column (`column: null`).
 - Reading toolchain, after an independent review of the EVAL-1 wave:
   - `harness marks`: a rotated header keyword (or one that is not a cell text) no longer crashes the run;
     the table becomes a non-blocking `schedule_table_unparsed`. Questions no longer quote table ids, so a
