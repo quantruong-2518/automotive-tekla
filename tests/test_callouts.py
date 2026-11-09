@@ -530,7 +530,9 @@ def refs_of(doc: dict[str, Any], code: str, name: str) -> list[dict[str, Any]]:
 def test_the_document_holds_no_questions_only_counts(doc, work):
     assert "questions" not in doc and "questions" not in doc["summary"]
     assert "blocking_questions" not in doc["summary"]
-    assert doc["question_counts"] == {"callout_ambiguous": 9, "grade_legacy_mapping": 1}
+    # callout_unparsed (tool wave 3): the fixture's loose Ø forms and its unverified grades, one per family
+    expected = {"callout_ambiguous": 9, "callout_unparsed": 2, "grade_legacy_mapping": 1}
+    assert doc["question_counts"] == expected
     assert doc["question_counts"] == question_counts(doc["candidates"])
     assert extract_callouts(work)["question_counts"] == doc["question_counts"]  # deterministic
 

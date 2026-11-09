@@ -839,7 +839,8 @@ def test_cli_callouts_writes_documents_and_numbers_questions(cwork, capsys):
     doc = load(cwork / "callouts-questions.json")
     assert validate("intake", doc) == []
     qs = doc["questions"]
-    assert {q["code"] for q in qs} == {"callout_ambiguous", "grade_legacy_mapping"}  # prefixes: harness marks
+    # prefixes: harness marks; callout_unparsed: tool wave 3 (the fixture's loose Ø forms, unverified grades)
+    assert {q["code"] for q in qs} == {"callout_ambiguous", "callout_unparsed", "grade_legacy_mapping"}
     assert all(q["file"] == REL and all(r["file"] == REL for r in q["refs"]) for q in qs)
     keys = [(not q["blocking"], q["code"], q["file"]) for q in qs]
     assert keys == sorted(keys)

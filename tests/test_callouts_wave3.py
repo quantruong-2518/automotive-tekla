@@ -15,7 +15,15 @@ from typing import Any
 import pytest
 
 from _callout_fixtures import REL, build_work
-from tekla_harness.callouts import extract_callouts, member_mark, scan_line
+from tekla_harness import questions
+from tekla_harness.callouts import (
+    callout_questions,
+    extract_callouts,
+    member_mark,
+    question_counts,
+    run_callouts,
+    scan_line,
+)
 from tekla_harness.schemas import validate
 
 DIA = "Ø"
@@ -245,3 +253,106 @@ def test_every_diameter_sign_is_a_candidate_a_blocked_entry_or_rejected(reject_d
     accounted |= {r["entry_id"] for r in reject_doc["rejected"]}
     with_sign = {e["id"] for e in index["entries"] if DIA in e["display_text"]}
     assert len(with_sign) == 3 and with_sign <= accounted
+
+
+# --- callout_unparsed -------------------------------------------------------------------------------------
+
+
+def unparsed_questions(doc: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """callout_unparsed questions by the reason code their subject names."""
+    out = {}
+    for q in callout_questions(doc["candidates"]):
+        if q["code"] == questions.CALLOUT_UNPARSED_CODE:
+            (subject,) = q["subjects"]
+            out[subject["name"]] = q
+    return out
+
+
+def test_one_blocking_callout_unparsed_question_per_file_and_reason_family(glyph_doc):
+    qs = unparsed_questions(glyph_doc)
+    # M20 (bolt_label_hole) is asked by callout_ambiguous and C1 by the marks prefix question: not here
+    assert set(qs) == {GLYPH, "grade_unverified", "notation_unverified"}
+    assert all(q["blocking"] is True and q["file"] == REL for q in qs.values())
+    g = qs[GLYPH]
+    assert g["count"] == 4 and g["subjects"] == [{"name": GLYPH, "count": 4}]
+    examples = [r for r in g["refs"] if r["where"].startswith("text entry ")]
+    assert [r["found"] for r in examples] == [t for t, _ in GLYPH_TEXTS]  # scan order, verbatim
+    assert all(r["sheet"] == "model#01" for r in examples)
+    (sheets,) = [r for r in g["refs"] if r["where"] == "sheets"]
+    assert sheets["found"] == "model#01 (4)"
+    assert glyph_doc["question_counts"]["callout_unparsed"] == 3
+
+
+def test_callout_unparsed_lists_five_examples_and_keeps_the_true_count(tmp_path):
+    texts = [(f"{n}{U_GRAVE}20", "Arial") for n in range(1, 8)]
+    work = build_work(tmp_path, s1=[], styled=texts, s2=[], paper=[], extra_styles=GLYPH_STYLES)
+    doc = extract_callouts(work)
+    q = unparsed_questions(doc)[GLYPH]
+    examples = [r for r in q["refs"] if r["where"].startswith("text entry ")]
+    assert [r["found"] for r in examples] == [f"{n}{U_GRAVE}20" for n in range(1, 6)]
+    assert q["count"] == 7 and q["truncated"] is True
+    (sheets,) = [r for r in q["refs"] if r["where"] == "sheets"]
+    assert sheets["found"] == "model#01 (7)"
+
+
+def test_callout_unparsed_sheets_ref_counts_every_sheet():
+    def cand(n: int, sheet: str | None) -> dict[str, Any]:
+        return {
+            "id": f"K{n:06d}",
+            "kind": "rebar_callout",
+            "file": REL,
+            "sheet": sheet,
+            "text_ref": {"file": REL, "entry_id": f"T{n:06d}"},
+            "display_text": f"{n}{U_GRAVE}20",
+            "parsed": None,
+            "rule": "SYMBOL_GLYPH",
+            "ambiguity": None,
+            "unparsed_code": GLYPH,
+        }
+
+    cands = [cand(1, "model#02"), cand(2, None), cand(3, "model#02"), cand(4, "model#01")]
+    (q,) = callout_questions(cands)
+    found = "model#01 (1), model#02 (2), no sheet (1)"
+    assert q["refs"][-1] == {"file": REL, "where": "sheets", "found": found}
+    assert [r["where"] for r in q["refs"][:-1]] == [f"text entry T{n:06d}" for n in (1, 2, 3, 4)]
+    assert "sheet" not in q["refs"][1]  # a text on no sheet
+    assert (q["count"], q["truncated"]) == (4, False)
+
+
+def test_every_unparsed_candidate_is_asked_by_exactly_one_question(glyph_doc, reject_doc):
+    from tekla_harness.callouts import AMBIGUITIES
+
+    for doc in (glyph_doc, reject_doc):
+        asked = {
+            q["subjects"][0]["name"]
+            for q in callout_questions(doc["candidates"])
+            if q["code"] == "callout_unparsed"
+        }
+        for c in doc["candidates"]:
+            if c["parsed"] is not None:
+                continue
+            owners = [
+                c["ambiguity"] in AMBIGUITIES,  # callout_ambiguous
+                c["kind"] == "member_mark",  # member_mark_prefix_meaning (harness marks)
+                c["rule"].startswith("LEGACY_GROUP"),  # grade_legacy_mapping
+                c["ambiguity"] is None
+                and c["kind"] != "member_mark"
+                and not c["rule"].startswith("LEGACY_GROUP")
+                and c["unparsed_code"] in asked,  # callout_unparsed
+            ]
+            assert sum(owners) == 1, c
+
+
+def test_question_counts_count_callout_unparsed_groups(glyph_doc):
+    assert question_counts(glyph_doc["candidates"])["callout_unparsed"] == 3
+
+
+def test_run_writes_callout_unparsed_questions_that_validate(glyph_work, tmp_path):
+    target = tmp_path / "copy"
+    shutil.copytree(glyph_work, target)
+    run_callouts(target)
+    qdoc = json.loads((target / "callouts-questions.json").read_text(encoding="utf-8"))
+    assert validate("intake", qdoc) == []
+    codes = [q["code"] for q in qdoc["questions"]]
+    assert codes.count("callout_unparsed") == 3
+    assert all(q["id"].startswith("Q-") for q in qdoc["questions"])

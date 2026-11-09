@@ -19,9 +19,15 @@ designations"):
   * `display_text` has `%%c` already expanded to U+00D8 by the text index; the diameter sign set is the
     research's (U+2300 is NOT in it). A literal diameter sign in a non-Unicode text is flagged
     (`diameter_sign_literal_non_unicode`): U+00D8 is also byte 0xD8 of single-byte code pages.
+  * Tool wave 3, W1b (docs/research/diameter-glyph-u-grave.md): a character in diameter position that is
+    not a verified diameter sign (`2ù20`, `ù14a150`, `2Þ16`, U+2300, U+2205) is an unparsed rebar callout
+    with `unparsed_code` symbol_glyph_unverified, never decoded (`_GLYPH` says which shapes count).
   * Precedence on a line (a character belongs to one candidate): ambiguous rebar forms, verified rebar
-    forms, `L=`, grades, steel sections, plates, bolts, loose diameter-sign forms. A line with no candidate
-    whose whole text looks like a member mark is a `member_mark` (practice only, never verified).
+    forms, `L=`, grades, steel sections, plates, bolts, loose diameter-sign forms, glyphs. A line with no
+    candidate whose whole text looks like a member mark is a `member_mark` (practice only, never verified).
+  * Every unparsed candidate names its reason family in `unparsed_code`. Nothing that matched is dropped
+    silently: a diameter sign no pattern reads, a mark-shaped sheet code and a mark-shaped text another
+    extractor took are listed in `rejected` with a `reason_code`.
   * Confidence: min(rule cap, the text entry's own confidence). Caps: verified grammar from a grade-B source
     'medium'; unparsed, ambiguous and member marks 'low'. Any of
     these also forces 'low': case_uncertain text, unmapped characters, NFD damage, flags
@@ -44,7 +50,10 @@ with a stable key, a registry id and the engineer's answer (questions.py, intake
 Inside a `callout_ambiguous` question `subjects` lists the notations. A changed drawing gives new keys, so
 these questions are asked again. Member mark prefixes (`member_mark_prefix_meaning`) are asked by
 `harness marks` since tool wave 2 (fix 1b): an answer given to the question callouts raised before goes
-stale once, at the next callouts run.
+stale once, at the next callouts run. Tool wave 3: `callout_unparsed` (blocking: lot specs cannot use the
+texts) is ONE question per (file, unparsed_code) over the unparsed candidates no other question covers
+(no ambiguity, no member mark, no legacy grade group); its subject names the code, its refs give the first
+five examples in scan order and one `sheets` ref with the count per sheet, `count` is the true total.
 
 Not covered (research ambiguous list): 5 circled bar marks, 8-10 sheet prefixes / axes / levels (other
 extractors), 15 weld symbols, 17 laps and hooks; welds and electrodes are not detected at all.
@@ -61,6 +70,7 @@ from typing import Any
 
 from tekla_harness.detect import sha256_file
 from tekla_harness.questions import (
+    CALLOUT_UNPARSED_CODE,
     QuestionsError,
     dump_json,
     load_ledger,
@@ -752,8 +762,23 @@ def question_counts(candidates: list[dict[str, Any]]) -> dict[str, int]:
                 for c in candidates
             )
         ),
+        CALLOUT_UNPARSED_CODE: len(
+            {(c["file"], c["unparsed_code"]) for c in candidates if _asked_unparsed(c)}
+        ),
     }
     return {code: n for code, n in counts.items() if n}
+
+
+def _asked_unparsed(c: dict[str, Any]) -> bool:
+    """An unparsed candidate no other question covers, so callout_unparsed asks it: not an ambiguous
+    notation (callout_ambiguous), not a member mark (member_mark_prefix_meaning, harness marks), not a
+    legacy grade group (grade_legacy_mapping)."""
+    return (
+        c["parsed"] is None
+        and c["ambiguity"] is None
+        and c["kind"] != "member_mark"
+        and not c["rule"].startswith("LEGACY_GROUP")
+    )
 
 
 def _check(doc: dict[str, Any]) -> dict[str, Any]:
@@ -1013,6 +1038,49 @@ def _legacy_question(file: str, cands: list[dict[str, Any]]) -> list[dict[str, A
     return [question_group("grade_legacy_mapping", True, LEGACY_GRADE_MESSAGE, refs, MAX_REFS, file=file)]
 
 
+UNPARSED_EXAMPLES = 5  # example candidates quoted per callout_unparsed question; count stays true
+UNPARSED_MESSAGE = (
+    "These texts look like a callout but are not read into values; the subject names the reason family "
+    "({code}: {why}). The refs give up to five examples (text entry ids, verbatim) and the sheets that hold "
+    "them, with counts. Look at the examples on the drawing: what does the notation mean, and must these "
+    "texts be read? Lot specs cannot use them until this is answered."
+)
+UNPARSED_WHY = {
+    NOTATION_UNVERIFIED: "a diameter, section, plate, hole or bolt form outside the verified notations",
+    GRADE_UNVERIFIED: "a grade spelling or number outside the verified grade list",
+    CONFLICTING: "one line gives several values",
+    SYMBOL_GLYPH: "a character that is not Ø or %%c stands in diameter position; it is never decoded",
+}
+
+
+def _unparsed_questions(file: str, cands: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """One blocking callout_unparsed per reason family (unparsed_code) of the file's asked candidates:
+    the first UNPARSED_EXAMPLES in scan order, then one ref listing the sheets with counts."""
+    by_code: dict[str, list[dict[str, Any]]] = {}
+    for c in cands:
+        if _asked_unparsed(c):
+            by_code.setdefault(c["unparsed_code"], []).append(c)
+    out = []
+    for code in sorted(by_code):
+        group = by_code[code]
+        refs = [_qref(c, f"text entry {c['text_ref']['entry_id']}") for c in group[:UNPARSED_EXAMPLES]]
+        per_sheet = Counter(c["sheet"] or "no sheet" for c in group)
+        sheets = ", ".join(f"{sheet} ({n})" for sheet, n in sorted(per_sheet.items()))
+        refs.append({"file": file, "where": "sheets", "found": sheets})
+        message = UNPARSED_MESSAGE.format(code=code, why=UNPARSED_WHY[code])
+        q = question_group(
+            CALLOUT_UNPARSED_CODE,
+            True,
+            message,
+            refs,
+            file=file,
+            subjects=[{"name": code, "count": len(group)}],
+        )
+        q["count"], q["truncated"] = len(group), len(group) > UNPARSED_EXAMPLES
+        out.append(q)
+    return out
+
+
 def callout_questions(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Raw questions (no id, key or answer yet) of a callouts document: one per (code, blocking flag, file),
     blocking first, then by code, then by file. Counts come from all candidates, not from capped lists."""
@@ -1022,7 +1090,9 @@ def callout_questions(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for file in sorted(by_file):
         mine = by_file[file]
-        out += _ambiguous_questions(file, mine) + _legacy_question(file, mine)
+        out += (
+            _ambiguous_questions(file, mine) + _legacy_question(file, mine) + _unparsed_questions(file, mine)
+        )
     return sorted(out, key=lambda q: (not q["blocking"], q["code"], q["file"]))
 
 

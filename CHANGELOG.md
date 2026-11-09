@@ -634,6 +634,11 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
       (`diameter_sign_no_notation`, e.g. `Ø<10mm`, a glued `A4Ø16`), a mark-shaped sheet code
       (`sheet_code`), and a mark-shaped text another extractor took (`claimed_by_title_block`,
       `claimed_by_grids`, `claimed_by_levels`). Blocked texts stay in `blocked_entries` only.
+    - `harness callouts` raises `callout_unparsed` (blocking for lot specs; callouts is no gate-1 producer):
+      one question per file and `unparsed_code` over the unparsed candidates no other question asks (no
+      ambiguity, no member mark, no legacy grade group). Subject = the code with the true count; refs = the
+      first five examples (text entry ids, verbatim, scan order) and one `sheets` ref with the count per
+      sheet. On EVAL-3's set this asks the 554 unparsed Ø-callouts and drawing 290's 538 glyph callouts.
 
 ### Changed
 - Question lifecycle (tool wave 2, EVAL-2 fix 5):
