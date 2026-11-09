@@ -20,7 +20,8 @@ drawings, so a recorded route is needed as well.
 ## Decision
 
 1. `harness grid-system` raises `grid_system_missing` (blocking, gate-1 producer `grid-system`), one per
-   drawing file that has plan sheets but no usable grid system. Usable means a system that is not
+   drawing file that has plan sheets but no usable grid system (until a tool classifies plan sheets:
+   every read drawing file without one, answered `no_grid=yes` when it holds no plan). Usable means a system that is not
    rejected and has at least two labelled axes in each of two directions. The question quotes what was
    found: bubbles, labels, rejected systems.
 2. The answer carries structured values: the labels and spacings of each direction (dir1 and dir2), and
@@ -34,6 +35,14 @@ drawings, so a recorded route is needed as well.
    | `dir2_labels` | yes | as `dir1_labels`, for the other direction: `dir2_labels=A,B,C` | array of strings |
    | `dir2_spacings` | yes | as `dir1_spacings`: `dir2_spacings=4250,3730` | array of numbers |
    | `sheet` | no | the detector sheet id the grid was read from: `sheet=model#05` | string |
+   | `no_grid` | instead of all the keys above | `no_grid=yes`: the engineer states that this file holds no plan that needs a grid (notes, details or sections only) | `"yes"` |
+
+   `no_grid=yes` is alone or not at all: it is refused with any other key. From the engineer it closes the
+   question and builds nothing; the file then has no grid system by the engineer's statement, which the
+   gate-1 document shows. From any other role it closes nothing, like every other answer (decision 4). It
+   exists because the question is raised for every read drawing file without a usable system (no tool
+   classifies plan sheets yet), and a notes-only file must not hold gate 1 shut for ever (orchestrator
+   default, tool wave 3 review; reversible by the engineer).
 
    Both directions are required: a usable system has two (decision 1). An answer without values is
    recorded as words and builds nothing, so it does not close the question either, even from the
@@ -50,6 +59,11 @@ drawings, so a recorded route is needed as well.
    extension points fall on the given axes (where it can place them). On a mismatch it raises
    `grid_answer_contradicts_drawing`, which quotes both the answer and the dimension. The engineer stays
    authoritative, but the contradiction is never silent.
+6. `harness status` closes `grid_system_missing` only from the built result, never from the answer alone:
+   the engineer's `no_grid=yes`, or a fresh `grid-systems.json` holding a system whose `source_answer` is
+   that question's key. Freshness covers who answered: an answer that changes role (simulated, then the
+   engineer with the same values) makes the grid-system output stale. An answer-built system is checked
+   for conflicts against every other system, the same way as two detected systems.
 
 ## Consequences
 
