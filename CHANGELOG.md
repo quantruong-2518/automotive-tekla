@@ -700,6 +700,11 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
       U+2205 no pattern reads are listed in `rejected` with `diameter_glyph_no_notation`: not a candidate,
       so a slab-panel letter raises no blocking question. Known drawings: no change (none of these forms
       occurs; 290 keeps 507 `ù` + 31 `Þ` candidates).
+    - Fix (review, tie): when a sheet's shape-only (`pattern`) title-block candidates of one field have
+      two values or more, `harness callouts` and `harness marks` claim none of them: sheets already chose
+      none and raised a blocking `title_field_conflict`, so a mark among them stays a member mark in
+      `marks.json` instead of a `claimed_by_title_block` row. One shape-only candidate (461 `Đn-05`) stays
+      claimed. Known drawings: no change (no such tie in their sheets documents).
 
 ### Changed
 - Question lifecycle (tool wave 2, EVAL-2 fix 5):

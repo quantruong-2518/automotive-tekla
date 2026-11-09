@@ -789,7 +789,9 @@ def _released_pattern_values(loaded: LoadedFile) -> set[str]:
     text of the sheet that no title-block candidate took has the same prefix, style and height and a mark's
     shape (EVAL-3 286 model#04: `gĐ-3` next to `gĐ-1`, `gĐ-2`). Such a text is a member mark, not the sheet
     number, so it is not claimed. A printed sheet number found the same way (461 `Đn-05`, one per sheet)
-    has no such family and stays claimed."""
+    has no such family and stays claimed. Review (tie): when a sheet's `pattern` candidates of one field
+    have two values or more, none of them is the field's value (sheets raises a blocking
+    title_field_conflict, nothing is chosen), so none is claimed either: a mark among them stays a mark."""
     if loaded.sheets is None or loaded.text_index is None:
         return set()
     entries = {e["id"]: e for e in loaded.text_index["entries"]}
@@ -801,9 +803,16 @@ def _released_pattern_values(loaded: LoadedFile) -> set[str]:
         }
         families = {_family_key(entries[t]) for t in sh["text_ids"] if t in entries and t not in taken}
         families.discard(None)
+        values: dict[str, set[str]] = {}
+        for c in cands:
+            if c["evidence"]["kind"] == "pattern":
+                values.setdefault(c["field"], set()).add(c["value"])
+        tied = {fld for fld, vs in values.items() if len(vs) > 1}
         for c in cands:
             value = entries.get(c["evidence"]["value_text_id"])
-            if c["evidence"]["kind"] == "pattern" and value is not None and _family_key(value) in families:
+            if c["evidence"]["kind"] != "pattern" or value is None:
+                continue
+            if c["field"] in tied or _family_key(value) in families:
                 out.add(value["id"])
     return out
 

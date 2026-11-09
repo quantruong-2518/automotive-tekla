@@ -478,20 +478,25 @@ FAMILY_TEXTS = ["GD-1", "GD-2", "GD-3", "SX-5", "GE-1"]
 
 
 @pytest.fixture(scope="module")
-def family_work(tmp_path_factory) -> Path:
-    work = build_work(
+def family_base(tmp_path_factory) -> Path:
+    return build_work(
         tmp_path_factory.mktemp("family"),
         s1=FAMILY_TEXTS,
         styled=[("GE-2", ".VnTimeH")],  # same family, another style: no evidence
         s2=[],
         paper=[],
     )
+
+
+def family_work(base: Path, target: Path, kinds: tuple[tuple[str, str], ...]) -> Path:
+    """A copy of `base` whose sheet model#01 has these sheet_number candidates (text, evidence kind)."""
+    work = target / "work"
+    shutil.copytree(base, work)
     index = json.loads((work / "text" / f"{REL}.json").read_text(encoding="utf-8"))
     ids = {e["display_text"]: e for e in index["entries"]}
     path = work / "structure" / f"{REL}.sheets.json"
     sheets = json.loads(path.read_text(encoding="utf-8"))
     (s1,) = [s for s in sheets["sheets"] if s["sheet_id"] == "model#01"]
-    kinds = (("GD-3", "pattern"), ("SX-5", "pattern"), ("GE-1", "pattern"), ("GD-2", "adjacent_label"))
     for text, kind in kinds:
         e = ids[text]
         s1["title_block"]["candidates"].append(
@@ -513,17 +518,32 @@ def family_work(tmp_path_factory) -> Path:
     return work
 
 
-def test_a_shape_only_title_candidate_from_a_mark_family_is_released(family_work):
+@pytest.mark.parametrize(
+    ("kinds", "released", "claimed"),
+    [
+        # pattern kind, siblings GD-1 (GD-2 is claimed by a label) in its style
+        ((("GD-3", "pattern"), ("GD-2", "adjacent_label")), {"GD-3"}, {"GD-2"}),
+        ((("SX-5", "pattern"),), set(), {"SX-5"}),  # no family: the sheet number
+        ((("GE-1", "pattern"),), set(), {"GE-1"}),  # its family only in another style
+        # review (tie): two shape-only candidates with different values raise a blocking
+        # title_field_conflict in sheets; neither is taken as the number, so neither consumes a mark
+        ((("SX-5", "pattern"), ("GE-1", "pattern")), {"SX-5", "GE-1"}, set()),
+        ((("SX-5", "pattern"), ("GE-1", "pattern"), ("GD-2", "adjacent_label")), {"SX-5", "GE-1"}, {"GD-2"}),
+        # the tie is about values: one candidate found twice is no tie
+        ((("SX-5", "pattern"), ("SX-5", "pattern")), set(), {"SX-5"}),
+    ],
+)
+def test_which_shape_only_title_candidates_are_released(family_base, tmp_path, kinds, released, claimed):
     from tekla_harness.marks import extract_marks
 
-    doc = extract_callouts(family_work)
+    work = family_work(family_base, tmp_path, kinds)
+    doc = extract_callouts(work)
     marks = {c["display_text"] for c in doc["candidates"] if c["kind"] == "member_mark"}
-    assert "GD-3" in marks  # pattern kind, siblings GD-1 (GD-2 is claimed by a label) in its style
-    assert not {"SX-5", "GE-1", "GD-2"} & marks  # no family / another style only / label evidence
-    assert set(rejected(doc, "claimed_by_title_block")) >= {"SX-5", "GE-1", "GD-2"}
-    assert "GD-3" not in rejected(doc, "claimed_by_title_block")
-    plan = {p["mark"] for p in extract_marks(family_work)["plan_marks"]}
-    assert "GD-3" in plan and not {"SX-5", "GE-1", "GD-2"} & plan
+    taken = set(rejected(doc, "claimed_by_title_block"))
+    assert released <= marks and not released & taken
+    assert claimed <= taken and not claimed & marks
+    plan = {p["mark"] for p in extract_marks(work)["plan_marks"]}
+    assert released <= plan and not claimed & plan
 
 
 # --- a footing mark with a bolt-size number (EVAL-3 R arm, 433 T000555 'M8' among footings M1-M7) -------
