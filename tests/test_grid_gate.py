@@ -358,6 +358,21 @@ def test_questions_md_offers_no_grid_in_vietnamese(w3):
     assert not any(line.startswith("#") and q["id"] in line for line in lines[:section4])
 
 
+def test_a_grid_systems_json_from_another_inventory_closes_no_missing_question(w3):
+    """Freshness is both fingerprints: built from another inventory.json, the built system is not current."""
+    q = missing_q(w3)
+    record_answer(w3, q["id"], "grid", "A. Nguyen", GRID, role="engineer")
+    run_grid_systems(w3)
+    assert q["id"] not in grid_step(build_status(w3))["blocking_open_ids"]
+    path = w3 / "grid-systems.json"
+    doc = load(path)
+    doc["inventory_sha256"] = "0" * 64
+    path.write_text(json.dumps(doc, ensure_ascii=False), encoding="utf-8")
+    status = build_status(w3)
+    assert grid_step(status)["outputs"]["status"] == "stale"
+    assert q["id"] in grid_step(status)["blocking_open_ids"]
+
+
 def test_questions_md_shows_a_grid_answer_that_built_nothing_as_open(w3):
     q = missing_q(w3)
     record_answer(w3, q["id"], "grid", "A. Nguyen", GRID, role="engineer")

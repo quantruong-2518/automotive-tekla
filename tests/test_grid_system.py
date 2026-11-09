@@ -1860,6 +1860,47 @@ def test_an_answer_built_conflict_across_files_waits_for_the_file_sets(tmp_path,
     }
 
 
+def test_a_same_file_conflict_with_a_built_system_blocks_while_the_file_sets_are_asked(tmp_path, example):
+    """Rule 9: only a conflict between systems with no file in common waits for file_set_relation; the
+    built system's file counts (mutant: a built system with no files)."""
+    work = _no_grid(tmp_path, example)
+    pending = (FILE_SET_KEY, FILE_SET_ID)
+    grid = answer_to(
+        build_grid_systems(work, file_set=pending), MISSING, {**GRID, "dir2_spacings": [4000, 3730]}
+    )
+    out = build_grid_systems(work, answers=[grid], file_set=pending)
+    assert out["file_sets"]["status"] == "pending"
+    assert _conflict_pairs(out) == [(["S001", "S002"], True, None)]
+
+
+def test_a_built_system_is_compared_in_millimetres_when_both_files_answer_their_units(tmp_path, example):
+    """a.dxf draws the plan in mm (6000 / 6000 / 4500), house.dxf is in cm and its given grid is the same
+    building in cm (600 / 600 / 450): one building in mm, so no conflict (mutant: built families never in
+    mm, then 6000 vs 600)."""
+    w = Work(tmp_path, example)
+    w.add_file("a.dxf", [plan("V001", "model#01", 1)])
+    w.add_file(
+        "house.dxf", [view("V001", "model#05", fam("F001", ["X", "Y"], [500.0], angle=0.0))], unit="cm"
+    )
+    work = w.finish()
+    units = [
+        ans("units_confirm_all", "a.dxf", {"unit": "mm"}),
+        ans("units_confirm_all", "house.dxf", {"unit": "cm"}),
+    ]
+    values = {"dir1_labels": LETTERS, "dir1_spacings": [600, 600, 450], "dir2_labels": NUMBERS,
+              "dir2_spacings": [720, 720]}  # fmt: skip
+    grid = answer_to(
+        build_grid_systems(work, answers=units), MISSING, values, "house.dxf: no usable grid system"
+    )
+    out = build_grid_systems(work, answers=[*units, grid])
+    check_invariants(out)
+    (built,) = _built(out)
+    assert out["conflicts"] == [] and "S001" in built["relations"]["compatible_with"]
+    # the same numbers with no units answer are compared as drawn: 6000 vs 600 conflict
+    raw = build_grid_systems(work, answers=[grid])
+    assert any(built["system_id"] in c["systems"] for c in raw["conflicts"])
+
+
 def test_two_answer_built_systems_are_compared(tmp_path, example):
     """house.dxf and shed.dxf: neither has a usable system; both grids are given, and disagree on 1-2."""
     w = Work(tmp_path, example)
