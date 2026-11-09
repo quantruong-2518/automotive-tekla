@@ -1,6 +1,7 @@
 # Tekla Open API notes (Step 3 input)
 
 Purpose: everything needed to start `TeklaCore` + the console CLI against **Tekla Structures 2024 (Diamond)**, with the 2025/2026 deltas.
+Under review (engineer, 2026-11-09): the company runs Tekla **2026** Diamond; the target is confirmed when Step 3 resumes after Steps 1–2 ([roadmap](../docs/roadmap.md), Step 3). The 2026 deltas below were not researched in depth.
 Date accessed: **2026-11-06**. Authored by a research agent on a Linux machine with no Tekla installed.
 
 **Status of these notes: doc-sourced, NOT run-verified.** Nothing here was executed against Tekla. Every claim carries a status:
@@ -96,6 +97,7 @@ Abbreviations for sources:
   ```
   Trimble's 2024 sample uses exactly `Tekla.Structures.Model 2024.0.4` + `TSAppConfigPatcherTask 2.1.3` (`Directory.Build.Props` there: `<TeklaVersion Condition="'$(Configuration)' == 'Debug'">2024.0</TeklaVersion>`). GACLESS says `TSAppConfigPatcherTask` **2.1.0 or later**; 2.1.3 is the latest on NuGet (2024-04-01). · 2024 · SAMPLES branch `2024`; GACLESS; api.nuget.org flat container · `sample-code` / `doc`
 - **What `TSAppConfigPatcherTask` does** (package 2.1.3 `build/TSAppConfigPatcherTask.targets`): after build, for outputs that are `.exe`, `*Test.dll` or `*Tests.dll` (or `ForceApplyAppConfig=true`), and when `TeklaVersion`, `TeklaStructuresInstallationPath` or `SourceAppConfigExe` is set, writes `obj\...\App.config` with `codeBase` entries for the "GAC dll" list (Tekla.Structures*.dll, Tekla.Common.Geometry*.dll, Tekla.Technology.Serialization.dll, Trimble.Remoting.dll, Grpc*, ...). Opt-out: `DisablePatchCodeBaseToAppConfigFiles=true`. · 2024+ · package contents · `nuget-metadata`
+- **Full `GacDlls` list of the patcher** (same targets file, read 2026-11-07 from the api.nuget.org flat container): `@(UserDefinedGacDlls)`, `DotNetKit`, `Tekla.Logging`, `Tekla.Application.Library`, `Tekla.Structures.*` (WebBrowser, WorkspaceApiConnector, base, Datatype, Dialog, Drawing, Model, Plugins, Analysis, Catalogs, Ui.WpfKit, CustomPropertyPlugin, Geometry3d.Compatibility, DrawingPresentationPluginInterface, DrawingPresentationModel, ObjectDimensioningPlugin, ObjectDimensioningModel, Dialog.Data, DirectManipulation), `Tekla.BIM.*` (Geometry, Common.Contracts, Utilities, DirectManipulation), `Model.Common`, `Akit5`, `Tekla.Technology.Scripting(.Plugins)`, `Trimble.Technology.Rkit`, `Trimble.Technology.MsgLib`, `Tekla.Technology.Serialization`, `Tekla.Common.Geometry(.Primitives, .Shapes)`, `Trimble.Remoting`, `Trimble.Package.Manager`, **`System.Runtime.CompilerServices.Unsafe`**, `Grpc.Core.Api`, `Grpc.Core`, `Grpc.Net.Client`, `Grpc.Net.Common`, `Google.Protobuf`. Each listed DLL gets a codeBase into Tekla's `bin` and the wide redirect, so Tekla picks its version at run time. Consequence: no dependency of our .NET projects may pull one of these (`System.Text.Json` on netstandard2.0 depends on `System.Runtime.CompilerServices.Unsafe`); ADR-0010 Amendment 1 therefore uses a hand-written JSON reader. Not on the list: `Newtonsoft.Json`, `System.Text.Json`, `System.Memory`, `System.Buffers`. · 2024+ · package contents · `nuget-metadata`
 - **Do not copy Tekla DLLs by hand.** Use NuGet only for compile-time; the exe resolves via the patched config. GACLESS: "Tekla Structures will still be able to load the version deployed with the extension" (ambiguous for stand-alone exes) and "Don't deploy GAC assemblies". Copy Local / `ExcludeAssets` behaviour is not documented. · 2024 · GACLESS · `doc` + `not-found`
 - Expect **MSB3277** version-conflict warnings for `Tekla.Structures.Model` when patching; Trimble calls them development-only. · 2024 · GACLESS · `doc`
 
@@ -262,6 +264,12 @@ Sources: nuspecs/DLLs (PKG24/25/26), REL24-26, system requirements pages, releas
 17. Whether the CLI needs `CommitChanges` after read-only selection changes (the XML examples call it after `Select`).
 18. `GetObjectsByBoundingBox` is "NOT EXACT"; not to be used for lot queries (documented), confirm by test if ever needed.
 19. Can the CLI run while the Tekla UI is in a modal dialog or busy (macro running via `IsMacroRunning`)?
+20. (ADR-0012) A UDA filter on parts (`LOT`, `RUN_ID`, `SPEC_ID`) returns exactly the tagged objects, including just-inserted uncommitted ones.
+21. (ADR-0012) `GetIdentifierByGUID` (or the chosen lookup) tells "not found" apart from a failure, for a deleted, a never-existing and an uncommitted object.
+22. (ADR-0012) Beam start/end come back in global mm once the global `TransformationPlane` is set, whatever work plane the UI shows.
+23. (ADR-0012) Profile and material strings read back exactly as written by `Insert` (no normalisation such as `HEA300` → `HEA 300`); rotation read back in the same convention as written.
+24. (ADR-0012) A string UDA holds a 64-character `SPEC_ID` without truncation.
+25. (ADR-0012) Setting the three UDAs before `Insert` works and persists (would remove the intent window).
 
 ## Gaps
 

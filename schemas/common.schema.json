@@ -90,6 +90,7 @@
     },
     "project_id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{1,63}$" },
     "spec_id": { "type": "string", "pattern": "^[A-Z0-9][A-Z0-9_-]{0,63}$" },
-    "question_id": { "type": "string", "pattern": "^Q-[0-9]{3,}$" }
+    "question_id": { "type": "string", "pattern": "^Q-[0-9]{3,}$" },
+    "run_id": { "type": "string", "pattern": "^[A-Z0-9][A-Z0-9_-]{0,31}$", "description": "Tekla RUN_ID tag and part of the run journal file name (ADR-0012)." }
   }
 }

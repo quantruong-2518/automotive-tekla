@@ -10,6 +10,8 @@ the guard hook, permissions and schemas can rely on it. Open API facts behind it
 - Target: Tekla Structures **2024** (Diamond). NuGet `Tekla.Structures.Model` and
   `Tekla.Structures.Catalogs` **2024.0.4** (the pin does not depend on the service pack),
   `net48`, `x64`. Later versions (2025, 2026) are separate builds, each verified on its own.
+  Under review (engineer, 2026-11-09): the company runs Tekla **2026** Diamond; the target is
+  confirmed when Step 3 resumes after Steps 1–2 ([roadmap](roadmap.md), Step 3).
 - The executable is named **`tekla-cli.exe`** (`AssemblyName` `tekla-cli`). Agents call it only
   by that name, never through `dotnet run`, `dotnet exec` or `dotnet watch`. The guard hook
   denies those routes outside `builder` (RTI-0006).
@@ -63,7 +65,9 @@ Adding a read subcommand requires updating `READ_SUBCOMMANDS` in
    macro route must pass on the test model before the first real lot.
 3. Refuse unless `--lot`, `--run-id` and a schema-valid `--spec` are given. "Schema-valid" means
    a validation receipt from `harness validate spec` whose SHA-256 matches the spec file
-   ([ADR-0010](decisions/0010-spec-validation-receipt.md)).
+   ([ADR-0010](decisions/0010-spec-validation-receipt.md), Amendment 1). A missing or mismatched
+   receipt, a spec the reader rejects, or a spec `lot` other than `--lot` exits `5`; missing
+   arguments exit `2`; an existing spec or receipt that cannot be read exits `3`.
 4. Tag every created or modified object with UDAs `LOT`, `RUN_ID`, `SPEC_ID`. Refuse (exit `3`)
    unless all three are defined in the model as `unique_attribute`, type `string`, not affecting
    numbering (the repo ships the `objects.inp` to copy into each model folder).
@@ -73,7 +77,8 @@ Adding a read subcommand requires updating `READ_SUBCOMMANDS` in
 6. Resume: re-running `build` for the same lot and `RUN_ID` skips every spec item whose
    `SPEC_ID` already exists in that lot and run, and builds only the missing ones. If an existing
    object differs from its spec item, stop with exit `1` and ask the engineer. Never create a
-   duplicate `SPEC_ID`.
+   duplicate `SPEC_ID`. Journal, snapshot, matching rules ("differs" includes kind, rotation and
+   class since 2026-11-08), lock and refusals: [ADR-0012](decisions/0012-run-journal-and-resume-planner.md).
 
 ## Open questions
 

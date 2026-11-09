@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:tekla-harness:schema:spec-receipt:0.1",
+  "title": "Spec validation receipt",
+  "description": "Written by `harness validate spec` next to a spec that passed validation, as `<spec file name>.receipt.json` (ADR-0010, Amendment 1). The CLI builds only from a spec whose exact bytes hash to spec_sha256. It proves the bytes are unchanged since a validation, not who validated them.",
+  "type": "object",
+  "required": ["schema_version", "spec_file", "spec_sha256", "spec_schema_id", "validator", "validated_at"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": "0.1" },
+    "spec_file": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[^/\\\\]+$",
+      "description": "Base name of the validated spec file. Information only: the hash binds the content."
+    },
+    "spec_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "SHA-256 of the spec file's exact bytes, lowercase hex."
+    },
+    "spec_schema_id": {
+      "type": "string",
+      "pattern": "^urn:tekla-harness:schema:spec:[0-9]+\\.[0-9]+$",
+      "description": "The `$id` of the spec schema the file was validated against."
+    },
+    "validator": {
+      "type": "object",
+      "required": ["name", "version", "rules_version"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "const": "tekla_harness" },
+        "version": { "type": "string", "minLength": 1, "description": "Package version of tekla_harness." },
+        "rules_version": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000,
+          "description": "SPEC_RULES_VERSION: bumped whenever check_spec or the strict JSON profile gets stricter. The CLI refuses receipts below its built-in minimum."
+        }
+      }
+    },
+    "validated_at": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$",
+      "description": "UTC time of validation, second precision. Information only, never an expiry."
+    }
+  }
+}

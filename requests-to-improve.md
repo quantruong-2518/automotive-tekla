@@ -105,7 +105,64 @@ Severity: `critical` · `major` · `minor`.
 - Regression test: with a model open that lacks the marker or has another path, the integration
   fixture fails before any write; `TeklaCore.Tests` builds and runs with no Tekla installed.
 
-## RTI-0009 — On Windows, an unlocked reader can make a work-folder write fail
+## RTI-0008 — An agent can forge a spec validation receipt
+
+- Source: independent design review of slice S1b (ADR-0010 Amendment 1), 2026-11-08
+- Classification: safety layer · Severity: minor (the receipt is not a gate; gate approval stays
+  with the engineer) · Status: **done** (Unreleased; approved by the engineer 2026-11-08; PR #8, master
+  `3307060`; live-checked 2026-11-09 in a fresh Claude Code 2.1.319 session on master)
+- Live check (2026-11-09, `claude -p` in a master worktree, `acceptEdits`, `cp`/`echo` allowed):
+  Write and Edit of a receipt were denied by the permission rule ("denied by your permission
+  settings"); `cp`, `echo >`, a two-line `cd` + `cp`, and `ls … | xargs cp` were denied by the
+  hook; a control Write, `cat`, `test -f` and `harness validate spec` were allowed, and the
+  receipt it wrote matched the spec's SHA-256. PowerShell was not exercised (Linux).
+- Root cause: the receipt is a plain JSON file holding the spec's SHA-256. Any agent with file
+  write access (`builder` has Write) can create a receipt for a spec that was never validated,
+  and the CLI cannot tell. Signing adds nothing while the key sits on the same machine.
+- Proposed fix: a Claude Code `permissions.deny` rule for Write and Edit on `**/*.receipt.json`
+  (and a guard-hook check for shell redirection into such a file), so only `harness validate spec`
+  produces receipts. Check the current permission-rule syntax in the Claude Code docs first.
+- Regression test: a hook/permission test where `builder` tries to Write `x.json.receipt.json`
+  and is denied, while `uv run harness validate spec` still writes it.
+- Related, also needs approval (agent definition): `.claude/agents/builder.md` step 1 runs
+  `harness validate spec` right before building, so the agent that writes to Tekla produces its
+  own receipt, and the Tekla machine needs Python (ADR-0010 says it should not). Proposed: step 1
+  becomes "the receipt exists and matches", checked by `tekla-cli` itself; validation stays with
+  the planner/doc-reader before the gate.
+- Implemented: settings deny `Edit(**/*.receipt.json)` (Claude Code permissions docs, read
+  2026-11-08: Edit rules cover Write, Edit, NotebookEdit and Bash `>`/`>>`/`2>` targets; the
+  pattern is anchored at the working directory). `guard_tekla_write.py` denies any shell
+  command naming a receipt, or piping one into another command, unless it only reads
+  (cat, ls, Test-Path, jq, …) with no redirection into a receipt and no `--output`, for every
+  agent. `builder.md` step 1 now only checks that the receipt exists. Tests:
+  `tests/test_guard_hook.py` (`test_receipt_*`, `test_settings_deny_edits_of_receipts`); the
+  producer side stays covered by `tests/test_receipt.py`. An independent Opus review found the
+  newline bypass logged as RTI-0009, fixed on the same branch.
+- Remaining limits: this narrows forgery, it does not close it; only an OS-level sandbox would.
+  Not seen: a script file that writes a receipt (`uv run python forge.py`), a glob that does
+  not spell `.receipt.json`, a directory copy, a path outside the working directory. Nothing
+  stops `builder` from running `harness validate spec` itself; `builder.md` no longer asks it
+  to. Unverified: whether the `Edit(...)` pattern matches case-insensitively on Windows. The
+  Write-tool denial is enforced by Claude Code and is pinned only as configuration in pytest.
+
+## RTI-0009 — Write guard reads a multi-line command as one command
+
+- Source: independent review of RTI-0008, 2026-11-08
+- Classification: tooling (safety layer) · Severity: critical · Status: **done**
+  (Unreleased; merged by the engineer with RTI-0008 in PR #8, 2026-11-09)
+- Root cause: `_split` in `guard_tekla_write.py` let `shlex` treat a newline as whitespace, so
+  `cd projects/p` + newline + `tekla-cli build …` became one segment whose command word `cd`
+  is inert, and the write passed for any agent. The `Bash(tekla-cli build *)` ask rule still
+  prompted, but it does not check which agent runs the command.
+- Fix: every newline separates commands like `;`, a bash backslash-newline too (in PowerShell a
+  trailing `\` is part of a path, so joining lines would hide the next one; a split bash
+  continuation fails closed). Inside quotes a newline stays in its token, so a multi-line
+  `git commit -m` is still data. Accepted change: a heredoc body is now read as commands, so a
+  heredoc that mentions a CLI write is denied outside `builder` (the commit skill uses `-F`).
+- Regression test: `tests/test_guard_hook.py` — newline, CRLF, bash continuation and
+  PowerShell trailing-backslash cases in `WRITE_COMMANDS` and `RECEIPT_WRITE_COMMANDS`; a
+  multi-line commit message in `MENTION_ONLY_COMMANDS`.
+## RTI-0010 — On Windows, an unlocked reader can make a work-folder write fail
 
 - Source: independent review of the tool wave 2 seam (ADR-0011), 2026-11-08
 - Classification: tooling · Severity: minor · Status: **proposed**
@@ -120,7 +177,7 @@ Severity: `critical` · `major` · `minor`.
 - Regression test: Windows-only test that holds a read handle on the target while
   `write_text_atomic` replaces it; it expects retry, then success, or exit 3 with no traceback.
 
-## RTI-0010 — An agent can declare itself the engineer when it records an answer
+## RTI-0011 — An agent can declare itself the engineer when it records an answer
 
 - Source: independent review of the tool wave 2 seam, 2026-11-08 (finding M1)
 - Classification: safety layer · Severity: major · Status: **proposed** (needs engineer decision)
