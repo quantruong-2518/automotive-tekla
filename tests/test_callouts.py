@@ -191,7 +191,6 @@ def test_several_candidates_in_one_line(line, kinds):
     [
         f"A4{DIA_SIGN}16",  # glued to the token before
         f"12345{DIA_SIGN}16",  # five-digit count
-        "⌀16",  # U+2300 is not in the verified diameter set
         "CB350-V",
         "CB300-X",
         "8.8",  # a bare class is not a bolt

@@ -136,6 +136,30 @@ _DIA_SPACING = re.compile(_L + DIA + r"\s*(?P<d>\d{1,2})\s*a\s*(?P<s1>\d{2,3})(?
 _COUNT_DIA = re.compile(_L + r"(?P<n>\d{1,3})\s*" + DIA + r"\s*(?P<d>\d{1,2})" + _R)
 _LEN_EQ = re.compile(r"(?<![\w])L\s*=\s*\d+(?:[.,]\d+)?(?!\w)")
 _LOOSE_DIA = re.compile(_L + r"(?:\d{1,3}\s*)?" + DIA + r"\s*\d{1,3}(?:\s*[aAsS@]\s*\d{1,4}(?:/\d{1,4})?)?")
+# W1b (docs/research/diameter-glyph-u-grave.md): a character in diameter position that is not a verified
+# diameter sign. A non-ASCII letter (not a diameter sign, not the mark letter Đ/đ) counts only in the two
+# callout shapes, count + diameter or diameter + spacing (`2ù20`, `ù14a150`, `2Þ16`): a lone letter + number
+# (`Ô1`) is no callout. The diameter-like symbols U+2300 and U+2205 (AutoCAD's Unicode for %%c, not in the
+# research's verified set) count in any of those shapes or alone with a number.
+_GLYPH_LETTER = r"(?=[^\x00-\x7f])(?![" + DIA_CHARS + r"Đđ])[^\W\d_]"
+_GLYPH_SYMBOL = r"[⌀∅]"
+_GLYPH_ANY = "(?:" + _GLYPH_LETTER + "|" + _GLYPH_SYMBOL + ")"
+_GLYPH_SPACING = r"\s*a\s*\d{2,3}(?:/\d{2,3})?"
+_GLYPH = re.compile(
+    _L
+    + r"(?:\d{1,3}\s*(?P<g1>"
+    + _GLYPH_ANY
+    + r")\s*\d{1,2}(?:"
+    + _GLYPH_SPACING
+    + r")?|(?P<g2>"
+    + _GLYPH_ANY
+    + r")\s*\d{1,2}"
+    + _GLYPH_SPACING
+    + r"|(?P<g3>"
+    + _GLYPH_SYMBOL
+    + r")\s*\d{1,2})"
+    + _R
+)
 
 _REBAR_GRADE = re.compile(r"\bCB(?P<ys>240|300|400|500|600)-?(?P<surf>[TV])\b")
 _LEGACY = re.compile(r"\b(?P<p>C|A-?)(?P<g>I{1,3}|IV)\b")
@@ -178,6 +202,14 @@ _MARK_CI = re.compile(_MARK.pattern, re.IGNORECASE)
 _SHEET_CODE = re.compile(r"^(?P<disc>KT|KC|\u0110|N|TCXD)\s*-?\s*\d{1,3}(?:\s*/\s*\d{1,3})?$")
 
 _CITE = "docs/research/vn-structural-drawing-conventions.md"
+
+# unparsed_code (tool wave 3): the reason family of an unparsed candidate (callouts schema)
+AMBIGUOUS = "ambiguous_notation"
+GRADE_UNVERIFIED = "grade_unverified"
+NOTATION_UNVERIFIED = "notation_unverified"
+CONFLICTING = "conflicting_values"
+MARK_UNDEFINED = "member_mark_undefined"
+SYMBOL_GLYPH = "symbol_glyph_unverified"
 
 # ambiguity id -> (blocking, notation text, message)
 AMBIGUITIES: dict[str, tuple[bool, str]] = {
@@ -246,6 +278,7 @@ class _Hit:
     family: str | None = None
     lexical: dict[str, str] | None = None
     derived_flags: tuple[str, ...] = ()
+    code: str | None = None  # unparsed_code (UNPARSED_CODES) of an unparsed hit; None when parsed
 
 
 class _Line:
@@ -273,8 +306,10 @@ def _cite(pattern: str, where: str) -> str:
     return f"{pattern} ({_CITE}: {where})"
 
 
-def _unparsed(kind: str, m: re.Match[str], rule: str, reason: str, ambiguity: str | None = None) -> _Hit:
-    return _Hit(kind, m.start(), m.end(), rule, "low", None, reason, ambiguity)
+def _unparsed(
+    kind: str, m: re.Match[str], rule: str, reason: str, code: str, ambiguity: str | None = None
+) -> _Hit:
+    return _Hit(kind, m.start(), m.end(), rule, "low", None, reason, ambiguity, code=code)
 
 
 def _parsed(kind: str, m: re.Match[str], rule: str, cap: str, parsed: dict[str, Any], **extra: Any) -> _Hit:
@@ -288,7 +323,7 @@ _Maker = Callable[[re.Match[str]], _Hit | None]
 def _ambiguous_rebar(amb: str, item: int) -> _Maker:
     def make(m: re.Match[str]) -> _Hit:
         rule = _cite(f"AMBIG_{amb.upper()}", f"Ambiguous notations, #{item}")
-        return _unparsed("rebar_callout", m, rule, f"ambiguous notation, not parsed: {amb}", amb)
+        return _unparsed("rebar_callout", m, rule, f"ambiguous notation, not parsed: {amb}", AMBIGUOUS, amb)
 
     return make
 
@@ -315,7 +350,7 @@ def _rebar_grade(m: re.Match[str]) -> _Hit:
     rule = _cite("REBAR_GRADE", "Parsing patterns 2, section 1.3")
     if (m["surf"], int(m["ys"])) not in _GRADES:
         reason = "this strength class and surface letter pair is not in the verified grade list (section 1.3)"
-        return _Hit("rebar_grade", m.start(), m.end(), rule, "low", None, reason)
+        return _Hit("rebar_grade", m.start(), m.end(), rule, "low", None, reason, code=GRADE_UNVERIFIED)
     parsed = {
         "form": "rebar_grade",
         "yield_class_mpa": int(m["ys"]),
@@ -331,7 +366,7 @@ def _legacy(m: re.Match[str]) -> _Hit:
     )
     if m["p"] == "A":
         reason = "spelling without a hyphen (AI, AII, AIII) is in no standard (section 1.3)"
-        return _Hit("rebar_grade", m.start(), m.end(), rule, "low", None, reason)
+        return _Hit("rebar_grade", m.start(), m.end(), rule, "low", None, reason, code=GRADE_UNVERIFIED)
     family = "CI..CIV (TCVN 1651:1985)" if m["p"] == "C" else "A-I..A-IV (imported Russian groups)"
     return _parsed(
         "rebar_grade", m, rule, "medium", {"form": "legacy_group", "family": family, "group": m["g"]}
@@ -343,7 +378,9 @@ def _steel_vn(m: re.Match[str]) -> _Hit:
     prefix, number = m["prefix"], m["n"]
     if prefix == "CCT" and number == "52":
         reason = "CCT52 is not in the verified list (CCT34, CCT38, CCT42)"
-        return _Hit("steel_grade", m.start(), m.end(), rule, "low", None, reason, family=prefix)
+        return _Hit(
+            "steel_grade", m.start(), m.end(), rule, "low", None, reason, family=prefix, code=GRADE_UNVERIFIED
+        )
     parsed = {
         "form": "steel_grade_vn",
         "prefix": prefix,
@@ -357,7 +394,10 @@ def _steel_vn(m: re.Match[str]) -> _Hit:
 def _steel_vn_near_miss(m: re.Match[str]) -> _Hit:
     rule = _cite("STEEL_VN", "Parsing patterns 5, section 5.4")
     reason = "CCT/XCT followed by a number outside the verified list (CCT34/38/42, XCT34/38/42/52)"
-    return _Hit("steel_grade", m.start(), m.end(), rule, "low", None, reason, family=m.group(0)[:3])
+    family = m.group(0)[:3]
+    return _Hit(
+        "steel_grade", m.start(), m.end(), rule, "low", None, reason, family=family, code=GRADE_UNVERIFIED
+    )
 
 
 def _steel_foreign(m: re.Match[str]) -> _Hit:
@@ -396,7 +436,7 @@ def _qty_angle(m: re.Match[str]) -> _Hit:
 def _section_unverified(rule_id: str, why: str) -> _Maker:
     def make(m: re.Match[str]) -> _Hit:
         rule = _cite(rule_id, "section 5.2, NOTES.md 'Section designations', ambiguous #12")
-        return _unparsed("section_label", m, rule, why, "section_designation")
+        return _unparsed("section_label", m, rule, why, NOTATION_UNVERIFIED, "section_designation")
 
     return make
 
@@ -407,19 +447,33 @@ def _plate(m: re.Match[str]) -> _Hit:
     else:
         why = "plate tag with a number (mark or thickness): no verified form"
     rule = _cite("PLATE_TAG", "section 5.2, NOTES.md 'Plates', ambiguous #13")
-    return _unparsed("plate", m, rule, why, "plate_designation")
+    return _unparsed("plate", m, rule, why, NOTATION_UNVERIFIED, "plate_designation")
 
 
 def _loose_dia(m: re.Match[str]) -> _Hit:
     rule = _cite("LOOSE_DIAMETER", "Parsing patterns 1: no verified form matches")
     why = "diameter sign with a number, outside the verified forms (count + diameter, diameter + spacing)"
-    return _unparsed("rebar_callout", m, rule, why)
+    return _unparsed("rebar_callout", m, rule, why, NOTATION_UNVERIFIED)
+
+
+def _glyph(m: re.Match[str]) -> _Hit:
+    glyph = m["g1"] or m["g2"] or m["g3"]
+    rule = (
+        "SYMBOL_GLYPH (docs/research/diameter-glyph-u-grave.md: a character that is not a verified diameter "
+        "sign stands in diameter position; never decoded)"
+    )
+    why = (
+        f"the character '{glyph}' (U+{ord(glyph):04X}) stands where a diameter sign stands (count + diameter "
+        "or diameter + spacing), but it is not \u00d8 or %%c: never decoded, the meaning depends on a font "
+        "nobody verified (research note diameter-glyph-u-grave.md)"
+    )
+    return _unparsed("rebar_callout", m, rule, why, SYMBOL_GLYPH)
 
 
 def _hole(m: re.Match[str]) -> _Hit:
     rule = _cite("BOLT_HOLE", "section 5.3, ambiguous #14")
     why = "hole diameter notation ('lỗ Ø22'): hole size, standard or oversize unverified"
-    return _unparsed("bolt", m, rule, why, "bolt_label_hole")
+    return _unparsed("bolt", m, rule, why, NOTATION_UNVERIFIED, "bolt_label_hole")
 
 
 def _pattern(rx: re.Pattern[str], make: _Maker, fold: bool = False) -> Callable[[str, _Line], None]:
@@ -454,11 +508,12 @@ def _bolts(text: str, acc: _Line) -> None:
             acc.add(_Hit("bolt", start, end, rule, "medium", parsed))
         else:
             why = f"several strength classes on one line: {', '.join(values)}"
-            acc.add(_Hit("bolt", start, end, rule, "low", None, why, "bolt_label_hole"))
+            acc.add(_Hit("bolt", start, end, rule, "low", None, why, "bolt_label_hole", code=CONFLICTING))
     elif sizes:
         rule = _cite("BOLT_M_LABEL", "section 5.3, ambiguous #14")
         why = "bolt diameter label (M20...) without a verified strength class on the line"
-        acc.add(_Hit("bolt", sizes[0].start(), sizes[-1].end(), rule, "low", None, why, "bolt_label_hole"))
+        start, end = sizes[0].start(), sizes[-1].end()
+        acc.add(_Hit("bolt", start, end, rule, "low", None, why, "bolt_label_hole", code=NOTATION_UNVERIFIED))
     _pattern(_HOLE, _hole)(text, acc)
 
 
@@ -512,6 +567,7 @@ _SCANNERS: tuple[Callable[[str, _Line], None], ...] = (
     _pattern(_PLATE, _plate),
     _bolts,
     _pattern(_LOOSE_DIA, _loose_dia),
+    _pattern(_GLYPH, _glyph),
 )
 
 
@@ -535,7 +591,7 @@ def member_mark(line: str, case_uncertain: bool) -> _Hit | None:
     lexical = {"prefix": m["prefix"].upper(), "number": m["number"], "suffix": m["suffix"]}
     rule = _cite("MEMBER_MARK_SHAPE", "section 4: practice only, no standard defines the letters")
     why = "member mark letters are not defined by any standard or by this drawing's legend yet (section 4)"
-    return _Hit("member_mark", 0, len(line), rule, "low", None, why, lexical=lexical)
+    return _Hit("member_mark", 0, len(line), rule, "low", None, why, lexical=lexical, code=MARK_UNDEFINED)
 
 
 # --- one text entry -----------------------------------------------------------------------------------
@@ -697,6 +753,9 @@ def _summary(
         "unparsed_by_reason": dict(
             sorted(Counter(c["unparsed_reason"] for c in candidates if c["parsed"] is None).items())
         ),
+        "unparsed_by_code": dict(
+            sorted(Counter(c["unparsed_code"] for c in candidates if c["parsed"] is None).items())
+        ),
         "files_scanned": sum(1 for f in files if f["status"] == "scanned"),
         "files_skipped": sum(1 for f in files if f["status"] == "skipped"),
         "blocked_entries": len(blocked),
@@ -797,6 +856,9 @@ def extract_callouts(work_dir: Path | str, *, check_inputs: bool = False) -> dic
                     "flags": flags,
                     "provenance": _provenance(loaded.rel, sheet, entry),
                 }
+                if hit.parsed is None:
+                    assert hit.code is not None, hit.rule  # every unparsed hit names its reason family
+                    cand["unparsed_code"] = hit.code
                 if hit.family is not None:
                     cand["_family"] = hit.family
                 if span.strip() != line.strip():

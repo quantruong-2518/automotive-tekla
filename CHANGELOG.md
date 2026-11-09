@@ -620,6 +620,14 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
       lists it with the open blocking questions as "chưa đóng: câu trả lời chỉ có lời", with those values.
     - `status` schema: `gate1.closed` is required (`$id` still 0.1; example updated). A status output
       written before tool wave 3 without it no longer validates; rerun `harness status`.
+  - Tool wave 3, package M (marks + callouts):
+    - `harness callouts`: every unparsed candidate names its reason family in `unparsed_code`
+      (`ambiguous_notation`, `grade_unverified`, `notation_unverified`, `conflicting_values`,
+      `member_mark_undefined`, `symbol_glyph_unverified`), counted in `summary.unparsed_by_code`. A character
+      in diameter position that is not Ø or %%c (W1b: `2ù20`, `ù14a150` in drawing 290's style Arial, `2Þ16`
+      in its VNI styles, U+2300 / U+2205) is an unparsed `rebar_callout` with `symbol_glyph_unverified`,
+      never decoded: a non-ASCII letter only in the shapes count + diameter or diameter + spacing (`Đ`/`đ`
+      never), the two diameter-like symbols also alone with a number. Before, these texts gave no candidate.
 
 ### Changed
 - Question lifecycle (tool wave 2, EVAL-2 fix 5):
