@@ -442,9 +442,6 @@ def _cmd_ask(args: argparse.Namespace) -> int:
     except QuestionsError as exc:
         print(str(exc), file=sys.stderr)
         return exc.exit_code
-    except NotImplementedError as exc:  # tool wave 2: a package has not landed yet
-        print(str(exc), file=sys.stderr)
-        return EXIT_ENV
     if result["status"] == "already_asked":
         print(f"{result['id']}: already asked", file=sys.stderr)
     elif result["status"] == "already_supplemented":

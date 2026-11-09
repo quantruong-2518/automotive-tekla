@@ -6,6 +6,7 @@
 2. A grid-system conflict waiting for the file-set answer is pending, not closed, in questions.md.
 3. Every gate-1 reason and questions.md line that tells someone to answer frames it as the engineer's step.
 5. A damaged question document is exit 1 in `harness status`, not a traceback.
+6. `harness ask` does not turn a stray NotImplementedError into an environment error.
 
 The two-sheet world is test_status.py's; the one-grid files are built here (one grid per file, so two
 files with the same labels and different spacings conflict across files).
@@ -19,6 +20,7 @@ import json
 import re
 import shutil
 from pathlib import Path
+from typing import Any
 
 import pytest
 from ezdxf.filemanagement import new
@@ -348,3 +350,19 @@ def test_a_damaged_question_document_is_exit_1_in_status_not_a_traceback(ready, 
     assert caught.value.exit_code == 1 and "grid-system-questions.json" in str(caught.value)
     assert main(["status", str(work)]) == 1
     assert "Traceback" not in capsys.readouterr().err
+
+
+# --- 6. harness ask: no catch-all for NotImplementedError ----------------------------------------------
+
+
+def test_ask_does_not_turn_a_not_implemented_error_into_exit_3(world, monkeypatch):
+    from tekla_harness import cli
+
+    _, work = world
+
+    def boom(*args: Any, **kwargs: Any) -> Any:
+        raise NotImplementedError("a bug, not an environment problem")
+
+    monkeypatch.setattr(cli, "ask_question", boom)
+    with pytest.raises(NotImplementedError):
+        cli.main(["ask", str(work), "--code", "reader_gap", "--where", "w", "--found", "f", "--text", "t"])
