@@ -604,6 +604,14 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
     - `harness ask` refuses the producer codes `legacy_ascii_text` (intake) and
       `grid_answer_contradicts_drawing` (grid-system; it no longer falls under read-structure's `grid_`
       prefix) as reader codes (exit 2).
+    - `harness ask --amend Q-id [--text T] [--places P ...]` works (it was a stub, exit 3): it changes a
+      live, unanswered reader question in place. The id, key and ref stay; the new message and/or `places`
+      replace the old ones, which are kept in `amendments` (`at` = the registry run counter, bumped once
+      per amendment; only what changed is recorded). The same values again change nothing (status
+      `unchanged`). Refused with exit 2 for an unknown, producer, withdrawn or answered question (any
+      active answer, simulated included). A live entry missing from `reader-questions.json` is exit 1.
+      `harness ask` now checks `reader-questions.json` against the `reader-questions` schema before it
+      writes it.
 
 ### Changed
 - Question lifecycle (tool wave 2, EVAL-2 fix 5):

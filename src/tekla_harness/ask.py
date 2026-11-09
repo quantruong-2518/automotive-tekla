@@ -20,12 +20,15 @@ document kind as the other `*questions.json`.
     marks one obsolete (kept in the registry with its reason, dropped from reader-questions.json; an
     active answer to it goes stale). Withdrawing twice is a no-op. A withdrawn place cannot be asked again
     (exit 2): ask about another `where`.
+  * `--amend Q-id [--text T] [--places P ...]` changes a live, unanswered reader question in place: same
+    id and key, new message and/or `places`, the replaced values kept in `amendments` (amend_question).
   * Answers work unchanged (`harness answer`).
   * Evidence for a PRODUCER's question is not a new question: `--supplement Q-id` adds it to that question
     (supplements.py, `reader-supplements.json`), never changing its blocking flag or answer.
 
-Stdout: {"id", "key", "status": "new" | "already_asked"}, or {"id", "key", "status": "withdrawn" |
-"already_withdrawn"}. Registry first, then the document (questions.py).
+Stdout: {"id", "key", "status": "new" | "already_asked"}, {"id", "key", "status": "withdrawn" |
+"already_withdrawn"}, or {"id", "key", "status": "amended" | "unchanged"}. Registry first, then the
+document (questions.py), which is checked against the reader-questions schema before it is written.
 
 Exit codes (AGENTS.md): 1 invalid documents or a file not in the inventory, 2 usage.
 """
@@ -161,7 +164,7 @@ def _finish(ledger: Ledger, doc: dict[str, Any]) -> None:
     for q in questions:
         q["answer"] = ledger.active(q["key"])
     doc.update(questions_document(ledger.registry["project_id"], questions))
-    problems = validate("intake", doc)
+    problems = validate("reader-questions", doc)
     if problems:  # a bug here, not in the work folder
         raise QuestionsError(
             EXIT_INVALID, f"{READER_FILE} would be invalid, nothing written: {problems[0].message}"
@@ -300,10 +303,68 @@ def amend_question(
 ) -> dict[str, str]:
     """Amend a live reader question in place (`harness ask --amend Q-id [--text T] [--places P ...]`).
 
-    Contract (tool wave 3 seam; package C implements it): the id and key never change; `text` replaces the
-    question's message, `places` replaces its `places` list (intake schema, reader questions only); each
-    call appends {at: registry run counter, text?: the replaced message, places?: the replaced places} to
-    the question's `amendments` (history kept). Refused (exit 2) for an unknown, obsolete, withdrawn,
-    answered or non-reader question. Returns {"id", "key", "status": "amended"}.
+    The id, key, code, blocking flag and ref never change (the key is the place: asking it again still
+    reports `already_asked`). `text` replaces the question's message, `places` its `places` list. A change
+    bumps the registry's run counter and appends {at: that counter, text?: the replaced message, places?: the
+    replaced places, [] when there were none} to the question's `amendments`; only what actually changes is
+    recorded. Given values equal to the current ones change nothing and write nothing (status `unchanged`).
+    Refused (exit 2) for an unknown, non-reader, obsolete (withdrawn) or answered question (any active
+    answer, whatever its role: amend only a question nobody has answered; ask a new one otherwise). A
+    registry entry missing from reader-questions.json is an inconsistency (exit 1). Returns {"id", "key",
+    "status": "amended" | "unchanged"}. Registry first, then the document (_finish).
     """
-    raise NotImplementedError("harness ask --amend is not implemented yet (tool wave 3, package C)")
+    work = Path(work_dir).resolve()
+    if not work.is_dir():
+        raise QuestionsError(EXIT_USAGE, f"work folder not found (not a folder): {work_dir}")
+    if text is None and places is None:
+        raise QuestionsError(EXIT_USAGE, "--amend needs --text, --places or both: what to change")
+    if text is not None and not text.strip():
+        raise QuestionsError(EXIT_USAGE, "--text is empty: write the amended question in Vietnamese")
+    if places is not None and (not places or not all(p.strip() for p in places)):
+        raise QuestionsError(EXIT_USAGE, "--places: give at least one place, none empty")
+    ledger = load_ledger(work, None, create=False)
+    found = ledger.entry_by_id(question_id)
+    if found is None:
+        raise QuestionsError(EXIT_USAGE, f"unknown question id '{question_id}' (see question-registry.json)")
+    key, entry = found
+    if entry["producer"] != READER:
+        raise QuestionsError(
+            EXIT_USAGE,
+            f"{question_id} belongs to producer '{entry['producer']}', not the reader: only reader questions "
+            "are amended (add evidence to it with --supplement)",
+        )
+    if entry["status"] == "obsolete":
+        raise QuestionsError(
+            EXIT_USAGE,
+            f"{question_id} was withdrawn ({entry.get('withdrawn_reason', 'no reason')}): ask a new question",
+        )
+    if ledger.active(key) is not None:  # the registry marks it answered exactly then (mark_answered)
+        raise QuestionsError(
+            EXIT_USAGE,
+            f"{question_id} is already answered: its answer refers to the current wording, so it is not "
+            "amended; ask a new question about another --where",
+        )
+    doc = _load_reader_doc(work, ledger.registry["project_id"])
+    question = next((q for q in doc["questions"] if q["key"] == key), None)
+    if question is None:
+        raise QuestionsError(
+            EXIT_INVALID,
+            f"{question_id} is live in question-registry.json but not in {READER_FILE}: the documents "
+            "disagree, nothing written",
+        )
+    replaced: dict[str, Any] = {}
+    if text is not None and text != question["message"]:
+        replaced["text"] = question["message"]
+    if places is not None and list(places) != question.get("places", []):
+        replaced["places"] = list(question.get("places", []))
+    if not replaced:
+        return {"id": question_id, "key": key, "status": "unchanged"}
+    run = ledger.registry["runs"] + 1
+    ledger.registry["runs"] = run
+    if text is not None:
+        question["message"] = text
+    if places is not None:
+        question["places"] = list(places)
+    question.setdefault("amendments", []).append({"at": run, **replaced})
+    _finish(ledger, doc)
+    return {"id": question_id, "key": key, "status": "amended"}

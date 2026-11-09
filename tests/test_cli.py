@@ -250,11 +250,13 @@ def test_validate_reader_questions(capsys):
     capsys.readouterr()
 
 
-def test_ask_amend_reaches_package_cs_stub(tmp_path, capsys):
-    assert main(["ask", str(tmp_path), "--amend", "Q-001", "--text", "câu hỏi mới"]) == 3
-    assert main(["ask", str(tmp_path), "--amend", "Q-001", "--places", "model#05 axis 3", "model#07"]) == 3
+def test_ask_amend_is_implemented_and_needs_a_work_folder(tmp_path, capsys):
+    # package C replaced the seam stub (exit 3): a folder without a registry is a usage error
+    # (the behaviour itself: tests/test_ask.py)
+    assert main(["ask", str(tmp_path), "--amend", "Q-001", "--text", "câu hỏi mới"]) == 2
+    assert main(["ask", str(tmp_path), "--amend", "Q-001", "--places", "model#05 axis 3", "model#07"]) == 2
     err = capsys.readouterr().err
-    assert "not implemented yet" in err and "--amend" in err and "Traceback" not in err
+    assert "not implemented" not in err and "question-registry.json" in err and "Traceback" not in err
 
 
 @pytest.mark.parametrize(
