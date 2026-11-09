@@ -553,6 +553,14 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
       has `legacy_ascii_suspect` entries (encoding questions still only when an encoding answer can lift
       a reason); find-text `notes` names the questions covering the blocked entries in scope; `harness
       finding` counts `legacy_ascii_text` as a font question when it refuses a blocked entry.
+    - a5: `harness sheet-text W FILE SHEET --region=x0,y0,x1,y1` (absolute coordinates, the entries' x/y
+      and the list-sheets bbox) returns the sheet's entries whose insertion point lies in the box, edges
+      included, as `rows` of `cells`: rows as the reading order with the whole sheet's row tolerance
+      (0.6 x its median text height), a new cell where the insertion-x gap to the left neighbour exceeds
+      that tolerance, each cell with its entry ids, joined display text, meaning and x span; no blank
+      cell is invented. `entries[].row` indexes `rows`; `counts.assigned` and `legacy_font_gate` stay the
+      whole sheet's; `--contains` and `--max` work as without a region. A box that misses the frame is
+      warned about. On 286 the `Ø<10mm` row reads `Ø<10mm | CI | 225` (T001075, T001074, T001072).
 
 ### Changed
 - Question lifecycle (tool wave 2, EVAL-2 fix 5):

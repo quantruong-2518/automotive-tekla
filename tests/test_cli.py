@@ -285,19 +285,20 @@ def test_ask_places_only_with_amend(tmp_path, capsys):
     assert "--places" in capsys.readouterr().err
 
 
-def test_sheet_text_region_reaches_package_ts_stub(tmp_path, capsys):
+def test_sheet_text_region_reaches_the_reader(tmp_path, capsys):
+    # package T implemented the seam stub: an empty folder is now a usage error from the reader
     argv = ["sheet-text", str(tmp_path), "a.dxf", "model#01", "--region", "60000,54000,70000,57000.5"]
-    assert main(argv) == 3
+    assert main(argv) == 2
     err = capsys.readouterr().err
-    assert "not implemented yet" in err and "--region" in err and "Traceback" not in err
+    assert "inventory.json" in err and "not implemented" not in err and "Traceback" not in err
 
 
 def test_sheet_text_region_takes_negative_model_coordinates_with_equals(tmp_path, capsys):
     # model-space boxes are often negative (286's rebar table sits near y -177151); argparse reads a
     # value starting with '-' after a space as an option, so the help names the '=' form
     argv = ["sheet-text", str(tmp_path), "a.dxf", "model#01", "--region=-5000,-178000,0,-176000"]
-    assert main(argv) == 3
-    assert "not implemented yet" in capsys.readouterr().err
+    assert main(argv) == 2
+    assert "inventory.json" in capsys.readouterr().err
     assert main(["sheet-text", "--help"]) == 0
     assert "--region=-5000" in " ".join(capsys.readouterr().out.split())
 

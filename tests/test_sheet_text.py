@@ -7,6 +7,7 @@ folder work on a copy.
 from __future__ import annotations
 
 import json
+import math
 import shutil
 import unicodedata
 from pathlib import Path
@@ -29,6 +30,7 @@ from tekla_harness.sheet_text import (
     list_sheets,
     normalize,
     reading_order,
+    sheet_region,
     sheet_text,
     truncation_warning,
 )
@@ -967,6 +969,122 @@ def test_cli_unassigned(loose, capsys):
     assert "never matched" in err and doc["counts"]["blocked_in_scope"] == 1
     code, out, err = run_cli(capsys, "sheet-text", str(loose), LOOSE, "model#01", "--unassigned")
     assert code == 2 and out is None and "--unassigned" in err
+
+
+# --- sheet-text --region (tool wave 3, a5) ---------------------------------------------------------------
+
+BOX = (20000.0, 54000.0, 30000.0, 57000.0)  # absolute, the coordinates of the entries and the frame
+
+
+@pytest.fixture
+def table(damaged) -> tuple[Path, dict[str, str]]:
+    """model#01 with a small notes table moved into BOX: (work, {label: entry id}). The table texts are
+    tall (2000), so rows from the region's own median height (1200) would merge rows A and B; the sheet's
+    median (350, tolerance 210) keeps them apart."""
+    entries = sheet_text(damaged, REL, "model#01")["entries"]
+    allowed = [e["entry_id"] for e in entries if e["meaning"] == "allowed"]
+    blocked = next(e["entry_id"] for e in entries if e["meaning"] == "blocked")
+    cells = {  # label: (text, x, y)
+        "A1": ("Ø<10mm", 21000.0, 56500.0),
+        "A2": ("CI", 24000.0, 56500.0),
+        "A3": ("225", 27000.0, 56500.0),
+        "A3b": ("MPa", 27100.0, 56450.0),  # 100 right of '225' (< 210): the same cell
+        "B1": ("Ø>=10mm", 21000.0, 55400.0),  # 100 below the row's first (topmost) entry: the same row
+        "B2": ("CII", 24000.0, 55500.0),
+        "EDGE": ("EDGE", 20000.0, 54000.0),  # on the box's corner: inside
+        "OUT_X": ("OUTX", 30000.5, 56500.0),
+        "OUT_Y": ("OUTY", 21000.0, 57000.5),
+    }
+    ids = dict(zip(cells, allowed, strict=False))
+    patch = {
+        ids[k]: {"display_text": t, "raw_text": t, "position": {"x": x, "y": y, "basis": "insert"},
+                 "height": 2000.0, "flags": [], "unicode": True}
+        for k, (t, x, y) in cells.items()
+    }  # fmt: skip
+    patch[blocked] = {"position": {"x": 27000.0, "y": 55500.0, "basis": "insert"}, "height": 2000.0}
+    patch_entries(damaged, patch)
+    return damaged, {**ids, "B3": blocked}
+
+
+def test_region_reads_a_table_row_by_row_and_cell_by_cell(table):
+    work, ids = table
+    doc = sheet_region(work, REL, "model#01", BOX, check_inputs=True)
+    assert validate("sheet-text", doc) == [] and doc["kind"] == "sheet_text"
+    assert doc["query"]["region"] == list(BOX) and doc["region"] == list(BOX)
+    blocked = next(e for e in doc["entries"] if e["entry_id"] == ids["B3"])
+    shape = [[(c["entry_ids"], c["display_text"]) for c in r["cells"]] for r in doc["rows"]]
+    assert shape == [
+        [([ids["A1"]], "Ø<10mm"), ([ids["A2"]], "CI"), ([ids["A3"], ids["A3b"]], "225 MPa")],
+        [([ids["B1"]], "Ø>=10mm"), ([ids["B2"]], "CII"), ([ids["B3"]], blocked["display_text"])],
+        [([ids["EDGE"]], "EDGE")],
+    ]
+    assert [r["y"] for r in doc["rows"]] == [56500.0, 55500.0, 54000.0]
+    a3 = doc["rows"][0]["cells"][2]
+    assert (a3["x0"], a3["x1"]) == (27000.0, 27100.0)
+    assert a3["meaning"] == "allowed" and a3["blocked_reason"] is None
+    b3 = doc["rows"][1]["cells"][2]
+    assert b3["meaning"] == "blocked" and b3["blocked_reason"] == blocked["blocked_reason"] is not None
+    # entries: the box's entries in reading order, each row index pointing into rows
+    assert [e["entry_id"] for e in doc["entries"]] == [
+        i for r in doc["rows"] for c in r["cells"] for i in c["entry_ids"]
+    ]
+    for e in doc["entries"]:
+        assert e["entry_id"] in {i for c in doc["rows"][e["row"]]["cells"] for i in c["entry_ids"]}
+    assert ids["OUT_X"] not in str(doc) and ids["OUT_Y"] not in str(doc)
+    full = sheet_text(work, REL, "model#01")
+    assert doc["counts"]["assigned"] == full["counts"]["assigned"] and doc["counts"]["matched"] == 8
+    assert doc["legacy_font_gate"] == full["legacy_font_gate"]  # the gate is the sheet's, unchanged
+    assert doc["warnings"] == []
+    # every edge is inside: a box whose top edge runs through row A still holds row A
+    top = sheet_region(work, REL, "model#01", (20000.0, 56000.0, 30000.0, 56500.0))
+    assert [c["entry_ids"] for c in top["rows"][0]["cells"]][:2] == [[ids["A1"]], [ids["A2"]]]
+
+
+def test_region_contains_and_max_keep_the_gate_and_number_rows_by_what_is_returned(table):
+    work, ids = table
+    found = sheet_region(work, REL, "model#01", BOX, contains="c")
+    assert [[c["display_text"] for c in r["cells"]] for r in found["rows"]] == [["CI"], ["CII"]]
+    assert [e["row"] for e in found["entries"]] == [0, 1]
+    only_b = sheet_region(work, REL, "model#01", BOX, contains="ii")  # row B alone: renumbered 0
+    assert [(e["entry_id"], e["row"]) for e in only_b["entries"]] == [(ids["B2"], 0)]
+    assert all(e["meaning"] == "allowed" for e in found["entries"])  # blocked text is never matched
+    assert any("never matched" in w for w in found["warnings"])
+    assert found["query"] == {"contains": "c", "max_entries": None, "region": list(BOX)}
+    capped = sheet_region(work, REL, "model#01", BOX, max_entries=2)
+    assert capped["counts"]["truncated"] and capped["counts"]["returned"] == 2
+    assert [[c["entry_ids"] for c in r["cells"]] for r in capped["rows"]] == [[[ids["A1"]], [ids["A2"]]]]
+    assert truncation_warning(capped) in capped["warnings"]
+    assert validate("sheet-text", found) == [] and validate("sheet-text", capped) == []
+
+
+def test_region_outside_the_frame_warns_and_bad_requests_are_usage_errors(table):
+    work, _ = table
+    away = sheet_region(work, REL, "model#01", (-5000.0, -5000.0, -1000.0, -1000.0))
+    assert away["rows"] == [] and away["entries"] == [] and away["counts"]["matched"] == 0
+    assert any("outside" in w and "absolute" in w for w in away["warnings"])
+    for region in (
+        (1.0, 0.0, 0.0, 1.0),
+        (0.0, 1.0, 1.0, 0.0),
+        (0.0, 0.0, math.inf, 1.0),
+        (math.nan, 0, 1, 1),
+    ):
+        with pytest.raises(ReaderError) as err:
+            sheet_region(work, REL, "model#01", region)
+        assert err.value.exit_code == 2
+    with pytest.raises(ReaderError) as err:
+        sheet_region(work, REL, "model#99", BOX)
+    assert err.value.exit_code == 2
+    with pytest.raises(ReaderError) as err:
+        sheet_region(work, REL, "model#01", BOX, max_entries=0)
+    assert err.value.exit_code == 2
+
+
+def test_cli_region(table, capsys):
+    work, ids = table
+    code, doc, err = run_cli(
+        capsys, "sheet-text", str(work), REL, "model#01", "--region=20000,54000,30000,57000"
+    )
+    assert code == 0 and err == "" and doc["rows"][0]["cells"][1]["entry_ids"] == [ids["A2"]]
 
 
 # --- list-sheets: blocked text per file (tool wave 2, fix 11) ----------------------------------------------

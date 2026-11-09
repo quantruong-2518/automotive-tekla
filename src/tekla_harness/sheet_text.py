@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 import statistics
 import unicodedata
@@ -228,10 +229,19 @@ def sheet_label(sheet: dict[str, Any] | None) -> str:
 # --- reading order -------------------------------------------------------------------------------------
 
 
-def reading_order(entries: list[dict[str, Any]]) -> list[tuple[int | None, dict[str, Any]]]:
-    """(row index, entry) in reading order; see the module docstring."""
+def row_tolerance(entries: list[dict[str, Any]]) -> float:
+    """ROW_TOLERANCE x the median text height of `entries` (heights > 0 only); 0 when there is none."""
     heights = [e["height"] for e in entries if e["height"] is not None and e["height"] > 0]
-    tol = ROW_TOLERANCE * statistics.median(heights) if heights else 0.0
+    return ROW_TOLERANCE * statistics.median(heights) if heights else 0.0
+
+
+def reading_order(
+    entries: list[dict[str, Any]], tol: float | None = None
+) -> list[tuple[int | None, dict[str, Any]]]:
+    """(row index, entry) in reading order; see the module docstring. `tol`: the row tolerance, by default
+    `row_tolerance(entries)` (a region read passes its sheet's)."""
+    if tol is None:
+        tol = row_tolerance(entries)
     placed = sorted(
         (e for e in entries if e["position"]["y"] is not None),
         key=lambda e: (-e["position"]["y"], e["id"]),
@@ -558,6 +568,7 @@ def sheet_text(
     max_entries: int | None = None,
     check_inputs: bool = False,
     unassigned: bool = False,
+    region: tuple[float, float, float, float] | None = None,
 ) -> dict[str, Any]:
     """The text of one sheet in reading order. Raises ReaderError. See `load_file`.
 
@@ -566,9 +577,14 @@ def sheet_text(
     `unassigned` (instead of a sheet id; tool wave 2, fix 4): the entries on no sheet or on several, as
     sheet `unassigned` with null layout and bbox; its `space` names the spaces of those entries (model
     first, then layouts by name, ', '-separated; 'none' when there is no such entry), and they are read in
-    `unassigned_order`. This is how the text of a file without a detected sheet is reached."""
+    `unassigned_order`. This is how the text of a file without a detected sheet is reached.
+    `region` (with a sheet id only): see `sheet_region`."""
     if (sheet_id is None) == (not unassigned):
         raise ReaderError(EXIT_USAGE, "give either a sheet id or --unassigned, not both and not neither")
+    if region is not None and unassigned:
+        raise ReaderError(
+            EXIT_USAGE, "a region reads a box of ONE sheet: give its sheet id, not --unassigned"
+        )
     if max_entries is not None and max_entries < 1:
         raise ReaderError(EXIT_USAGE, "max_entries must be at least 1")
     inv = load_inventory(work_dir)
@@ -577,6 +593,7 @@ def sheet_text(
         raise ReaderError(EXIT_USAGE, f"{file_rel} has no text to read: {loaded.skip}")
     if loaded.sheets is None:
         raise ReaderError(EXIT_USAGE, f"{file_rel}: " + "; ".join(loaded.warnings))
+    tol = 0.0  # the sheet's row tolerance; a region read needs it (never with --unassigned)
     if unassigned:
         entries = _unassigned_entries(loaded)
         ordered = unassigned_order(entries)
@@ -601,7 +618,11 @@ def sheet_text(
             )
         sh = found[0]
         entries = _sheet_entries(loaded, sh)
-        ordered = reading_order(entries)
+        tol = row_tolerance(entries)
+        if region is None:
+            ordered = reading_order(entries, tol)
+        else:
+            ordered = reading_order([e for e in entries if _in_box(e, region)], tol)
         sheet = {
             "sheet_id": sh["sheet_id"],
             "space": sh["space"],
@@ -631,9 +652,10 @@ def sheet_text(
             "contains": contains,
             "max_entries": max_entries,
             **({"unassigned": True} if unassigned else {}),
+            **({"region": list(region)} if region is not None else {}),
         },
         "counts": {
-            "assigned": len(ordered),
+            "assigned": len(entries),
             "matched": len(matched),
             "returned": len(shown),
             "omitted": len(matched) - len(shown),
@@ -643,6 +665,12 @@ def sheet_text(
         "entries": [_compact(r, e) for r, e in shown],
         "warnings": [*loaded.warnings, *id_warnings, *hidden],
     }
+    if region is not None:
+        rows, renumbered = _region_rows(shown, ordered, tol)
+        doc["region"] = list(region)
+        doc["rows"] = rows
+        doc["entries"] = [_compact(renumbered[e["id"]], e) for _, e in shown]
+        doc["warnings"].extend(_outside_warning(region, sheet))
     warning = truncation_warning(doc)
     if warning:
         doc["warnings"].append(warning)
@@ -794,12 +822,95 @@ def sheet_region(
     max_entries: int | None = None,
     check_inputs: bool = False,
 ) -> dict[str, Any]:
-    """The entries of one sheet inside `region` (x0, y0, x1, y1 in the sheet's space, x0 < x1, y0 < y1),
-    as `harness sheet-text W FILE SHEET --region x0,y0,x1,y1` prints them.
+    """The entries of one sheet inside `region`, as `harness sheet-text W FILE SHEET --region x0,y0,x1,y1`
+    prints them (tool wave 3, a5: a notes-table cell becomes a tool claim, not an eyeball one).
 
-    Contract (tool wave 3 seam, sheet-text schema; package T implements it): a `sheet_text` document whose
-    query carries `region`, with top-level `region` and `rows` (reading-order rows, each split into cells
-    by x gaps; a cell lists its entry ids, display text, meaning and blocked_reason). The legacy-font gate
-    is unchanged: blocked entries stay blocked. Raises ReaderError.
+    `region` is x0, y0, x1, y1 in ABSOLUTE coordinates of the sheet's space (the entries' x/y and the
+    list-sheets frame bbox; not relative to the frame), x0 < x1 and y0 < y1, all finite. An entry is in the
+    box when its insertion point is (edges included); entries without a position never are. The result
+    is a `sheet_text` document whose query carries `region`, with top-level `region` and `rows`:
+      * rows: the box's entries in reading order (rows and their tolerance as `reading_order`, the
+        tolerance taken from the WHOLE sheet's median text height), numbered over the returned entries
+        (`entries[].row` indexes `rows`); a row's `y` is its first (topmost) entry's y in the box;
+      * cells: inside a row, left to right, a new cell starts where the gap between neighbouring insertion
+        x values exceeds that same tolerance; a cell joins its entries' display text with one space, is
+        blocked when any entry is (the first blocked entry's reason), and spans x0..x1 (insertion x). A
+        blank cell is never invented.
+    `counts.assigned` and `legacy_font_gate` stay the whole sheet's (the gate is unchanged); `matched` is
+    the box's entries passing `contains` (a blocked entry is never matched); `max_entries` as `sheet_text`.
+    A box that misses the sheet's frame gets a warning. Raises ReaderError (2 for a bad region).
     """
-    raise NotImplementedError("harness sheet-text --region is not implemented yet (tool wave 3, package T)")
+    if len(region) != 4 or not all(math.isfinite(v) for v in region):
+        raise ReaderError(EXIT_USAGE, f"region must be four finite numbers x0,y0,x1,y1, not {region}")
+    x0, y0, x1, y1 = region
+    if not (x0 < x1 and y0 < y1):
+        raise ReaderError(EXIT_USAGE, f"region {region}: need x0 < x1 and y0 < y1 (the box's corners)")
+    return sheet_text(
+        work_dir,
+        file_rel,
+        sheet_id,
+        contains=contains,
+        max_entries=max_entries,
+        check_inputs=check_inputs,
+        region=(float(x0), float(y0), float(x1), float(y1)),
+    )
+
+
+def _in_box(entry: dict[str, Any], region: tuple[float, float, float, float]) -> bool:
+    x, y = entry["position"]["x"], entry["position"]["y"]
+    x0, y0, x1, y1 = region
+    return x is not None and y is not None and x0 <= x <= x1 and y0 <= y <= y1
+
+
+def _region_rows(
+    shown: list[tuple[int | None, dict[str, Any]]],
+    ordered: list[tuple[int | None, dict[str, Any]]],
+    tol: float,
+) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    """(rows, entry id -> row index) over the returned entries; see `sheet_region`."""
+    anchors: dict[int | None, float] = {}
+    for r, e in ordered:  # a row's first entry in `reading_order` is its topmost (the y it was opened at)
+        anchors[r] = max(anchors.get(r, e["position"]["y"]), e["position"]["y"])
+    rows: list[dict[str, Any]] = []
+    index: dict[int | None, int] = {}
+    renumbered: dict[str, int] = {}
+    last_x = 0.0
+    for r, e in shown:
+        x = e["position"]["x"]
+        if r not in index:
+            index[r] = len(rows)
+            rows.append({"y": anchors[r], "cells": []})
+        cells = rows[index[r]]["cells"]
+        if not cells or x - last_x > tol:
+            cells.append([])
+        cells[-1].append(e)
+        last_x = x
+        renumbered[e["id"]] = index[r]
+    for row in rows:
+        row["cells"] = [_cell(group) for group in row["cells"]]
+    return rows, renumbered
+
+
+def _cell(entries: list[dict[str, Any]]) -> dict[str, Any]:
+    reasons = [r for r in (meaning_block_reason(e) for e in entries) if r is not None]
+    xs = [e["position"]["x"] for e in entries]
+    return {
+        "entry_ids": [e["id"] for e in entries],
+        "display_text": " ".join(e["display_text"] for e in entries),
+        "meaning": "blocked" if reasons else "allowed",
+        "blocked_reason": reasons[0] if reasons else None,
+        "x0": min(xs),
+        "x1": max(xs),
+    }
+
+
+def _outside_warning(region: tuple[float, float, float, float], sheet: dict[str, Any]) -> list[str]:
+    """A warning when the box does not overlap the sheet's frame (often a frame-relative box)."""
+    bbox = sheet["bbox"]
+    x0, y0, x1, y1 = region
+    if bbox is None or (x0 <= bbox[2] and bbox[0] <= x1 and y0 <= bbox[3] and bbox[1] <= y1):
+        return []
+    return [
+        f"region {list(region)} lies outside the frame of {sheet['sheet_id']} {bbox}: region coordinates "
+        "are absolute (the entries' x/y and the list-sheets bbox), not relative to the frame"
+    ]
