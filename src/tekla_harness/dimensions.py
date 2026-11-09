@@ -20,6 +20,13 @@ change the value (the printed text does not change either); ezdxf's virtual copy
 and the layer. A row whose group 42 disagrees with the measurement is `not_compared`, whatever its text
 rule.
 
+Text link (review F2 item 4): a row whose text is more than the measurement (rule override or
+measured_with_text) carries `text_entry`, its text-index DIMENSION entry (same space, block path and raw
+text; the nearest to the text midpoint among equal ones) with the legacy-font gate's verdict
+(`text_gate.meaning_block_reason`). An override whose meaning is blocked is not read: override_value,
+expected value and tolerance null, status not_compared, with a note. A text without an index entry has
+`text_entry` null and is counted in `warnings`.
+
 Layer: the effective layer. Inside a block, a dimension on layer 0 takes the layer of the INSERT that
 places it, resolved through nested INSERTs (AutoCAD's layer-0 rule); `--layer` filters on it. The schema
 has one layer field, so the stored layer of such a dimension (0) is not reported.
@@ -35,6 +42,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import sys
 from collections import Counter
 from pathlib import Path
@@ -57,6 +65,7 @@ from tekla_harness.sheet_text import (
     load_inventory,
 )
 from tekla_harness.sheets import SHEET_UNKNOWN, SheetLocator, Walker, layout_spaces, open_checked
+from tekla_harness.text_gate import meaning_block_reason
 
 COMMAND = "dimensions"
 HELP = "every DIMENSION of one drawing: measured value, printed text, override, layer, sheet (read-only)"
@@ -82,6 +91,61 @@ def _definition(copy: Any) -> Any:
     degrees it measures about 0 (sample 270, block *U1792: 2.9e-08 for group 42 = 4000)."""
     origin = getattr(copy, "origin_of_copy", None)
     return copy if origin is None else origin
+
+
+class _TextLinks:
+    """The text-index DIMENSION entries (the dimension's own text, never a measured value), found by space,
+    block path and raw text; among equal ones the nearest to the dimension's text midpoint."""
+
+    def __init__(self, entries: list[dict[str, Any]]):
+        self.by_key: dict[tuple[str, tuple[str, ...], str], list[dict[str, Any]]] = {}
+        for e in entries:
+            if e["entity_type"] == "DIMENSION":
+                key = (e["space"], tuple(e["block_path"]), e["raw_text"])
+                self.by_key.setdefault(key, []).append(e)
+        self.missing = 0
+
+    def link(self, space: str, block_path: tuple[str, ...], text: str, at: tuple[Any, Any]) -> Any:
+        if _TEXT_RULE_HAS_TEXT.get(text, True) is False:
+            return None
+        found = self.by_key.get((space, block_path, text))
+        if not found:
+            self.missing += 1
+            return None
+
+        def distance(e: dict[str, Any]) -> float:
+            x, y = e["position"]["x"], e["position"]["y"]
+            if None in (x, y, *at):
+                return math.inf
+            return math.hypot(x - at[0], y - at[1])
+
+        entry = min(found, key=distance)
+        reason = meaning_block_reason(entry)
+        return {
+            "entry_id": entry["id"],
+            "meaning": "allowed" if reason is None else "blocked",
+            "block_reason": reason,
+        }
+
+
+# texts extract_text never indexes: the measurement shown as is, or suppressed (read_dxf._text_rule)
+_TEXT_RULE_HAS_TEXT = {"": False, "<>": False, " ": False}
+
+
+def _gate_override(row: dict[str, Any]) -> None:
+    """An override text whose meaning the legacy-font gate blocks is not read (review F2 item 4)."""
+    link = row["text_entry"]
+    if row["text_rule"] != "override" or link is None or link["meaning"] != "blocked":
+        return
+    note = (
+        f"the override text is blocked by the legacy-font gate ({link['block_reason']}): "
+        "its value is not read"
+    )
+    if row["note"]:
+        note = f"{note}; {row['note']}"
+    row.update(
+        override_value=None, expected_text_value=None, tolerance=None, status="not_compared", note=note
+    )
 
 
 def _anchor(dim: Any) -> tuple[float | None, float | None]:
@@ -166,6 +230,7 @@ def dimensions(
     handles_ok = bool(loaded.text_index["file"]["handles_reliable"])
     locator = None if loaded.sheets is None else SheetLocator(loaded.sheets)
     walker = Walker(doc, handles_ok)
+    links = _TextLinks(loaded.text_index["entries"])
     rows: list[dict[str, Any]] = []
     for space, layout, is_model in layout_spaces(doc):
         insert_layers: dict[int, str | None] = {}  # INSERT occurrence serial -> its effective layer
@@ -186,14 +251,21 @@ def dimensions(
             if block_path:
                 row["handle"] = None  # a placement of the definition, not the definition itself
             on: str | None = None
+            x, y = _anchor(dim)
             if locator is not None:
-                x, y = _anchor(dim)
                 found = locator.locate(space, x, y)
                 on = None if found == SHEET_UNKNOWN else found
-            row.update(layer=effective, sheet=on, block_path=block_path)
+            link = links.link(space, placed.block_path, row["text"], (x, y))
+            row.update(layer=effective, sheet=on, block_path=block_path, text_entry=link)
+            _gate_override(row)
             rows.append(row)
     if walker.skipped:
         warnings.append(f"{file_rel}: some INSERTs were not expanded: {dict(sorted(walker.skipped.items()))}")
+    if links.missing:
+        warnings.append(
+            f"{file_rel}: {links.missing} dimension text(s) have no text-index entry (text_entry null): "
+            "the legacy-font gate was not applied to them"
+        )
     folded = None if layer is None else layer.casefold()
     matched = [
         r

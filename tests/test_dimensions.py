@@ -24,6 +24,7 @@ from tekla_harness.dimensions import dimensions
 from tekla_harness.intake import run_intake
 from tekla_harness.schemas import validate
 from tekla_harness.sheet_text import ReaderError
+from tekla_harness.text_gate import meaning_block_reason
 
 DIM_LAYER = "S-DIM"
 NESTED_AT = (20000.0, 30000.0)
@@ -346,6 +347,9 @@ def test_a_changed_drawing_is_refused(world):
 
 ROT_AT = (40000.0, 30000.0)
 ROT_LENGTH = 4000.0
+BLOCKED_STYLE = "VntimeH"  # font vntimeh.shx: encoding unknown, so non-ASCII text is blocked
+BLOCKED_TEXT = "250 cöa"  # as sample 270's '250 cöa' (TCVN3 for 'cửa'), invented here
+TEXT_TWIN_AT = (ROT_AT[0] + 3125.0, 25501.875)  # ezdxf's text midpoint of the '250' dimension
 
 
 def build_rotated_dxf(base: Path) -> Path:
@@ -372,6 +376,19 @@ def build_rotated_dxf(base: Path) -> Path:
     bad = msp.add_linear_dim(base=(ROT_AT[0], 20500), p1=(ROT_AT[0], 20000), p2=(ROT_AT[0] + 1000, 20000))
     bad.render()
     bad.dimension.dxf.actual_measurement = 1500.0
+    # override texts in a legacy font whose encoding is unknown: blocked by the text gate
+    doc.styles.add(BLOCKED_STYLE, font="vntimeh.shx")
+    # a TEXT with the same words at the '250' dimension's text midpoint: only DIMENSION entries link
+    msp.add_text("250", height=100, dxfattribs={"insert": TEXT_TWIN_AT})
+    for x, text in ((0, BLOCKED_TEXT), (3000, "250")):
+        msp.add_linear_dim(
+            base=(ROT_AT[0] + x, 25500),
+            p1=(ROT_AT[0] + x, 25000),
+            p2=(ROT_AT[0] + x + 250, 25000),
+            text=text,
+            dimstyle="Standard",
+            override={"dimtxsty": BLOCKED_STYLE},
+        ).render()
     doc.saveas(root / REL)
     # ezdxf always writes group 50 (angle 0.0) of a rotated dimension; 270 omits it: drop it as 270 does
     path = root / REL
@@ -383,13 +400,23 @@ def build_rotated_dxf(base: Path) -> Path:
 
 
 @pytest.fixture(scope="module")
-def rot(tmp_path_factory) -> dict[str, Any]:
+def rot_base(tmp_path_factory) -> Path:
     root = tmp_path_factory.mktemp("rot")
     inp = build_rotated_dxf(root)
     work = root / "work"
     run_intake(inp, work, "demo-rot", knowledge=PROPOSED_FONT_TABLE)
     write_structure(inp, work)
-    return dimensions(work, REL, input_dir=inp)
+    return root
+
+
+@pytest.fixture(scope="module")
+def rot(rot_base) -> dict[str, Any]:
+    return dimensions(rot_base / "work", REL, input_dir=rot_base / "input")
+
+
+def index_entries(base: Path) -> list[dict[str, Any]]:
+    text = (base / "work" / "text" / f"{REL}.json").read_text(encoding="utf-8")
+    return [e for e in json.loads(text)["entries"] if e["entity_type"] == "DIMENSION"]
 
 
 def test_block_content_is_measured_on_its_definition_not_on_the_rotated_copy(rot):
@@ -418,3 +445,101 @@ def test_every_disagreeing_row_is_not_compared_whatever_its_text_rule(rot):
     for r in rot["dimensions"]:
         if r["measurement_agrees"] is False:
             assert r["status"] == "not_compared" and r["note"]
+
+
+def test_an_override_text_the_gate_blocks_is_linked_and_not_read(rot, rot_base):
+    """Review F2 item 4: '250 cöa' in a legacy font was echoed raw with nothing saying it is blocked.
+    The row names its text-index entry and the gate's verdict; its value is not read."""
+    by_text = {e["raw_text"]: e for e in index_entries(rot_base) if not e["block_path"]}
+    (blocked,) = rows(rot, text=BLOCKED_TEXT)
+    reason = meaning_block_reason(by_text[BLOCKED_TEXT])  # the knowledge table proposes this font's row
+    assert reason is not None
+    assert blocked["text_entry"] == {
+        "entry_id": by_text[BLOCKED_TEXT]["id"],
+        "meaning": "blocked",
+        "block_reason": reason,
+    }
+    assert blocked["status"] == "not_compared" and blocked["override_value"] is None
+    assert blocked["expected_text_value"] is None and blocked["tolerance"] is None
+    assert "blocked" in blocked["note"] and reason in blocked["note"]
+    index = json.loads((rot_base / "work" / "text" / f"{REL}.json").read_text(encoding="utf-8"))
+    (twin,) = [e for e in index["entries"] if e["entity_type"] == "TEXT" and e["raw_text"] == "250"]
+    assert twin["position"]["x"] == pytest.approx(by_text["250"]["position"]["x"])  # precondition: a tie
+    assert twin["position"]["y"] == pytest.approx(by_text["250"]["position"]["y"])
+    (plain,) = rows(rot, text="250")  # ASCII in the same font: allowed, compared as before
+    assert plain["text_entry"] == {
+        "entry_id": by_text["250"]["id"],
+        "meaning": "allowed",
+        "block_reason": None,
+    }
+    assert plain["status"] == "ok" and plain["override_value"] == 250.0
+    assert validate("dimensions", rot) == []
+
+
+def test_every_dimension_text_links_its_own_text_index_entry(rot, rot_base):
+    """Block content too: each placement of a block's override text is its own index entry."""
+    entries = index_entries(rot_base)
+    over = [r for r in rot["dimensions"] if r["text"] == "4100"]
+    ids = [r["text_entry"]["entry_id"] for r in over]
+    assert len(set(ids)) == len(over) == 3
+    by_id = {e["id"]: e for e in entries}
+    assert sorted(tuple(by_id[i]["block_path"]) for i in ids) == sorted(tuple(r["block_path"]) for r in over)
+    # two placements of ROT_DIM: the rotated one at ROT_AT, the scaled one 10000 higher; each its own entry
+    rotated, scaled = [by_id[r["text_entry"]["entry_id"]] for r in over if r["block_path"] == ["ROT_DIM"]]
+    assert rotated["position"]["y"] < ROT_AT[1] + 9000 < scaled["position"]["y"]
+    for r in rot["dimensions"]:
+        if r["text_rule"] in ("measured", "suppressed") and r["text"] in ("", "<>", " "):
+            assert r["text_entry"] is None  # no text of its own: the index has no entry
+    assert not any("no text-index entry" in w for w in rot["warnings"])
+
+
+def test_a_dimension_text_missing_from_the_index_is_counted_not_dropped(rot_base, tmp_path, monkeypatch):
+    """Without its index entry a text is reported (text_entry null) and counted in a warning; a blocked
+    text then cannot be recognised, so the warning says the gate was not applied."""
+    from tekla_harness import dimensions as dims_mod
+
+    shutil.copytree(rot_base, tmp_path / "w")
+    work, inp = tmp_path / "w" / "work", tmp_path / "w" / "input"
+    path = work / "text" / f"{REL}.json"
+    index = json.loads(path.read_text(encoding="utf-8"))
+    kept = [e for e in index["entries"] if not (e["entity_type"] == "DIMENSION" and e["raw_text"] == "4100")]
+    assert len(kept) == len(index["entries"]) - 3
+    monkeypatch.setattr(dims_mod, "load_file", _with_entries(dims_mod.load_file, kept))
+    out = dimensions(work, REL, input_dir=inp)
+    over = [r for r in out["dimensions"] if r["text"] == "4100"]
+    assert len(over) == 3 and all(r["text_entry"] is None for r in over)
+    assert all(r["status"] == "override_differs" for r in over)  # read as before: nothing says blocked
+    (warning,) = [w for w in out["warnings"] if "no text-index entry" in w]
+    assert "3 dimension text(s)" in warning
+    assert rows(out, text="250")[0]["text_entry"] is not None
+    assert validate("dimensions", out) == []
+
+
+def test_a_blocked_override_that_looks_numeric_is_not_read():
+    """The gate wins over a value already parsed (e.g. '250' plus a non-ASCII space in a legacy font)."""
+    from tekla_harness.dimensions import _gate_override
+
+    row = {
+        "text_rule": "override",
+        "override_value": 250.0,
+        "expected_text_value": 250.0,
+        "tolerance": 0.005,
+        "status": "ok",
+        "note": "DIMLFAC -1 is negative",
+        "text_entry": {"entry_id": "T000001", "meaning": "blocked", "block_reason": "encoding_unknown"},
+    }
+    _gate_override(row)
+    assert (row["override_value"], row["expected_text_value"], row["tolerance"]) == (None, None, None)
+    assert row["status"] == "not_compared"
+    assert row["note"].startswith("the override text is blocked") and row["note"].endswith("is negative")
+
+
+def _with_entries(load_file: Any, entries: list[dict[str, Any]]) -> Any:
+    """load_file whose text index keeps only `entries` (the drawing's sha256 check stays real)."""
+
+    def patched(*args: Any, **kwargs: Any) -> Any:
+        loaded = load_file(*args, **kwargs)
+        loaded.text_index["entries"] = entries
+        return loaded
+
+    return patched

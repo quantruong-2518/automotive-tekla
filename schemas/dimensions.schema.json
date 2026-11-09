@@ -61,7 +61,7 @@
         "dim_type": { "type": "string" },
         "text_rule": { "enum": ["measured", "measured_with_text", "suppressed", "override"], "description": "As in the dxf-probe dimension_audit: 'override' is any text that does not show the measurement." },
         "text": { "type": "string", "description": "dxf.text verbatim (the override text, '' or '<>' when the measurement is shown)." },
-        "measured": { "type": ["number", "null"], "description": "ezdxf get_measurement(), drawing units (angular: degrees)." },
+        "measured": { "type": ["number", "null"], "description": "ezdxf get_measurement(), drawing units (angular: degrees); block content is measured on its block definition, in the block's units." },
         "actual_measurement": { "type": ["number", "null"], "description": "Group 42 as stored (angular: radians); null when absent." },
         "measurement_agrees": { "type": ["boolean", "null"] },
         "expected_text_value": { "type": ["number", "null"] },
@@ -71,7 +71,23 @@
         "note": { "type": ["string", "null"] },
         "layer": { "type": ["string", "null"] },
         "sheet": { "type": ["string", "null"], "description": "Detector sheet id the dimension lies on; null when on no sheet or several, or when the sheets document is missing." },
-        "block_path": { "type": "array", "items": { "type": "string" }, "description": "Block names from the outermost INSERT inwards; empty for a dimension placed directly in a layout." }
+        "block_path": { "type": "array", "items": { "type": "string" }, "description": "Block names from the outermost INSERT inwards; empty for a dimension placed directly in a layout." },
+        "text_entry": {
+          "description": "The text-index entry of the dimension's own text (text rule override or measured_with_text) and the legacy-font gate's verdict on it; null when the text shows only the measurement, or when the index has no matching entry (counted in warnings). An override whose meaning is blocked is not read: status not_compared, override_value null.",
+          "anyOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "required": ["entry_id", "meaning", "block_reason"],
+              "additionalProperties": false,
+              "properties": {
+                "entry_id": { "type": "string", "pattern": "^T[0-9]{6,}$" },
+                "meaning": { "enum": ["allowed", "blocked"] },
+                "block_reason": { "type": ["string", "null"], "description": "A text_gate reason when meaning is blocked, else null." }
+              }
+            }
+          ]
+        }
       }
     }
   }

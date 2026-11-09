@@ -505,6 +505,11 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
     `b x h` values, or none is readable), else "the schedule table has no size column"; a row with no
     cell in its size columns says "the schedule row has no size cells" (was "... are not numbers");
     `blocked_columns` no longer lists a header cell that lies in no column (`column: null`).
+  - `harness dimensions` rows carry `text_entry` (schema `dimensions`, additive optional field, `$id` still
+    0.1): the text-index entry of the dimension's own text and the legacy-font gate's verdict (`meaning`,
+    `block_reason`); null for a text that only shows the measurement. An override text the gate blocks is
+    not read (override_value null, status `not_compared`, note). A text with no index entry is counted in
+    `warnings`. Sample 270: 75 of 75 texts linked, 15 blocked (were `not_numeric`).
 - Reading toolchain, after an independent review of the EVAL-1 wave:
   - `harness marks`: a rotated header keyword (or one that is not a cell text) no longer crashes the run;
     the table becomes a non-blocking `schedule_table_unparsed`. Questions no longer quote table ids, so a
