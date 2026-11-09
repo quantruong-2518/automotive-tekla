@@ -611,7 +611,7 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
       `unchanged`). Refused with exit 2 for an unknown, producer, withdrawn or answered question (any
       active answer, simulated included). A live entry missing from `reader-questions.json` is exit 1.
       `harness ask` now checks `reader-questions.json` against the `reader-questions` schema before it
-      writes it.
+      writes it, and when it reads it (a document that breaks the reader rules is refused, exit 1).
     - `harness status` always writes `gate1.closed`, as `[]` when nothing is closed (W5).
     - `status` schema: `gate1.closed` is required (`$id` still 0.1; example updated). A status output
       written before tool wave 3 without it no longer validates; rerun `harness status`.

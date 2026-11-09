@@ -28,7 +28,8 @@ document kind as the other `*questions.json`.
 
 Stdout: {"id", "key", "status": "new" | "already_asked"}, {"id", "key", "status": "withdrawn" |
 "already_withdrawn"}, or {"id", "key", "status": "amended" | "unchanged"}. Registry first, then the
-document (questions.py), which is checked against the reader-questions schema before it is written.
+document (questions.py). reader-questions.json is checked against the reader-questions schema when read
+(a document that breaks it is refused, exit 1) and again before it is written.
 
 Exit codes (AGENTS.md): 1 invalid documents or a file not in the inventory, 2 usage.
 """
@@ -151,7 +152,7 @@ def _load_reader_doc(work: Path, project_id: str) -> dict[str, Any]:
         doc = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise QuestionsError(EXIT_INVALID, f"{READER_FILE} cannot be read: {exc}") from exc
-    problems = validate("intake", doc)
+    problems = validate("reader-questions", doc)  # the intake schema plus the reader's own rules
     if problems or doc.get("kind") != "questions":
         why = problems[0].message if problems else "kind is not 'questions'"
         raise QuestionsError(EXIT_INVALID, f"{READER_FILE} is invalid: {why}")

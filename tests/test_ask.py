@@ -490,17 +490,24 @@ def test_amend_a_question_missing_from_the_document_is_an_inconsistency(world):
     assert caught.value.exit_code == 1 and "reader-questions.json" in str(caught.value)
 
 
-def test_the_reader_document_is_checked_against_its_own_schema_before_writing(world):
-    """A question with two refs is a valid intake question but not a reader one: nothing is written."""
+def test_a_reader_document_that_breaks_the_reader_rules_is_refused_when_read(world):
+    """A question with two refs is a valid intake question but not a reader one: every mode of harness ask
+    refuses the document (exit 1) and writes nothing."""
     _, work = world
     q = ask(work)
     doc = load(work / "reader-questions.json")
     doc["questions"][0]["refs"].append({"file": FILE, "where": "grid Z", "found": "f"})
     (work / "reader-questions.json").write_text(json.dumps(doc), encoding="utf-8")
     snapshot = (work / "question-registry.json").read_bytes()
-    with pytest.raises(QuestionsError) as caught:
-        amend_question(work, q["id"], text="mới")
-    assert caught.value.exit_code == 1 and "would be invalid" in str(caught.value)
+    for run in (
+        lambda: amend_question(work, q["id"], text="mới"),
+        lambda: ask(work, where="grid Y"),
+        lambda: withdraw_question(work, q["id"], "r"),
+    ):
+        with pytest.raises(QuestionsError) as caught:
+            run()
+        # the document on disk is at fault, not the command: it is refused when read
+        assert caught.value.exit_code == 1 and "reader-questions.json is invalid" in str(caught.value)
     assert (work / "question-registry.json").read_bytes() == snapshot
 
 
