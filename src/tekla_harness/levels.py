@@ -11,8 +11,9 @@ on a structural sheet is finished or structural. So:
 1. Every line of every indexed text is scanned (display_text: '%%p' is already '±') for a signed decimal
    (`_VALUE_RE`): '±' (also written '+-' or '+/-'), '+', '-' or U+2212, 1-3 digits, '.' or ','
    (flagged), 1-3 decimals, optional 'm'. A sign separated from the digits by a space counts only at the
-   start of the line or after a level word ('TẦNG 2 - 3.600' is a name, a dash and an unsigned number:
-   no level). Unsigned numbers, values followed by 'mm' or '%' are not levels.
+   start of the line, after a level word, or right after '(' ('(+ 6.00M LEVEL)'); 'TẦNG 2 - 3.600' is a
+   name, a dash and an unsigned number: no level. Unsigned numbers, values followed by 'mm' or '%' are
+   not levels.
 2. The line around the value gives the form: bare (nothing else), prefixed (a level word only),
    labelled (a storey name, optionally a level word, then the value), embedded (anything else). Storey
    words are matched WITH their diacritics (tầng, sàn, mái, tum, hầm, lầu; English floor, roof, ...):
@@ -249,8 +250,13 @@ def _parse(line: str):
         raw_before = line[: m.start()]
         if raw_before and raw_before[-1].isalpha() and not _PREFIX_RE.search(_fold_keep(raw_before)):
             continue  # a letter glued to the sign ('A-1.200') is not a level unless it ends a level word
-        if m.group("gap") and before and not _PREFIX_RE.search(_fold_keep(raw_before)):
-            continue  # 'TẦNG 2 - 3.600': a dash between a name and a number, not a sign
+        if (
+            m.group("gap")
+            and before
+            and not _PREFIX_RE.search(_fold_keep(raw_before))
+            and not raw_before.rstrip().endswith("(")
+        ):
+            continue  # 'TẦNG 2 - 3.600': a dash between a name and a number, not a sign; '(+ 6.00M' is one
         if _NOT_LEVEL_AFTER_RE.match(line, m.end()):
             continue  # '+3.600 mm' (millimetres), 'i=-2.5%' (a slope)
         sign = m.group("sign")

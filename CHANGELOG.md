@@ -517,6 +517,9 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
       quantity headings, names nothing. So `level_name_conflict` is no longer raised between slab-plan
       titles (290: three false conflicts; 267: one), and storey heights fall back to the asked, low
       rule instead of skipping unnamed levels (290: +7.300 is no longer skipped).
+    - Levels: a sign with one space before the digits right after `(` is a sign, so
+      `(+ 6.00M LEVEL)` gives the level +6.000 (161 and Steel_01). Elsewhere a spaced sign after other
+      text is still read as a dash (`TẦNG 2 - 3.600`).
 
 ### Changed
 - Question lifecycle (tool wave 2, EVAL-2 fix 5):

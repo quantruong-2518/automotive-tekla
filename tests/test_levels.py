@@ -86,6 +86,11 @@ def level_set(tmp_path_factory) -> dict[str, Any]:
             "MẶT BẰNG THÉP SÀN CAO ĐỘ +7.300 VÀ +10.500",
             [("7.300", "embedded", None, None), ("10.500", "embedded", None, None)],
         ),
+        # a spaced sign right after '(' is a sign (tool wave 3 a3), elsewhere still a dash
+        ("(+ 6.00M LEVEL)", [("6.00", "embedded", None, None)]),
+        ("( - 1.200)", [("-1.200", "embedded", None, None)]),
+        ("A (- 1.200", [("-1.200", "embedded", None, None)]),
+        ("B + 6.00M LEVEL", []),
     ],
 )
 def test_parse(text, expected):
@@ -279,6 +284,13 @@ def test_an_adjacent_name_needs_a_number_or_a_roof_word(tmp_path, name, expected
 )
 def test_a_storey_name_needs_a_number_or_a_storey_word_of_its_own(text, named):
     assert mod._names_storey(text) is named
+
+
+def test_a_spaced_sign_after_a_bracket_is_a_level(tmp_path):
+    result = run(_texts(tmp_path, "F.F.L +1.20", "(+ 6.00M LEVEL)"))
+    six = next(c for c in result["candidates"] if c["value_text"] == "+ 6.00M")
+    assert six["value"]["value"] == 6.0 and six["form"] == "embedded" and six["unit_suffix"] == "M"
+    assert [lv["value_text"] for lv in result["levels"]] == ["+1.200", "+6.000"]
 
 
 def test_out_of_range_value_is_a_unit_question(tmp_path):
