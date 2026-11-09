@@ -577,6 +577,10 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
     it stays a gate-1 reason through its own blocking intake question (`read_failed`,
     `conversion_empty`, `no_reader_implemented`) until the engineer answers it, and is a `files:` reason
     when no such question is live.
+  - `harness grid-system`: a system's `grid_system_axis_unassigned` question is keyed by its representative
+    families (`where` = `<file> <view>/<family> x <view>/<family>`), not by its positional system id, which
+    moves to the message (`Grid system S00n: …`). Adding an unrelated drawing file no longer re-asks it or
+    leaves the engineer's X/Y answer stale. Existing X/Y answers go stale once, on the first rerun.
 - `guard_tekla_write.py` now exits 2 (the blocking code) on any internal error instead of
   relying on an undocumented `onFailure` setting; the setting was removed.
 - `guard_tekla_write.py` no longer blocks commands that only mention `tekla-cli` as data

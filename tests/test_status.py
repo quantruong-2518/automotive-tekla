@@ -58,6 +58,16 @@ def find(questions: list[dict[str, Any]], code: str, file: str | None = None) ->
     return q
 
 
+def subject(q: dict[str, Any]) -> str:
+    """What a question is about: an axis question's system id (in its message; its `where` names the
+    representative families, so its key survives renumbering), else its first ref's `where`."""
+    if q["code"] == SYSTEM_AXIS_CODE:
+        m = re.search(r"Grid system (S\d+):", q["message"])
+        assert m, q["message"]
+        return m.group(1)
+    return q["refs"][0]["where"]
+
+
 def by_label(status: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return {p["producer"]: p for p in status["producers"]}
 
@@ -194,7 +204,7 @@ def test_grid_system_command_writes_documents_drawings_and_numbered_questions(wo
     merged = [q for q in qs if q["code"] not in own]
     assert len({(q["code"], q["blocking"], q["file"]) for q in merged}) == len(merged)
     axis = [q for q in qs if q["code"] == SYSTEM_AXIS_CODE]
-    assert sorted(q["refs"][0]["where"] for q in axis) == [s["system_id"] for s in doc["systems"]]
+    assert sorted(subject(q) for q in axis) == [s["system_id"] for s in doc["systems"]]
     assert all(q["count"] == 1 and [x["name"] for x in q["subjects"]] == ["dir1", "dir2"] for q in axis)
     select = find(qs, SELECT_CODE)
     assert select["file"] is None and select["blocking"]
@@ -589,7 +599,7 @@ def test_gate1_needs_axis_assignment_not_just_a_word_answer(ready):
     status = build_status(work)
     text = "\n".join(status["gate1"]["reasons"])
     axis = {
-        q["refs"][0]["where"]: q
+        subject(q): q
         for q in questions_of(work, "grid-system-questions.json")
         if q["code"] == SYSTEM_AXIS_CODE
     }
@@ -678,9 +688,7 @@ def answer_units(work: Path, unit: str = "mm") -> None:
 
 def blocking_now(work: Path) -> set[tuple[str, str]]:
     return {
-        (q["code"], q["refs"][0]["where"][:4])
-        for q in questions_of(work, "grid-system-questions.json")
-        if q["blocking"]
+        (q["code"], subject(q)[:4]) for q in questions_of(work, "grid-system-questions.json") if q["blocking"]
     }
 
 

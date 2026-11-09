@@ -809,12 +809,22 @@ def answer_to(
     doc: dict[str, Any], code: str, values: dict[str, Any], where: str | None = None
 ) -> dict[str, Any]:
     """An active answer bound (by key) to this run's question of `code` (whose first ref is at `where`)."""
-    (q,) = [q for q in keyed(doc) if q["code"] == code and where in (None, q["refs"][0]["where"])]
+    (q,) = [q for q in keyed(doc) if q["code"] == code and where in (None, subject(q))]
     return {**ans(code, q["file"], values), "key": q["key"]}
 
 
+def subject(q: dict[str, Any]) -> str:
+    """What a question is about: an axis question's system id (in its message; its `where` names the
+    representative families, so its key survives renumbering), else its (first) `where`."""
+    if q["code"] == "grid_system_axis_unassigned":
+        m = re.search(r"Grid system (S\d+):", q["message"])
+        assert m, q["message"]
+        return m.group(1)
+    return q["refs"][0]["where"] if "refs" in q else q["where"]
+
+
 def blocking_of(doc: dict[str, Any]) -> list[tuple[str, str]]:
-    return sorted((q["code"], q["where"][:4]) for q in doc["questions"] if q["blocking"])
+    return sorted((q["code"], subject(q)[:4]) for q in doc["questions"] if q["blocking"])
 
 
 def _two_buildings(tmp_path: Path, example: Any) -> Path:
@@ -837,10 +847,11 @@ def test_one_axis_question_per_system_answered_by_direction_and_kept_once_answer
     work = _two_buildings(tmp_path, example)
     doc = build_grid_systems(work)
     axis = [q for q in keyed(doc) if q["code"] == "grid_system_axis_unassigned"]
-    assert [(q["refs"][0]["where"], q["count"], q["blocking"]) for q in axis] == [
+    assert [(subject(q), q["count"], q["blocking"]) for q in axis] == [
         ("S001", 1, True),
         ("S002", 1, True),
     ]
+    assert axis[0]["refs"][0]["where"] == "plans.dxf V001/F001 x V001/F002"  # families, not the system id
     assert axis[0]["subjects"] == [{"name": "dir1", "count": 2}, {"name": "dir2", "count": 2}]
     assert (
         axis[0]["refs"][0]["found"]
@@ -852,8 +863,8 @@ def test_one_axis_question_per_system_answered_by_direction_and_kept_once_answer
     s1 = after["systems"][0]
     assert s1["axis_assignment"]["status"] == "answered"
     assert [d["tekla_axis"] for d in s1["directions"]] == ["Y", "X"]
-    again = {q["refs"][0]["where"]: q for q in keyed(after) if q["code"] == "grid_system_axis_unassigned"}
-    assert [again[q["refs"][0]["where"]]["key"] for q in axis] == [q["key"] for q in axis]  # same keys
+    again = {subject(q): q for q in keyed(after) if q["code"] == "grid_system_axis_unassigned"}
+    assert [again[subject(q)]["key"] for q in axis] == [q["key"] for q in axis]  # same keys
     assert (again["S001"]["blocking"], again["S002"]["blocking"]) == (False, True)
     # an answer bound to another key, or that does not assign every direction, assigns nothing
     for wrong in (

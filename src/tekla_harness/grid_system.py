@@ -43,7 +43,9 @@ Rules (deterministic; the thresholds are heuristics, see the schema description)
    reason. The declared header unit is never used to convert.
 7. Tekla X/Y: only from active `grid_family_axis_assignment` answers ({"<family_id>": "X"|"Y"}, bound
    to the answer's `file`; family ids restart in every file) that cover every direction of the system
-   without contradiction; otherwise null.
+   without contradiction; otherwise null. Also from the system's own `grid_system_axis_unassigned` answer,
+   bound by its key, which names the representative families (file, view and family ids: axis_where),
+   never the positional system id, so adding an unrelated file does not re-ask it.
 8. Confidence is never above 'medium' (gate 1 decides).
 9. File sets (intake's project-level file_set_relation, two or more readable drawing files): once it is
    answered (bound by key to the live question), views of two different sets never cluster, never join one
@@ -850,6 +852,14 @@ def _axis_found(s: _System) -> str:
     )
 
 
+def axis_where(refs: list[dict[str, str]]) -> str:
+    """`where` of a system's grid_system_axis_unassigned question, from its representative families (one
+    ref per direction: file, group_id, family_id). System ids are positional (adding a file renumbers
+    them), so the id is in the message only and the question keeps its key, and its answer, when an
+    unrelated file is added (the conflict key does the same: _conflict_identity)."""
+    return f"{refs[0]['file']} " + " x ".join(f"{r['group_id']}/{r['family_id']}" for r in refs)
+
+
 def _system_axis_values(answer: dict[str, Any], n_dirs: int, sid: str, warnings: list[str]) -> dict[int, str]:
     """Direction index -> Tekla axis from a grid_system_axis_unassigned answer: every direction of the system,
     X or Y, distinct. Anything else (a words-only answer included) assigns nothing and is warned."""
@@ -1160,12 +1170,14 @@ def build_grid_systems(
 
     # each system's own X/Y question; its answer is bound by this run's key
     axis_found: dict[str, str] = {}
+    axis_wheres: dict[str, str] = {}
     axis_keys: dict[str, str] = {}
     system_axes: dict[str, dict[int, str]] = {}
     for sid, s in zip(ids, systems, strict=True):
         rf = s.rep.fams[0]
         axis_found[sid] = _axis_found(s)
-        axis_keys[sid] = _own_key(SYSTEM_AXIS_CODE, rf.file, sid, axis_found[sid], rf.sheet, sha)
+        axis_wheres[sid] = axis_where([f.ref() for f in s.rep.fams])
+        axis_keys[sid] = _own_key(SYSTEM_AXIS_CODE, rf.file, axis_wheres[sid], axis_found[sid], rf.sheet, sha)
         answer = next(
             (a for a in active if a.get("code") == SYSTEM_AXIS_CODE and a.get("key") == axis_keys[sid]), None
         )
@@ -1302,8 +1314,8 @@ def build_grid_systems(
             )
         names = " and ".join(AXIS_DIRECTIONS[: len(d["directions"])])
         base = (
-            "Which direction of this grid system is Tekla X (lines parallel to Y) and which is Y? Answer "
-            f"with --value for {names} as listed in found (e.g. dir1=X), or answer "
+            f"Grid system {sid}: which direction of this grid system is Tekla X (lines parallel to Y) and "
+            f"which is Y? Answer with --value for {names} as listed in found (e.g. dir1=X), or answer "
             "grid_family_axis_assignment per family."
         )
         status = d["axis_assignment"]["status"]
@@ -1313,7 +1325,9 @@ def build_grid_systems(
             blocking, message = False, f"Not blocking: Tekla X / Y is assigned. {base}"
         else:
             blocking, message = True, f"{base} ({d['axis_assignment']['reason']})"
-        raised = ask(SYSTEM_AXIS_CODE, message, sid, axis_found[sid], rf.file, rf.sheet, blocking=blocking)
+        raised = ask(
+            SYSTEM_AXIS_CODE, message, axis_wheres[sid], axis_found[sid], rf.file, rf.sheet, blocking=blocking
+        )
         d["axis_question_key"] = axis_keys[sid] if raised else None
     for c in contradictions:
         ask(
@@ -1410,7 +1424,7 @@ def grid_system_questions(doc: dict[str, Any]) -> list[dict[str, Any]]:
     one question each; grid_system_units_unconfirmed is one per (blocking flag, file)."""
     out: list[dict[str, Any]] = []
     groups: dict[tuple[str, bool, str], list[tuple[str, dict[str, Any]]]] = {}
-    by_id = {d["system_id"]: d for d in doc["systems"]}
+    by_where = {axis_where([x["representative"] for x in d["directions"]]): d for d in doc["systems"]}
     for q in doc["questions"]:
         if q["code"] == SELECT_CODE:
             refs = _select_refs(doc["systems"], {f["path"]: f["sha256"] for f in doc["files"]})
@@ -1420,7 +1434,7 @@ def grid_system_questions(doc: dict[str, Any]) -> list[dict[str, Any]]:
         if q["code"] in OWN_QUESTION_CODES:
             subjects = None
             if q["code"] == SYSTEM_AXIS_CODE:
-                dirs = by_id[q["where"]]["directions"]
+                dirs = by_where[q["where"]]["directions"]
                 subjects = [{"name": AXIS_DIRECTIONS[k], "count": x["families"]} for k, x in enumerate(dirs)]
             out.append(
                 question_group(

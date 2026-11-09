@@ -5,6 +5,7 @@
    the answer is shown with its role.
 2. A grid-system conflict waiting for the file-set answer is pending, not closed, in questions.md.
 3. Every gate-1 reason and questions.md line that tells someone to answer frames it as the engineer's step.
+4. The X/Y question of a grid system keeps its key when an unrelated drawing file is added.
 5. A damaged question document is exit 1 in `harness status`, not a traceback.
 6. `harness ask` does not turn a stray NotImplementedError into an environment error.
 7. An unreadable DXF is not a units row; it stays a gate-1 reason through its own intake question.
@@ -331,6 +332,69 @@ def test_every_questions_md_line_that_tells_how_to_answer_is_the_engineers_step(
         assert any("**Cách đóng" in ln for ln in lines) or w == two_files[1]
         for ln in lines:
             assert MD_ENGINEER in ln, ln
+
+
+# --- 4. the X/Y question of a system keeps its key when a file is added ----------------------------------
+
+
+def test_adding_a_file_keeps_each_systems_axis_question_and_its_answer(two_files):
+    """Review probe p4: a third file whose grid ranks first renumbered S002 to S003, made Q-013 obsolete and
+    left the engineer's X/Y answer stale."""
+    root, work = two_files
+    answer_blocking(work, ("questions.json", "structure-questions.json"))
+    run_grid_systems(work)
+    answer_select(work)
+    answer_blocking(work, ("grid-system-questions.json",), skip=(CONFLICT_CODE,))
+    run_grid_systems(work)
+    axis = {
+        q["file"]: q
+        for q in questions_of(work, "grid-system-questions.json")
+        if q["code"] == "grid_system_axis_unassigned"
+    }
+    assert set(axis) == {"a.dxf", "b.dxf"}
+    one_grid(root / "aa.dxf", [0, 5000, 10000, 15000], "S-301")  # ranks first: becomes S001
+    rerun_all(root, work)
+    after = {
+        q["file"]: q
+        for q in questions_of(work, "grid-system-questions.json")
+        if q["code"] == "grid_system_axis_unassigned"
+    }
+    for f in ("a.dxf", "b.dxf"):
+        assert (after[f]["id"], after[f]["key"]) == (axis[f]["id"], axis[f]["key"]), f
+        assert after[f]["answer"] is not None, f
+    stale = [a for a in load(work / "answers.json")["answers"] if a["status"] == "stale"]
+    assert "grid_system_axis_unassigned" not in {a["code"] for a in stale}
+    # the system id moved, and the message names the current one
+    systems = {s["axis_question_key"]: s["system_id"] for s in load(work / "grid-systems.json")["systems"]}
+    for f in ("a.dxf", "b.dxf"):
+        assert systems[after[f]["key"]] in after[f]["message"]
+
+
+def test_the_axis_question_still_shows_its_system_and_directions(ready):
+    _, work = ready
+    systems = load(work / "grid-systems.json")["systems"]
+    questions = {q["key"]: q for q in questions_of(work, "grid-system-questions.json")}
+    text = render_questions_md(work).text
+    for s in systems:
+        q = questions[s["axis_question_key"]]
+        assert [x["name"] for x in q["subjects"]] == ["dir1", "dir2"][: len(s["directions"])]
+        line = next(ln for ln in sections(text)["4"].splitlines() if ln.startswith(f"- {q['id']} "))
+        assert line
+    unanswered = render_questions_md(build_unassigned(work)).text
+    for s in systems:
+        q = questions[s["axis_question_key"]]
+        block = block_of(unanswered, q["id"])
+        assert f"lưới {code_span(s['system_id'])}" in block, block
+
+
+def build_unassigned(work: Path) -> Path:
+    """Supersede nothing; withdraw the axis answers so the axis questions are open again."""
+    doc = load(work / "answers.json")
+    for a in doc["answers"]:
+        if a["code"] == "grid_system_axis_unassigned":
+            a["status"] = "superseded"
+    (work / "answers.json").write_text(json.dumps(doc), encoding="utf-8")
+    return work
 
 
 # --- 5. a damaged question document is exit 1 -------------------------------------------------------------

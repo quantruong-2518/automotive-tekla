@@ -355,7 +355,12 @@ def _system_lines(system: dict[str, Any], ctx: Context) -> list[str]:
 def grid_proposals(item: Item, ctx: Context) -> list[str]:
     """The grid systems that inform a grid question, verbatim from grid-systems.json (empty: none)."""
     if item.code.startswith("grid_system_"):
-        wanted = sorted({sid for ref in item.refs for sid in SYSTEM_ID.findall(ref["where"])})
+        # the select refs name system ids; an axis or conflict question names families (its key is stable
+        # when systems are renumbered), so its systems come from grid-systems.json by question key
+        wanted = {sid for ref in item.refs for sid in SYSTEM_ID.findall(ref["where"])}
+        wanted |= {s["system_id"] for s in ctx.systems if s.get("axis_question_key") == item.key}
+        conflict = ctx.conflicts.get(item.key)
+        wanted |= set(conflict["systems"]) if conflict is not None else set()
         systems = [s for s in ctx.systems if s["system_id"] in wanted]
     elif item.code in GRID_PROPOSAL_CODES and item.file is not None:
         systems = [
