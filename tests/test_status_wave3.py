@@ -19,6 +19,7 @@ from typing import Any
 from tekla_harness.answers import record_answer
 from tekla_harness.grid_system import run_grid_systems
 from tekla_harness.questions import GRID_MISSING_CODE
+from tekla_harness.questions_md import render_questions_md
 from tekla_harness.schemas import validate
 from tekla_harness.status import build_status
 from test_status import (  # noqa: F401  (pytest fixtures, used by name)
@@ -110,7 +111,8 @@ def test_a_conflict_a_simulated_answer_would_close_stays_open(ready):
 
 
 def inject_missing(work: Path) -> str:
-    """A live, blocking grid-system grid_system_missing question on set.dxf (package G raises it)."""
+    """A live, blocking grid-system grid_system_missing question on set.dxf (package G raises it), in the
+    registry and in grid-system-questions.json (questions.md lists the documents' questions)."""
     registry = load(work / "question-registry.json")
     number = registry["next_id"]
     qid, key = f"Q-{number:03d}", f"{number:016x}"
@@ -121,7 +123,24 @@ def inject_missing(work: Path) -> str:
     }  # fmt: skip
     registry["next_id"] = number + 1
     (work / "question-registry.json").write_text(json.dumps(registry), encoding="utf-8")
+    path = work / "grid-system-questions.json"
+    doc = load(path)
+    doc["questions"].append(
+        {
+            "id": qid, "key": key, "code": GRID_MISSING_CODE, "blocking": True, "file": "set.dxf",
+            "message": "No usable grid system on set.dxf", "count": 1, "truncated": False,
+            "refs": [{"file": "set.dxf", "where": "model#01", "found": "0 usable grid systems"}],
+            "answer": None,
+        }
+    )  # fmt: skip
+    assert validate("intake", doc) == []
+    path.write_text(json.dumps(doc, ensure_ascii=False), encoding="utf-8")
     return qid
+
+
+def words_only_reasons(status: dict[str, Any], qid: str) -> list[str]:
+    prefix = f"grid systems: {qid} {GRID_MISSING_CODE} (set.dxf) was answered in words only"
+    return [r for r in status["gate1"]["reasons"] if r.startswith(prefix)]
 
 
 def test_a_simulated_grid_system_missing_answer_leaves_the_question_open(ready):
@@ -135,8 +154,77 @@ def test_a_simulated_grid_system_missing_answer_leaves_the_question_open(ready):
     assert row in status["gate1"]["non_engineer_answers"]
     assert status["gate1"]["ready_for_gate1"] is False
     assert any(r.startswith(f"answers: {qid} {GRID_MISSING_CODE}") for r in status["gate1"]["reasons"])
-    # the engineer's own answer settles the question (here in words only: it builds nothing)
+    assert words_only_reasons(status, qid) == []  # it has values: the role is what keeps it open
+
+
+def test_an_engineer_words_only_grid_system_missing_answer_does_not_close_it(ready):
+    """ADR-0013 decision 2: an answer without values builds nothing, so the file still has no usable grid
+    system and the question stays open, even when the engineer gave the answer."""
+    _, work = ready
+    qid = inject_missing(work)
     record_answer(work, qid, "không đọc được lưới", "A. Nguyen", {}, role="engineer")
     status = build_status(work)
-    assert qid not in by_label(status)["grid-system"]["blocking_open_ids"]
+    assert qid in by_label(status)["grid-system"]["blocking_open_ids"]
+    assert status["gate1"]["ready_for_gate1"] is False
     assert qid not in [a["question_id"] for a in status["gate1"].get("non_engineer_answers", [])]
+    (reason,) = words_only_reasons(status, qid)
+    # the reason tells the engineer to give the values, with the exact command
+    assert f"harness answer {work} {qid} " in reason and "--role engineer" in reason
+    for key in ("dir1_labels", "dir1_spacings", "dir2_labels", "dir2_spacings"):
+        assert f"--value {key}=" in reason, key
+    assert "[--value sheet=" in reason and "harness grid-system" in reason
+
+
+def test_an_engineer_answer_with_the_grid_values_closes_it(ready):
+    _, work = ready
+    qid = inject_missing(work)
+    record_answer(work, qid, "lưới 1-3, A-B", "A. Nguyen", GRID, role="engineer")
+    status = build_status(work)
+    assert qid not in by_label(status)["grid-system"]["blocking_open_ids"]
+    assert words_only_reasons(status, qid) == []
+    assert by_label(status)["grid-system"]["questions"]["blocking_open"] == 0
+
+
+def test_a_words_only_answer_superseded_by_values_closes_it(ready):
+    _, work = ready
+    qid = inject_missing(work)
+    record_answer(work, qid, "chưa đọc được", "A. Nguyen", {}, role="engineer")
+    record_answer(work, qid, "lưới 1-3, A-B", "A. Nguyen", GRID, role="engineer")
+    status = build_status(work)
+    assert qid not in by_label(status)["grid-system"]["blocking_open_ids"]
+    assert words_only_reasons(status, qid) == []
+
+
+def answer_line(work: Path, qid: str) -> str:
+    lines = render_questions_md(work).text.splitlines()
+    heading = next(i for i, line in enumerate(lines) if line.startswith("#") and qid in line)
+    return next(line for line in lines[heading:] if line.startswith("- **Trả lời:**"))
+
+
+def test_questions_md_a_simulated_words_only_answer_is_shown_as_not_the_engineers(ready):
+    """The role comes first: the engineer must answer it themselves, with the values."""
+    _, work = ready
+    qid = inject_missing(work)
+    record_answer(work, qid, "không đọc được lưới", "agent", {}, role="simulated")
+    line = answer_line(work, qid)
+    assert "không phải kỹ sư" in line and "chỉ có lời" not in line
+    assert words_only_reasons(build_status(work), qid) == []  # the role reason names it instead
+
+
+def test_questions_md_does_not_show_a_words_only_grid_answer_as_closing(ready):
+    _, work = ready
+    qid = inject_missing(work)
+    record_answer(work, qid, "không đọc được lưới", "A. Nguyen", {}, role="engineer")
+    rendered = render_questions_md(work)
+    lines = rendered.text.splitlines()
+    heading = next(i for i, line in enumerate(lines) if line.startswith("#") and qid in line)
+    answer = next(line for line in lines[heading:] if line.startswith("- **Trả lời:**"))
+    assert "chỉ có lời" in answer and "chưa đóng" in answer
+    assert "không phải kỹ sư" not in answer  # it IS the engineer's answer
+    assert "`--value dir1_labels=" in answer and "`[--value sheet=" in answer  # sheet is optional
+    # it is listed with the open blocking questions (section 2), not with the answered ones (section 4)
+    section2 = next(i for i, line in enumerate(lines) if line.startswith("## 2. "))
+    section3 = next(i for i, line in enumerate(lines) if line.startswith("## 3. "))
+    assert section2 < heading < section3
+    answered = "\n".join(lines[next(i for i, line in enumerate(lines) if line.startswith("## 4. ")) :])
+    assert qid not in answered.split("## 5. ")[0]

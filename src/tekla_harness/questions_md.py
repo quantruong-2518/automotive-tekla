@@ -12,7 +12,8 @@ Sources (all read-only):
     whether it is answered. The documents' own `answer` fields are NOT used (they can lag behind). An
     answer to a question gate 1 reads settles it only when the engineer gave it (status.answer_closes):
     a simulated or role-less one stays open with the answer shown; every answer that is not the
-    engineer's is labelled "(mô phỏng)" or "(chưa rõ vai trò)";
+    engineer's is labelled "(mô phỏng)" or "(chưa rõ vai trò)". The engineer's words-only answer to a code
+    that needs values to close (status.words_only: grid_system_missing) stays open too, shown as not closed;
   * `harness status` (`status.build_status`): the gate-1 reasons and the per-step counts;
   * `grid-systems.json` + its SVGs and `structure-summary.json`: the proposals shown next to the questions
     they inform. A proposal is always labelled "ĐỀ XUẤT — chưa xác nhận" and is never an answer. A
@@ -77,8 +78,10 @@ from tekla_harness.status import (
     NOT_CLOSED_BY_AN_ANSWER,
     StatusError,
     answer_closes,
+    answer_counts,
     build_status,
     closure_state,
+    words_only,
 )
 
 COMMAND = "questions-md"
@@ -519,6 +522,19 @@ def question_lines(item: Item, ctx: Context, level: str = "#####") -> list[str]:
         block = _answer_block(item.answer)
         lines.append(
             "- **Trả lời:** không đóng được câu này" + block[0].replace(" — trả lời", "; câu trả lời cũ", 1)
+        )
+        lines += block[1:]
+    elif words_only(item.code, item.answer) and answer_counts(item.producer, item.answer):
+        # the engineer's answer in words only to a code that needs values (ADR-0013 decision 2): not closed
+        block = _answer_block(item.answer)
+        values = " ".join(
+            code_span(f"[--value {v[1:]}]" if v.startswith("?") else f"--value {v}")
+            for v in answer_values(item)
+        )
+        lines.append(
+            "- **Trả lời:** chưa đóng: câu trả lời chỉ có lời, không có giá trị lưới nên không dựng được hệ "
+            f"lưới; kỹ sư trả lời lại kèm giá trị ({values})"
+            + block[0].replace(" — trả lời", "; câu trả lời hiện có", 1)
         )
         lines += block[1:]
     else:  # not the engineer's answer to a question gate 1 reads (status.answer_counts): shown, not counted

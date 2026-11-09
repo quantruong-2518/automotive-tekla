@@ -613,6 +613,11 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
       `harness ask` now checks `reader-questions.json` against the `reader-questions` schema before it
       writes it, and when it reads it (a document that breaks the reader rules is refused, exit 1).
     - `harness status` always writes `gate1.closed`, as `[]` when nothing is closed (W5).
+    - `harness status`: an answer to `grid_system_missing` closes it only with its grid values (ADR-0013
+      decision 2). The engineer's answer in words only (`{}`) builds nothing, so the question stays in
+      `blocking_open`, and a `grid systems:` gate-1 reason gives the `harness answer` command with the
+      `dir1_labels` / `dir1_spacings` / `dir2_labels` / `dir2_spacings` values. `harness questions-md`
+      lists it with the open blocking questions as "chưa đóng: câu trả lời chỉ có lời", with those values.
     - `status` schema: `gate1.closed` is required (`$id` still 0.1; example updated). A status output
       written before tool wave 3 without it no longer validates; rerun `harness status`.
 

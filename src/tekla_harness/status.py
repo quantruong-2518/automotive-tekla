@@ -45,6 +45,12 @@ Tool wave 2:
     Such an answer does not settle its question either (answer_counts): the question stays in
     `blocking_open` / `blocking_open_ids` and out of `answered`, as in questions.md section 2.
 
+Tool wave 3:
+  * `gate1.closed` is always written ([] when nothing is closed);
+  * an answer to grid_system_missing closes it only with its grid values (VALUES_NEEDED_TO_CLOSE,
+    ADR-0013 decision 2): the engineer's answer in words only builds nothing, so the question stays in
+    `blocking_open` and a `grid systems:` reason gives the command with the values.
+
 Exit codes (AGENTS.md): 0 for any readable work folder (status is information, not a verdict), 1 an
 unreadable or invalid document, 2 not a work folder.
 """
@@ -69,6 +75,9 @@ from tekla_harness.questions import (
     CONFLICT_CODE,
     CONTRADICTION_CODE,
     FILE_SET_CODE,
+    GRID_ANSWER_KEYS,
+    GRID_ANSWER_SHEET_KEY,
+    GRID_MISSING_CODE,
     PRODUCER_COMMANDS,
     QUESTION_DOCUMENTS,
     REGISTRY_FILE,
@@ -111,6 +120,9 @@ GATE_ANSWER_PRODUCERS = frozenset(dict(PRODUCERS)[label] for label in GATE_PRODU
 LEGACY_ANSWER_IS_ENGINEER = False
 # an answer to these never closes them: they close through another question's structured values
 NOT_CLOSED_BY_AN_ANSWER = frozenset({CONFLICT_CODE})
+# an answer to these closes them only with its structured values: an answer in words only builds nothing, so
+# the file still has no usable grid system (ADR-0013 decision 2, even when the engineer gave it)
+VALUES_NEEDED_TO_CLOSE = frozenset({GRID_MISSING_CODE})
 # codes a gate check reads from every active answer, whatever its question's registry state: units_by_file
 # (units) and harness grid-system (CONSUMED_CODES). A non-engineer answer of these to a question that is not
 # live is a gate-1 reason too (_retired_answers)
@@ -167,10 +179,21 @@ def answer_counts(producer: str, answer: dict[str, Any] | None) -> bool:
     return producer not in GATE_ANSWER_PRODUCERS or _by_engineer(answer)
 
 
+def words_only(code: str, answer: dict[str, Any] | None) -> bool:
+    """An answer without values to a code whose answer must carry them (VALUES_NEEDED_TO_CLOSE): it is
+    recorded but builds nothing, so it does not close its question."""
+    return answer is not None and code in VALUES_NEEDED_TO_CLOSE and not answer["values"]
+
+
 def answer_closes(producer: str, code: str, answer: dict[str, Any] | None) -> bool:
-    """The answer takes its question out of the open ones: it counts (answer_counts), and the code is one an
-    answer closes (an answer to a grid_system_conflict question never does)."""
-    return answer_counts(producer, answer) and code not in NOT_CLOSED_BY_AN_ANSWER
+    """The answer takes its question out of the open ones: it counts (answer_counts), the code is one an
+    answer closes (an answer to a grid_system_conflict question never does), and it carries the values its
+    code needs to close (a words-only grid_system_missing answer does not: words_only)."""
+    return (
+        answer_counts(producer, answer)
+        and code not in NOT_CLOSED_BY_AN_ANSWER
+        and not words_only(code, answer)
+    )
 
 
 def _question_counts(
@@ -708,6 +731,27 @@ def _role_reasons(non_engineer: list[dict[str, Any]], work_dir: str) -> list[str
     ]
 
 
+def _words_only_reasons(
+    registry: dict[str, Any], active: dict[str, dict[str, Any]], work_dir: str
+) -> list[str]:
+    """A live question whose ENGINEER answer is in words only although its code needs values to close
+    (VALUES_NEEDED_TO_CLOSE): the reason gives the command with the values. A non-engineer answer is already
+    a reason of its own (_role_reasons)."""
+    values = " ".join(f"--value {k}=<{k.split('_')[1][:-1]}>,..." for k in GRID_ANSWER_KEYS)
+    return [
+        f"grid systems: {e['id']} {e['code']} ({e['file'] or 'project'}) was answered in words only, which "
+        "builds no grid system, so the question stays open: the engineer gives the grid "
+        f"({ANSWER.format(work_dir=work_dir, id=e['id'])} {values} [--value {GRID_ANSWER_SHEET_KEY}=<sheet "
+        "id>]), then rerun harness grid-system"
+        for k, e in sorted(registry["questions"].items(), key=lambda kv: _id_number(kv[1]["id"]))
+        if e["status"] != "obsolete"
+        and e["producer"] in GATE_ANSWER_PRODUCERS
+        and k in active
+        and _by_engineer(active[k])
+        and words_only(e["code"], active[k])
+    ]
+
+
 def _level_reasons(registry: dict[str, Any], active: dict[str, dict[str, Any]]) -> list[str]:
     return [
         f"levels: {e['id']} {e['code']} ({e['file']}) is not answered"
@@ -773,6 +817,7 @@ def build_status(work_dir: str | Path) -> dict[str, Any]:
     )
     reasons += _unreadable_reasons(inventory, registry)
     reasons += _grid_reasons(work, registry, active, by_label["grid-system"]["outputs"], shown)
+    reasons += _words_only_reasons(registry, active, shown)
     reasons += _level_reasons(registry, active)
     non_engineer = _non_engineer_answers(registry, active)
     reasons += _role_reasons(non_engineer, shown)
