@@ -927,7 +927,7 @@ def _scan_file(
                 sheet_of.update({tid: sh for tid in sh["text_ids"]})
                 order.append(sh)
     order.append(None)
-    claimed = _claimed_text_ids(inv_work, loaded, warnings) | duplicate_ids
+    claimed = set(_claimed_text_ids(inv_work, loaded, warnings)) | duplicate_ids
     lines_by_space, grid_info = _load_lines(inv_work, loaded, input_dir, warnings)
     texts = _texts(entries, claimed)
     groups: dict[tuple[str | None, str], list[_Text]] = {}

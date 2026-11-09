@@ -583,18 +583,49 @@ def scan_line(line: str, case_uncertain: bool = False) -> list[_Hit]:
 def member_mark(line: str, case_uncertain: bool) -> _Hit | None:
     text = line.strip()
     m = (_MARK_CI if case_uncertain else _MARK).match(text)
-    if m is None:
-        return None
-    code = _SHEET_CODE.match(text.upper() if case_uncertain else text)
-    if code and (code["disc"] in ("KT", "KC", "TCXD") or "-" in text or "/" in text):
-        return None  # a sheet code (research parsing pattern 3), not a member
+    if m is None or is_sheet_code(text, case_uncertain):
+        return None  # a sheet code (research parsing pattern 3) is not a member
     lexical = {"prefix": m["prefix"].upper(), "number": m["number"], "suffix": m["suffix"]}
     rule = _cite("MEMBER_MARK_SHAPE", "section 4: practice only, no standard defines the letters")
     why = "member mark letters are not defined by any standard or by this drawing's legend yet (section 4)"
     return _Hit("member_mark", 0, len(line), rule, "low", None, why, lexical=lexical, code=MARK_UNDEFINED)
 
 
+def is_sheet_code(line: str, case_uncertain: bool) -> bool:
+    """The whole line has a member mark's shape but is a sheet code (research parsing pattern 3)."""
+    text = line.strip()
+    if (_MARK_CI if case_uncertain else _MARK).match(text) is None:
+        return False
+    code = _SHEET_CODE.match(text.upper() if case_uncertain else text)
+    return bool(code and (code["disc"] in ("KT", "KC", "TCXD") or "-" in text or "/" in text))
+
+
 # --- one text entry -----------------------------------------------------------------------------------
+
+# rejected[] reason codes: text that matched a candidate pattern and is no candidate (callouts schema)
+NO_NOTATION = "diameter_sign_no_notation"
+SHEET_CODE = "sheet_code"
+REJECT_REASONS = {
+    NO_NOTATION: "a diameter sign that no callout pattern reads: no number right after it, or glued to the "
+    "token before or after it",
+    SHEET_CODE: "the whole text is a sheet code (research parsing pattern 3), not a member mark",
+    "claimed_by_title_block": "the title-block extractor took this text as a field value or label",
+    "claimed_by_grids": "the grid extractor took this text (a grid bubble label)",
+    "claimed_by_levels": "the level extractor took this text (a level value)",
+}
+_DIA_SIGN = re.compile("[" + DIA_CHARS + "]")
+_TOKEN = re.compile(r"\S+")
+
+
+def _uncovered_signs(line: str, hits: list[_Hit]) -> list[str]:
+    """The line's tokens (whitespace-separated) holding a diameter sign that no hit covers, in order."""
+    out = []
+    for tok in _TOKEN.finditer(line):
+        for sign in _DIA_SIGN.finditer(line, tok.start(), tok.end()):
+            if not any(h.start <= sign.start() < h.end for h in hits):
+                out.append(tok.group(0))
+                break
+    return out
 
 
 def _confidence(cap: str, entry: dict[str, Any], extra_flags: tuple[str, ...]) -> str:
@@ -610,45 +641,57 @@ def _confidence(cap: str, entry: dict[str, Any], extra_flags: tuple[str, ...]) -
     return "low" if low else conf
 
 
-def _entry_hits(entry: dict[str, Any], mark_allowed: bool) -> list[tuple[str, _Hit]]:
-    """(line, hit) for every candidate of the entry, lines in order."""
+def _entry_hits(
+    entry: dict[str, Any], claimed_by: str | None
+) -> tuple[list[tuple[str, _Hit]], list[tuple[str, str, str]]]:
+    """(line, hit) for every candidate of the entry, lines in order, and what matched but is no candidate:
+    (text, kind, reason code). `claimed_by`: the extractor that took the text (title_block, grids, levels);
+    such a text is never a member mark."""
     out: list[tuple[str, _Hit]] = []
+    rejects: list[tuple[str, str, str]] = []
     dec = entry["decode"]
+    cu = dec["case_uncertain"]
     literal_sign_unsafe = dec["encoding_used"] != "unicode" and "%%c" not in entry["special_codes"]
     for line in entry["display_text"].split("\n"):
-        hits = scan_line(line, dec["case_uncertain"])
-        if not hits and mark_allowed:
-            mark = member_mark(line, dec["case_uncertain"])
-            if mark is not None:
+        hits = scan_line(line, cu)
+        if not hits:
+            mark = member_mark(line, cu)
+            if mark is not None and claimed_by is not None:
+                rejects.append((line.strip(), "member_mark", f"claimed_by_{claimed_by}"))
+            elif mark is not None:
                 hits = [mark]
+            elif is_sheet_code(line, cu):
+                rejects.append((line.strip(), "member_mark", SHEET_CODE))
+        rejects.extend((tok, "rebar_callout", NO_NOTATION) for tok in _uncovered_signs(line, hits))
         for hit in hits:
             if literal_sign_unsafe and re.search("[" + DIA_CHARS + "]", line[hit.start : hit.end]):
                 hit.derived_flags += ("diameter_sign_literal_non_unicode",)
             out.append((line, hit))
-    return out
+    return out, rejects
 
 
-def _claimed_text_ids(inv_work: Path, loaded: LoadedFile, warnings: list[str]) -> set[str]:
-    """Text ids that title-block, grid and level extraction already used."""
-    ids: set[str] = set()
+def _claimed_text_ids(inv_work: Path, loaded: LoadedFile, warnings: list[str]) -> dict[str, str]:
+    """Text ids that title-block, grid and level extraction already used, each with the extractor that
+    took it first (title_block, grids, levels)."""
+    ids: dict[str, str] = {}
     if loaded.sheets is not None:
         for sh in loaded.sheets["sheets"]:
             for cand in sh["title_block"]["candidates"]:
                 ev = cand["evidence"]
-                ids.add(ev["value_text_id"])
+                ids.setdefault(ev["value_text_id"], "title_block")
                 if ev["label_text_id"]:
-                    ids.add(ev["label_text_id"])
+                    ids.setdefault(ev["label_text_id"], "title_block")
 
-    def walk(node: Any) -> None:
+    def walk(node: Any, kind: str) -> None:
         if isinstance(node, dict):
             for key, value in node.items():
                 if key == "text_id" and isinstance(value, str):
-                    ids.add(value)
+                    ids.setdefault(value, kind)
                 else:
-                    walk(value)
+                    walk(value, kind)
         elif isinstance(node, list):
             for item in node:
-                walk(item)
+                walk(item, kind)
 
     for kind in ("grids", "levels"):
         rel = f"{STRUCTURE_DIR}/{loaded.rel}.{kind}.json"
@@ -656,7 +699,7 @@ def _claimed_text_ids(inv_work: Path, loaded: LoadedFile, warnings: list[str]) -
         if not path.is_file():
             warnings.append(f"{loaded.rel}: {rel} is missing: its texts are not excluded from member marks")
             continue
-        walk(read_json(path, f"{loaded.rel}: {rel}"))  # not schema-checked: only text_id keys are read
+        walk(read_json(path, f"{loaded.rel}: {rel}"), kind)  # not schema-checked: only text_id keys read
     return ids
 
 
@@ -721,7 +764,10 @@ def _check(doc: dict[str, Any]) -> dict[str, Any]:
 
 
 def _summary(
-    candidates: list[dict[str, Any]], files: list[dict[str, Any]], blocked: list[dict[str, Any]]
+    candidates: list[dict[str, Any]],
+    files: list[dict[str, Any]],
+    blocked: list[dict[str, Any]],
+    rejected: list[dict[str, Any]],
 ) -> dict[str, Any]:
     by_file: dict[str, Counter[str]] = {}
     by_sheet: dict[tuple[str, str | None], tuple[dict[str, str] | None, Counter[str]]] = {}
@@ -756,6 +802,8 @@ def _summary(
         "unparsed_by_code": dict(
             sorted(Counter(c["unparsed_code"] for c in candidates if c["parsed"] is None).items())
         ),
+        "rejected": len(rejected),
+        "rejected_by_reason": dict(sorted(Counter(r["reason_code"] for r in rejected).items())),
         "files_scanned": sum(1 for f in files if f["status"] == "scanned"),
         "files_skipped": sum(1 for f in files if f["status"] == "skipped"),
         "blocked_entries": len(blocked),
@@ -775,6 +823,7 @@ def extract_callouts(work_dir: Path | str, *, check_inputs: bool = False) -> dic
     skipped_sheets: list[dict[str, Any]] = []
     candidates: list[dict[str, Any]] = []
     blocked: list[dict[str, Any]] = []
+    rejected: list[dict[str, Any]] = []
     for row in sorted(inv.doc["files"], key=lambda r: r["path"]):
         if row["format"] not in ("dwg", "dxf"):
             continue
@@ -816,7 +865,7 @@ def extract_callouts(work_dir: Path | str, *, check_inputs: bool = False) -> dic
                 continue
             info["scanned"] += 1
             sheet = sheet_of.get(entry["id"])
-            hits = _entry_hits(entry, entry["id"] not in claimed_ids)
+            hits, rejects = _entry_hits(entry, claimed_ids.get(entry["id"]))
             reason = meaning_block_reason(entry)
             if reason is not None:  # legacy-font gate: no meaning from this text, only a verbatim listing
                 if hits:
@@ -830,6 +879,18 @@ def extract_callouts(work_dir: Path | str, *, check_inputs: bool = False) -> dic
                         }
                     )
                 continue
+            for text, kind, code in rejects:
+                rejected.append(
+                    {
+                        "file": loaded.rel,
+                        "sheet": None if sheet is None else sheet["sheet_id"],
+                        "entry_id": entry["id"],
+                        "display_text": text[:LINE_CHARS],
+                        "kind": kind,
+                        "reason_code": code,
+                        "reason": REJECT_REASONS[code],
+                    }
+                )
             for line, hit in hits:
                 span = line[hit.start : hit.end]
                 flags = list(entry["flags"])
@@ -877,8 +938,9 @@ def extract_callouts(work_dir: Path | str, *, check_inputs: bool = False) -> dic
         "skipped_sheets": skipped_sheets,
         "candidates": candidates,
         "blocked_entries": blocked,
+        "rejected": rejected,
         "question_counts": question_counts(candidates),
-        "summary": _summary(candidates, files, blocked),
+        "summary": _summary(candidates, files, blocked, rejected),
         "warnings": warnings,
     }
     return _check(doc)

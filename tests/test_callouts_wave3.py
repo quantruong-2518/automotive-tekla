@@ -6,12 +6,15 @@ follow docs/research/diameter-glyph-u-grave.md (drawing 290 of EVAL-3)."""
 
 from __future__ import annotations
 
+import json
+import shutil
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from _callout_fixtures import build_work
+from _callout_fixtures import REL, build_work
 from tekla_harness.callouts import extract_callouts, member_mark, scan_line
 from tekla_harness.schemas import validate
 
@@ -167,3 +170,78 @@ def test_summary_counts_unparsed_candidates_per_code(glyph_doc):
         "notation_unverified": 2,
     }
     assert sum(s["unparsed_by_code"].values()) == s["unparsed"]
+
+
+# --- nothing that matched is dropped without a reason (rejected) -------------------------------------------
+
+REJECT_TEXTS = [
+    "C1",
+    "%%c<10mm",  # a diameter sign with no number after it (286's rebar table: 'Ø<10mm')
+    "A4%%c16",  # glued to the token before
+    "4%%c16 + %%c",  # the trailing sign belongs to no candidate
+    "KC-01",  # a sheet code
+    "D1",
+    "C2",
+]
+
+
+@pytest.fixture(scope="module")
+def reject_work(tmp_path_factory) -> Path:
+    return build_work(tmp_path_factory.mktemp("rejects"), s1=REJECT_TEXTS, styled=[], s2=["C1"], paper=[])
+
+
+@pytest.fixture(scope="module")
+def reject_doc(reject_work) -> dict[str, Any]:
+    return extract_callouts(reject_work, check_inputs=True)
+
+
+def rejected(doc: dict[str, Any], code: str) -> list[str]:
+    return [r["display_text"] for r in doc["rejected"] if r["reason_code"] == code]
+
+
+def test_a_diameter_sign_no_pattern_reads_is_rejected_with_its_reason(reject_doc):
+    assert validate("callouts", reject_doc) == []
+    assert rejected(reject_doc, "diameter_sign_no_notation") == [f"{DIA}<10mm", f"A4{DIA}16", DIA]
+    row = next(r for r in reject_doc["rejected"] if r["display_text"] == f"{DIA}<10mm")
+    assert row["kind"] == "rebar_callout" and row["sheet"] == "model#01" and row["entry_id"].startswith("T")
+    assert "no callout pattern" in row["reason"]
+
+
+def test_a_sheet_code_and_a_title_block_value_are_rejected_not_dropped(reject_doc):
+    assert rejected(reject_doc, "sheet_code") == ["KC-01"]
+    assert "S-101" in rejected(reject_doc, "claimed_by_title_block")  # the printed sheet number
+    marks = {c["display_text"] for c in reject_doc["candidates"] if c["kind"] == "member_mark"}
+    assert not {"KC-01", "S-101"} & marks
+    others = [r for r in reject_doc["rejected"] if r["reason_code"] != "diameter_sign_no_notation"]
+    assert others and {r["kind"] for r in others} == {"member_mark"}
+
+
+def test_texts_claimed_by_grids_or_levels_are_rejected_with_the_claimer(reject_work, tmp_path):
+    target = tmp_path / "copy"
+    shutil.copytree(reject_work, target)
+    index = json.loads((target / "text" / f"{REL}.json").read_text(encoding="utf-8"))
+    c2 = next(e["id"] for e in index["entries"] if e["display_text"] == "C2")
+    d1 = next(e["id"] for e in index["entries"] if e["display_text"] == "D1")
+    structure = target / "structure"
+    (structure / f"{REL}.grids.json").write_text(json.dumps({"a": [{"text_id": c2}]}), encoding="utf-8")
+    (structure / f"{REL}.levels.json").write_text(json.dumps({"b": {"text_id": d1}}), encoding="utf-8")
+    out = extract_callouts(target)
+    assert rejected(out, "claimed_by_grids") == ["C2"] and rejected(out, "claimed_by_levels") == ["D1"]
+
+
+def test_summary_counts_rejected_matches(reject_doc):
+    s = reject_doc["summary"]
+    assert s["rejected"] == len(reject_doc["rejected"])
+    by_reason = Counter(r["reason_code"] for r in reject_doc["rejected"])
+    assert s["rejected_by_reason"] == dict(sorted(by_reason.items()))
+    assert s["rejected_by_reason"]["diameter_sign_no_notation"] == 3
+
+
+def test_every_diameter_sign_is_a_candidate_a_blocked_entry_or_rejected(reject_doc, reject_work):
+    """The 'never drop silently' invariant: every text with a diameter sign is accounted for."""
+    index = json.loads((reject_work / "text" / f"{REL}.json").read_text(encoding="utf-8"))
+    accounted = {c["text_ref"]["entry_id"] for c in reject_doc["candidates"]}
+    accounted |= {b["entry_id"] for b in reject_doc["blocked_entries"]}
+    accounted |= {r["entry_id"] for r in reject_doc["rejected"]}
+    with_sign = {e["id"] for e in index["entries"] if DIA in e["display_text"]}
+    assert len(with_sign) == 3 and with_sign <= accounted

@@ -628,6 +628,12 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
       in its VNI styles, U+2300 / U+2205) is an unparsed `rebar_callout` with `symbol_glyph_unverified`,
       never decoded: a non-ASCII letter only in the shapes count + diameter or diameter + spacing (`Đ`/`đ`
       never), the two diameter-like symbols also alone with a number. Before, these texts gave no candidate.
+    - `harness callouts` drops nothing silently: text that matched and is no candidate is listed in
+      `rejected` (file, sheet, entry id, the text, kind, `reason_code`, reason), counted in
+      `summary.rejected` / `rejected_by_reason`: a diameter sign that no pattern reads
+      (`diameter_sign_no_notation`, e.g. `Ø<10mm`, a glued `A4Ø16`), a mark-shaped sheet code
+      (`sheet_code`), and a mark-shaped text another extractor took (`claimed_by_title_block`,
+      `claimed_by_grids`, `claimed_by_levels`). Blocked texts stay in `blocked_entries` only.
 
 ### Changed
 - Question lifecycle (tool wave 2, EVAL-2 fix 5):
