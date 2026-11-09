@@ -290,9 +290,10 @@ def test_unparsed_table(doc):
 
 def test_exact_match_schedule_only_and_plan_only(doc):
     m = matching(doc)
-    assert [x["key"] for x in m["matched"]] == ["c1", "c2", "d1", "d2"]
-    assert [x["key"] for x in m["schedule_only"]] == ["d1-1", "d9"]
-    assert {"b5", "d1.1", "d1a", "d3", "gm1"} <= {x["key"] for x in m["plan_only"]}
+    # tool wave 3 (a4): 'COLUMN C2' and 'DẦM D3' are detail headings, not plan marks, in the comparison
+    assert [x["key"] for x in m["matched"]] == ["c1", "d1", "d2"]
+    assert [x["key"] for x in m["schedule_only"]] == ["c2", "d1-1", "d3", "d9"]
+    assert {"b5", "d1.1", "d1a", "gm1"} <= {x["key"] for x in m["plan_only"]}
     assert all(x["confidence"] in ("medium", "low") for x in m["matched"])
 
 
@@ -620,7 +621,6 @@ def test_every_match_says_whether_its_size_was_compared(doc, gate):
     assert matched(doc, "d1")["size_compared"] is False
     assert matched(doc, "d1")["size_not_compared_reason"] == NO_PLAN_SIZE
     assert matched(doc, "c1")["size_not_compared_reason"] == NO_SIZE_COLUMN
-    assert matched(doc, "c2")["size_not_compared_reason"] == NO_PLAN_SIZE  # 'COLUMN C2' has no section
     assert matched(gate, "e1")["size_compared"] is True  # same size: compared, no conflict
     assert not matching(gate)["size_conflicts"]
     assert matched(gate, "e2")["size_not_compared_reason"] == SIZE_CELLS_BLOCKED
@@ -729,8 +729,8 @@ def test_a_header_cell_in_no_column_is_no_blocked_column():
 def test_summary_counts_size_comparisons(doc, gate):
     assert doc["summary"]["size_comparisons"] == {
         "compared": 1,
-        "not_compared": 3,
-        "by_reason": {NO_PLAN_SIZE: 2, NO_SIZE_COLUMN: 1},
+        "not_compared": 2,
+        "by_reason": {NO_PLAN_SIZE: 1, NO_SIZE_COLUMN: 1},
     }
     s = gate["summary"]["size_comparisons"]
     assert (s["compared"], s["not_compared"]) == (1, 2)

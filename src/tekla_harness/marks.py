@@ -75,7 +75,11 @@ viewports: the table is in the texts' own coordinates, `space` says which):
     found (line grid) are not plan marks.
 
 Matching, per file, only between allowed plan marks and allowed mark-column cells of tables whose header
-is not blocked. Keys: NFC + casefold + all whitespace removed. Equal keys match; nothing else ever does.
+is not blocked, and (tool wave 3, a4) RC detail headings as a second source: a title-form plan mark
+(`DẦM D1 (SL= 02)`, `ĐÀI CỌC ĐC2`) and an English `DETAIL OF/ON <mark>` line are headings, never the plan
+side of the comparison. `compared_with` says what matched or was compared (schedule when a row exists,
+else detail_heading), `detail_headings` lists the headings of a key and `matching[].detail_headings` counts
+them. Keys: NFC + casefold + all whitespace removed. Equal keys match; nothing else ever does.
 Two keys with the same structure (prefix, the numbers as integers, suffix, compared case-insensitively)
 but different keys, e.g. `D1.1` / `D1-1` or `C-01` / `C1`, are a `notation_variant`: never merged, asked
 once per file as `mark_notation_equivalence` (blocking for lot specs). A matched plan mark with a section
@@ -86,8 +90,10 @@ compared; a difference is a blocking `mark_size_conflict` quoting both entry ids
 header cells that could name one are blocked (a blocked column whose readable cells are numbers or
 `b x h` values, or none of whose cells is readable), the size cells are blocked, they are not numbers,
 or the row has no size cells (`summary.size_comparisons` counts both). A blocked header cell in no
-column is not listed in `blocked_columns`. `plan_only` is listed only for a file with at least one
-matchable schedule. `summary.by_sheet` counts plan marks, tables, rows, unparsed tables and blocked marks
+column is not listed in `blocked_columns`. A match through headings only is not size-compared
+(NO_SCHEDULE_ROW). `plan_only` is listed only for a file with at least one matchable schedule or detail
+heading: a file with neither is not compared, and its plan marks are no finding (`compared_with` none is
+never written). `summary.by_sheet` counts plan marks, tables, rows, unparsed tables and blocked marks
 per detector sheet (sheet null: on no sheet).
 
 Confidence is never high: plan marks, titles and tables are at most medium (callouts' rule: min(cap,
@@ -253,6 +259,7 @@ SIZE_HEADER_BLOCKED = "the schedule header cells that could name a size column a
 SIZE_CELLS_BLOCKED = "the schedule size cells are blocked"
 SIZE_NOT_NUMBERS = "the schedule size cells are not numbers"
 SIZE_CELLS_MISSING = "the schedule row has no size cells"
+NO_SCHEDULE_ROW = "matched through detail headings only: no schedule row to compare"
 _SIZE_VALUE = re.compile(r"^\s*(\d+(?:[.,]\d+)?)\s*[xX\u00d7]\s*(\d+(?:[.,]\d+)?)\s*$")
 _NUMBER = re.compile(r"^\s*(\d+(?:[.,]\d+)?)\s*$")
 _INTEGER = re.compile(r"^\s*\d+\s*$")
@@ -328,6 +335,24 @@ def parse_title(text: str, case_uncertain: bool = False) -> tuple[str, Mark] | N
         return None
     mark = _mark_from(head, rest[: head.end()])
     return None if mark is None else (m["word"], mark)
+
+
+# an English detail heading without a member word: 'DETAIL OF CP1', 'DETAIL ON AB-20B' (161)
+_DETAIL_OF = re.compile(r"^detail\s+(?:of|on)\s+(?P<rest>\S.*)$", re.IGNORECASE)
+
+
+def parse_detail_of(text: str, case_uncertain: bool = False) -> Mark | None:
+    """The mark of a 'DETAIL OF <mark> ...' / 'DETAIL ON <mark> ...' line; else None. Only a heading (a
+    second comparison source), never a plan mark: it has no member word."""
+    t = " ".join(unicodedata.normalize("NFC", text).split())
+    m = _DETAIL_OF.match(t)
+    if m is None:
+        return None
+    rest = m["rest"]
+    head = _MARK_HEAD.match(rest)
+    if head is None or scan_line(rest[: head.end()], case_uncertain):
+        return None
+    return _mark_from(head, rest[: head.end()])
 
 
 def _header_text(text: str) -> str:
@@ -744,6 +769,7 @@ class _FileOut:
     tables: list[dict[str, Any]] = field(default_factory=list)
     unparsed: list[dict[str, Any]] = field(default_factory=list)
     blocked: list[dict[str, Any]] = field(default_factory=list)
+    headings: list[dict[str, Any]] = field(default_factory=list)  # internal: detail headings (a4)
 
 
 def _space_tolerances(entries: list[dict[str, Any]]) -> dict[str, float]:
@@ -1003,8 +1029,38 @@ def _scan_file(
         if t.id in in_table or t.block is not None:
             continue
         sh = sheet_of.get(t.id)
-        out.plan.extend(_plan_marks(loaded.rel, sh, t.entry, t.id in footing))
+        found = _plan_marks(loaded.rel, sh, t.entry, t.id in footing)
+        out.plan.extend(found)
+        out.headings.extend(_detail_of_headings(sh, t.entry, {p["display_text"] for p in found}))
     return out, grid_info
+
+
+def _detail_of_headings(
+    sheet: dict[str, Any] | None, entry: dict[str, Any], plan_lines: set[str]
+) -> list[dict[str, Any]]:
+    """Detail headings of an entry that are no plan mark ('DETAIL OF CP1'); title-form plan marks are
+    headings too (`_match_file`)."""
+    out = []
+    cu = entry["decode"]["case_uncertain"]
+    for line in entry["display_text"].split("\n"):
+        text = " ".join(line.split())[:LINE_CHARS]
+        if not text or text in plan_lines:
+            continue
+        mark = parse_detail_of(line, cu)
+        if mark is not None:
+            out.append(
+                {
+                    "key": mark.key,
+                    "mark": mark.text,
+                    "ref": {
+                        "entry_id": entry["id"],
+                        "sheet": None if sheet is None else sheet["sheet_id"],
+                        "text": text,
+                    },
+                    "confidence": _confidence("medium", entry, ()),
+                }
+            )
+    return out
 
 
 def _plan_marks(
@@ -1211,10 +1267,28 @@ def _row_size(
 # --- matching -----------------------------------------------------------------------------------------
 
 
-def _match_file(file: str, plan: list[dict[str, Any]], tables: list[dict[str, Any]]) -> dict[str, Any]:
+def _match_file(
+    file: str, plan: list[dict[str, Any]], tables: list[dict[str, Any]], detail_of: list[dict[str, Any]]
+) -> dict[str, Any]:
+    """Plan marks against schedule rows and detail headings (a4). The plan side holds plan marks that are
+    no title; a title-form plan mark ('DẦM D3', 'ĐÀI CỌC ĐC2 (SL= 01)') and a 'DETAIL OF <mark>' line
+    (`detail_of`) are detail headings, the second source. A key with a plan mark and a schedule row or a
+    heading is matched (`compared_with` schedule when a row exists, else detail_heading); a key with a
+    source and no plan mark is schedule_only; a plan mark with neither is plan_only, listed only when the
+    file has a matchable schedule or a heading (`compared_with` what it was compared with)."""
     plan_by_key: dict[str, list[dict[str, Any]]] = {}
+    heads_by_key: dict[str, list[dict[str, Any]]] = {}
     for p in plan:
-        plan_by_key.setdefault(p["key"], []).append(p)
+        if p["form"] == "title":
+            ref = {"entry_id": p["text_ref"]["entry_id"], "sheet": p["sheet"], "text": p["display_text"]}
+            heads_by_key.setdefault(p["key"], []).append(
+                {"key": p["key"], "mark": p["mark"], "ref": ref, "confidence": p["confidence"]}
+            )
+        else:
+            plan_by_key.setdefault(p["key"], []).append(p)
+    for h in detail_of:
+        heads_by_key.setdefault(h["key"], []).append(h)
+    heading_count = sum(len(v) for v in heads_by_key.values())
     sched_by_key: dict[str, list[tuple[dict[str, Any], dict[str, Any], dict[str, Any]]]] = {}
     matchable = [t for t in tables if not t["header_blocked"] and t["mark_column"] is not None]
     for t in matchable:
@@ -1225,7 +1299,9 @@ def _match_file(file: str, plan: list[dict[str, Any]], tables: list[dict[str, An
     def first_text(key: str) -> str:
         if key in sched_by_key:
             return sched_by_key[key][0][2]["text"]
-        return plan_by_key[key][0]["mark"]
+        if key in plan_by_key:
+            return plan_by_key[key][0]["mark"]
+        return heads_by_key[key][0]["mark"]
 
     def sched_refs(key: str) -> list[dict[str, Any]]:
         return [
@@ -1233,18 +1309,29 @@ def _match_file(file: str, plan: list[dict[str, Any]], tables: list[dict[str, An
             for t, row, m in sched_by_key[key]
         ]
 
+    def head_refs(key: str) -> dict[str, Any]:
+        hs = heads_by_key.get(key, [])
+        return {"detail_headings": [h["ref"] for h in hs]} if hs else {}
+
     matched, schedule_only, plan_only, conflicts = [], [], [], []
-    for key in sorted(set(plan_by_key) | set(sched_by_key)):
-        ps, ss = plan_by_key.get(key, []), sched_by_key.get(key, [])
-        if ps and ss:
-            conf = _min_conf(*(p["confidence"] for p in ps), *(m["confidence"] for _, _, m in ss))
+    for key in sorted(set(plan_by_key) | set(sched_by_key) | set(heads_by_key)):
+        ps, ss, hs = plan_by_key.get(key, []), sched_by_key.get(key, []), heads_by_key.get(key, [])
+        source = "schedule" if ss else "detail_heading"
+        if ps and (ss or hs):
+            conf = _min_conf(
+                *(p["confidence"] for p in ps),
+                *(m["confidence"] for _, _, m in ss),
+                *(h["confidence"] for h in hs),
+            )
             match: dict[str, Any] = {
                 "key": key,
                 "mark": first_text(key),
                 "plan_marks": [p["id"] for p in ps],
-                "schedule": sched_refs(key),
+                "schedule": sched_refs(key) if ss else [],
                 "confidence": conf,
                 "size_compared": False,
+                "compared_with": source,
+                **head_refs(key),
             }
             matched.append(match)
             row_reasons: set[str] = set()
@@ -1274,12 +1361,27 @@ def _match_file(file: str, plan: list[dict[str, Any]], tables: list[dict[str, An
                         }
                     )
             if not match["size_compared"]:
-                reasons = sorted(row_reasons) if row_reasons else [NO_PLAN_SIZE]
+                reasons = sorted(row_reasons) if row_reasons else [NO_PLAN_SIZE if ss else NO_SCHEDULE_ROW]
                 match["size_not_compared_reason"] = "; ".join(reasons)
-        elif ss:
-            schedule_only.append({"key": key, "mark": first_text(key), "schedule": sched_refs(key)})
-        elif matchable:
-            plan_only.append({"key": key, "mark": first_text(key), "plan_marks": [p["id"] for p in ps]})
+        elif ss or hs:
+            schedule_only.append(
+                {
+                    "key": key,
+                    "mark": first_text(key),
+                    "schedule": sched_refs(key) if ss else [],
+                    "compared_with": source,
+                    **head_refs(key),
+                }
+            )
+        elif matchable or heads_by_key:
+            plan_only.append(
+                {
+                    "key": key,
+                    "mark": first_text(key),
+                    "plan_marks": [p["id"] for p in ps],
+                    "compared_with": "schedule" if matchable else "detail_heading",
+                }
+            )
     by_structure: dict[tuple[str, tuple[int, ...], str], set[str]] = {}
     for p in plan:
         by_structure.setdefault(p["_structure"], set()).add(p["key"])
@@ -1308,6 +1410,7 @@ def _match_file(file: str, plan: list[dict[str, Any]], tables: list[dict[str, An
     return {
         "file": file,
         "schedule_tables": len(matchable),
+        "detail_headings": heading_count,
         "matched": matched,
         "schedule_only": schedule_only,
         "plan_only": plan_only,
@@ -1509,6 +1612,7 @@ def extract_marks(
     tables: list[dict[str, Any]] = []
     unparsed: list[dict[str, Any]] = []
     blocked: list[dict[str, Any]] = []
+    headings: dict[str, list[dict[str, Any]]] = {}
     for row in sorted(inv.doc["files"], key=lambda r: r["path"]):
         if row["format"] not in ("dwg", "dxf"):
             continue
@@ -1544,6 +1648,7 @@ def extract_marks(
         for b in out.blocked:
             b["table"] = out.tables[b.pop("_t")]["id"]
         plan.extend(out.plan)
+        headings[loaded.rel] = out.headings
         tables.extend(out.tables)
         unparsed.extend(out.unparsed)
         blocked.extend(out.blocked)
@@ -1555,7 +1660,7 @@ def extract_marks(
             continue
         mine_p = [p for p in plan if p["file"] == f["path"]]
         mine_t = [t for t in tables if t["file"] == f["path"]]
-        matching.append(_match_file(f["path"], mine_p, mine_t))
+        matching.append(_match_file(f["path"], mine_p, mine_t, headings.get(f["path"], [])))
     for p in plan:
         p.pop("_structure", None)
     for t in tables:

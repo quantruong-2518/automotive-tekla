@@ -49,3 +49,120 @@ def test_a_lintel_plan_mark_keeps_the_whole_line(tmp_path):
         ("LT2", "LT2(L=3200)", "plain", None),
     ]
     assert {p["key"] for p in lintels} == {"lt1", "lt2"}
+
+
+# --- a4: plan marks compared with RC detail headings ------------------------------------------------------
+# Default tables of _marks_fixtures: A (KÝ HIỆU | b | h: D1, D2, D1-1, D9), B (NAME ...: C1, C2), a blocked
+# table C (D7, D8) and an unreadable one. The plan side holds marks only; a member-word title ('DẦM D3',
+# 'COLUMN C2') or an English 'DETAIL OF/ON <mark>' line is a detail heading, the second comparison source.
+
+HEADING_PLAN = (
+    "D1",
+    "D2(220x500)",
+    "C1 (220x220)",
+    "COLUMN C2",
+    "DẦM D3",
+    "D3",
+    "D4",
+    "DẦM D5 (SL= 02)",
+    "DETAIL OF AB-20B",
+    "AB-20B",
+    "DETAIL ON CP7A",
+    "gm1",
+)
+
+
+@pytest.fixture(scope="module")
+def heading_doc(tmp_path_factory) -> dict[str, Any]:
+    from _marks_fixtures import build_marks_work
+    from tekla_harness.marks import extract_marks
+
+    base = tmp_path_factory.mktemp("headings")
+    work = build_marks_work(base, plan_texts=HEADING_PLAN)
+    return extract_marks(work, base / "input", check_inputs=True)
+
+
+def by_key(items: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    return {x["key"]: x for x in items}
+
+
+def test_headings_are_a_second_comparison_source(heading_doc):
+    from tekla_harness.schemas import validate
+
+    assert validate("marks", heading_doc) == []
+    (m,) = heading_doc["matching"]
+    assert m["detail_headings"] == 5
+    matched = by_key(m["matched"])
+    assert sorted(matched) == ["ab-20b", "c1", "d1", "d2", "d3"]
+    assert {k: v["compared_with"] for k, v in matched.items()} == {
+        "ab-20b": "detail_heading",
+        "c1": "schedule",
+        "d1": "schedule",
+        "d2": "schedule",
+        "d3": "detail_heading",
+    }
+    assert matched["d3"]["schedule"] == []
+    assert [h["text"] for h in matched["d3"]["detail_headings"]] == ["DẦM D3"]
+    assert [h["text"] for h in matched["ab-20b"]["detail_headings"]] == ["DETAIL OF AB-20B"]
+    assert "detail_headings" not in matched["d1"]
+
+
+def test_a_heading_is_no_plan_mark_in_the_comparison(heading_doc):
+    (m,) = heading_doc["matching"]
+    only = by_key(m["schedule_only"])
+    assert sorted(only) == ["c2", "cp7a", "d1-1", "d5", "d9"]
+    assert only["c2"]["compared_with"] == "schedule" and only["c2"]["schedule"]  # schedule row + heading
+    assert [h["text"] for h in only["c2"]["detail_headings"]] == ["COLUMN C2"]
+    assert only["d5"]["compared_with"] == "detail_heading" and only["d5"]["schedule"] == []
+    assert only["d5"]["mark"] == "D5" and by_key(m["matched"])["ab-20b"]["mark"] == "AB-20B"
+    assert only["cp7a"]["mark"] == "CP7A" and only["cp7a"]["detail_headings"][0]["text"] == "DETAIL ON CP7A"
+    assert [h["text"] for h in only["d5"]["detail_headings"]] == ["DẦM D5 (SL= 02)"]
+    assert all(
+        h["sheet"] == "model#01" and h["entry_id"].startswith("T") for h in only["d5"]["detail_headings"]
+    )
+    plan_only = by_key(m["plan_only"])
+    assert {"d4", "gm1"} <= set(plan_only) and not {"d3", "ab-20b"} & set(plan_only)
+    assert {x["compared_with"] for x in m["plan_only"]} == {"schedule"}
+
+
+def test_a_heading_only_match_says_why_its_size_was_not_compared(heading_doc):
+    (m,) = heading_doc["matching"]
+    d3 = by_key(m["matched"])["d3"]
+    assert d3["size_compared"] is False
+    assert (
+        d3["size_not_compared_reason"] == "matched through detail headings only: no schedule row to compare"
+    )
+
+
+def test_title_marks_stay_plan_marks_for_the_prefix_question(heading_doc):
+    titles = {p["mark"]: p for p in heading_doc["plan_marks"] if p["form"] == "title"}
+    assert set(titles) == {"C2", "D3", "D5"}  # 'DETAIL OF AB-20B' is a heading only, never a plan mark
+    assert [p["mark"] for p in heading_doc["plan_marks"]].count("AB-20B") == 1
+
+
+@pytest.fixture(scope="module")
+def no_schedule(tmp_path_factory) -> dict[str, Any]:
+    from _callout_fixtures import build_work
+    from tekla_harness.marks import extract_marks
+
+    base = tmp_path_factory.mktemp("noschedule")
+    work = build_work(base, s1=["D1", "D2", "DẦM D1 (SL= 02)", "DẦM D9"], styled=[], s2=["D2"], paper=[])
+    return extract_marks(work, base / "input")
+
+
+def test_without_a_schedule_the_headings_alone_are_compared(no_schedule):
+    (m,) = no_schedule["matching"]
+    assert (m["schedule_tables"], m["detail_headings"]) == (0, 2)
+    assert [(x["key"], x["compared_with"]) for x in m["matched"]] == [("d1", "detail_heading")]
+    assert [(x["key"], x["compared_with"]) for x in m["schedule_only"]] == [("d9", "detail_heading")]
+    assert [(x["key"], x["compared_with"]) for x in m["plan_only"]] == [("d2", "detail_heading")]
+
+
+def test_with_neither_source_nothing_is_compared(tmp_path):
+    from _callout_fixtures import build_work
+    from tekla_harness.marks import extract_marks
+
+    work = build_work(tmp_path, s1=["D1", "D2"], styled=[], s2=[], paper=[])
+    (m,) = extract_marks(work, tmp_path / "input")["matching"]
+    assert (m["schedule_tables"], m["detail_headings"]) == (0, 0)
+    assert m["matched"] == m["schedule_only"] == m["plan_only"] == []  # not compared is no finding

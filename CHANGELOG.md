@@ -650,6 +650,17 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
       `M7`) joins M1–M7; bolt labels elsewhere (161, Steel) are unchanged.
     - `harness marks` reads a mark followed by a length in brackets, `LT1(L=4700)` (267's lintels), as the
       plan mark `LT1`; the length stays in `display_text` only (no size). 267 gains 41 lintel plan marks.
+    - `harness marks` (a4) compares plan marks with RC detail headings as a second source besides parsed
+      schedules: a title-form plan mark (`DẦM D1 (SL= 02)`, `CỘT C9`, `ĐÀI CỌC ĐC2`) and an English
+      `DETAIL OF/ON <mark>` line (161 `DETAIL ON AB-20B`) are headings and no longer the plan side of the
+      comparison (they stay plan marks for the prefix question). Matched, schedule-only and plan-only marks
+      carry `compared_with` (`schedule` when a schedule row exists, else `detail_heading`), headings are
+      listed in `detail_headings` (entry id, sheet, text) and counted per file in
+      `matching[].detail_headings`. A match through headings only is not size-compared (reason
+      `matched through detail headings only: no schedule row to compare`). `plan_only` is listed only for a
+      file with a schedule or a heading; a file with neither is not compared (`none` is never written).
+      Changed: a title that used to match a schedule row (`COLUMN C2`) is now a schedule-only key with
+      that heading.
 
 ### Changed
 - Question lifecycle (tool wave 2, EVAL-2 fix 5):
