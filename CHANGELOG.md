@@ -512,11 +512,18 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
     which the help says, because argparse takes a `-` value after a space for an option). `harness find-text` warns with `blocked_in_scope` when the
     output has it. `harness answer --help` names the `grid_system_missing` keys.
   - Tool wave 3, package S (sheets + levels):
-    - Levels: a storey name needs a number or a word that names one storey (`tầng 3`, `sàn tầng 3`,
-      `tầng trệt`, `mái`, `2nd floor`, `roof`); a bare `sàn` (slab), which ends slab-plan titles and
-      quantity headings, names nothing. So `level_name_conflict` is no longer raised between slab-plan
-      titles (290: three false conflicts; 267: one), and storey heights fall back to the asked, low
-      rule instead of skipping unnamed levels (290: +7.300 is no longer skipped).
+    - Levels: a storey word names a storey except in the non-names seen on the corpus: a slab-plan
+      title whose only storey word is `sàn` (slab), a quantity or schedule heading (`khối lượng`,
+      `thống kê`), and a storey word with nothing else (`tầng`, `floor slab`). A sure name (`tầng 3`,
+      `first floor`, `upper floor`, `tầng thượng`, `tầng kỹ thuật`, `tầng điển hình`, `áp mái`,
+      `penthouse`) always counts, also as the text next to a bare value. So `level_name_conflict` is no
+      longer raised between slab-plan titles (290: three false conflicts; 267: one) but still is between
+      names without a number (`TẦNG THƯỢNG +10.800 / +10.500`), and storey heights fall back to the
+      asked, low rule instead of skipping unnamed levels (290: +7.300 is no longer skipped).
+    - Levels (safety): when storeys are named, an unnamed level that carries a storey word (on its line
+      or in the text next to it) and lies between named levels caps the storey heights at low and raises
+      the blocking `level_storey_selection` listing those levels; before, `GROUND / FIRST / SECOND / ROOF
+      FLOOR` gave one 10.8 m storey with no question. No known file changes.
     - Levels: a sign with one space before the digits right after `(` is a sign, so
       `(+ 6.00M LEVEL)` gives the level +6.000 (161 and Steel_01). Elsewhere a spaced sign after other
       text is still read as a dash (`TẦNG 2 - 3.600`).

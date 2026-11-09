@@ -286,6 +286,214 @@ def test_a_storey_name_needs_a_number_or_a_storey_word_of_its_own(text, named):
     assert mod._names_storey(text) is named
 
 
+# --- review of a2: only the observed non-names are rejected; every other storey word still names a storey ---
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "FIRST FLOOR",
+        "SECOND FLOOR",
+        "THIRD FLOOR",
+        "UPPER FLOOR",
+        "TYPICAL FLOOR",
+        "PENTHOUSE",
+        "TẦNG THƯỢNG",
+        "SÂN THƯỢNG",
+        "TẦNG KỸ THUẬT",
+        "TẦNG ĐIỂN HÌNH",
+        "ÁP MÁI",
+        "OFFICE FLOOR",  # a storey word with a qualifier the rule does not list is still a name
+        "KHỐI LƯỢNG THÉP SÀN TẦNG 3",  # a heading that names its storey by number names it
+        "KHỐI LƯỢNG THÉP TẦNG KỸ THUẬT",  # ... or by a qualifier
+        "SÀN TẦNG KHO",  # a slab word next to another storey word with a qualifier
+    ],
+)
+def test_every_other_storey_word_still_names_a_storey(text):
+    assert mod._names_storey(text) is True
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "THỐNG KÊ THÉP SÀN",  # a schedule heading of slab steel
+        "KHỐI LƯỢNG BÊ TÔNG TẦNG",  # a quantity heading
+        "BILL OF QUANTITIES FLOOR",
+        "FLOOR SLAB",
+        "SÀN SÀN",
+        "TẦNG:",
+    ],
+)
+def test_slab_quantity_headings_and_bare_storey_words_name_nothing(text):
+    assert mod._names_storey(text) is False
+
+
+def _uni_texts(tmp_path: Path, *texts: str, name: str = "u.dxf") -> Path:
+    """One text per row in a Unicode TrueType style, so the legacy-font gate reads Vietnamese letters."""
+    doc = new("R2018", setup=True)
+    doc.styles.add("UNI", font="arial.ttf")
+    msp = doc.modelspace()
+    for i, t in enumerate(texts):
+        msp.add_text(t, height=250, dxfattribs={"insert": (0, i * 2000), "style": "UNI"})
+    path = tmp_path / name
+    doc.saveas(path)
+    return path
+
+
+def _heights(result: dict[str, Any]) -> list[tuple[float, float, str]]:
+    return [(h["from_value"], h["to_value"], h["height"]["confidence"]) for h in result["storey_heights"]]
+
+
+def test_ordinal_floor_names_give_every_storey(tmp_path):
+    # review C2: GROUND / FIRST / SECOND / ROOF gave one 10.8 m storey with no question after a2
+    texts = ["GROUND FLOOR %%p0.000", "FIRST FLOOR +3.600", "SECOND FLOOR +7.200", "ROOF +10.800"]
+    result = run(_texts(tmp_path, *texts))
+    assert result["blocked_candidates"] == []
+    assert [lv["names"] for lv in result["levels"]] == [
+        ["GROUND FLOOR"],
+        ["FIRST FLOOR"],
+        ["SECOND FLOOR"],
+        ["ROOF"],
+    ]
+    assert [(a, b) for a, b, _ in _heights(result)] == [(0.0, 3.6), (3.6, 7.2), (7.2, 10.8)]
+
+
+def test_vietnamese_named_storeys_give_every_storey(tmp_path):
+    texts = [
+        "TẦNG 1 ±0.000",
+        "TẦNG 2 +3.600",
+        "TẦNG KỸ THUẬT +7.200",
+        "TẦNG THƯỢNG +10.800",
+        "ÁP MÁI +14.400",
+    ]
+    result = run(_uni_texts(tmp_path, *texts))
+    assert result["blocked_candidates"] == []
+    assert all(lv["names"] for lv in result["levels"])
+    assert [(a, b) for a, b, _ in _heights(result)] == [
+        (0.0, 3.6),
+        (3.6, 7.2),
+        (7.2, 10.8),
+        (10.8, 14.4),
+    ]
+    assert "level_storey_selection" not in codes(result)
+
+
+def test_a_storey_name_without_a_number_still_conflicts(tmp_path):
+    # review M1: 'TẦNG THƯỢNG' at two values is a blocking conflict again
+    result = run(_uni_texts(tmp_path, "TẦNG THƯỢNG +10.800", "TẦNG THƯỢNG +10.500", "+3.600", "+3.600"))
+    assert result["blocked_candidates"] == []
+    q = next(q for q in result["questions"] if q["code"] == "level_name_conflict")
+    assert q["blocking"] and q["where"] == "TẦNG THƯỢNG" and q["found"] == "+10.500 / +10.800"
+
+
+def test_an_unnamed_storey_level_between_named_ones_is_asked(tmp_path):
+    # safety net: '+3.600' carries the storey word 'FLOOR' but names no storey; heights that skip it are asked
+    texts = ["GROUND FLOOR %%p0.000", "FLOOR +3.600", "FLOOR +3.600", "ROOF +7.200"]
+    result = run(_texts(tmp_path, *texts))
+    assert [lv["value_text"] for lv in result["levels"] if lv["used_for_heights"]] == ["±0.000", "+7.200"]
+    assert _heights(result) == [(0.0, 7.2, "low")]
+    q = next(q for q in result["questions"] if q["code"] == "level_storey_selection")
+    assert q["blocking"] and q["where"] == "+3.600"
+    assert "between named storeys" in q["message"]
+
+
+def test_an_unnamed_level_under_a_slab_heading_between_named_ones_is_asked(tmp_path):
+    # the storey word sits in the neighbour text above a bare value, not on the value's own line
+    doc = new("R2018", setup=True)
+    msp = doc.modelspace()
+    msp.add_text("GROUND FLOOR %%p0.000", height=250, dxfattribs={"insert": (0, 0)})
+    msp.add_text("ROOF +7.200", height=250, dxfattribs={"insert": (0, 2000)})
+    for x in (20000, 40000):
+        msp.add_text("+3.600", height=250, dxfattribs={"insert": (x, 0)})
+        msp.add_text("FLOOR SLAB", height=250, dxfattribs={"insert": (x, 400)})
+    doc.saveas(tmp_path / "adj.dxf")
+    result = run(tmp_path / "adj.dxf")
+    three = next(lv for lv in result["levels"] if lv["value_text"] == "+3.600")
+    assert three["names"] == [] and not three["used_for_heights"]
+    q = next(q for q in result["questions"] if q["code"] == "level_storey_selection")
+    assert q["where"] == "+3.600"
+
+
+def _marked(tmp_path: Path, rows: list[tuple[str, str]]) -> Path:
+    """Bare values next to a level symbol (medium), each with a name text just above it."""
+    doc = new("R2018", setup=True)
+    blk = doc.blocks.new("LVL")
+    blk.add_solid([(0, 0), (-200, 300), (200, 300)])  # apex down over a horizontal base, 0.75 base high
+    msp = doc.modelspace()
+    for i, (value, name) in enumerate(rows):
+        x = i * 20000
+        msp.add_text(value, height=250, dxfattribs={"insert": (x, 0)})
+        msp.add_text(name, height=250, dxfattribs={"insert": (x, 400)})
+        msp.add_blockref("LVL", (x - 400, 0))
+    path = tmp_path / "marked.dxf"
+    doc.saveas(path)
+    return path
+
+
+def test_heights_that_skip_an_unnamed_storey_level_are_low(tmp_path):
+    rows = [("%%p0.000", "GROUND FLOOR"), ("+7.200", "ROOF")]
+    result = run(_marked(tmp_path, rows))
+    assert _heights(result) == [(0.0, 7.2, "medium")]  # named, next to a symbol: not asked
+    result = run(_marked(tmp_path, [*rows, ("+3.600", "FLOOR")]))
+    assert _heights(result) == [(0.0, 7.2, "low")]
+    assert "level_storey_selection" in codes(result)
+
+
+def test_a_named_level_with_an_unnamed_storey_text_is_no_skipped_storey(tmp_path):
+    texts = ["GROUND FLOOR %%p0.000", "FIRST FLOOR +3.600", "FLOOR +3.600", "ROOF +7.200"]
+    result = run(_texts(tmp_path, *texts))
+    assert "level_storey_selection" not in codes(result)
+    assert [(a, b) for a, b, _ in _heights(result)] == [(0.0, 3.6), (3.6, 7.2)]
+
+
+def test_one_storey_text_among_plain_values_marks_the_level(tmp_path):
+    texts = ["GROUND FLOOR %%p0.000", "+3.600", "FLOOR +3.600", "+3.600", "ROOF +7.200"]
+    result = run(_texts(tmp_path, *texts))
+    q = next(q for q in result["questions"] if q["code"] == "level_storey_selection")
+    assert q["where"] == "+3.600"
+    assert q["found"] == "1 unnamed level(s) between ±0.000 and +7.200; heights use the 2 named level(s)"
+
+
+@pytest.mark.parametrize("outside", ["FLOOR -1.500", "FLOOR +9.000"])
+def test_an_unnamed_storey_level_outside_the_named_range_is_not_a_skipped_storey(tmp_path, outside):
+    # the review asks for the levels BETWEEN named storeys; one below the lowest or above the highest is not
+    texts = [outside, outside, "GROUND FLOOR %%p0.000", "ROOF +7.200"]
+    result = run(_texts(tmp_path, *texts))
+    assert "level_storey_selection" not in codes(result)
+
+
+def test_a_neighbour_without_a_storey_word_marks_nothing(tmp_path):
+    rows = [("%%p0.000", "GROUND FLOOR"), ("+7.200", "ROOF"), ("+1.500", "WINDOW SILL"), ("+1.500", "SILL")]
+    result = run(_marked(tmp_path, rows))
+    assert "level_storey_selection" not in codes(result)
+
+
+def test_an_adjacent_vietnamese_roof_word_after_a_qualifier_is_taken(tmp_path):
+    doc = new("R2018", setup=True)
+    doc.styles.add("UNI", font="arial.ttf")
+    msp = doc.modelspace()
+    msp.add_text("+14.400", height=250, dxfattribs={"insert": (0, 0), "style": "UNI"})
+    msp.add_text("ÁP MÁI", height=250, dxfattribs={"insert": (0, 400), "style": "UNI"})
+    doc.saveas(tmp_path / "apmai.dxf")
+    result = run(tmp_path / "apmai.dxf")
+    assert result["blocked_candidates"] == []
+    (cand,) = result["candidates"]
+    assert (cand["name"] or {}).get("value") == "ÁP MÁI"
+
+
+def test_an_unnamed_level_without_a_storey_word_raises_no_selection_question(tmp_path):
+    texts = ["GROUND FLOOR %%p0.000", "+1.500", "+1.500", "ROOF +7.200"]
+    result = run(_texts(tmp_path, *texts))
+    assert "level_storey_selection" not in codes(result)
+    assert [(a, b) for a, b, _ in _heights(result)] == [(0.0, 7.2)]
+
+
+@pytest.mark.parametrize("name", ["FIRST FLOOR", "UPPER FLOOR", "PENTHOUSE"])
+def test_an_adjacent_ordinal_or_own_word_name_is_taken(tmp_path, name):
+    (cand,) = run(_named(tmp_path, name))["candidates"]
+    assert (cand["name"] or {}).get("value") == name
+
+
 def test_a_spaced_sign_after_a_bracket_is_a_level(tmp_path):
     result = run(_texts(tmp_path, "F.F.L +1.20", "(+ 6.00M LEVEL)"))
     six = next(c for c in result["candidates"] if c["value_text"] == "+ 6.00M")

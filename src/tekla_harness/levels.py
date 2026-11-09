@@ -17,9 +17,10 @@ on a structural sheet is finished or structural. So:
 2. The line around the value gives the form: bare (nothing else), prefixed (a level word only),
    labelled (a storey name, optionally a level word, then the value), embedded (anything else). Storey
    words are matched WITH their diacritics (tầng, sàn, mái, tum, hầm, lầu; English floor, roof, ...):
-   'TĂNG CƯỜNG' (strengthening) and 'SÂN' (yard) are not storeys. A storey NAME needs a number or a
-   word that names one storey (`_NAMED_STOREY_RE`: 'tầng 3', 'sàn tầng 3', 'tầng trệt', 'mái'); a bare
-   'sàn' (slab) ends slab-plan titles and quantity headings and names nothing.
+   'TĂNG CƯỜNG' (strengthening) and 'SÂN' (yard) are not storeys. A storey word is a storey NAME
+   (`_names_storey`) except in the non-names seen on the corpus: a slab-plan title whose only storey word
+   is 'sàn' (slab), a quantity or schedule heading, and a storey word with nothing else ('tầng', 'floor
+   slab'). A sure name ('tầng 3', 'first floor', 'tầng thượng', 'mái', `_NAMED_STOREY_RE`) wins over them.
 3. A level symbol is an INSERT (anywhere, also nested) of a block that looks like a level marker: it
    holds an isosceles triangle (SOLID/TRACE, closed 3-vertex polyline, or a 3-vertex HATCH boundary)
    with a horizontal base, its apex over the base midpoint (within 5 % of the base width) and a height of
@@ -33,7 +34,10 @@ on a structural sheet is finished or structural. So:
    sheet that is a copy, sheets.json duplicate_of, adds nothing). Storey heights are differences of
    consecutive levels whose candidates name a storey; when fewer than two levels are named, the
    differences of all non-embedded levels seen twice, at the datum, or next to a symbol are given, capped
-   'low', with a blocking level_storey_selection question. Values are never converted.
+   'low', with a blocking level_storey_selection question. Safety net: when storeys are named, an unnamed
+   level that carries a storey word (on the value's line, or in a neighbour that names no storey) and lies
+   between the lowest and highest named level may be a storey the heights skip: the heights are capped
+   'low' and a blocking level_storey_selection question lists those levels. Values are never converted.
 6. Legacy-font gate (`text_gate.meaning_block_reason`, tool wave 2 fix 1a): an entry whose meaning is blocked
    gives no candidate, level, group, storey name or question; each level-shaped match in it is listed in
    `blocked_candidates` (entry id, 0-based line, value text as stored, reason), and a 'none found' question
@@ -121,26 +125,41 @@ _PREFIX_RE = re.compile(
 # Storey words, matched on NFC casefolded text WITH diacritics: Vietnamese tầng/sàn/mái/tum/hầm/lầu (not
 # tăng 'strengthen', sân 'yard') and English equivalents.
 _STOREY_RE = re.compile(
-    r"\b(tầng|sàn|mái|tum|hầm|lầu|floor|roof|storey|story|level|basement|ground|terrace|mezzanine)\b"
+    r"\b(tầng|sàn|mái|tum|hầm|lầu|thượng|floor|roof|storey|story|level|basement|ground|terrace|mezzanine"
+    r"|penthouse)\b"
 )
-# A storey NAME (tool wave 3, EVAL-3 a2) needs more than a storey word: a bare 'sàn' (slab) ends slab-plan
-# titles and quantity headings ('khối lượng thép sàn'), so it names no storey. A name is a storey word
-# followed by a number, a Vietnamese number word or a ground/mezzanine word ('tầng 3', 'sàn tầng 3',
-# 'tầng hai', 'tầng trệt', 'lầu 1', 'level 2'), an English ordinal before the word ('2nd floor'), a
-# ground/mezzanine word before it ('ground floor'), or a word that names one storey by itself (mái, tum,
-# hầm, roof, terrace, basement, mezzanine).
+# A storey NAME (tool wave 3, EVAL-3 a2 and its review). A storey word names a storey, except in the
+# non-names seen on the corpus: a bare 'sàn' (slab) ends slab-plan titles ('mặt bằng thép sàn') and
+# quantity headings ('khối lượng thép sàn'), and a storey word with nothing else ('tầng', 'floor slab')
+# names nothing. A sure name (_NAMED_STOREY_RE) wins over those rejections: a storey word followed by a
+# number, a number word or a qualifier ('tầng 3', 'sàn tầng 3', 'tầng hai', 'tầng trệt', 'tầng thượng',
+# 'tầng kỹ thuật', 'tầng điển hình', 'level 2'), an ordinal or a qualifier before the word ('2nd floor',
+# 'first floor', 'upper floor', 'ground floor'), or a word that names one storey by itself (mái, áp mái,
+# tum, hầm, thượng, roof, terrace, basement, mezzanine, penthouse).
 _NAMED_STOREY_RE = re.compile(
     r"\b(?:tầng|sàn|lầu|floor|storey|story|level)\s*(?:\d+|một|hai|ba|bốn|tư|năm|sáu|bảy|tám|chín|mười"
-    r"|trệt|lửng|ground)\b"
-    r"|\b\d+\s*(?:st|nd|rd|th)?\s*(?:floor|storey|story|level)\b"
-    r"|\b(?:ground|mezzanine)\s+(?:floor|storey|story|level)\b"
-    r"|\b(?:mái|tum|hầm|roof|terrace|basement|mezzanine)\b"
+    r"|trệt|lửng|ground|thượng|kỹ thuật|điển hình)\b"
+    r"|\b(?:\d+\s*(?:st|nd|rd|th)?|first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth"
+    r"|upper|lower|top|typical|ground|mezzanine)\s*(?:floor|storey|story|level)\b"
+    r"|\b(?:áp\s*mái|mái|tum|hầm|thượng|roof|terrace|basement|mezzanine|penthouse)\b"
 )
+# Non-names: quantity and schedule headings, and the words that are no storey of their own.
+_QUANTITY_HEADING_RE = re.compile(r"\b(?:khối lượng|thống kê|quantity|quantities|schedule)\b")
+_SLAB_WORD = "sàn"
+_BARE_STOREY_WORDS_RE = re.compile(r"\b(?:tầng|sàn|lầu|floor|storey|story|level|ground|slab)\b")
 
 
 def _names_storey(text: str) -> bool:
     """Does this text (a candidate's label or a neighbour) name a storey? See _NAMED_STOREY_RE."""
-    return _NAMED_STOREY_RE.search(_storey_fold(text)) is not None
+    folded = _storey_fold(text)
+    if _NAMED_STOREY_RE.search(folded):
+        return True
+    words = _STOREY_RE.findall(folded)
+    if not words or _QUANTITY_HEADING_RE.search(folded):
+        return False
+    if all(w == _SLAB_WORD for w in words):
+        return False  # a slab-plan title or a bare 'sàn'
+    return re.search(r"\w", _BARE_STOREY_WORDS_RE.sub(" ", folded)) is not None  # 'tầng', 'floor slab': bare
 
 
 LEVEL_MARK_APEX_TOL = 0.05  # apex offset from the base midpoint, in base widths
@@ -336,6 +355,7 @@ def extract_levels(
         by_sheet_space[(locator.text_sheet(e["id"]), e["space"])].append(e)
 
     candidates: list[dict[str, Any]] = []
+    storey_worded: set[str] = set()  # candidate ids: a storey word on the value's line or next to it
     blocked: list[dict[str, Any]] = []
     for e in entries:
         lines = e["display_text"].split("\n")
@@ -383,12 +403,16 @@ def extract_levels(
                     "region": {"bbox": rbox(box)},
                 }
                 name_obj = None
+                storey_word = _STOREY_RE.search(_storey_fold(line)) is not None
                 if name is not None:
                     name_obj = {"value": name, "provenance": prov, "confidence": "low"}
                 elif form in ("bare", "prefixed") and h > 0:
-                    name_obj = _adjacent_name(
+                    name_obj, near_word = _adjacent_name(
                         e, box, h, by_sheet_space[(sheet, e["space"])], file_path, sheet
                     )
+                    storey_word = storey_word or near_word
+                if storey_word:
+                    storey_worded.add(f"L{len(candidates) + 1:04d}")
                 candidates.append(
                     {
                         "candidate_id": f"L{len(candidates) + 1:04d}",
@@ -440,6 +464,21 @@ def extract_levels(
     storeys_named = sum(named) >= 2
     for lv, n, fb in zip(levels, named, fallback, strict=True):
         lv["used_for_heights"] = n if storeys_named else fb
+    # safety net (review of a2): an unnamed level that carries a storey word and lies between named storeys
+    # may be a storey the named heights skip, so those heights are low and asked
+    skipped: list[dict[str, Any]] = []
+    low_named = high_named = 0.0
+    if storeys_named:
+        low_named = min(lv["value"] for lv in levels if lv["names"])
+        high_named = max(lv["value"] for lv in levels if lv["names"])
+        skipped = [
+            lv
+            for lv in levels
+            if not lv["names"]
+            and low_named < lv["value"] < high_named
+            and any(cid in storey_worded for cid in lv["candidate_ids"])
+        ]
+    heights_asked = not storeys_named or bool(skipped)
 
     heights = []
     used = [lv for lv in levels if lv["used_for_heights"]]
@@ -461,10 +500,20 @@ def extract_levels(
                         "derived_from": [a["value"]["provenance"], b["value"]["provenance"]],
                     },
                     "confidence": min_conf(
-                        lo["confidence"], hi["confidence"], None if storeys_named else "low"
+                        lo["confidence"], hi["confidence"], "low" if heights_asked else None
                     ),
                 },
             }
+        )
+    if skipped:
+        ask(
+            "level_storey_selection",
+            True,
+            "These levels carry a storey word but no storey name and lie between named storeys, so the "
+            "storey heights given skip them (low). Is each of them a floor?",
+            listed(lv["value_text"] for lv in skipped),
+            f"{len(skipped)} unnamed level(s) between {_value_text(Decimal(str(low_named)))} and "
+            f"{_value_text(Decimal(str(high_named)))}; heights use the {len(used)} named level(s)",
         )
     if heights and not storeys_named:
         ask(
@@ -606,18 +655,22 @@ def _adjacent_name(
     neighbours: list[dict[str, Any]],
     file_path: str,
     sheet: str,
-) -> dict[str, Any] | None:
-    """Nearest storey-word text on the same line (within NAME_SAME_LINE heights) or just above it."""
+) -> tuple[dict[str, Any] | None, bool]:
+    """(nearest storey-name text on the same line (within NAME_SAME_LINE heights) or just above it, whether
+    such a neighbour carries a storey word but names no storey: 'FLOOR SLAB' above a bare value)."""
     cx, cy = (box[0] + box[2]) / 2, (box[1] + box[3]) / 2
     best: tuple[float, str, dict[str, Any], tuple[float, float, float, float]] | None = None
+    storey_word = False
     for other in neighbours:
         if other["id"] == entry["id"] or meaning_block_reason(other) is not None:
             continue  # a blocked text never names a storey (legacy-font gate)
         text = other["display_text"].strip()
         if not text or len(text) > 40 or "\n" in text or _VALUE_RE.search(text):
             continue
-        if not _STOREY_RE.match(_storey_fold(text).lstrip("(-: ")) or not _names_storey(text):
+        start = _storey_fold(text).lstrip("(-: ")
+        if not _STOREY_RE.search(start):
             continue
+        name = (_STOREY_RE.match(start) or _NAMED_STOREY_RE.match(start)) and _names_storey(text)
         obox = text_box(other)
         if obox is None:
             continue
@@ -634,10 +687,13 @@ def _adjacent_name(
         )
         if not (same_line or above):
             continue
+        if not name:
+            storey_word = True
+            continue
         dist = math.hypot(ox - cx, oy - cy)
         if best is None or (dist, other["id"]) < (best[0], best[1]):
             best = (dist, other["id"], other, obox)
     if best is None:
-        return None
+        return None, storey_word
     prov = {"file": file_path, "sheet": sheet, "method": "dxf_entity", "region": {"bbox": rbox(best[3])}}
-    return {"value": best[2]["display_text"].strip(), "provenance": prov, "confidence": "low"}
+    return {"value": best[2]["display_text"].strip(), "provenance": prov, "confidence": "low"}, storey_word
