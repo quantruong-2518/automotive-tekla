@@ -173,7 +173,7 @@
             "question_ids": {
               "type": "array",
               "items": { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/question_id" },
-              "description": "Non-obsolete questions of this file (question-registry.json) with code font_encoding_proposed, font_encoding_conflict, text_encoding_hint or encoding_unknown_non_ascii: the engineer's answers unblock the gate."
+              "description": "Non-obsolete questions of this file (question-registry.json) with code font_encoding_proposed, font_encoding_conflict, text_encoding_hint or encoding_unknown_non_ascii: the engineer's answers unblock the gate. Empty when no blocked entry has a reason such an answer can lift (none blocked, or all legacy_ascii_suspect: ASCII text stays ASCII in every encoding)."
             }
           }
         }

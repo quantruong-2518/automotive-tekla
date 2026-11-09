@@ -452,9 +452,10 @@ def test_legacy_font_gate_block_counts_styles_and_question_ids(work):
         q["id"] for q in registry.values() if q["code"] in codes and q["file"] == REL
     )
     assert gate["question_ids"]  # the fixture raises them
-    # a sheet without blocked text still reports the file's questions and zero entries
+    # a sheet without blocked text has nothing an answer could unblock: zero entries, no question
     clean = sheet_text(work, REL, "Plot#01")["legacy_font_gate"]
     assert clean["blocked_entries"] == 0 and clean["by_reason"] == {} and clean["styles"] == []
+    assert clean["question_ids"] == []
 
 
 def test_gate_counts_the_whole_sheet_not_only_the_returned_entries(work):
@@ -481,6 +482,27 @@ def test_question_ids_skip_obsolete_other_files_and_other_codes(damaged):
     path.write_text(json.dumps(registry), encoding="utf-8")
     ids = sheet_text(damaged, REL, "model#01")["legacy_font_gate"]["question_ids"]
     assert ids == ["Q-003", "Q-004", "Q-005", "Q-090", "Q-1000"]  # numeric order, answered kept
+
+
+def _gate_entry(raw: str, flags: list[str], encoding: str = "unknown") -> dict[str, Any]:
+    return {"raw_text": raw, "flags": flags, "style": "S", "decode": {"encoding_used": encoding}}
+
+
+@pytest.mark.parametrize(
+    ("entries", "ids"),
+    [
+        # review of tool wave 2 (F1 item 6): no encoding answer unblocks ASCII Telex-style text, so a sheet
+        # whose only blocked entries are legacy_ascii_suspect lists no question
+        ([_gate_entry("haFn 200", ["legacy_ascii_suspect"], "tcvn3")], []),
+        ([_gate_entry("D1", [])], []),  # nothing blocked: nothing to unblock
+        ([_gate_entry("b\xb6n", ["encoding_unknown_non_ascii"])], ["Q-003"]),
+        ([_gate_entry("haFn 200", ["legacy_ascii_suspect"]), _gate_entry("b\xb6n", [])], ["Q-003"]),
+    ],
+)
+def test_gate_lists_only_questions_that_can_unblock(entries, ids):
+    from tekla_harness.sheet_text import _gate
+
+    assert _gate(entries, ["Q-003"])["question_ids"] == ids
 
 
 def test_missing_registry_warns_and_lists_no_questions(damaged):

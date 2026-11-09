@@ -553,6 +553,10 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
     `grids.json` `blocked_candidates` (entry id, value as shown, reason, sheet; count in
     `summary.blocked_candidates`), and a family line ending in such a circle asks `grid_label_missing`.
     `grids` schema: both fields added, optional (`$id` stays 0.1).
+  - `harness sheet-text` / `find-text`: `legacy_font_gate.question_ids` lists the file's font questions only
+    when some blocked entry has a reason an encoding answer can lift; a sheet whose blocked entries are all
+    `legacy_ascii_suspect`, or that has none, lists no question. Schema descriptions of `question_ids` and
+    `legacy_ascii_suspect` updated (no structural change, `$id` stays 0.1).
 - `guard_tekla_write.py` now exits 2 (the blocking code) on any internal error instead of
   relying on an undocumented `onFailure` setting; the setting was removed.
 - `guard_tekla_write.py` no longer blocks commands that only mention `tekla-cli` as data

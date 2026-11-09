@@ -295,14 +295,17 @@ def _compact(row: int | None, e: dict[str, Any]) -> dict[str, Any]:
 
 
 def _gate(entries: list[dict[str, Any]], question_ids: list[str]) -> dict[str, Any]:
-    """The `legacy_font_gate` block over a set of full entries."""
+    """The `legacy_font_gate` block over a set of full entries. `question_ids` only when an answer can
+    unblock something: no encoding answer unblocks `legacy_ascii_suspect` (ASCII stays ASCII in every
+    encoding), so a sheet whose blocked entries are all of that kind, or that has none, lists no question."""
     reasons = [r for r in (meaning_block_reason(e) for e in entries) if r is not None]
     styles = {e["style"] or "" for e in entries if meaning_block_reason(e) is not None}
+    answerable = any(r != "legacy_ascii_suspect" for r in reasons)
     return {
         "blocked_entries": len(reasons),
         "by_reason": {r: reasons.count(r) for r in BLOCK_REASONS if r in reasons},
         "styles": sorted(styles),
-        "question_ids": question_ids,
+        "question_ids": question_ids if answerable else [],
     }
 
 
