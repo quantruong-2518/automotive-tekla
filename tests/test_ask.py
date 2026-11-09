@@ -14,7 +14,14 @@ from tekla_harness.answers import record_answer
 from tekla_harness.ask import ask_question, reader_key, static_owner, withdraw_question
 from tekla_harness.cli import main
 from tekla_harness.intake import run_intake
-from tekla_harness.questions import QuestionsError
+from tekla_harness.questions import (
+    CALLOUT_UNPARSED_CODE,
+    GRID_CONTRADICTS_CODE,
+    GRID_MISSING_CODE,
+    LEGACY_ASCII_CODE,
+    SHEET_GAP_CODE,
+    QuestionsError,
+)
 from tekla_harness.schemas import validate
 from tekla_harness.status import build_status
 from tekla_harness.structure import read_structure
@@ -142,6 +149,12 @@ def test_unknown_file_is_refused_with_exit_1_and_writes_nothing(world, capsys):
         ("schedule_row_unparsed", "marks"),
         ("member_mark_prefix_meaning", "marks"),  # tool wave 2: marks raises it, callouts no longer does
         ("file_set_relation", "intake"),  # tool wave 2: intake's project-level file-set question
+        # tool wave 3 codes, with the producer that raises each (questions.py)
+        (SHEET_GAP_CODE, "structure"),
+        (CALLOUT_UNPARSED_CODE, "callouts"),
+        (LEGACY_ASCII_CODE, "intake"),  # read-dxf at intake: no prefix covers it
+        (GRID_MISSING_CODE, "grid-system"),
+        (GRID_CONTRADICTS_CODE, "grid-system"),  # exact code beats read-structure's grid_ prefix
     ],
 )
 def test_a_code_owned_by_another_producer_is_refused_with_exit_2(world, capsys, code, owner):

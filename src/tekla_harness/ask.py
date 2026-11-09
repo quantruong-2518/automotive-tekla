@@ -41,7 +41,9 @@ from typing import Any
 from tekla_harness.questions import (
     EXIT_INVALID,
     EXIT_USAGE,
+    GRID_CONTRADICTS_CODE,
     KEY_LENGTH,
+    LEGACY_ASCII_CODE,
     PRODUCER_COMMANDS,
     Ledger,
     QuestionsError,
@@ -75,10 +77,12 @@ OTHER_OWNERS: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
             "read_failed",
             "no_reader_implemented",
             "file_set_relation",
+            LEGACY_ASCII_CODE,  # tool wave 3: read-dxf, one per file and text style
         ),
         ("units_",),
     ),
-    "grid-system": (("units_answer_contradicts_evidence",), ("grid_system_",)),
+    # grid_answer_contradicts_drawing: exact, so read-structure's grid_ prefix does not take it (ADR-0013 §5)
+    "grid-system": (("units_answer_contradicts_evidence", GRID_CONTRADICTS_CODE), ("grid_system_",)),
     "structure": (("grid_family_axis_assignment", "grid_units_doubt"), ("grid_", "level_", "sheet_")),
     "callouts": (("grade_legacy_mapping",), ("callout_", "steel_grade", "rebar_")),
     # member_mark_prefix_meaning: raised by marks for every plan-mark prefix (tool wave 2)

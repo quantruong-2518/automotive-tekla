@@ -601,6 +601,9 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
       each a plain decimal > 0 (no sign, exponent, `inf` or `nan`); anything else is exit 1, nothing
       written. Stored in `answers.json` as arrays: labels as strings, spacings as numbers (`3130` stays an
       integer, `3540.5` a float). The answer itself builds nothing; `harness grid-system` reads it.
+    - `harness ask` refuses the producer codes `legacy_ascii_text` (intake) and
+      `grid_answer_contradicts_drawing` (grid-system; it no longer falls under read-structure's `grid_`
+      prefix) as reader codes (exit 2).
 
 ### Changed
 - Question lifecycle (tool wave 2, EVAL-2 fix 5):
