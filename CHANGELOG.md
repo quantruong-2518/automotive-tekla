@@ -547,7 +547,8 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
     - W3: `read_dxf.legacy_ascii_questions(text_index, file, probe text_styles)` builds the
       `legacy_ascii_text` questions of one file: one per text style holding `legacy_ascii_suspect`
       entries, not blocking, `count` = the style's flagged entries, the first 5 listed by entry id and
-      quoted as stored, the message naming the style, its font file and its TrueType family. Not yet
+      quoted as stored, the message and every ref's `where` naming the style, its font file and its
+      TrueType family (`harness questions-md` shows the refs, not the English message). Not yet
       called by `harness intake` (wiring pending, see the package report). The sheet-text
       `legacy_font_gate.question_ids` lists the file's live `legacy_ascii_text` questions when the sheet
       has `legacy_ascii_suspect` entries (encoding questions still only when an encoding answer can lift

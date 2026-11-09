@@ -1764,6 +1764,7 @@ def test_legacy_ascii_text_is_one_question_per_style_with_count_and_five_example
     assert second["count"] == 1 and second["truncated"] is False and len(second["refs"]) == 1
     assert "'kt..9'" in second["message"] and "plain.shx" in second["message"]
     assert "family VnSimH" in second["message"]
+    assert second["refs"][0]["where"] == "text style kt..9 (font file plain.shx, TrueType family VnSimH)"
     assert "D1 200x300" not in json.dumps(got)  # not flagged: not listed
     # no legacy_ascii_suspect entry: no question
     clean = {"entries": [_legacy_entry("T000001", "S", "D1", flagged=False)]}
@@ -1779,7 +1780,12 @@ def test_legacy_ascii_text_without_style_or_probe_styles_says_so():
         ]
     }
     got = read_dxf.legacy_ascii_questions(text, "x.dxf", None)
-    assert [q["refs"][0]["where"] for q in got] == ["text style (no style)", "text style B"]
+    # questions-md shows the refs, not the English message: each ref names the font file and family too
+    unknown = "TrueType family unknown (the probe has no text_styles section)"
+    assert [q["refs"][0]["where"] for q in got] == [
+        f"text style (no style) (font file none, {unknown})",
+        f"text style B (font file b.shx, {unknown})",
+    ]
     assert "font file none" in got[0]["message"]
     assert "family unknown (the probe has no text_styles section)" in got[1]["message"]
     assert [r["found"] for r in got[1]["refs"]] == ["T000001: haFn", "T000003: tieRp"]

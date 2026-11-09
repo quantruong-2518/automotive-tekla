@@ -771,6 +771,8 @@ def legacy_ascii_questions(
         else:
             family = families.get(style) or "none"
         n = len(entries)
+        # questions-md shows the refs, not this English message: each ref names the font too
+        where = f"text style {style} (font file {font or 'none'}, TrueType family {family})"
         message = (
             f"{n} pure-ASCII text entr{'y' if n == 1 else 'ies'} in text style '{style}' (font file "
             f"{font or 'none'}, TrueType family {family}) {'has' if n == 1 else 'have'} the shape legacy "
@@ -779,10 +781,7 @@ def legacy_ascii_questions(
             "whether its text can be read as it is stored. The answer records your reading of the style; it "
             "decodes nothing and unblocks nothing."
         )
-        refs = [
-            {"file": rel, "where": f"text style {style}", "found": f"{e['id']}: {e['display_text']}"}
-            for e in entries
-        ]
+        refs = [{"file": rel, "where": where, "found": f"{e['id']}: {e['display_text']}"} for e in entries]
         out.append(question_group(LEGACY_ASCII_CODE, False, message, refs, MAX_LEGACY_EXAMPLES, file=rel))
     return out
 
