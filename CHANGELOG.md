@@ -543,6 +543,11 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
     `1/A`) unless two letters stand before it (`BO/R`), and CamelCase words (`TieRod`, `HoleSize`). On
     dwgshare 461 the 16 Telex-style texts of the `vncc-rms.shx` / `vncc-sim.shx` styles are blocked
     (except `s.l`, `stt`): `haFn 200` is no longer two plan marks with a `HAFN` prefix question.
+  - A TrueType family no longer silently overrides an approved knowledge row: when the family decides and
+    an approved row for the style or its font file gives another encoding (or approved rows disagree),
+    `harness extract-text` decodes nothing and flags `knowledge_conflict` (the gate blocks it), and
+    `harness read-dxf` gives no hint and asks `font_encoding_conflict`. An agreeing row changes nothing.
+    This replaces P1's "a `.Vn*` family decides before an approved font-file row" for disagreeing rows.
 - `guard_tekla_write.py` now exits 2 (the blocking code) on any internal error instead of
   relying on an undocumented `onFailure` setting; the setting was removed.
 - `guard_tekla_write.py` no longer blocks commands that only mention `tekla-cli` as data

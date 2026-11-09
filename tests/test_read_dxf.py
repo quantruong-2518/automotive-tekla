@@ -838,6 +838,34 @@ def test_conflicting_approved_rows_leave_the_style_undecided_and_ask(tmp_path):
     assert not question["blocking"] and "vn*.shx" in question["found"] and "vn_vni.shx" in question["found"]
 
 
+def test_a_family_that_disagrees_with_an_approved_row_gives_no_hint_and_asks(tmp_path):
+    # review of tool wave 2 (F1 item 4): the same rule as extract_text (knowledge_conflict there)
+    def build(doc):
+        doc.styles.new("kt..1", dxfattribs={"font": "VHARIAL.TTF"}).set_extended_font_data("VNI-Times")
+        doc.styles.new("kt..2", dxfattribs={"font": "VHARIAL.TTF"}).set_extended_font_data(".VnArialH")
+
+    result = probe(make(tmp_path, build), knowledge=table_of(tmp_path, approved(pattern="VHARIAL.TTF")))
+    hints = {h["style"]: h for h in result["text_encoding_hints"]}
+    assert "kt..1" not in hints  # nothing decided for it
+    assert (hints["kt..2"]["encoding_hint"], hints["kt..2"]["source"]) == ("tcvn3", "font_hint")  # agrees
+    (question,) = [q for q in result["questions"] if q["code"] == "font_encoding_conflict"]
+    assert question["where"] == "text style kt..1" and not question["blocking"]
+    assert "VNI-Times" in question["found"] and "VHARIAL.TTF" in question["found"]
+    assert not [q for q in result["questions"] if q["code"] == "text_encoding_hint" and "kt..1" in q["where"]]
+    assert validate("dxf-probe", result) == []
+
+
+def test_approved_rows_that_disagree_leave_a_family_style_undecided(tmp_path):
+    def build(doc):
+        doc.styles.new("kt..1", dxfattribs={"font": "VHARIAL.TTF"}).set_extended_font_data(".VnArialH")
+
+    table = table_of(tmp_path, approved(pattern="VH*.TTF"), approved(pattern="VHARIAL.TTF", encoding="vni"))
+    result = probe(make(tmp_path, build), knowledge=table)
+    assert result["text_encoding_hints"] == []
+    (question,) = [q for q in result["questions"] if q["code"] == "font_encoding_conflict"]
+    assert "VH*.TTF" in question["found"] and "VHARIAL.TTF" in question["found"]
+
+
 def test_the_shipped_table_is_used_by_default(tmp_path):
     def build(doc):
         doc.styles.new("TKT", dxfattribs={"font": "vntimeh.shx"})

@@ -810,7 +810,8 @@ def test_a_unicode_family_never_overrides_an_approved_font_row(tmp_path):
 
 
 def test_a_legacy_family_comes_before_the_knowledge_table(tmp_path):
-    table = table_of(tmp_path, approved(pattern="VHAVAN_2.TTF", encoding="vni"))
+    # an approved row that agrees with the family: the family decides, nothing is flagged
+    table = table_of(tmp_path, approved(pattern="VHAVAN_2.TTF", encoding="tcvn3"))
 
     def fn(doc):
         family_style(doc, "kt..1", "VHAVAN_2.TTF", ".VnAvant")
@@ -818,7 +819,49 @@ def test_a_legacy_family_comes_before_the_knowledge_table(tmp_path):
 
     e = only(index(build(tmp_path, fn), knowledge=table), entity_type="TEXT")
     assert (e["decode"]["encoding_used"], e["decode"]["source"]) == ("tcvn3", "style_family")
-    assert e["decode"]["knowledge_patterns"] == []
+    assert e["decode"]["knowledge_patterns"] == [] and "knowledge_conflict" not in e["flags"]
+
+
+@pytest.mark.parametrize(
+    ("rows", "family"),
+    [
+        # review of tool wave 2 (F1 item 4): VHARIAL.TTF is approved TCVN3, a 'VNI-Times' family must not
+        # silently decode it as VNI
+        ((("VHARIAL.TTF", "font_file", "tcvn3"),), "VNI-Times"),
+        ((("kt..1", "style_name", "vni"),), ".VnArial"),  # a style-name row counts the same
+        ((("VHARIAL.TTF", "font_file", "unicode"),), ".VnArial"),
+        # approved rows that disagree among themselves: a conflict whatever the family says
+        ((("VH*.TTF", "font_file", "tcvn3"), ("VHARIAL.TTF", "font_file", "vni")), ".VnArial"),
+    ],
+)
+def test_a_family_that_disagrees_with_an_approved_row_is_a_knowledge_conflict(tmp_path, rows, family):
+    table = table_of(tmp_path, *(approved(pattern=p, applies_to=a, encoding=enc) for p, a, enc in rows))
+
+    def fn(doc):
+        family_style(doc, "kt..1", "VHARIAL.TTF", family)
+        text_at(doc.modelspace(), "m" + A_DOT_BREVE_TCVN3 + "t", "kt..1")
+
+    e = only(index(build(tmp_path, fn), knowledge=table), entity_type="TEXT")
+    assert "knowledge_conflict" in e["flags"]
+    assert e["decode"]["encoding_used"] == "unknown" and e["decoded_text"] == e["raw_text"]
+    assert meaning_block_reason(e) == "knowledge_conflict"
+
+
+def test_a_proposed_or_rejected_row_never_conflicts_with_the_family(tmp_path):
+    table = table_of(
+        tmp_path,
+        row(pattern="VHARIAL.TTF", encoding="vni"),
+        row(pattern="kt..1", applies_to="style_name", encoding="unicode", status="rejected", decided_by="x",
+            decided_on="2026-11-07"),
+    )  # fmt: skip
+
+    def fn(doc):
+        family_style(doc, "kt..1", "VHARIAL.TTF", ".VnArial")
+        text_at(doc.modelspace(), "m" + A_DOT_BREVE_TCVN3 + "t", "kt..1")
+
+    e = only(index(build(tmp_path, fn), knowledge=table), entity_type="TEXT")
+    assert (e["decode"]["encoding_used"], e["decode"]["source"]) == ("tcvn3", "style_family")
+    assert "knowledge_conflict" not in e["flags"]
 
 
 # --- ASCII text that looks like legacy Vietnamese (tool wave 2, fix 2b; default D2) -------------------

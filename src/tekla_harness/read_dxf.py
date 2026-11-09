@@ -657,7 +657,24 @@ def _text_styles(
             for field_name, value in (("name", name), ("font", font), ("family", family))
             if value and guess_encoding_from_font(value) == encoding
         ]  # empty when the encoding is "unknown"
-        if encoding == "unknown":
+        if hint.decided_by == "family":  # a family never silently overrides an approved row (as extract_text)
+            found = table.match(name, font or None)
+            disagree = found.conflict or (found.rows if found.encoding not in (None, encoding) else ())
+            if disagree:
+                encoding = "unknown"
+                questions.append(
+                    {
+                        "code": "font_encoding_conflict",
+                        "blocking": False,
+                        "message": "The TrueType family of a text style names one legacy encoding and "
+                        "approved rows of the font-encoding knowledge table give another (or disagree). "
+                        "Nothing is decoded for this style. Fix or reject the row, or confirm the encoding.",
+                        "where": f"text style {name}",
+                        "found": f"family '{family}' -> {hint.encoding}; "
+                        + "; ".join(f"{r.cite()} [{r.source}]" for r in disagree),
+                    }
+                )
+        elif encoding == "unknown":
             found = table.match(name, font or None)
             if found.conflict:
                 questions.append(

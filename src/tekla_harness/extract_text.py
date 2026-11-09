@@ -287,7 +287,8 @@ class _Context:
 
     def style_decision(self, style: str | None) -> _StyleDecision:
         """Encoding hint of a text style: `font_hint` (name, font file, TrueType family), then an approved
-        knowledge row if that says nothing."""
+        knowledge row if that says nothing. A family that disagrees with an approved row (or approved rows
+        that disagree among themselves) decides nothing: a knowledge conflict, as between rows."""
         key = style or ""
         if key not in self.decision_cache:
             if not style:
@@ -297,7 +298,13 @@ class _Context:
                 hint = font_hint(style, font_file, self.style_family(style))
                 source = "style_family" if hint.decided_by == "family" else "style_font"
                 decision = _StyleDecision(hint, source)
-                if hint.encoding == "unknown":
+                if hint.decided_by == "family":
+                    found = self.knowledge.match(style, font_file)
+                    if found.conflict or (found.encoding is not None and found.encoding != hint.encoding):
+                        decision = _StyleDecision(
+                            FontHint("unknown", hint.capital_font), conflict=True, proposed=found.proposed
+                        )
+                elif hint.encoding == "unknown":
                     found = self.knowledge.match(style, font_file)
                     decision = _StyleDecision(hint, conflict=bool(found.conflict), proposed=found.proposed)
                     if found.encoding is not None:
