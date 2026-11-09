@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import shutil
 from pathlib import Path
@@ -518,6 +519,92 @@ def test_questions_md_shows_the_amended_text(world):
     amend_question(work, q["id"], text="Câu hỏi mới về nhãn trục")
     text = render_questions_md(work).text
     assert "Câu hỏi mới về nhãn trục" in text and "Câu hỏi cũ về nhãn trục" not in text
+
+
+# --- harness validate reader-questions on real-shaped documents ----------------------------------------
+
+# The shape of the EVAL-3 reader documents (projects/_evals/eval3-2026-11-09, arms H and R: 31 and 22
+# questions, all with exactly these keys), cut down to two questions with short stand-in text: a .dwg file,
+# a blocking and a non-blocking question, no sheet, an empty `found`, no answer.
+EVAL3_SHAPE: dict[str, Any] = {
+    "schema_version": "0.1",
+    "kind": "questions",
+    "project_id": "eval3-r",
+    "questions": [
+        {
+            "id": "Q-075",
+            "key": "4ea02907ca0c8032",
+            "code": "reader_drawing_list_missing",
+            "blocking": True,
+            "file": "267_4-story_house_complete_project.dwg",
+            "message": "Không tìm thấy danh mục bản vẽ trong file.",
+            "count": 1,
+            "truncated": False,
+            "refs": [
+                {
+                    "file": "267_4-story_house_complete_project.dwg",
+                    "where": "cả file (65 tờ, model#01…model#65)",
+                    "found": "find-text 'danh mục': 0 kết quả",
+                }
+            ],
+            "answer": None,
+        },
+        {
+            "id": "Q-117",
+            "key": "86b2fa3ad2caba14",
+            "code": "reader_level_storey_selection",
+            "blocking": False,
+            "file": "161_complete_steel_building.dwg",
+            "message": "Cao độ nào là cao độ tầng?",
+            "count": 1,
+            "truncated": False,
+            "refs": [{"file": "161_complete_steel_building.dwg", "where": "tờ Layout2#01", "found": ""}],
+            "answer": None,
+        },
+    ],
+    "summary": {"questions": 2, "blocking_questions": 1, "answered": 0, "blocking_open": 1},
+}
+
+
+def _validate_cli(capsys, path: Path, doc: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+    path.write_text(json.dumps(doc, ensure_ascii=False), encoding="utf-8")
+    rc = main(["validate", "reader-questions", str(path)])
+    return rc, json.loads(capsys.readouterr().out)
+
+
+def test_validate_reader_questions_accepts_the_eval3_shape_and_an_amended_question(tmp_path, capsys):
+    rc, out = _validate_cli(capsys, tmp_path / "rq.json", EVAL3_SHAPE)
+    assert rc == 0 and out["results"][0]["valid"] is True
+    amended = copy.deepcopy(EVAL3_SHAPE)
+    amended["questions"][0].update(
+        message="mới",
+        places=["model#05 axis 3-4"],
+        amendments=[{"at": 7, "places": []}, {"at": 9, "text": "cũ", "places": ["model#05"]}],
+    )
+    rc, out = _validate_cli(capsys, tmp_path / "rq.json", amended)
+    assert rc == 0, out
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda q: q["refs"].append({"file": q["file"], "where": "w2", "found": "f"}),  # one ref only
+        lambda q: q.update(count=2),
+        lambda q: q.update(truncated=True),
+        lambda q: q.update(closed_by={"question_id": "Q-001", "reason": "not_selected"}),
+        lambda q: q.update(subjects=[{"name": "dir1"}]),
+        lambda q: q.update(amendments=[{"at": 3}]),  # an amendment records what it replaced
+        lambda q: q.update(amendments=[]),
+        lambda q: q.update(places=[" "]),
+        lambda q: q.update(places=[]),
+        lambda q: q.update(amendments=[{"at": 0, "text": "cũ"}]),
+    ],
+)
+def test_validate_reader_questions_refuses_what_a_reader_question_cannot_be(tmp_path, capsys, mutate):
+    bad = copy.deepcopy(EVAL3_SHAPE)
+    mutate(bad["questions"][1])
+    rc, out = _validate_cli(capsys, tmp_path / "rq.json", bad)
+    assert rc == 1 and out["results"][0]["valid"] is False
 
 
 def test_an_answer_keeps_the_amendments(world):
