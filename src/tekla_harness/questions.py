@@ -16,7 +16,9 @@ identity that does not depend on the position:
             re-bound to another key.
 
 One question is one (code, blocking flag, file) with its refs (file null = a question about the whole
-project). Six producers share the registry and own disjoint code sets: `intake` (harness intake),
+project), except one per file and text style for legacy_ascii_text and one per file and unparsed_code for
+callout_unparsed (tool wave 3): those differ by their refs, so by their key.
+Six producers share the registry and own disjoint code sets: `intake` (harness intake),
 `structure` (harness read-structure), `callouts` (harness callouts), `marks` (harness marks: member marks
 and schedules), `grid-system` (harness grid-system) and
 `reader` (harness ask, the drawing-reader agent's own questions, see ask.py: one question per

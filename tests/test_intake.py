@@ -619,6 +619,80 @@ def test_questions_group_unknown_encodings_and_proposed_rows(text_folder, tmp_pa
     assert order[-2:] == ["encoding_unknown_non_ascii", "file_set_relation"]
 
 
+LEGACY_FONT = "TrueType family none"
+
+
+@pytest.fixture
+def legacy_folder(tmp_path) -> Path:
+    """a.dxf has no legacy-looking ASCII; b.dxf has two legacy-font styles holding it, and a clean one."""
+    root = tmp_path / "input"
+    make_text_dxf(root / "a.dxf", [("D1", ".VnTime", "vntime.ttf"), ("ABC 200", "Simplex", "simplex.shx")])
+    make_text_dxf(
+        root / "b.dxf",
+        [
+            ("4/g14", ".VnTime", "vntime.ttf"),
+            ("chi tiESt", ".VnTime", "vntime.ttf"),
+            ("D1", ".VnTime", "vntime.ttf"),  # structural ASCII: not suspect
+            ("haFn 200", "VNI-Times", "vni-times.ttf"),
+            ("haFn 200", "Simplex", "simplex.shx"),  # no legacy font, no non-ASCII sibling: not suspect
+            (LEGACY_BYTES, "Odd", "odd.shx"),  # non-ASCII of unknown encoding: encoding_unknown_non_ascii
+        ],
+    )
+    return root
+
+
+def test_intake_asks_legacy_ascii_text_once_per_file_and_style(legacy_folder, tmp_path):
+    """Tool wave 3 (W3): every legacy_ascii_suspect entry's file gets a live question covering it (M6)."""
+    out = tmp_path / "work"
+    run_intake(legacy_folder, out, "demo-intake", knowledge=EMPTY_TABLE)
+    doc = load(out, "questions.json")
+    assert validate("intake", doc) == []
+    legacy = [q for q in doc["questions"] if q["code"] == "legacy_ascii_text"]
+    assert [(q["file"], q["refs"][0]["where"], q["count"]) for q in legacy] == [
+        ("b.dxf", f"text style .VnTime (font file vntime.ttf, {LEGACY_FONT})", 2),
+        ("b.dxf", f"text style VNI-Times (font file vni-times.ttf, {LEGACY_FONT})", 1),
+    ]  # none for a.dxf; one per style of b.dxf
+    assert all(q["blocking"] is False and q["truncated"] is False for q in legacy)
+    assert len({q["id"] for q in legacy}) == 2 and len({q["key"] for q in legacy}) == 2
+    text = {e["id"]: e for e in load(out, "text/b.dxf.json")["entries"]}
+    flagged = sorted(i for i, e in text.items() if "legacy_ascii_suspect" in e["flags"])
+    assert sorted(r["found"].split(":")[0] for q in legacy for r in q["refs"]) == flagged
+    assert legacy[0]["refs"][0]["found"] == f"{flagged[0]}: 4/g14"  # quoted as stored
+    registry = load(out, "question-registry.json")["questions"]
+    entries = [v for v in registry.values() if v["code"] == "legacy_ascii_text"]
+    assert sorted(v["id"] for v in entries) == sorted(q["id"] for q in legacy)
+    assert all(v["producer"] == "intake" and v["status"] == "open" and v["file"] == "b.dxf" for v in entries)
+    order = [q["code"] for q in doc["questions"]]
+    # with the other text questions, before the project-level file set question (always last)
+    assert order[-4:] == [
+        "encoding_unknown_non_ascii", "legacy_ascii_text", "legacy_ascii_text", "file_set_relation",
+    ]  # fmt: skip
+
+
+def test_an_unreadable_text_index_raises_no_legacy_ascii_text(legacy_folder, tmp_path, monkeypatch):
+    real = intake_mod.extract_text
+
+    def unreadable(*args, **kwargs):
+        result = real(*args, **kwargs)
+        return {
+            "schema_version": result["schema_version"],
+            "status": "unreadable",
+            "file": result["file"],
+            "attempts": result["attempts"],
+            "error": "simulated: the text index could not be computed",
+        }
+
+    monkeypatch.setattr(intake_mod, "extract_text", unreadable)
+    out = tmp_path / "work"
+    run_intake(legacy_folder, out, "demo-intake", knowledge=EMPTY_TABLE)
+    codes = [q["code"] for q in load(out, "questions.json")["questions"]]
+    assert "legacy_ascii_text" not in codes
+    assert any(
+        "text index could not be computed" in w
+        for w in by_file(load(out, "read-log.json"))["b.dxf"]["warnings"]
+    )
+
+
 def test_an_approved_row_removes_the_unknown_question_for_its_styles(text_folder, tmp_path):
     out = tmp_path / "work"
     run_intake(text_folder, out, "demo-intake", knowledge=table_of(tmp_path, approved(pattern="VH*.TTF")))

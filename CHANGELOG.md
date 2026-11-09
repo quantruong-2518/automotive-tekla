@@ -548,8 +548,12 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
       `legacy_ascii_text` questions of one file: one per text style holding `legacy_ascii_suspect`
       entries, not blocking, `count` = the style's flagged entries, the first 5 listed by entry id and
       quoted as stored, the message and every ref's `where` naming the style, its font file and its
-      TrueType family (`harness questions-md` shows the refs, not the English message). Not yet
-      called by `harness intake` (wiring pending, see the package report). The sheet-text
+      TrueType family (`harness questions-md` shows the refs, not the English message). `harness
+      intake` raises them after the `encoding_unknown_non_ascii` questions (none for a file whose text
+      index is unreadable); on 267 one question covers the 786 ROMANS entries, on 461 two questions
+      cover 14. The `questions.py` docstring and the intake schema descriptions now say these questions
+      (and `callout_unparsed`) are one per file and style (or reason family), not one per code and
+      file. The sheet-text
       `legacy_font_gate.question_ids` lists the file's live `legacy_ascii_text` questions when the sheet
       has `legacy_ascii_suspect` entries (encoding questions still only when an encoding answer can lift
       a reason); find-text `notes` names the questions covering the blocked entries in scope; `harness
