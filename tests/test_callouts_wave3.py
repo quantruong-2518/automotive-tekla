@@ -413,3 +413,85 @@ def test_a_shape_only_title_candidate_from_a_mark_family_is_released(family_work
     assert "GD-3" not in rejected(doc, "claimed_by_title_block")
     plan = {p["mark"] for p in extract_marks(family_work)["plan_marks"]}
     assert "GD-3" in plan and not {"SX-5", "GE-1", "GD-2"} & plan
+
+
+# --- a footing mark with a bolt-size number (EVAL-3 R arm, 433 T000555 'M8' among footings M1-M7) -------
+
+M_TEXTS = ["M1", "M7", "M8", "M20", "4M20", "M10 8.8", "M10"]
+
+
+@pytest.fixture(scope="module")
+def m_work(tmp_path_factory) -> Path:
+    return build_work(
+        tmp_path_factory.mktemp("footings"),
+        s1=M_TEXTS,
+        styled=[("M11", ".VnTimeH")],  # a neighbour of M10 in another style: no evidence
+        s2=["M8", "M9b"],  # on sheet 2, M8 has no plain M7 or M9 neighbour
+        paper=[],
+    )
+
+
+def test_a_bolt_size_m_label_next_to_its_footing_family_is_a_member_mark(m_work):
+    from tekla_harness.marks import extract_marks
+
+    doc = extract_callouts(m_work)
+    s1_marks = {
+        c["display_text"]
+        for c in doc["candidates"]
+        if c["kind"] == "member_mark" and c["sheet"] == "model#01"
+    }
+    s1_bolts = {
+        c["display_text"] for c in doc["candidates"] if c["kind"] == "bolt" and c["sheet"] == "model#01"
+    }
+    assert s1_marks == {"M1", "M7", "M8", "M11"}
+    assert {"M20", "M10 8.8", "M10"} <= s1_bolts and "M8" not in s1_bolts  # 4M20's span is 'M20'
+    assert sum(c["display_text"] == "M20" and c["kind"] == "bolt" for c in doc["candidates"]) == 2
+    assert [
+        c["kind"] for c in doc["candidates"] if c["display_text"] == "M8" and c["sheet"] == "model#02"
+    ] == ["bolt"]
+    plan = [p for p in extract_marks(m_work)["plan_marks"] if p["sheet"] == "model#01"]
+    assert {p["mark"] for p in plan} == {"M1", "M7", "M8", "M11"}
+    (m8,) = [p for p in plan if p["mark"] == "M8"]
+    assert m8["in_callouts"] is True and m8["lexical"]["numbers"] == ["8"]
+
+
+@pytest.mark.parametrize(
+    ("texts", "marks"),
+    [
+        (["M7", "M8"], {"M8"}),  # n - 1
+        (["M9", "M8"], {"M8"}),  # n + 1
+        (["M9", "M10"], {"M10"}),
+        (["M6", "M8"], set()),  # no neighbour number
+        (["M7", "M8a"], set()),  # not a bare M<n>
+        (["M7", " M8 "], {" M8 "}),  # surrounding blanks are not part of the text
+        (["m7", "m8"], set()),  # lower case: no evidence
+    ],
+)
+def test_which_bolt_size_m_labels_are_footing_marks(texts, marks):
+    from tekla_harness.callouts import footing_m_labels
+
+    entries = [
+        {
+            "id": f"T{n:06d}",
+            "display_text": t,
+            "style": "Standard",
+            "height": 300.0,
+            "decode": {"case_uncertain": False},
+        }
+        for n, t in enumerate(texts, start=1)
+    ]
+    sheet = {"sheet_id": "model#01"}
+    found = footing_m_labels(entries, {e["id"]: sheet for e in entries})
+    assert {e["display_text"] for e in entries if e["id"] in found} == marks
+
+
+def test_a_footing_neighbour_needs_the_same_style_and_height():
+    from tekla_harness.callouts import footing_m_labels
+
+    def entry(n: int, text: str, style: str, height: float) -> dict[str, Any]:
+        return {"id": f"T{n:06d}", "display_text": text, "style": style, "height": height}
+
+    entries = [entry(1, "M7", "A", 300.0), entry(2, "M8", "B", 300.0), entry(3, "M9", "A", 250.0)]
+    assert footing_m_labels(entries, {}) == set()  # texts on no sheet are grouped together, still no match
+    entries.append(entry(4, "M9", "B", 300.0))
+    assert footing_m_labels(entries, {}) == {"T000002"}

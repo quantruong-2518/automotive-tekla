@@ -644,6 +644,10 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
       holds a family of that mark (another unclaimed mark-shaped text with the same prefix, style and
       height): 286's tie-beam mark `gĐ-3` is a mark again. Sheet numbers found the same way without such a
       family (461 `Đn-05`) stay claimed.
+    - Fix: a whole `M<n>` text with a bolt size n is a member mark, not a bolt label, in `harness callouts`
+      and `harness marks` when its footing family stands next to it: a whole `M<n-1>` or `M<n+1>` that is
+      no bolt size, on the same sheet, in the same style and height. 433's footing `M8` (T000555, next to
+      `M7`) joins M1–M7; bolt labels elsewhere (161, Steel) are unchanged.
 
 ### Changed
 - Question lifecycle (tool wave 2, EVAL-2 fix 5):

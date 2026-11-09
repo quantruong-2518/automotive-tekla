@@ -123,6 +123,7 @@ from tekla_harness.callouts import (
     _confidence,
     _num,
     _provenance,
+    footing_m_labels,
     member_mark,
     scan_line,
 )
@@ -299,11 +300,13 @@ def _mark_from(m: re.Match[str], text: str) -> Mark | None:
     return Mark(mark_text, mark_key(mark_text), m["prefix"], numbers, separators, m["suffix"], size)
 
 
-def parse_mark(text: str, case_uncertain: bool = False) -> Mark | None:
-    """The mark when the WHOLE text (one line) is a mark, optionally with a section; else None."""
+def parse_mark(text: str, case_uncertain: bool = False, *, footing_m: bool = False) -> Mark | None:
+    """The mark when the WHOLE text (one line) is a mark, optionally with a section; else None.
+    `footing_m`: the text is a bolt-size `M<n>` of a footing family (callouts.footing_m_labels), so the
+    bolt label the callouts patterns see in it does not stop it."""
     t = unicodedata.normalize("NFC", text).strip()
     m = _MARK.match(t)
-    if m is None or scan_line(t, case_uncertain):
+    if m is None or (not footing_m and scan_line(t, case_uncertain)):
         return None
     return _mark_from(m, t)
 
@@ -990,22 +993,25 @@ def _scan_file(
                         "reason": reason,
                     }
                 )
+    footing = footing_m_labels([t.entry for t in texts], sheet_of)
     for t in texts:
         if t.id in in_table or t.block is not None:
             continue
         sh = sheet_of.get(t.id)
-        out.plan.extend(_plan_marks(loaded.rel, sh, t.entry))
+        out.plan.extend(_plan_marks(loaded.rel, sh, t.entry, t.id in footing))
     return out, grid_info
 
 
-def _plan_marks(rel: str, sheet: dict[str, Any] | None, entry: dict[str, Any]) -> list[dict[str, Any]]:
+def _plan_marks(
+    rel: str, sheet: dict[str, Any] | None, entry: dict[str, Any], footing_m: bool = False
+) -> list[dict[str, Any]]:
     out = []
     cu = entry["decode"]["case_uncertain"]
     for line in entry["display_text"].split("\n"):
         if not line.strip():
             continue
         title = None
-        mark = parse_mark(line, cu)
+        mark = parse_mark(line, cu, footing_m=footing_m)
         if mark is None:
             found = parse_title(line, cu)
             if found is None:

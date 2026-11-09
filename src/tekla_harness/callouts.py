@@ -651,19 +651,47 @@ def _confidence(cap: str, entry: dict[str, Any], extra_flags: tuple[str, ...]) -
     return "low" if low else conf
 
 
+_BARE_M = re.compile(r"^M(?P<n>\d{1,2})$")
+
+
+def footing_m_labels(entries: list[dict[str, Any]], sheet_of: dict[str, dict[str, Any]]) -> set[str]:
+    """Ids of texts that are a whole `M<n>` with a bolt size n (which the bolt pattern reads as a bolt
+    label) but stand in a family of `M` marks: the same sheet (or, for texts on no sheet, the same no-sheet
+    group) holds a whole `M<n-1>` or `M<n+1>` that is no bolt size, in the same text style and height.
+    EVAL-3 R arm, 433 model#01: footings M1..M7 and T000555 `M8`. Such a text is a member mark."""
+    groups: dict[tuple[str | None, str | None, float | None], dict[int, list[str]]] = {}
+    bolt: dict[int, bool] = {}
+    for e in entries:
+        m = _BARE_M.match(e["display_text"].strip())
+        if m is None:
+            continue
+        sheet = sheet_of.get(e["id"])
+        key = (None if sheet is None else sheet["sheet_id"], e["style"], e["height"])
+        n = int(m["n"])
+        bolt[n] = bolt.get(n, False) or _M_SIZE.fullmatch("M" + m["n"]) is not None
+        groups.setdefault(key, {}).setdefault(n, []).append(e["id"])
+    out: set[str] = set()
+    for numbers in groups.values():
+        for n, ids in numbers.items():
+            if bolt[n] and any(k in numbers and not bolt[k] for k in (n - 1, n + 1)):
+                out.update(ids)
+    return out
+
+
 def _entry_hits(
-    entry: dict[str, Any], claimed_by: str | None
+    entry: dict[str, Any], claimed_by: str | None, as_mark: bool = False
 ) -> tuple[list[tuple[str, _Hit]], list[tuple[str, str, str]]]:
     """(line, hit) for every candidate of the entry, lines in order, and what matched but is no candidate:
     (text, kind, reason code). `claimed_by`: the extractor that took the text (title_block, grids, levels);
-    such a text is never a member mark."""
+    such a text is never a member mark. `as_mark`: a bolt-size `M<n>` of a footing family
+    (`footing_m_labels`), read as a member mark only."""
     out: list[tuple[str, _Hit]] = []
     rejects: list[tuple[str, str, str]] = []
     dec = entry["decode"]
     cu = dec["case_uncertain"]
     literal_sign_unsafe = dec["encoding_used"] != "unicode" and "%%c" not in entry["special_codes"]
     for line in entry["display_text"].split("\n"):
-        hits = scan_line(line, cu)
+        hits = [] if as_mark else scan_line(line, cu)
         if not hits:
             mark = member_mark(line, cu)
             if mark is not None and claimed_by is not None:
@@ -923,12 +951,13 @@ def extract_callouts(work_dir: Path | str, *, check_inputs: bool = False) -> dic
                 else:
                     sheet_of.update({tid: sh for tid in sh["text_ids"]})
         claimed_ids = _claimed_text_ids(inv.work, loaded, warnings)
+        as_marks = footing_m_labels([e for e in entries if e["id"] not in duplicate_ids], sheet_of)
         for entry in entries:
             if entry["id"] in duplicate_ids:
                 continue
             info["scanned"] += 1
             sheet = sheet_of.get(entry["id"])
-            hits, rejects = _entry_hits(entry, claimed_ids.get(entry["id"]))
+            hits, rejects = _entry_hits(entry, claimed_ids.get(entry["id"]), entry["id"] in as_marks)
             reason = meaning_block_reason(entry)
             if reason is not None:  # legacy-font gate: no meaning from this text, only a verbatim listing
                 if hits:
