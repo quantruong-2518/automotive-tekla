@@ -1,0 +1,61 @@
+# 0013. Grid system from an engineer's answer
+
+- Status: proposed
+- Date: 2026-11-09
+- Decided by: orchestrator, tool wave 3 decision W2 (reversible), pending engineer approval
+
+## Context
+
+Gate 1 needs a grid system for every building the project uses (`harness status`, reason `grid
+systems:`). The grid extractor finds systems from bubbles, labels and lines. When it finds none for a
+file, nothing today can give that file a grid. In EVAL-3, two of the four held-out houses had none:
+dwgshare 285 has 656 labelled bubbles drawn as polylines and 0 axes, and 286's plan grid was missed.
+The engineer could read the grid off the drawing, but there was no way to record it. So gate 1 stayed
+blocked even with real engineer answers. EVAL-3's judges rated this the most important tool gap, and
+the EVAL-4 protocol counts such a gap as Critical friction.
+
+Tool wave 3 also improves detection, so that 285 and 286 are found. Detection will still miss some
+drawings, so a recorded route is needed as well.
+
+## Decision
+
+1. `harness grid-system` raises `grid_system_missing` (blocking, gate-1 producer `grid-system`), one per
+   drawing file that has plan sheets but no usable grid system. Usable means a system that is not
+   rejected and has at least two labelled axes in each of two directions. The question quotes what was
+   found: bubbles, labels, rejected systems.
+2. The answer carries structured values: the labels and spacings of each direction (dir1 and dir2), and
+   optionally the sheet. Spacings are in drawing units, like every other grid value. The `--value` keys
+   (fixed by the tool wave 3 seam; `harness answer` help and the question's answer command print them):
+
+   | Key | Required | Form on the command line | Stored in answers.json |
+   |---|---|---|---|
+   | `dir1_labels` | yes | comma-separated axis labels in drawing order, at least 2, distinct, none blank: `dir1_labels=1,2,3,4,5` | array of strings |
+   | `dir1_spacings` | yes | comma-separated distances between consecutive axes, each > 0, exactly one fewer than the labels: `dir1_spacings=3130,3540,3520,4590` | array of numbers |
+   | `dir2_labels` | yes | as `dir1_labels`, for the other direction: `dir2_labels=A,B,C` | array of strings |
+   | `dir2_spacings` | yes | as `dir1_spacings`: `dir2_spacings=4250,3730` | array of numbers |
+   | `sheet` | no | the detector sheet id the grid was read from: `sheet=model#05` | string |
+
+   Both directions are required: a usable system has two (decision 1). An answer without values is
+   recorded as words and builds nothing. Which direction becomes Tekla X or Y is not part of this
+   answer: it is asked afterwards on the built system, like for a detected one (decision 3).
+3. A grid system is built from that answer only when the answer is active, structured, and recorded with
+   `answered_by_role: engineer`. The system carries `source: engineer_answer` and the answer id as its
+   provenance. It then goes through the same gate-1 steps as a detected system: select, X/Y, units.
+4. A simulated or role-less answer is recorded and builds nothing. `harness status` lists it under
+   `answers:`, the same rule as for every other gate-1 answer (tool wave 2, F3).
+5. The drawing is still checked. `grid-system` compares the given spacings with linear dimensions whose
+   extension points fall on the given axes (where it can place them). On a mismatch it raises
+   `grid_answer_contradicts_drawing`, which quotes both the answer and the dimension. The engineer stays
+   authoritative, but the contradiction is never silent.
+
+## Consequences
+
+- Gate 1 can open for a building whose grid the tools cannot detect, once the engineer has typed the grid
+  in. This is a new input path into gate 1, so the commit that adds it carries a `Safety:` line.
+- An agent can still record an answer with `--role engineer` (RTI-0011, open). This ADR adds no new
+  bypass: a forged role here has the same effect as one on any other gate-1 question.
+- The answer is a second source of truth beside the drawing. Spacings are checked against the
+  dimensions, but labels and order are taken as given.
+- Rejected: building a grid from a simulated answer, so that evals could pass gate 1. Gate 1 never opens
+  on simulated answers.
+- Rejected: building a grid from the reader's prose. Readers never create gate-1 inputs.
