@@ -35,9 +35,10 @@ on a structural sheet is finished or structural. So:
    consecutive levels whose candidates name a storey; when fewer than two levels are named, the
    differences of all non-embedded levels seen twice, at the datum, or next to a symbol are given, capped
    'low', with a blocking level_storey_selection question. Safety net: when storeys are named, an unnamed
-   level that carries a storey word (on the value's line, or in a neighbour that names no storey) and lies
-   between the lowest and highest named level may be a storey the heights skip: the heights are capped
-   'low' and a blocking level_storey_selection question lists those levels. Values are never converted.
+   level that carries a storey word (on the value's line, or in a neighbour that names no storey) may be a
+   storey the heights skip, between named storeys or outside them ('GROUND ±0.000' under named floors, a
+   basement): the heights are capped 'low' and a blocking level_storey_selection question lists those
+   levels. Values are never converted.
 6. Legacy-font gate (`text_gate.meaning_block_reason`, tool wave 2 fix 1a): an entry whose meaning is blocked
    gives no candidate, level, group, storey name or question; each level-shaped match in it is listed in
    `blocked_candidates` (entry id, 0-based line, value text as stored, reason), and a 'none found' question
@@ -464,19 +465,15 @@ def extract_levels(
     storeys_named = sum(named) >= 2
     for lv, n, fb in zip(levels, named, fallback, strict=True):
         lv["used_for_heights"] = n if storeys_named else fb
-    # safety net (review of a2): an unnamed level that carries a storey word and lies between named storeys
-    # may be a storey the named heights skip, so those heights are low and asked
+    # safety net (review of a2): an unnamed level that carries a storey word may be a storey the named
+    # heights skip (between named storeys, or a basement / top storey outside them), so those heights are
+    # low and asked
     skipped: list[dict[str, Any]] = []
-    low_named = high_named = 0.0
     if storeys_named:
-        low_named = min(lv["value"] for lv in levels if lv["names"])
-        high_named = max(lv["value"] for lv in levels if lv["names"])
         skipped = [
             lv
             for lv in levels
-            if not lv["names"]
-            and low_named < lv["value"] < high_named
-            and any(cid in storey_worded for cid in lv["candidate_ids"])
+            if not lv["names"] and any(cid in storey_worded for cid in lv["candidate_ids"])
         ]
     heights_asked = not storeys_named or bool(skipped)
 
@@ -509,11 +506,10 @@ def extract_levels(
         ask(
             "level_storey_selection",
             True,
-            "These levels carry a storey word but no storey name and lie between named storeys, so the "
-            "storey heights given skip them (low). Is each of them a floor?",
+            "These levels carry a storey word but no storey name, so the storey heights given (between "
+            "named storeys only, low) skip them. Is each of them a floor?",
             listed(lv["value_text"] for lv in skipped),
-            f"{len(skipped)} unnamed level(s) between {_value_text(Decimal(str(low_named)))} and "
-            f"{_value_text(Decimal(str(high_named)))}; heights use the {len(used)} named level(s)",
+            f"{len(skipped)} unnamed level(s) with a storey word; heights use the {len(used)} named level(s)",
         )
     if heights and not storeys_named:
         ask(

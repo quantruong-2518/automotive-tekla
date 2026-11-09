@@ -521,9 +521,10 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
       names without a number (`TẦNG THƯỢNG +10.800 / +10.500`), and storey heights fall back to the
       asked, low rule instead of skipping unnamed levels (290: +7.300 is no longer skipped).
     - Levels (safety): when storeys are named, an unnamed level that carries a storey word (on its line
-      or in the text next to it) and lies between named levels caps the storey heights at low and raises
-      the blocking `level_storey_selection` listing those levels; before, `GROUND / FIRST / SECOND / ROOF
-      FLOOR` gave one 10.8 m storey with no question. No known file changes.
+      or in the text next to it), between the named levels or outside them, caps the storey heights at
+      low and raises the blocking `level_storey_selection` listing those levels; before, `GROUND / FIRST /
+      SECOND / ROOF FLOOR` gave one 10.8 m storey with no question, and a bare `GROUND ±0.000` or an
+      unnamed basement below named floors was dropped from the heights silently. No known file changes.
     - Levels: a sign with one space before the digits right after `(` is a sign, so
       `(+ 6.00M LEVEL)` gives the level +6.000 (161 and Steel_01). Elsewhere a spaced sign after other
       text is still read as a dash (`TẦNG 2 - 3.600`).

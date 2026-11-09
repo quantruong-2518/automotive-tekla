@@ -394,7 +394,7 @@ def test_an_unnamed_storey_level_between_named_ones_is_asked(tmp_path):
     assert _heights(result) == [(0.0, 7.2, "low")]
     q = next(q for q in result["questions"] if q["code"] == "level_storey_selection")
     assert q["blocking"] and q["where"] == "+3.600"
-    assert "between named storeys" in q["message"]
+    assert "skip them" in q["message"]
 
 
 def test_an_unnamed_level_under_a_slab_heading_between_named_ones_is_asked(tmp_path):
@@ -451,15 +451,36 @@ def test_one_storey_text_among_plain_values_marks_the_level(tmp_path):
     result = run(_texts(tmp_path, *texts))
     q = next(q for q in result["questions"] if q["code"] == "level_storey_selection")
     assert q["where"] == "+3.600"
-    assert q["found"] == "1 unnamed level(s) between ±0.000 and +7.200; heights use the 2 named level(s)"
+    assert q["found"] == "1 unnamed level(s) with a storey word; heights use the 2 named level(s)"
 
 
 @pytest.mark.parametrize("outside", ["FLOOR -1.500", "FLOOR +9.000"])
-def test_an_unnamed_storey_level_outside_the_named_range_is_not_a_skipped_storey(tmp_path, outside):
-    # the review asks for the levels BETWEEN named storeys; one below the lowest or above the highest is not
+def test_an_unnamed_storey_level_outside_the_named_range_is_asked_too(tmp_path, outside):
+    # a basement or a top storey below the lowest or above the highest name is skipped just the same
     texts = [outside, outside, "GROUND FLOOR %%p0.000", "ROOF +7.200"]
     result = run(_texts(tmp_path, *texts))
-    assert "level_storey_selection" not in codes(result)
+    q = next(q for q in result["questions"] if q["code"] == "level_storey_selection")
+    assert q["blocking"] and q["where"] == outside.split()[1]
+    assert _heights(result) == [(0.0, 7.2, "low")]
+
+
+def test_without_two_names_the_fallback_question_is_the_only_selection_question(tmp_path):
+    # the net is for named storeys; with fewer than two names every height is already low and asked once
+    texts = ["FLOOR +3.900", "+3.900", "+3.900", "+7.300", "+7.300"]
+    result = run(_texts(tmp_path, *texts))
+    assert _heights(result) == [(3.9, 7.3, "low")]
+    assert codes(result).count("level_storey_selection") == 1
+    q = next(q for q in result["questions"] if q["code"] == "level_storey_selection")
+    assert q["message"].startswith("Fewer than two levels")
+
+
+def test_a_bare_ground_datum_under_named_floors_is_asked(tmp_path):
+    # 'GROUND' alone names nothing, so the 0 -> 3.6 storey is not in the named heights: it must be asked
+    texts = ["GROUND %%p0.000", "FIRST FLOOR +3.600", "SECOND FLOOR +7.200", "ROOF +10.800"]
+    result = run(_texts(tmp_path, *texts))
+    q = next(q for q in result["questions"] if q["code"] == "level_storey_selection")
+    assert q["blocking"] and q["where"] == "±0.000"
+    assert {c for _, _, c in _heights(result)} == {"low"}
 
 
 def test_a_neighbour_without_a_storey_word_marks_nothing(tmp_path):
