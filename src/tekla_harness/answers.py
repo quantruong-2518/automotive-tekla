@@ -29,6 +29,12 @@ Rules:
                                       uses; without it `harness status` takes every listed system as used)
                                       separate=S001,S002            (optional: two or more systems of the
                                       question, all selected, that are different buildings)
+        grid_system_missing           dir1_labels=1,2,3 dir1_spacings=3130,3540 dir2_labels=A,B
+                                      dir2_spacings=4250 [sheet=model#05]   (ADR-0013 §2: the four keys
+                                      together, or none for an answer in words only that builds nothing;
+                                      per direction at least 2 distinct labels and one spacing fewer, each a
+                                      plain decimal > 0 in drawing units; stored as arrays: labels strings,
+                                      spacings numbers, an integer kept an integer)
     every other code takes no value;
   * grid_system_conflict cannot be answered: a conflict closes only through the grid_system_select answer
     (`systems` without one of the two, or `separate` with both), never through words;
@@ -65,6 +71,9 @@ from tekla_harness.questions import (
     EXIT_USAGE,
     FILE_SET_CODE,
     FILE_SET_KEY,
+    GRID_ANSWER_KEYS,
+    GRID_ANSWER_SHEET_KEY,
+    GRID_MISSING_CODE,
     PREFIX_CODE,
     PRODUCER_COMMANDS,
     QUESTION_DOCUMENTS,
@@ -153,6 +162,8 @@ def check_values(code: str, values: dict[str, str]) -> list[str]:
                     f"separate: {', '.join(outside)} not in systems (a separate building must be selected)"
                 ]
         return bad
+    if code == GRID_MISSING_CODE:
+        return _grid_problems(values)
     if code == FILE_SET_CODE:
         if not values:
             return ["this question needs at least one set: set1=a.dwg,b.dwg (set2=..., every file once)"]
@@ -169,6 +180,73 @@ def check_values(code: str, values: dict[str, str]) -> list[str]:
                 seen.setdefault(f, name)
         return bad
     return [f"questions with code '{code}' take no value, got: {', '.join(sorted(values))}"] if values else []
+
+
+def _grid_problems(values: dict[str, str]) -> list[str]:
+    """check_values for grid_system_missing (ADR-0013 §2): {} (words only), or the four keys of
+    GRID_ANSWER_KEYS plus the optional sheet; per direction at least two distinct, non-blank labels and
+    exactly one spacing fewer, each a plain decimal number > 0."""
+    if not values:
+        return []
+    allowed = (*GRID_ANSWER_KEYS, GRID_ANSWER_SHEET_KEY)
+    bad = [f"'{k}' is not one of {', '.join(allowed)}" for k in values if k not in allowed]
+    bad += [
+        f"{k} is missing: give both directions ({' '.join(f'{n}=...' for n in GRID_ANSWER_KEYS)}), or no "
+        "value for an answer in words only"
+        for k in GRID_ANSWER_KEYS
+        if k not in values
+    ]
+    if GRID_ANSWER_SHEET_KEY in values and not values[GRID_ANSWER_SHEET_KEY].strip():
+        bad.append(f"{GRID_ANSWER_SHEET_KEY}: blank (omit it, or give the sheet id like model#05)")
+    for direction in ("dir1", "dir2"):
+        labels_key, spacings_key = f"{direction}_labels", f"{direction}_spacings"
+        labels = _system_ids(values[labels_key]) if labels_key in values else None
+        spacings = _system_ids(values[spacings_key]) if spacings_key in values else None
+        if labels is not None:
+            if any(not label for label in labels):
+                bad.append(f"{labels_key}: a label is blank")
+            elif len(labels) < 2:
+                bad.append(f"{labels_key}: give at least 2 labels")
+            elif len(set(labels)) != len(labels):
+                bad.append(f"{labels_key}: the labels must be distinct")
+        if spacings is not None:
+            wrong = [s for s in spacings if not _spacing_ok(s)]
+            bad += [
+                f"{spacings_key}: '{s}' is not a number > 0 (plain decimal, drawing units)" for s in wrong
+            ]
+            if not wrong and labels is not None and len(spacings) != len(labels) - 1:
+                bad.append(
+                    f"{spacings_key}: {len(spacings)} spacing(s) for {len(labels)} labels; give one fewer "
+                    "than the labels (the distances between consecutive axes)"
+                )
+    return bad
+
+
+SPACING = re.compile(r"[0-9]+(?:\.[0-9]*)?|\.[0-9]+")
+
+
+def _spacing_ok(text: str) -> bool:
+    """A plain ASCII decimal (no sign, exponent, underscore, inf or nan) greater than 0."""
+    return SPACING.fullmatch(text) is not None and float(text) > 0
+
+
+def _spacing(text: str) -> int | float:
+    """An integer stays an integer (3130), a decimal is a float (3540.5)."""
+    return int(text) if text.isascii() and text.isdigit() else float(text)
+
+
+def grid_answer_values(values: dict[str, str]) -> dict[str, Any]:
+    """The stored form of checked grid_system_missing values (answers.schema.json): labels as arrays of
+    strings, spacings as arrays of numbers, the sheet stripped; {} stays {}."""
+    stored: dict[str, Any] = {}
+    for name, text in values.items():
+        if name.endswith("_labels"):
+            stored[name] = _system_ids(text)
+        elif name.endswith("_spacings"):
+            stored[name] = [_spacing(s) for s in _system_ids(text)]
+        else:
+            stored[name] = text.strip()
+    return stored
 
 
 def _system_ids(text: str) -> list[str]:
@@ -371,6 +449,8 @@ def record_answer(
                 stored[name] = _system_ids(values[name])
     if entry["code"] == FILE_SET_CODE:
         stored = {name: _system_ids(files) for name, files in values.items()}
+    if entry["code"] == GRID_MISSING_CODE:
+        stored = grid_answer_values(values)
     answer: dict[str, Any] = {
         "key": key,
         "question_id": question_id,

@@ -594,6 +594,13 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
       between two of the given axes (labels case-blind, spans as sums, drafting tolerance): a
       disagreement raises a blocking `grid_answer_contradicts_drawing` quoting both values; a grid with no
       dimension to check is warned. `grid_system_missing` answers are part of the answers digest.
+  - Tool wave 3, package C:
+    - `harness answer` takes the `grid_system_missing` values (ADR-0013 §2): `dir1_labels`,
+      `dir1_spacings`, `dir2_labels`, `dir2_spacings` together, optional `sheet`, or no value for an answer
+      in words only. Per direction at least two distinct, non-blank labels and exactly one spacing fewer,
+      each a plain decimal > 0 (no sign, exponent, `inf` or `nan`); anything else is exit 1, nothing
+      written. Stored in `answers.json` as arrays: labels as strings, spacings as numbers (`3130` stays an
+      integer, `3540.5` a float). The answer itself builds nothing; `harness grid-system` reads it.
 
 ### Changed
 - Question lifecycle (tool wave 2, EVAL-2 fix 5):
