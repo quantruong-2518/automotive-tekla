@@ -16,7 +16,9 @@ on a structural sheet is finished or structural. So:
 2. The line around the value gives the form: bare (nothing else), prefixed (a level word only),
    labelled (a storey name, optionally a level word, then the value), embedded (anything else). Storey
    words are matched WITH their diacritics (tầng, sàn, mái, tum, hầm, lầu; English floor, roof, ...):
-   'TĂNG CƯỜNG' (strengthening) and 'SÂN' (yard) are not storeys.
+   'TĂNG CƯỜNG' (strengthening) and 'SÂN' (yard) are not storeys. A storey NAME needs a number or a
+   word that names one storey (`_NAMED_STOREY_RE`: 'tầng 3', 'sàn tầng 3', 'tầng trệt', 'mái'); a bare
+   'sàn' (slab) ends slab-plan titles and quantity headings and names nothing.
 3. A level symbol is an INSERT (anywhere, also nested) of a block that looks like a level marker: it
    holds an isosceles triangle (SOLID/TRACE, closed 3-vertex polyline, or a 3-vertex HATCH boundary)
    with a horizontal base, its apex over the base midpoint (within 5 % of the base width) and a height of
@@ -120,6 +122,26 @@ _PREFIX_RE = re.compile(
 _STOREY_RE = re.compile(
     r"\b(tầng|sàn|mái|tum|hầm|lầu|floor|roof|storey|story|level|basement|ground|terrace|mezzanine)\b"
 )
+# A storey NAME (tool wave 3, EVAL-3 a2) needs more than a storey word: a bare 'sàn' (slab) ends slab-plan
+# titles and quantity headings ('khối lượng thép sàn'), so it names no storey. A name is a storey word
+# followed by a number, a Vietnamese number word or a ground/mezzanine word ('tầng 3', 'sàn tầng 3',
+# 'tầng hai', 'tầng trệt', 'lầu 1', 'level 2'), an English ordinal before the word ('2nd floor'), a
+# ground/mezzanine word before it ('ground floor'), or a word that names one storey by itself (mái, tum,
+# hầm, roof, terrace, basement, mezzanine).
+_NAMED_STOREY_RE = re.compile(
+    r"\b(?:tầng|sàn|lầu|floor|storey|story|level)\s*(?:\d+|một|hai|ba|bốn|tư|năm|sáu|bảy|tám|chín|mười"
+    r"|trệt|lửng|ground)\b"
+    r"|\b\d+\s*(?:st|nd|rd|th)?\s*(?:floor|storey|story|level)\b"
+    r"|\b(?:ground|mezzanine)\s+(?:floor|storey|story|level)\b"
+    r"|\b(?:mái|tum|hầm|roof|terrace|basement|mezzanine)\b"
+)
+
+
+def _names_storey(text: str) -> bool:
+    """Does this text (a candidate's label or a neighbour) name a storey? See _NAMED_STOREY_RE."""
+    return _NAMED_STOREY_RE.search(_storey_fold(text)) is not None
+
+
 LEVEL_MARK_APEX_TOL = 0.05  # apex offset from the base midpoint, in base widths
 LEVEL_MARK_HEIGHT = (0.3, 1.0)  # triangle height, in base widths
 
@@ -253,7 +275,7 @@ def _parse(line: str):
             rest = rest.strip(" :=-(")
             if pm and not rest:
                 form = "prefixed"
-            elif rest and _STOREY_RE.search(_storey_fold(rest)):
+            elif rest and _names_storey(rest):
                 form, name = "labelled", rest
             else:
                 prefix = None
@@ -588,7 +610,7 @@ def _adjacent_name(
         text = other["display_text"].strip()
         if not text or len(text) > 40 or "\n" in text or _VALUE_RE.search(text):
             continue
-        if not _STOREY_RE.match(_storey_fold(text).lstrip("(-: ")):
+        if not _STOREY_RE.match(_storey_fold(text).lstrip("(-: ")) or not _names_storey(text):
             continue
         obox = text_box(other)
         if obox is None:

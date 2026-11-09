@@ -511,6 +511,12 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
     y0 < y1, a sheet id and no `--unassigned`; write negative coordinates as `--region=-5000,...`,
     which the help says, because argparse takes a `-` value after a space for an option). `harness find-text` warns with `blocked_in_scope` when the
     output has it. `harness answer --help` names the `grid_system_missing` keys.
+  - Tool wave 3, package S (sheets + levels):
+    - Levels: a storey name needs a number or a word that names one storey (`tầng 3`, `sàn tầng 3`,
+      `tầng trệt`, `mái`, `2nd floor`, `roof`); a bare `sàn` (slab), which ends slab-plan titles and
+      quantity headings, names nothing. So `level_name_conflict` is no longer raised between slab-plan
+      titles (290: three false conflicts; 267: one), and storey heights fall back to the asked, low
+      rule instead of skipping unnamed levels (290: +7.300 is no longer skipped).
 
 ### Changed
 - Question lifecycle (tool wave 2, EVAL-2 fix 5):

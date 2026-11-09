@@ -65,8 +65,27 @@ def level_set(tmp_path_factory) -> dict[str, Any]:
         ("EL. - 3.600", [("-3.600", "prefixed", "EL.", None)]),
         ("SÂN +0.150", [("0.150", "embedded", None, None)]),  # sân (yard) is not sàn (floor)
         ("TĂNG CƯỜNG -0.200", [("-0.200", "embedded", None, None)]),  # tăng cường: strengthening
-        ("SÀN +3.600", [("3.600", "labelled", None, "SÀN")]),
         ("tầng hầm -3.000", [("-3.000", "labelled", None, "tầng hầm")]),
+        # a storey name needs a number or a storey word of its own (tool wave 3 a2): a bare sàn (slab) is not
+        ("SÀN +3.600", [("3.600", "embedded", None, None)]),
+        ("MẶT BẰNG THÉP SÀN +3.900", [("3.900", "embedded", None, None)]),
+        ("KHỐI LƯỢNG THÉP SÀN +3.900", [("3.900", "embedded", None, None)]),
+        ("FLOOR +3.600", [("3.600", "embedded", None, None)]),
+        ("SÀN TẦNG 3 +7.200", [("7.200", "labelled", None, "SÀN TẦNG 3")]),
+        ("MẶT BẰNG SÀN TẦNG 2 +3.600", [("3.600", "labelled", None, "MẶT BẰNG SÀN TẦNG 2")]),
+        ("TẦNG HAI +3.600", [("3.600", "labelled", None, "TẦNG HAI")]),
+        ("LẦU 1 +3.600", [("3.600", "labelled", None, "LẦU 1")]),
+        ("SÀN MÁI +12.600", [("12.600", "labelled", None, "SÀN MÁI")]),
+        ("TUM +15.600", [("15.600", "labelled", None, "TUM")]),
+        ("2ND FLOOR +3.600", [("3.600", "labelled", None, "2ND FLOOR")]),
+        ("LEVEL 2 +3.600", [("3.600", "labelled", None, "LEVEL 2")]),
+        ("TẦNG +3.600", [("3.600", "embedded", None, None)]),
+        ("TẦNG TRỆT ±0.000", [("0.000", "labelled", None, "TẦNG TRỆT")]),
+        # 290: digits of another value in the title are no storey number
+        (
+            "MẶT BẰNG THÉP SÀN CAO ĐỘ +7.300 VÀ +10.500",
+            [("7.300", "embedded", None, None), ("10.500", "embedded", None, None)],
+        ),
     ],
 )
 def test_parse(text, expected):
@@ -184,6 +203,82 @@ def _texts(tmp_path: Path, *texts: str) -> Path:
     path = tmp_path / "t.dxf"
     doc.saveas(path)
     return path
+
+
+def test_slab_plan_titles_are_not_storey_names(tmp_path):
+    # two slab-plan titles that both end in 'SÀN': no storey name, so no name conflict (EVAL-3 a2)
+    texts = ["MẶT BẰNG THÉP SÀN +3.900", "MẶT BẰNG THÉP SÀN +13.500", "+3.900", "+3.900", "+7.300", "+7.300"]
+    result = run(_texts(tmp_path, *texts))
+    assert "level_name_conflict" not in codes(result)
+    assert all(c["name"] is None for c in result["candidates"])
+    # no level is named: the storey heights come from the fallback rule (+7.300 is kept) and are asked
+    heights = [(h["from_value"], h["to_value"], h["height"]["confidence"]) for h in result["storey_heights"]]
+    assert heights == [(3.9, 7.3, "low")]
+    assert "level_storey_selection" in codes(result)
+
+
+def test_numbered_storey_names_still_conflict(tmp_path):
+    result = run(_texts(tmp_path, "SÀN TẦNG 2 +3.600", "SÀN TẦNG 2 +3.900"))
+    q = next(q for q in result["questions"] if q["code"] == "level_name_conflict")
+    assert q["where"] == "SÀN TẦNG 2" and q["found"] == "+3.600 / +3.900"
+
+
+def _named(tmp_path: Path, name: str) -> Path:
+    doc = new("R2018", setup=True)
+    msp = doc.modelspace()
+    msp.add_text("+3.600", height=250, dxfattribs={"insert": (0, 0)})
+    msp.add_text(name, height=250, dxfattribs={"insert": (0, 400)})  # just above the value
+    path = tmp_path / "named.dxf"
+    doc.saveas(path)
+    return path
+
+
+@pytest.mark.parametrize(  # ASCII names: a non-ASCII neighbour in this unknown-encoding file is gated
+    ("name", "expected"),
+    [
+        ("FLOOR", None),
+        ("FLOOR SLAB", None),
+        ("FLOOR 2", "FLOOR 2"),
+        ("ROOF", "ROOF"),
+        ("BASEMENT", "BASEMENT"),
+        ("LEVEL", None),
+    ],
+)
+def test_an_adjacent_name_needs_a_number_or_a_roof_word(tmp_path, name, expected):
+    (cand,) = run(_named(tmp_path, name))["candidates"]
+    assert (cand["name"] or {}).get("value") == expected
+
+
+@pytest.mark.parametrize(
+    ("text", "named"),
+    [
+        ("sàn", False),
+        ("SÀN BTCT", False),
+        ("khối lượng thép sàn coss", False),
+        ("MẶt bẰng bỐ trÍ lỚp thÉp dƯỚi (chỊu mÔ men dƯƠng) sÀn", False),  # 290 slab-plan title
+        ("tầng", False),
+        ("ground", False),
+        ("level", False),
+        ("TẦNG 3", True),
+        ("Sàn tầng 3", True),
+        ("tầng3", True),
+        ("TẦNG HAI", True),
+        ("tầng trệt", True),
+        ("TẦNG LỬNG", True),
+        ("lầu 2", True),
+        ("MÁI", True),
+        ("tum thang", True),
+        ("TẦNG HẦM", True),
+        ("3RD FLOOR", True),
+        ("GROUND FLOOR", True),
+        ("ROOF", True),
+        ("TERRACE", True),
+        ("MEZZANINE", True),
+        ("STOREY 4", True),
+    ],
+)
+def test_a_storey_name_needs_a_number_or_a_storey_word_of_its_own(text, named):
+    assert mod._names_storey(text) is named
 
 
 def test_out_of_range_value_is_a_unit_question(tmp_path):
