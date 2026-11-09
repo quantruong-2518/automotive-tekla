@@ -44,6 +44,31 @@
           }
         },
         {
+          "if": { "properties": { "code": { "const": "units_answer_contradicts_evidence" } }, "required": ["code"] },
+          "then": {
+            "properties": {
+              "values": {
+                "description": "The unit the engineer confirms on purpose although the drawing's dimensions contradict it: {\"unit\": \"m\"}; harness answer accepts only the unit already answered for the file.",
+                "required": ["unit"],
+                "additionalProperties": false,
+                "properties": { "unit": { "$ref": "#/$defs/unit" } }
+              }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "code": { "const": "grid_system_axis_unassigned" } }, "required": ["code"] },
+          "then": {
+            "properties": {
+              "values": {
+                "description": "Tekla axis of each direction of the system, as the question names them: {\"dir1\": \"X\", \"dir2\": \"Y\"}. harness answer requires exactly the question's directions with distinct axes; {} is allowed only for answers recorded before values existed (they assign nothing).",
+                "propertyNames": { "enum": ["dir1", "dir2"] },
+                "additionalProperties": { "enum": ["X", "Y"] }
+              }
+            }
+          }
+        },
+        {
           "if": { "properties": { "code": { "const": "grid_family_axis_assignment" } }, "required": ["code"] },
           "then": {
             "properties": {
@@ -72,10 +97,11 @@
           "then": {
             "properties": {
               "values": {
-                "description": "Optional: the grid systems the project uses, {\"systems\": [\"S001\", \"S002\"]} (ids of the grid-systems.json the question was raised from). Without it every system listed in the question counts as used.",
+                "description": "Optional: the grid systems the project uses, {\"systems\": [\"S001\", \"S002\"]} (ids of the grid-systems.json the question was raised from). Without it every system listed in the question counts as used; systems outside it raise no blocking question. Optional `separate`: two or more listed (and, with `systems`, selected) systems that are different buildings; it closes the grid_system_conflict questions between them.",
                 "additionalProperties": false,
                 "properties": {
-                  "systems": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "pattern": "^S[0-9]{3,}$" } }
+                  "systems": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "pattern": "^S[0-9]{3,}$" } },
+                  "separate": { "type": "array", "minItems": 2, "uniqueItems": true, "items": { "type": "string", "pattern": "^S[0-9]{3,}$" } }
                 }
               }
             }
@@ -84,7 +110,7 @@
         {
           "if": {
             "properties": {
-              "code": { "not": { "enum": ["units_confirm_all", "units_conflict", "units_suspect", "units_unknown", "grid_units_doubt", "grid_family_axis_assignment", "member_mark_prefix_meaning", "grid_system_select"] } }
+              "code": { "not": { "enum": ["units_confirm_all", "units_conflict", "units_suspect", "units_unknown", "grid_units_doubt", "units_answer_contradicts_evidence", "grid_family_axis_assignment", "grid_system_axis_unassigned", "member_mark_prefix_meaning", "grid_system_select"] } }
             },
             "required": ["code"]
           },

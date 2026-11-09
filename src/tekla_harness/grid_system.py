@@ -66,6 +66,7 @@ import hashlib
 import json
 import re
 import shutil
+import statistics
 from collections import Counter
 from dataclasses import dataclass, field
 from itertools import pairwise, permutations
@@ -78,20 +79,27 @@ from tekla_harness.grids import (
     FAMILY_ANGLE_TOL,
     coordinate_string,
     fmt_number,
+    implausible_spacing,
     rounding_step,
 )
 from tekla_harness.questions import (
     AXIS_CODE,
+    AXIS_DIRECTIONS,
+    CONFLICT_CODE,
+    CONTRADICTION_CODE,
     SELECT_CODE,
+    SYSTEM_AXIS_CODE,
     UNIT_CODES,
     QuestionsError,
     dump_json,
     load_ledger,
     merged_question,
     question_group,
+    question_key,
     questions_document,
     write_text_atomic,
 )
+from tekla_harness.read_dxf import implausible_dimensions
 from tekla_harness.schemas import validate
 from tekla_harness.sheets import listed, min_conf, rnum
 
@@ -239,6 +247,32 @@ class _Inputs:
     unassigned: list[dict[str, Any]]
     totals: Counter[str]
     warnings: list[str]
+    inventory_units: dict[str, dict[str, Any] | None] = field(default_factory=dict)
+    spacing_medians: dict[str, dict[str, Any] | None] = field(default_factory=dict)
+
+
+def spacing_median(grids: dict[str, Any]) -> dict[str, Any] | None:
+    """{"value", "count"}: the median positive grid spacing (drawing units) over every family of a grids
+    document, as `harness read-structure` measured it; None when it has no spacing."""
+    values = [
+        float(s["value"]["value"])
+        for g in grids["groups"]
+        for fam in g["families"]
+        for s in fam["spacings"]
+        if float(s["value"]["value"]) > 0
+    ]
+    return {"value": float(statistics.median(values)), "count": len(values)} if values else None
+
+
+def units_evidence(
+    dimension_median: dict[str, Any] | None, spacing: dict[str, Any] | None, unit: str
+) -> str | None:
+    """Why the answered `unit` contradicts the drawing, or None: the median modelspace linear dimension
+    (units_suspect test) or the median grid spacing (grid plausibility range) is implausible in `unit`."""
+    found = [
+        e for e in (implausible_dimensions(dimension_median, unit), implausible_spacing(spacing, unit)) if e
+    ]
+    return "; ".join(found) or None
 
 
 def _load_inputs(work: Path) -> _Inputs:
@@ -269,11 +303,14 @@ def _load_inputs(work: Path) -> _Inputs:
     views: list[_View] = []
     unassigned: list[dict[str, Any]] = []
     totals: Counter[str] = Counter()
+    inventory_units: dict[str, dict[str, Any] | None] = {}
+    spacing_medians: dict[str, dict[str, Any] | None] = {}
     root = work.resolve()
     for row in sorted(inventory["files"], key=lambda r: r["path"]):
         if row["format"] not in ("dwg", "dxf"):
             continue
         rel = row["path"]
+        inventory_units[rel] = row["units"]
         base = (root / STRUCTURE_DIR / rel).resolve()
         if root not in base.parents:
             raise GridSystemError(EXIT_INVALID, f"{rel}: path leaves the work folder")
@@ -287,6 +324,7 @@ def _load_inputs(work: Path) -> _Inputs:
             "declared_unit": None,
             "views": 0,
             "families_usable": 0,
+            "grid_spacing_median": None,
         }
         files.append(entry)
         if not grids_path.is_file():
@@ -305,7 +343,9 @@ def _load_inputs(work: Path) -> _Inputs:
             status="read",
             declared_unit=declared,
             views=len(grids["groups"]),
+            grid_spacing_median=spacing_median(grids),
         )
+        spacing_medians[rel] = entry["grid_spacing_median"]
         ctx = _FileCtx(rel, row["sha256"], declared)
         ctx.dup_root = {s["sheet_id"]: s["duplicate_of"] for s in sheets["sheets"] if s["duplicate_of"]}
         ctxs[rel] = ctx
@@ -347,7 +387,18 @@ def _load_inputs(work: Path) -> _Inputs:
                 views.extend(
                     _View(rel, row["sha256"], group["sheet"], group["group_id"], [f], frozen) for f in usable
                 )
-    return _Inputs(inventory["project_id"], inventory_sha, files, ctxs, views, unassigned, totals, warnings)
+    return _Inputs(
+        inventory["project_id"],
+        inventory_sha,
+        files,
+        ctxs,
+        views,
+        unassigned,
+        totals,
+        warnings,
+        inventory_units,
+        spacing_medians,
+    )
 
 
 def _evidence_links(raw: dict[str, Any], gid: str, ctx: _FileCtx, warnings: list[str]) -> None:
@@ -624,9 +675,14 @@ def units_by_file(
     return out
 
 
+# the answers this module reads besides the units answers
+CONSUMED_CODES = frozenset({AXIS_CODE, SYSTEM_AXIS_CODE, SELECT_CODE, CONTRADICTION_CODE})
+
+
 def consumed_answers_digest(answers: list[dict[str, Any]] | None) -> str:
-    """sha256 over the active answers this module reads (units and axis assignment): code, file, key, values.
-    `harness status` compares it with the current answers.json to see whether grid-systems.json is stale."""
+    """sha256 over the active answers this module reads (units, family and system axis assignment, the
+    grid_system_select answer, units contradiction confirmations): code, file, key, values. `harness status`
+    compares it with the current answers.json to see whether grid-systems.json is stale."""
     rows = sorted(
         (
             str(a.get("code")),
@@ -635,7 +691,7 @@ def consumed_answers_digest(answers: list[dict[str, Any]] | None) -> str:
             json.dumps(a.get("values"), sort_keys=True),
         )
         for a in _active(answers)
-        if a.get("code") in UNIT_CODES or a.get("code") == AXIS_CODE
+        if a.get("code") in UNIT_CODES or a.get("code") in CONSUMED_CODES
     )
     return hashlib.sha256(json.dumps(rows, ensure_ascii=False).encode("utf-8")).hexdigest()
 
@@ -678,13 +734,16 @@ class _Ask:
         found: str,
         file: str | None = None,
         sheet: str | None = None,
-    ) -> None:
+        *,
+        blocking: bool = True,
+    ) -> bool:
+        """Add a question; False when the per-code cap dropped it (counted, not listed)."""
         self.counts[code] += 1
         if self.counts[code] > MAX_QUESTIONS_PER_CODE:
-            return
+            return False
         q: dict[str, Any] = {
             "code": code,
-            "blocking": True,
+            "blocking": blocking,
             "message": message,
             "where": where,
             "found": found,
@@ -694,6 +753,110 @@ class _Ask:
         if sheet is not None:
             q["sheet"] = sheet
         self.questions.append(q)
+        return True
+
+
+def _raw_ref(q: dict[str, Any]) -> dict[str, Any]:
+    """The ref a question of the document becomes in grid-system-questions.json (grid_system_questions)."""
+    ref = {"file": q.get("file"), "where": q["where"], "found": q["found"]}
+    if "sheet" in q:
+        ref["sheet"] = q["sheet"]
+    return ref
+
+
+def _own_key(
+    code: str, file: str | None, where: str, found: str, sheet: str | None, sha: dict[str, str]
+) -> str:
+    """Registry key of a question that is registered on its own (one ref), exactly as Ledger.sync computes
+    it: answers are bound to THIS run's question by key, never by code alone."""
+    q: dict[str, Any] = {"file": file, "where": where, "found": found}
+    if sheet is not None:
+        q["sheet"] = sheet
+    return question_key(code, file, sha.get(file) if file is not None else None, [_raw_ref(q)])
+
+
+def _select_refs(docs: list[dict[str, Any]], shas: dict[str, str]) -> list[dict[str, Any]]:
+    """The refs of the project-level grid_system_select question: one per system. The question key hashes
+    only where / found / sheet, and sheet ids (`model#01`) repeat across files, so `found` also names the
+    representative's file and its inventory sha256: two systems from two files cannot swap S-ids under one
+    key, and a systems= answer cannot select another building."""
+    refs = []
+    for d in docs:
+        rep = d["directions"][0]["representative"]
+        file = rep["file"]
+        found = f"{_system_found(d)} [file {file}, sha256 {shas.get(file, '?')[:16]}]"
+        refs.append({"file": file, "where": d["system_id"], "found": found, "sheet": rep["sheet"]})
+    return refs
+
+
+def _axis_found(s: _System) -> str:
+    """The directions of a system as its grid_system_axis_unassigned question names them (dir1, dir2). It does
+    not depend on any answer, so the question keeps its key (and its answer) once it is answered."""
+    return "; ".join(
+        f"{AXIS_DIRECTIONS[d]}: {f.group_id}/{f.family_id} labels {f.label_text()}, "
+        f"angle {fmt_number(rnum(f.angle))} deg"
+        for d, f in enumerate(s.rep.fams)
+    )
+
+
+def _system_axis_values(answer: dict[str, Any], n_dirs: int, sid: str, warnings: list[str]) -> dict[int, str]:
+    """Direction index -> Tekla axis from a grid_system_axis_unassigned answer: every direction of the system,
+    X or Y, distinct. Anything else (a words-only answer included) assigns nothing and is warned."""
+    values = answer.get("values")
+    names = AXIS_DIRECTIONS[:n_dirs]
+    ok = (
+        isinstance(values, dict)
+        and set(values) == set(names)
+        and all(v in ("X", "Y") for v in values.values())
+        and len(set(values.values())) == len(values)
+    )
+    if not ok or not isinstance(values, dict):
+        warnings.append(
+            f"axis answer {answer.get('key')!r} for {sid} does not assign {', '.join(names)} to distinct "
+            f"X / Y (values {values!r}): not used"
+        )
+        return {}
+    return {AXIS_DIRECTIONS.index(k): str(v) for k, v in values.items()}
+
+
+def _contradictions(
+    active: list[dict[str, Any]],
+    statuses: dict[str, tuple[str, str | None]],
+    inventory_units: dict[str, dict[str, Any] | None],
+    sha: dict[str, str],
+    spacing_medians: dict[str, dict[str, Any] | None],
+) -> list[dict[str, Any]]:
+    """Files whose answered unit fails the units_suspect magnitude test (read_dxf.implausible_dimensions) on
+    the probe's median dimension, or the grid plausibility range (grids.implausible_spacing) on the median
+    grid spacing of the file's families: one units_answer_contradicts_evidence each, quoting the answer(s)
+    and the evidence. `confirmed`: this very question was answered with the same unit (a deliberate
+    confirmation)."""
+    out = []
+    for path in sorted(statuses):
+        status, unit = statuses[path]
+        row = inventory_units.get(path) or {}
+        if status != "answered" or unit is None:
+            continue
+        evidence = units_evidence(row.get("dimension_median"), spacing_medians.get(path), unit)
+        if evidence is None:
+            continue
+        quotes = [
+            f'{a.get("question_id")} {a.get("code")} unit={unit}: "{a.get("answer_text")}"'
+            for a in active
+            if a.get("code") in UNIT_CODES and a.get("file") in (path, None)
+        ]
+        where = "units answer vs drawing dimensions and grid spacings"
+        found = f"answer {'; '.join(quotes)} | drawing: {evidence}"
+        key = _own_key(CONTRADICTION_CODE, path, where, found, None, sha)
+        confirmed = any(
+            a.get("key") == key
+            and a.get("code") == CONTRADICTION_CODE
+            and isinstance(a.get("values"), dict)
+            and a["values"].get("unit") == unit
+            for a in active
+        )
+        out.append({"file": path, "unit": unit, "where": where, "found": found, "confirmed": confirmed})
+    return out
 
 
 def _where(sid: str, f: _Fam) -> str:
@@ -711,7 +874,10 @@ def _system_json(
     ctx: dict[str, _FileCtx],
     units: dict[str, tuple[str, str | None]],
     axes: dict[tuple[str, str], set[str]],
+    system_axes: dict[int, str] | None = None,
 ) -> dict[str, Any]:
+    """`system_axes`: direction index -> Tekla axis from this system's own grid_system_axis_unassigned
+    answer; unioned with the family answers (a disagreement is 'contradictory')."""
     rep = s.rep
     full = s.full()
     groups = _components([m.view for m in full], ctx)
@@ -734,6 +900,8 @@ def _system_json(
     reason: str | None = None
     if any(st == "disagree" for st, _ in statuses):
         reason = "units answers disagree"
+    elif any(st == "contradicted" for st, _ in statuses):
+        reason = "units answer contradicted by the drawing"
     elif any(st == "invalid" for st, _ in statuses):
         reason = "units answer invalid"
     elif any(st == "not_answered" for st, _ in statuses):
@@ -753,6 +921,8 @@ def _system_json(
             f = s.family_of(m, d)
             if f is not None:
                 got |= axes.get((f.file, f.family_id), set())
+        if system_axes and d in system_axes:
+            got.add(system_axes[d])
         per_dir.append(got)
     if any(len(g) > 1 for g in per_dir) or (
         len(per_dir) == 2 and all(len(g) == 1 for g in per_dir) and per_dir[0] == per_dir[1]
@@ -870,6 +1040,16 @@ def build_grid_systems(
     file_paths = [f["path"] for f in inputs.files if f["status"] == "read"]
     units = units_by_file(active, file_paths, warnings)
     axes = _axis_answers(active, warnings)
+    sha = {f["path"]: f["sha256"] for f in inputs.files}
+
+    # an answered unit that the drawing's own dimensions contradict converts nothing until it is confirmed
+    probed = sorted(p for p, u in inputs.inventory_units.items() if u is not None)
+    contradictions = _contradictions(
+        active, units_by_file(active, probed, []), inputs.inventory_units, sha, inputs.spacing_medians
+    )
+    for c in contradictions:
+        if not c["confirmed"] and c["file"] in units:
+            units[c["file"]] = ("contradicted", None)
     for f in inputs.files:
         st = units.get(f["path"])
         f["units_answer"] = None if st is None else {"status": st[0], "unit": st[1]}
@@ -881,14 +1061,46 @@ def build_grid_systems(
                 f.factor = UNIT_TO_MM[unit]
     systems = _systems(_clusters(inputs.views), inputs.ctx)
     ids = [f"S{k:03d}" for k in range(1, len(systems) + 1)]
-    docs = [_system_json(sid, s, inputs.ctx, units, axes) for sid, s in zip(ids, systems, strict=True)]
 
-    used = {(m.view.file, f.family_id) for s in systems for m in s.members for f in m.view.fams}
-    for file, fid in sorted(set(axes) - used):
+    # each system's own X/Y question; its answer is bound by this run's key
+    axis_found: dict[str, str] = {}
+    axis_keys: dict[str, str] = {}
+    system_axes: dict[str, dict[int, str]] = {}
+    for sid, s in zip(ids, systems, strict=True):
+        rf = s.rep.fams[0]
+        axis_found[sid] = _axis_found(s)
+        axis_keys[sid] = _own_key(SYSTEM_AXIS_CODE, rf.file, sid, axis_found[sid], rf.sheet, sha)
+        answer = next(
+            (a for a in active if a.get("code") == SYSTEM_AXIS_CODE and a.get("key") == axis_keys[sid]), None
+        )
+        if answer is not None:
+            system_axes[sid] = _system_axis_values(answer, len(s.rep.fams), sid, warnings)
+    docs = [
+        _system_json(sid, s, inputs.ctx, units, axes, system_axes.get(sid))
+        for sid, s in zip(ids, systems, strict=True)
+    ]
+
+    used_families = {(m.view.file, f.family_id) for s in systems for m in s.members for f in m.view.fams}
+    for file, fid in sorted(set(axes) - used_families):
         warnings.append(f"axis answer for {file} {fid} matches no family of any grid system")
+
+    # the grid_system_select answer of THIS run's question (bound by key): which systems are used, which
+    # are declared separate buildings
+    selected, separate = set(ids), set()
+    select_key = question_key(SELECT_CODE, None, None, _select_refs(docs, sha)) if docs else None
+    select = next((a for a in active if a.get("code") == SELECT_CODE and a.get("key") == select_key), None)
+    if select is not None and isinstance(select.get("values"), dict):
+        chosen, apart = select["values"].get("systems"), select["values"].get("separate")
+        if isinstance(chosen, list) and chosen:
+            selected = {str(x) for x in chosen}
+        if isinstance(apart, list):
+            separate = {str(x) for x in apart}
+        for sid in sorted((selected | separate) - set(ids)):
+            warnings.append(f"the {SELECT_CODE} answer names {sid}, which is not a system of this run")
 
     ask = _Ask()
     clashes: list[tuple[str, str, str, str]] = []
+    pairs: list[tuple[str, str]] = []
     for i in range(len(systems)):
         for j in range(i + 1, len(systems)):
             hit = _system_conflict(systems[i], systems[j])
@@ -898,6 +1110,7 @@ def build_grid_systems(
                 fa, fb, diffs = hit
                 where = f"{_where(ids[i], fa)} vs {_where(ids[j], fb)}"
                 clashes.append((where, "; ".join(diffs[:20]), fa.file, fa.sheet))
+                pairs.append((ids[i], ids[j]))
             elif _related(systems[i], systems[j]):
                 docs[i]["relations"]["compatible_with"].append(ids[j])
                 docs[j]["relations"]["compatible_with"].append(ids[i])
@@ -908,9 +1121,11 @@ def build_grid_systems(
 
     if docs:
         ask(
-            "grid_system_select",
-            "Gate 1: which of these grid systems are the project's grids, and which building or structure is "
-            "each? None is used until confirmed.",
+            SELECT_CODE,
+            "Gate 1: which of these grid systems are the project's grids, and which building or structure "
+            "is each? None is used until confirmed. Structured values (optional): systems=S001,S002 (the "
+            "systems the project uses; the others stop blocking) and separate=S001,S002 (selected systems "
+            "that are different buildings: closes the conflicts between them).",
             listed(ids),
             "; ".join(_system_found(d) for d in docs[:20]),
         )
@@ -918,24 +1133,52 @@ def build_grid_systems(
         warnings.append(
             "no grid system: no view has a usable grid family (see the grids documents' questions)"
         )
-    for where, found, file, sheet in clashes:
-        ask(
-            "grid_system_conflict",
+    conflicts: list[dict[str, Any]] = []
+    for (where, found, file, sheet), (a, b) in zip(clashes, pairs, strict=True):
+        closed_by = (
+            "not_selected"
+            if a not in selected or b not in selected
+            else "separate"
+            if {a, b} <= separate
+            else None
+        )
+        base = (
             "Two grid systems use the same axis labels with different spacings or order, so they are kept "
-            "apart. Are they different buildings or structures, or is one of them wrong?",
-            where,
-            found,
-            file,
-            sheet,
+            "apart. Are they different buildings or structures, or is one of them wrong?"
+        )
+        if closed_by == "not_selected":
+            message = (
+                f"Not blocking: {a if a not in selected else b} is not among the selected systems. " + base
+            )
+        elif closed_by == "separate":
+            message = (
+                f"Not blocking: the {SELECT_CODE} answer declares {a} and {b} separate buildings. " + base
+            )
+        else:
+            message = (
+                f"{base} An answer here closes nothing: answer {SELECT_CODE} with systems= leaving one of "
+                f"them out, or with separate={a},{b} when they are different buildings, then rerun "
+                "harness grid-system."
+            )
+        raised = ask(CONFLICT_CODE, message, where, found, file, sheet, blocking=closed_by is None)
+        conflicts.append(
+            {
+                "systems": [a, b],
+                "blocking": closed_by is None,
+                "closed_by": closed_by,
+                "question_key": _own_key(CONFLICT_CODE, file, where, found, sheet, sha) if raised else None,
+            }
         )
     for d, s in zip(docs, systems, strict=True):
         rf = s.rep.fams[0]
+        sid = d["system_id"]
         if d["units"]["status"] != "confirmed":
             ask(
                 "grid_system_units_unconfirmed",
-                "This grid system is in drawing units and no agreeing units answer covers every file it "
-                "comes from. What unit are the drawing coordinates in?",
-                d["system_id"],
+                "Not blocking: answer the units_confirm_all question of each file (harness intake), then "
+                "rerun harness grid-system. This grid system is in drawing units and no agreeing units "
+                "answer covers every file it comes from.",
+                sid,
                 f"{d['units']['reason']}; "
                 + "; ".join(
                     f"{f}: declared {inputs.ctx[f].declared}, answer {units[f][0]}"
@@ -943,21 +1186,35 @@ def build_grid_systems(
                 ),
                 rf.file,
                 rf.sheet,
+                blocking=False,
             )
-        if d["axis_assignment"]["status"] != "answered":
-            ask(
-                "grid_system_axis_unassigned",
-                "Which direction of this grid system is Tekla X (lines parallel to Y) and which is Y?",
-                d["system_id"],
-                f"{d['axis_assignment']['reason']}; "
-                + "; ".join(
-                    f"{x['representative']['group_id']}/{x['representative']['family_id']}: labels "
-                    f"{' '.join(x['labels'])}, angle {fmt_number(x['angle_deg'])} deg"
-                    for x in d["directions"]
-                ),
-                rf.file,
-                rf.sheet,
-            )
+        names = " and ".join(AXIS_DIRECTIONS[: len(d["directions"])])
+        base = (
+            "Which direction of this grid system is Tekla X (lines parallel to Y) and which is Y? Answer "
+            f"with --value for {names} as listed in found (e.g. dir1=X), or answer "
+            "grid_family_axis_assignment per family."
+        )
+        status = d["axis_assignment"]["status"]
+        if sid not in selected:
+            blocking, message = False, f"Not blocking: {sid} is not among the selected systems. {base}"
+        elif status == "answered":
+            blocking, message = False, f"Not blocking: Tekla X / Y is assigned. {base}"
+        else:
+            blocking, message = True, f"{base} ({d['axis_assignment']['reason']})"
+        raised = ask(SYSTEM_AXIS_CODE, message, sid, axis_found[sid], rf.file, rf.sheet, blocking=blocking)
+        d["axis_question_key"] = axis_keys[sid] if raised else None
+    for c in contradictions:
+        ask(
+            CONTRADICTION_CODE,
+            f"The units answer for this file ({c['unit']}) makes the drawing's own dimensions implausible "
+            "(the units_suspect test: the median modelspace linear dimension must fall between 0.01 m and "
+            "100 m; or the median grid spacing between 0.5 m and 30 m). Answer the file's units_confirm_all "
+            "again with the right unit, or confirm this unit on "
+            f"purpose by answering this question with --value unit={c['unit']}.",
+            c["where"],
+            c["found"],
+            c["file"],
+        )
     for code, n in sorted(ask.counts.items()):
         if n > MAX_QUESTIONS_PER_CODE:
             warnings.append(f"{n} '{code}' questions; only the first {MAX_QUESTIONS_PER_CODE} are listed.")
@@ -986,6 +1243,7 @@ def build_grid_systems(
             "single_source": sum(1 for d in docs if "single_source" in d["flags"]),
             "conflicts": len(clashes),
         },
+        "conflicts": conflicts,
         "questions": ask.questions,
         "question_counts": dict(sorted(ask.counts.items())),
         "warnings": warnings,
@@ -1027,30 +1285,36 @@ def clear_grid_system_svgs(work: Path) -> None:
 # --- the command: numbered questions, documents, drawings ----------------------------------------------
 
 
+# registered one question per item (never merged per file): their answers are bound to the item by key
+OWN_QUESTION_CODES = frozenset({SYSTEM_AXIS_CODE, CONFLICT_CODE, CONTRADICTION_CODE})
+
+
 def grid_system_questions(doc: dict[str, Any]) -> list[dict[str, Any]]:
-    """Raw questions (no id, key or answer yet) of a grid-systems document: one per (code, blocking flag,
-    file), blocking first, then code, then file. `grid_system_select` is a question about the whole project
-    (file null) with one ref per system; its ref carries the representative's file and sheet."""
+    """Raw questions (no id, key or answer yet) of a grid-systems document, blocking first, then code, then
+    file. `grid_system_select` is a question about the whole project (file null) with one ref per system; its
+    ref carries the representative's file and sheet. grid_system_axis_unassigned (one per system, `subjects`
+    dir1/dir2), grid_system_conflict (one per pair) and units_answer_contradicts_evidence (one per file) are
+    one question each; grid_system_units_unconfirmed is one per (blocking flag, file)."""
     out: list[dict[str, Any]] = []
     groups: dict[tuple[str, bool, str], list[tuple[str, dict[str, Any]]]] = {}
+    by_id = {d["system_id"]: d for d in doc["systems"]}
     for q in doc["questions"]:
         if q["code"] == SELECT_CODE:
-            refs = []
-            for d in doc["systems"]:
-                rep = d["directions"][0]["representative"]
-                refs.append(
-                    {
-                        "file": rep["file"],
-                        "where": d["system_id"],
-                        "found": _system_found(d),
-                        "sheet": rep["sheet"],
-                    }
-                )
+            refs = _select_refs(doc["systems"], {f["path"]: f["sha256"] for f in doc["files"]})
             out.append(question_group(SELECT_CODE, q["blocking"], q["message"], refs, file=None))
             continue
-        ref = {"file": q["file"], "where": q["where"], "found": q["found"]}
-        if "sheet" in q:
-            ref["sheet"] = q["sheet"]
+        ref = _raw_ref(q)
+        if q["code"] in OWN_QUESTION_CODES:
+            subjects = None
+            if q["code"] == SYSTEM_AXIS_CODE:
+                dirs = by_id[q["where"]]["directions"]
+                subjects = [{"name": AXIS_DIRECTIONS[k], "count": x["families"]} for k, x in enumerate(dirs)]
+            out.append(
+                question_group(
+                    q["code"], q["blocking"], q["message"], [ref], file=q["file"], subjects=subjects
+                )
+            )
+            continue
         groups.setdefault((q["code"], q["blocking"], q["file"]), []).append((q["message"], ref))
     out += [merged_question(code, blocking, file, items) for (code, blocking, file), items in groups.items()]
     return sorted(out, key=lambda q: (not q["blocking"], q["code"], q["file"] or ""))
@@ -1092,6 +1356,9 @@ def run_grid_systems(work_dir: str | Path, *, svg: bool = True) -> GridSystemsRe
         questions = ledger.sync("grid-system", grid_system_questions(doc), hashes)
     except QuestionsError as exc:
         raise GridSystemError(exc.exit_code, str(exc)) from exc
+    # the fingerprint of the answers AFTER sync: an answer to a question of this producer that is no longer
+    # raised just went stale (it was not applied: answers bind by key), so a rerun is not reported as stale
+    doc["answers_sha256"] = consumed_answers_digest(ledger.answers["answers"])
     qdoc = questions_document(doc["project_id"], questions)
     problems = validate("intake", qdoc)
     if problems:

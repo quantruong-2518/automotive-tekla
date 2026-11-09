@@ -16,11 +16,20 @@ Rules:
   * structured `values` exist for some codes only (see answers.schema.json):
         units_confirm_all, units_conflict, units_suspect, units_unknown, grid_units_doubt
                                       unit=mm|cm|m|in|ft            (required)
+        units_answer_contradicts_evidence
+                                      unit=<the unit already answered for the file>   (required: confirms
+                                      that unit on purpose; to change it, answer units_confirm_all again)
         grid_family_axis_assignment   <family_id>=X|Y               (at least one)
+        grid_system_axis_unassigned   dir1=X|Y, dir2=X|Y            (exactly the directions the question
+                                      lists in `subjects`, distinct axes)
         member_mark_prefix_meaning    <prefix>=<meaning>            (at least one)
         grid_system_select            systems=S001,S002             (optional: the grid systems the project
                                       uses; without it `harness status` takes every listed system as used)
+                                      separate=S001,S002            (optional: two or more systems of the
+                                      question, all selected, that are different buildings)
     every other code takes no value;
+  * grid_system_conflict cannot be answered: a conflict closes only through the grid_system_select answer
+    (`systems` without one of the two, or `separate` with both), never through words;
   * a second answer to the same key supersedes the first (kept, status 'superseded');
   * nothing is deleted: answers are only appended or change status.
 
@@ -42,16 +51,21 @@ from typing import Any
 
 from tekla_harness.questions import (
     AXIS_CODE,
+    AXIS_DIRECTIONS,
+    CONFLICT_CODE,
+    CONTRADICTION_CODE,
     EXIT_INVALID,
     EXIT_USAGE,
     PREFIX_CODE,
     PRODUCER_COMMANDS,
     QUESTION_DOCUMENTS,
     SELECT_CODE,
+    SYSTEM_AXIS_CODE,
     UNIT_CODES,
     UNITS,
     Ledger,
     QuestionsError,
+    active_answers,
     dump_json,
     load_ledger,
     questions_summary,
@@ -80,7 +94,7 @@ SYSTEM_ID = re.compile(r"S[0-9]{3,}")
 
 def check_values(code: str, values: dict[str, str]) -> list[str]:
     """Problems with the structured values of an answer to a question with this code (empty when fine)."""
-    if code in UNIT_CODES:
+    if code in UNIT_CODES or code == CONTRADICTION_CODE:
         if set(values) != {"unit"}:
             return ["this question needs exactly one value: unit=" + "|".join(UNITS)]
         return (
@@ -90,25 +104,127 @@ def check_values(code: str, values: dict[str, str]) -> list[str]:
         if not values:
             return ["this question needs at least one value: <family_id>=X|Y"]
         return [f"family '{k}': '{v}' is not X or Y" for k, v in values.items() if v not in AXES]
+    if code == SYSTEM_AXIS_CODE:
+        if not values:
+            return ["this question needs a value per direction: dir1=X|Y (and dir2=X|Y)"]
+        bad = [
+            f"'{k}' is not a direction ({', '.join(AXIS_DIRECTIONS)})"
+            for k in values
+            if k not in AXIS_DIRECTIONS
+        ]
+        bad += [f"direction '{k}': '{v}' is not X or Y" for k, v in values.items() if v not in AXES]
+        if not bad and len(set(values.values())) != len(values):
+            bad = ["two directions cannot take the same axis"]
+        return bad
     if code == PREFIX_CODE:
         if not values:
             return ["this question needs at least one value: <prefix>=<meaning>"]
         return [f"prefix '{k}': the meaning is blank" for k, v in values.items() if not v.strip()]
     if code == SELECT_CODE:
-        if set(values) - {"systems"}:
-            return ["this question takes only the optional value systems=S001,S002"]
-        if "systems" not in values:
-            return []
-        ids = _system_ids(values["systems"])
-        bad = [f"systems: '{i}' is not a grid system id like S001" for i in ids if not SYSTEM_ID.fullmatch(i)]
-        if not bad and len(set(ids)) != len(ids):
-            bad = ["systems: the ids must be distinct"]
+        if set(values) - {"systems", "separate"}:
+            return ["this question takes only the optional values systems=S001,S002 and separate=S001,S002"]
+        bad: list[str] = []
+        for name in ("systems", "separate"):
+            if name not in values:
+                continue
+            ids = _system_ids(values[name])
+            wrong = [
+                f"{name}: '{i}' is not a grid system id like S001" for i in ids if not SYSTEM_ID.fullmatch(i)
+            ]
+            if not wrong and len(set(ids)) != len(ids):
+                wrong = [f"{name}: the ids must be distinct"]
+            if not wrong and name == "separate" and len(ids) < 2:
+                wrong = ["separate: name at least two systems (they are different buildings)"]
+            bad += wrong
+        if not bad and "separate" in values and "systems" in values:
+            outside = sorted(set(_system_ids(values["separate"])) - set(_system_ids(values["systems"])))
+            if outside:
+                bad = [
+                    f"separate: {', '.join(outside)} not in systems (a separate building must be selected)"
+                ]
         return bad
     return [f"questions with code '{code}' take no value, got: {', '.join(sorted(values))}"] if values else []
 
 
 def _system_ids(text: str) -> list[str]:
     return [part.strip() for part in text.split(",")]
+
+
+def _raised_question(work: Path, key: str) -> dict[str, Any] | None:
+    """The question with this key in the question documents on disk (None when no readable one has it)."""
+    for name in QUESTION_DOCUMENTS:
+        path = work / name
+        if not path.is_file():
+            continue
+        try:
+            doc = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            continue
+        for q in doc.get("questions", []) if isinstance(doc, dict) else []:
+            if isinstance(q, dict) and q.get("key") == key:
+                return q
+    return None
+
+
+def _check_in_context(
+    ledger: Ledger, question_id: str, key: str, entry: dict[str, Any], values: dict[str, str]
+) -> None:
+    """Rules that need the question itself or the other answers. Raises QuestionsError."""
+    code = entry["code"]
+    if code == CONFLICT_CODE:
+        select = [
+            e["id"]
+            for e in ledger.registry["questions"].values()
+            if e["code"] == SELECT_CODE and e["status"] != "obsolete"
+        ]
+        raise QuestionsError(
+            EXIT_USAGE,
+            f"{question_id} ({CONFLICT_CODE}) cannot be answered: a conflict closes only through the "
+            f"{SELECT_CODE} answer ({', '.join(select) or SELECT_CODE}): systems= without one of the two, or "
+            "separate= naming both when they are different buildings; then rerun harness grid-system. "
+            "Nothing was written",
+        )
+    if code == SYSTEM_AXIS_CODE:
+        q = _raised_question(ledger.work, key)
+        names = [s["name"] for s in (q or {}).get("subjects") or [] if isinstance(s, dict)]
+        if not names:
+            raise QuestionsError(
+                EXIT_INVALID,
+                f"{question_id}: its directions are not in grid-system-questions.json; "
+                "rerun harness grid-system",
+            )
+        if set(values) != set(names):
+            raise QuestionsError(
+                EXIT_INVALID,
+                f"{question_id} ({code}): give exactly {', '.join(f'{n}=X|Y' for n in names)}, got "
+                f"{', '.join(sorted(values))}",
+            )
+    if code == SELECT_CODE:
+        q = _raised_question(ledger.work, key)
+        known = [r["where"] for r in (q or {}).get("refs") or [] if isinstance(r, dict)]
+        for name in ("systems", "separate"):  # both may only name systems the question lists
+            if name not in values:
+                continue
+            unknown = [i for i in _system_ids(values[name]) if i not in known]
+            if not known or unknown:
+                raise QuestionsError(
+                    EXIT_INVALID,
+                    f"{question_id}: {name} names {', '.join(unknown) or 'systems'} that the question does "
+                    f"not list ({', '.join(known) or 'grid-system-questions.json has no such question'})",
+                )
+    if code == CONTRADICTION_CODE:
+        units = {
+            str(a["values"].get("unit"))
+            for a in active_answers(ledger.answers).values()
+            if a["code"] in UNIT_CODES and a["file"] in (entry["file"], None)
+        }
+        if units != {values["unit"]}:
+            raise QuestionsError(
+                EXIT_INVALID,
+                f"{question_id}: unit={values['unit']} is not the unit answered for {entry['file']} "
+                f"({', '.join(sorted(units)) or 'none'}): this question only confirms that unit; to change "
+                "it, answer the file's units_confirm_all again",
+            )
 
 
 def _check_file_unchanged(work: Path, question_id: str, entry: dict[str, Any]) -> None:
@@ -201,10 +317,13 @@ def record_answer(
     problems = check_values(entry["code"], values)
     if problems:
         raise QuestionsError(EXIT_INVALID, f"{question_id} ({entry['code']}): " + "; ".join(problems))
+    _check_in_context(ledger, question_id, key, entry, values)
 
     stored: dict[str, Any] = dict(values)
-    if entry["code"] == SELECT_CODE and "systems" in values:
-        stored["systems"] = _system_ids(values["systems"])
+    if entry["code"] == SELECT_CODE:
+        for name in ("systems", "separate"):
+            if name in values:
+                stored[name] = _system_ids(values[name])
     answer = {
         "key": key,
         "question_id": question_id,

@@ -204,10 +204,25 @@
     "units": {
       "type": "object",
       "description": "Drawing units from header $INSUNITS only. $INSUNITS is accepted only as an integral code 0..20 (negatives, floats such as 6.9, booleans, text, >20 are invalid: header_code null, raw value kept in evidence). Code 0, a missing or invalid variable, or a code outside mm/cm/m/in/ft gives 'unknown' and a blocking units_unknown question; metres are never assumed. 'unitless' is reserved and not produced in this slice. TRUST: header units alone never reach 'high' (capped at 'medium', with a non-blocking units_confirm question); 'high' is reserved for a unit confirmed by an independent check, which this slice does not implement, so confidence is never 'high' here. It drops to 'low' with a blocking question when (a) $MEASUREMENT (0 imperial, 1 metric) disagrees with the unit system of the unit (in/ft imperial; mm/cm/m metric): units_conflict; or (b) the magnitude heuristic fails: the median absolute length of the modelspace linear and aligned dimensions (group 42 actual measurement when present, else ezdxf's measurement; at least 3 needed, otherwise the check is skipped and evidence says so), converted to metres with the declared unit, is below 0.01 m or above 100 m: units_suspect, with the median, count and thresholds in evidence. The thresholds are a documented heuristic: they only raise a question and never change the unit value.",
-      "required": ["value", "source", "header_code", "confidence", "evidence"],
+      "required": ["value", "source", "header_code", "confidence", "evidence", "dimension_median"],
       "additionalProperties": false,
       "properties": {
         "value": { "enum": ["mm", "cm", "m", "in", "ft", "unitless", "unknown"] },
+        "dimension_median": {
+          "description": "The input of the magnitude heuristic, kept whatever the declared unit (also for 'unknown'): median absolute length of the modelspace linear and aligned dimensions in DRAWING units and how many there are. Null when the dimension audit is unavailable or fewer than 3 exist. `harness grid-system` and `harness status` re-run the same 0.01 m..100 m test with the engineer's answered unit (units_answer_contradicts_evidence).",
+          "anyOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "required": ["value", "count"],
+              "additionalProperties": false,
+              "properties": {
+                "value": { "type": "number", "minimum": 0 },
+                "count": { "type": "integer", "minimum": 3 }
+              }
+            }
+          ]
+        },
         "source": { "const": "header" },
         "header_code": { "type": ["integer", "null"], "minimum": 0, "maximum": 20, "description": "$INSUNITS as stored when it is a valid integral code 0..20; null when the variable is missing or invalid (see evidence)." },
         "confidence": { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/confidence" },

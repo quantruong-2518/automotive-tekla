@@ -1,0 +1,1199 @@
+{
+  "schema_version": "0.1",
+  "kind": "marks",
+  "project_id": "demo-marks",
+  "inventory_sha256": "a10675c25737249985b49c087c0db5ffdfd13107490c88147cc56898aba5f443",
+  "files": [
+    {
+      "path": "plans/set.dxf",
+      "status": "scanned",
+      "reason": null,
+      "text_entries": 86,
+      "line_grid": {
+        "status": "read",
+        "reason": null,
+        "skipped": {}
+      },
+      "plan_marks": 5,
+      "tables": 3,
+      "unparsed_tables": 1,
+      "blocked_marks": 2
+    }
+  ],
+  "skipped_sheets": [],
+  "plan_marks": [
+    {
+      "id": "P000001",
+      "file": "plans/set.dxf",
+      "sheet": "model#01",
+      "sheet_number": {
+        "value": "S-101",
+        "confidence": "medium"
+      },
+      "space": "model",
+      "text_ref": {
+        "file": "plans/set.dxf",
+        "entry_id": "T000078"
+      },
+      "display_text": "B7",
+      "position": {
+        "x": 14000.0,
+        "y": 43300.0
+      },
+      "mark": "B7",
+      "key": "b7",
+      "lexical": {
+        "prefix": "B",
+        "numbers": [
+          "7"
+        ],
+        "separators": [
+          ""
+        ],
+        "suffix": ""
+      },
+      "size": null,
+      "form": "plain",
+      "title_member_word": null,
+      "in_callouts": true,
+      "confidence": "medium",
+      "flags": [],
+      "provenance": {
+        "file": "plans/set.dxf",
+        "sheet": "S-101",
+        "method": "derived",
+        "revision": "A",
+        "derived_from": [
+          {
+            "file": "plans/set.dxf",
+            "sheet": "S-101",
+            "method": "dxf_entity",
+            "revision": "A",
+            "region": {
+              "bbox": [
+                14000.0,
+                43300.0,
+                14490.0,
+                43650.0
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "P000002",
+      "file": "plans/set.dxf",
+      "sheet": "model#01",
+      "sheet_number": {
+        "value": "S-101",
+        "confidence": "medium"
+      },
+      "space": "model",
+      "text_ref": {
+        "file": "plans/set.dxf",
+        "entry_id": "T000080"
+      },
+      "display_text": "D1",
+      "position": {
+        "x": 46000.0,
+        "y": 37000.0
+      },
+      "mark": "D1",
+      "key": "d1",
+      "lexical": {
+        "prefix": "D",
+        "numbers": [
+          "1"
+        ],
+        "separators": [
+          ""
+        ],
+        "suffix": ""
+      },
+      "size": null,
+      "form": "plain",
+      "title_member_word": null,
+      "in_callouts": true,
+      "confidence": "medium",
+      "flags": [],
+      "provenance": {
+        "file": "plans/set.dxf",
+        "sheet": "S-101",
+        "method": "derived",
+        "revision": "A",
+        "derived_from": [
+          {
+            "file": "plans/set.dxf",
+            "sheet": "S-101",
+            "method": "dxf_entity",
+            "revision": "A",
+            "region": {
+              "bbox": [
+                46000.0,
+                37000.0,
+                46490.0,
+                37350.0
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "P000003",
+      "file": "plans/set.dxf",
+      "sheet": "model#01",
+      "sheet_number": {
+        "value": "S-101",
+        "confidence": "medium"
+      },
+      "space": "model",
+      "text_ref": {
+        "file": "plans/set.dxf",
+        "entry_id": "T000081"
+      },
+      "display_text": "D2(220x500)",
+      "position": {
+        "x": 46000.0,
+        "y": 36400.0
+      },
+      "mark": "D2",
+      "key": "d2",
+      "lexical": {
+        "prefix": "D",
+        "numbers": [
+          "2"
+        ],
+        "separators": [
+          ""
+        ],
+        "suffix": ""
+      },
+      "size": {
+        "b": 220,
+        "h": 500,
+        "text": "220x500"
+      },
+      "form": "with_size",
+      "title_member_word": null,
+      "in_callouts": false,
+      "confidence": "medium",
+      "flags": [],
+      "provenance": {
+        "file": "plans/set.dxf",
+        "sheet": "S-101",
+        "method": "derived",
+        "revision": "A",
+        "derived_from": [
+          {
+            "file": "plans/set.dxf",
+            "sheet": "S-101",
+            "method": "dxf_entity",
+            "revision": "A",
+            "region": {
+              "bbox": [
+                46000.0,
+                36400.0,
+                48695.0,
+                36750.0
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "P000004",
+      "file": "plans/set.dxf",
+      "sheet": "model#01",
+      "sheet_number": {
+        "value": "S-101",
+        "confidence": "medium"
+      },
+      "space": "model",
+      "text_ref": {
+        "file": "plans/set.dxf",
+        "entry_id": "T000082"
+      },
+      "display_text": "D1.1(220X350)",
+      "position": {
+        "x": 46000.0,
+        "y": 35800.0
+      },
+      "mark": "D1.1",
+      "key": "d1.1",
+      "lexical": {
+        "prefix": "D",
+        "numbers": [
+          "1",
+          "1"
+        ],
+        "separators": [
+          "",
+          "."
+        ],
+        "suffix": ""
+      },
+      "size": {
+        "b": 220,
+        "h": 350,
+        "text": "220X350"
+      },
+      "form": "with_size",
+      "title_member_word": null,
+      "in_callouts": false,
+      "confidence": "medium",
+      "flags": [],
+      "provenance": {
+        "file": "plans/set.dxf",
+        "sheet": "S-101",
+        "method": "derived",
+        "revision": "A",
+        "derived_from": [
+          {
+            "file": "plans/set.dxf",
+            "sheet": "S-101",
+            "method": "dxf_entity",
+            "revision": "A",
+            "region": {
+              "bbox": [
+                46000.0,
+                35800.0,
+                49185.0,
+                36150.0
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "P000005",
+      "file": "plans/set.dxf",
+      "sheet": "model#01",
+      "sheet_number": {
+        "value": "S-101",
+        "confidence": "medium"
+      },
+      "space": "model",
+      "text_ref": {
+        "file": "plans/set.dxf",
+        "entry_id": "T000083"
+      },
+      "display_text": "COLUMN C2",
+      "position": {
+        "x": 46000.0,
+        "y": 35200.0
+      },
+      "mark": "C2",
+      "key": "c2",
+      "lexical": {
+        "prefix": "C",
+        "numbers": [
+          "2"
+        ],
+        "separators": [
+          ""
+        ],
+        "suffix": ""
+      },
+      "size": null,
+      "form": "title",
+      "title_member_word": {
+        "word": "COLUMN",
+        "confidence": "medium"
+      },
+      "in_callouts": false,
+      "confidence": "medium",
+      "flags": [],
+      "provenance": {
+        "file": "plans/set.dxf",
+        "sheet": "S-101",
+        "method": "derived",
+        "revision": "A",
+        "derived_from": [
+          {
+            "file": "plans/set.dxf",
+            "sheet": "S-101",
+            "method": "dxf_entity",
+            "revision": "A",
+            "region": {
+              "bbox": [
+                46000.0,
+                35200.0,
+                48205.0,
+                35550.0
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "tables": [
+    {
+      "id": "S001",
+      "file": "plans/set.dxf",
+      "sheet": "model#01",
+      "sheet_number": {
+        "value": "S-101",
+        "confidence": "medium"
+      },
+      "space": "model",
+      "bbox": [
+        2000.0,
+        52000.0,
+        9000.0,
+        56000.0
+      ],
+      "detection": "line_grid",
+      "anchor_entry_id": "T000040",
+      "header_blocked": false,
+      "header_block_reasons": [],
+      "header": [
+        {
+          "column": 0,
+          "entry_id": "T000040",
+          "display_text": "KÝ HIỆU",
+          "meaning": "allowed",
+          "block_reason": null
+        },
+        {
+          "column": 1,
+          "entry_id": "T000041",
+          "display_text": "b",
+          "meaning": "allowed",
+          "block_reason": null
+        },
+        {
+          "column": 2,
+          "entry_id": "T000042",
+          "display_text": "h",
+          "meaning": "allowed",
+          "block_reason": null
+        }
+      ],
+      "columns": [
+        {
+          "index": 0,
+          "x0": 2000.0,
+          "x1": 5000.0,
+          "role": "mark"
+        },
+        {
+          "index": 1,
+          "x0": 5000.0,
+          "x1": 7000.0,
+          "role": "b"
+        },
+        {
+          "index": 2,
+          "x0": 7000.0,
+          "x1": 9000.0,
+          "role": "h"
+        }
+      ],
+      "mark_column": 0,
+      "rows": [
+        {
+          "index": 1,
+          "bbox": [
+            2000.0,
+            54400.0,
+            9000.0,
+            55200.0
+          ],
+          "cells": [
+            {
+              "column": 0,
+              "entry_id": "T000043",
+              "display_text": "D1",
+              "meaning": "allowed",
+              "block_reason": null
+            },
+            {
+              "column": 1,
+              "entry_id": "T000044",
+              "display_text": "220",
+              "meaning": "allowed",
+              "block_reason": null
+            },
+            {
+              "column": 2,
+              "entry_id": "T000045",
+              "display_text": "300",
+              "meaning": "allowed",
+              "block_reason": null
+            }
+          ],
+          "marks": [
+            {
+              "entry_id": "T000043",
+              "text": "D1",
+              "key": "d1",
+              "shape": "mark",
+              "confidence": "medium"
+            }
+          ],
+          "size": {
+            "b": 220,
+            "h": 300,
+            "entry_ids": [
+              "T000044",
+              "T000045"
+            ]
+          }
+        },
+        {
+          "index": 2,
+          "bbox": [
+            2000.0,
+            53600.0,
+            9000.0,
+            54400.0
+          ],
+          "cells": [
+            {
+              "column": 0,
+              "entry_id": "T000046",
+              "display_text": "D2",
+              "meaning": "allowed",
+              "block_reason": null
+            },
+            {
+              "column": 1,
+              "entry_id": "T000047",
+              "display_text": "220",
+              "meaning": "allowed",
+              "block_reason": null
+            },
+            {
+              "column": 2,
+              "entry_id": "T000048",
+              "display_text": "450",
+              "meaning": "allowed",
+              "block_reason": null
+            }
+          ],
+          "marks": [
+            {
+              "entry_id": "T000046",
+              "text": "D2",
+              "key": "d2",
+              "shape": "mark",
+              "confidence": "medium"
+            }
+          ],
+          "size": {
+            "b": 220,
+            "h": 450,
+            "entry_ids": [
+              "T000047",
+              "T000048"
+            ]
+          }
+        },
+        {
+          "index": 3,
+          "bbox": [
+            2000.0,
+            52800.0,
+            9000.0,
+            53600.0
+          ],
+          "cells": [
+            {
+              "column": 0,
+              "entry_id": "T000049",
+              "display_text": "D1-1",
+              "meaning": "allowed",
+              "block_reason": null
+            },
+            {
+              "column": 1,
+              "entry_id": "T000050",
+              "display_text": "220",
+              "meaning": "allowed",
+              "block_reason": null
+            },
+            {
+              "column": 2,
+              "entry_id": "T000051",
+              "display_text": "350",
+              "meaning": "allowed",
+              "block_reason": null
+            }
+          ],
+          "marks": [
+            {
+              "entry_id": "T000049",
+              "text": "D1-1",
+              "key": "d1-1",
+              "shape": "mark",
+              "confidence": "medium"
+            }
+          ],
+          "size": {
+            "b": 220,
+            "h": 350,
+            "entry_ids": [
+              "T000050",
+              "T000051"
+            ]
+          }
+        },
+        {
+          "index": 4,
+          "bbox": [
+            2000.0,
+            52000.0,
+            9000.0,
+            52800.0
+          ],
+          "cells": [
+            {
+              "column": 0,
+              "entry_id": "T000052",
+              "display_text": "D9",
+              "meaning": "allowed",
+              "block_reason": null
+            },
+            {
+              "column": 1,
+              "entry_id": "T000053",
+              "display_text": "200",
+              "meaning": "allowed",
+              "block_reason": null
+            },
+            {
+              "column": 2,
+              "entry_id": "T000054",
+              "display_text": "300",
+              "meaning": "allowed",
+              "block_reason": null
+            }
+          ],
+          "marks": [
+            {
+              "entry_id": "T000052",
+              "text": "D9",
+              "key": "d9",
+              "shape": "mark",
+              "confidence": "medium"
+            }
+          ],
+          "size": {
+            "b": 200,
+            "h": 300,
+            "entry_ids": [
+              "T000053",
+              "T000054"
+            ]
+          }
+        }
+      ],
+      "confidence": "medium",
+      "provenance": {
+        "file": "plans/set.dxf",
+        "sheet": "S-101",
+        "method": "table",
+        "region": {
+          "bbox": [
+            2000.0,
+            52000.0,
+            9000.0,
+            56000.0
+          ]
+        },
+        "revision": "A"
+      }
+    },
+    {
+      "id": "S002",
+      "file": "plans/set.dxf",
+      "sheet": "model#01",
+      "sheet_number": {
+        "value": "S-101",
+        "confidence": "medium"
+      },
+      "space": "model",
+      "bbox": [
+        14000.0,
+        48600.0,
+        23715.0,
+        50350.0
+      ],
+      "detection": "text_alignment",
+      "anchor_entry_id": "T000055",
+      "header_blocked": false,
+      "header_block_reasons": [],
+      "header": [
+        {
+          "column": 0,
+          "entry_id": "T000055",
+          "display_text": "NAME",
+          "meaning": "allowed",
+          "block_reason": null
+        },
+        {
+          "column": 1,
+          "entry_id": "T000056",
+          "display_text": "D (mm)",
+          "meaning": "allowed",
+          "block_reason": null
+        },
+        {
+          "column": 2,
+          "entry_id": "T000057",
+          "display_text": "TW (mm)",
+          "meaning": "allowed",
+          "block_reason": null
+        },
+        {
+          "column": 3,
+          "entry_id": "T000058",
+          "display_text": "BF (mm)",
+          "meaning": "allowed",
+          "block_reason": null
+        },
+        {
+          "column": 4,
+          "entry_id": "T000059",
+          "display_text": "TF (mm)",
+          "meaning": "allowed",
+          "block_reason": null
+        }
+      ],
+      "columns": [
+        {
+          "index": 0,
+          "x0": 13650.0,
+          "x1": 15612.5,
+          "role": "mark"
+        },
+        {
+          "index": 1,
+          "x0": 15612.5,
+          "x1": 17796.25,
+          "role": null
+        },
+        {
+          "index": 2,
+          "x0": 17796.25,
+          "x1": 19857.5,
+          "role": null
+        },
+        {
+          "index": 3,
+          "x0": 19857.5,
+          "x1": 21857.5,
+          "role": null
+        },
+        {
+          "index": 4,
+          "x0": 21857.5,
+          "x1": 24065.0,
+          "role": null
+        }
+      ],
+      "mark_column": 0,
+      "rows": [
+        {
+          "index": 1,
+          "bbox": [
+            14000.0,
+            49300.0,
+            22245.0,
+            49650.0
+          ],
+          "cells": [
+            {
+              "column": 0,
+              "entry_id": "T000060",
+              "display_text": "C1",
+              "meaning": "allowed",
+              "block_reason": null
+            },
+            {
+              "column": 1,
+              "entry_id": "T000061",
+              "display_text": "300",
+              "meaning": "allowed",
+              "block_reason": null
+            },
+            {
+              "column": 2,
+              "entry_id": "T000062",
+              "display_text": "6",
+              "meaning": "allowed",
+              "block_reason": null
+            },
+            {
+              "column": 3,
+              "entry_id": "T000063",
+              "display_text": "150",
+              "meaning": "allowed",
+              "block_reason": null
+            },
+            {
+              "column": 4,
+              "entry_id": "T000064",
+              "display_text": "8",
+              "meaning": "allowed",
+              "block_reason": null
+            }
+          ],
+          "marks": [
+            {
+              "entry_id": "T000060",
+              "text": "C1",
+              "key": "c1",
+              "shape": "mark",
+              "confidence": "medium"
+            }
+          ],
+          "size": null
+        },
+        {
+          "index": 2,
+          "bbox": [
+            14000.0,
+            48600.0,
+            22245.0,
+            48950.0
+          ],
+          "cells": [
+            {
+              "column": 0,
+              "entry_id": "T000065",
+              "display_text": "C2",
+              "meaning": "allowed",
+              "block_reason": null
+            },
+            {
+              "column": 1,
+              "entry_id": "T000066",
+              "display_text": "250",
+              "meaning": "allowed",
+              "block_reason": null
+            },
+            {
+              "column": 2,
+              "entry_id": "T000067",
+              "display_text": "5",
+              "meaning": "allowed",
+              "block_reason": null
+            },
+            {
+              "column": 3,
+              "entry_id": "T000068",
+              "display_text": "175",
+              "meaning": "allowed",
+              "block_reason": null
+            },
+            {
+              "column": 4,
+              "entry_id": "T000069",
+              "display_text": "8",
+              "meaning": "allowed",
+              "block_reason": null
+            }
+          ],
+          "marks": [
+            {
+              "entry_id": "T000065",
+              "text": "C2",
+              "key": "c2",
+              "shape": "mark",
+              "confidence": "medium"
+            }
+          ],
+          "size": null
+        }
+      ],
+      "confidence": "medium",
+      "provenance": {
+        "file": "plans/set.dxf",
+        "sheet": "S-101",
+        "method": "table",
+        "region": {
+          "bbox": [
+            14000.0,
+            48600.0,
+            23715.0,
+            50350.0
+          ]
+        },
+        "revision": "A"
+      }
+    },
+    {
+      "id": "S003",
+      "file": "plans/set.dxf",
+      "sheet": "model#01",
+      "sheet_number": {
+        "value": "S-101",
+        "confidence": "medium"
+      },
+      "space": "model",
+      "bbox": [
+        26000.0,
+        53600.0,
+        31000.0,
+        56000.0
+      ],
+      "detection": "line_grid",
+      "anchor_entry_id": "T000072",
+      "header_blocked": true,
+      "header_block_reasons": [
+        "encoding_proposed"
+      ],
+      "header": [
+        {
+          "column": 0,
+          "entry_id": "T000070",
+          "display_text": "Abçd",
+          "meaning": "blocked",
+          "block_reason": "encoding_proposed"
+        },
+        {
+          "column": 1,
+          "entry_id": "T000071",
+          "display_text": "Xyèz",
+          "meaning": "blocked",
+          "block_reason": "encoding_proposed"
+        }
+      ],
+      "columns": [
+        {
+          "index": 0,
+          "x0": 26000.0,
+          "x1": 29000.0,
+          "role": null
+        },
+        {
+          "index": 1,
+          "x0": 29000.0,
+          "x1": 31000.0,
+          "role": null
+        }
+      ],
+      "mark_column": null,
+      "rows": [
+        {
+          "index": 1,
+          "bbox": [
+            26000.0,
+            54400.0,
+            31000.0,
+            55200.0
+          ],
+          "cells": [
+            {
+              "column": 0,
+              "entry_id": "T000072",
+              "display_text": "D7",
+              "meaning": "blocked",
+              "block_reason": "header_blocked"
+            },
+            {
+              "column": 1,
+              "entry_id": "T000073",
+              "display_text": "2",
+              "meaning": "blocked",
+              "block_reason": "header_blocked"
+            }
+          ],
+          "marks": [],
+          "size": null
+        },
+        {
+          "index": 2,
+          "bbox": [
+            26000.0,
+            53600.0,
+            31000.0,
+            54400.0
+          ],
+          "cells": [
+            {
+              "column": 0,
+              "entry_id": "T000074",
+              "display_text": "D8",
+              "meaning": "blocked",
+              "block_reason": "header_blocked"
+            },
+            {
+              "column": 1,
+              "entry_id": "T000075",
+              "display_text": "4",
+              "meaning": "blocked",
+              "block_reason": "header_blocked"
+            }
+          ],
+          "marks": [],
+          "size": null
+        }
+      ],
+      "confidence": "low",
+      "provenance": {
+        "file": "plans/set.dxf",
+        "sheet": "S-101",
+        "method": "table",
+        "region": {
+          "bbox": [
+            26000.0,
+            53600.0,
+            31000.0,
+            56000.0
+          ]
+        },
+        "revision": "A"
+      }
+    }
+  ],
+  "unparsed_tables": [
+    {
+      "file": "plans/set.dxf",
+      "sheet": "model#01",
+      "sheet_number": {
+        "value": "S-101",
+        "confidence": "medium"
+      },
+      "space": "model",
+      "bbox": [
+        14000.0,
+        44000.0,
+        14980.0,
+        44350.0
+      ],
+      "detection": "text_alignment",
+      "anchor_entry_id": "T000076",
+      "anchor_text": "MARK",
+      "reason": "fewer than two data rows aligned under the header columns"
+    }
+  ],
+  "blocked_marks": [
+    {
+      "file": "plans/set.dxf",
+      "sheet": "model#01",
+      "table": "S003",
+      "row": 1,
+      "entry_id": "T000072",
+      "display_text": "D7",
+      "reason": "header_blocked:encoding_proposed"
+    },
+    {
+      "file": "plans/set.dxf",
+      "sheet": "model#01",
+      "table": "S003",
+      "row": 2,
+      "entry_id": "T000074",
+      "display_text": "D8",
+      "reason": "header_blocked:encoding_proposed"
+    }
+  ],
+  "matching": [
+    {
+      "file": "plans/set.dxf",
+      "schedule_tables": 2,
+      "matched": [
+        {
+          "key": "c2",
+          "mark": "C2",
+          "plan_marks": [
+            "P000005"
+          ],
+          "schedule": [
+            {
+              "table": "S002",
+              "row": 2,
+              "entry_id": "T000065"
+            }
+          ],
+          "confidence": "medium"
+        },
+        {
+          "key": "d1",
+          "mark": "D1",
+          "plan_marks": [
+            "P000002"
+          ],
+          "schedule": [
+            {
+              "table": "S001",
+              "row": 1,
+              "entry_id": "T000043"
+            }
+          ],
+          "confidence": "medium"
+        },
+        {
+          "key": "d2",
+          "mark": "D2",
+          "plan_marks": [
+            "P000003"
+          ],
+          "schedule": [
+            {
+              "table": "S001",
+              "row": 2,
+              "entry_id": "T000046"
+            }
+          ],
+          "confidence": "medium"
+        }
+      ],
+      "schedule_only": [
+        {
+          "key": "c1",
+          "mark": "C1",
+          "schedule": [
+            {
+              "table": "S002",
+              "row": 1,
+              "entry_id": "T000060"
+            }
+          ]
+        },
+        {
+          "key": "d1-1",
+          "mark": "D1-1",
+          "schedule": [
+            {
+              "table": "S001",
+              "row": 3,
+              "entry_id": "T000049"
+            }
+          ]
+        },
+        {
+          "key": "d9",
+          "mark": "D9",
+          "schedule": [
+            {
+              "table": "S001",
+              "row": 4,
+              "entry_id": "T000052"
+            }
+          ]
+        }
+      ],
+      "plan_only": [
+        {
+          "key": "b7",
+          "mark": "B7",
+          "plan_marks": [
+            "P000001"
+          ]
+        },
+        {
+          "key": "d1.1",
+          "mark": "D1.1",
+          "plan_marks": [
+            "P000004"
+          ]
+        }
+      ],
+      "notation_variants": [
+        {
+          "structure": {
+            "prefix": "d",
+            "numbers": [
+              1,
+              1
+            ],
+            "suffix": ""
+          },
+          "marks": [
+            {
+              "key": "d1-1",
+              "mark": "D1-1",
+              "plan_marks": [],
+              "schedule": [
+                {
+                  "table": "S001",
+                  "row": 3,
+                  "entry_id": "T000049"
+                }
+              ]
+            },
+            {
+              "key": "d1.1",
+              "mark": "D1.1",
+              "plan_marks": [
+                "P000004"
+              ],
+              "schedule": []
+            }
+          ]
+        }
+      ],
+      "size_conflicts": [
+        {
+          "key": "d2",
+          "mark": "D2",
+          "plan_mark": "P000003",
+          "plan_entry_id": "T000081",
+          "plan_text": "D2(220x500)",
+          "plan_size": {
+            "b": 220,
+            "h": 500
+          },
+          "table": "S001",
+          "row": 2,
+          "schedule_entry_id": "T000046",
+          "schedule_size": {
+            "b": 220,
+            "h": 450,
+            "entry_ids": [
+              "T000047",
+              "T000048"
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "question_counts": {
+    "mark_notation_equivalence": 1,
+    "mark_size_conflict": 1,
+    "schedule_table_unparsed": 1
+  },
+  "summary": {
+    "plan_marks": 5,
+    "tables": 3,
+    "header_blocked_tables": 1,
+    "rows": 8,
+    "unparsed_tables": 1,
+    "blocked_marks": 2,
+    "matched": 3,
+    "schedule_only": 3,
+    "plan_only": 2,
+    "notation_variants": 1,
+    "size_conflicts": 1,
+    "files_scanned": 1,
+    "files_skipped": 0,
+    "by_file": [
+      {
+        "file": "plans/set.dxf",
+        "plan_marks": 5,
+        "tables": 3,
+        "header_blocked_tables": 1,
+        "rows": 8,
+        "unparsed_tables": 1,
+        "blocked_marks": 2,
+        "matched": 3,
+        "schedule_only": 3,
+        "plan_only": 2,
+        "notation_variants": 1,
+        "size_conflicts": 1
+      }
+    ]
+  },
+  "warnings": [
+    "plans/set.dxf: structure/plans/set.dxf.grids.json is missing: its texts are not excluded from member marks",
+    "plans/set.dxf: structure/plans/set.dxf.levels.json is missing: its texts are not excluded from member marks"
+  ]
+}

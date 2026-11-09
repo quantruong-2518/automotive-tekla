@@ -15,15 +15,19 @@ from typing import Any
 import pytest
 
 from _callout_fixtures import COLUMN_X, REL, S1_TEXTS, build_work
+from tekla_harness.cli import main
 from tekla_harness.schemas import validate
 from tekla_harness.sheet_text import (
     MAX_TITLES,
     ReaderError,
+    find_text,
     list_sheets,
     normalize,
     reading_order,
     sheet_text,
+    truncation_warning,
 )
+from tekla_harness.text_gate import BLOCK_REASONS
 
 
 @pytest.fixture(scope="module")
@@ -184,14 +188,14 @@ def test_sheet_text_entries_are_compact_and_in_reading_order(work):
     }
     by_id = {e["id"]: e for e in index["entries"]}
     for out in doc["entries"]:
-        src = by_id[out["id"]]
+        src = by_id[out["entry_id"]]
         assert out["display_text"] == src["display_text"]  # never re-decoded here
         assert out["encoding"] == src["decode"]["encoding_used"]
         assert out["flags"] == src["flags"] and out["confidence"] == src["confidence"]
         assert (out["x"], out["y"]) == (src["position"]["x"], src["position"]["y"])
         assert set(out) - {"tag", "block_name", "case_uncertain"} == {
-            "id", "row", "display_text", "encoding", "confidence", "flags", "layer", "style",
-            "x", "y", "height", "rotation", "entity_type",
+            "entry_id", "row", "display_text", "meaning", "blocked_reason", "encoding", "confidence",
+            "flags", "layer", "style", "x", "y", "height", "rotation", "entity_type",
         }  # fmt: skip
         assert ("tag" in out) == (src["entity_type"] == "ATTRIB")
     column = [
@@ -245,7 +249,7 @@ def test_contains_is_case_insensitive_and_keeps_diacritics(work):
 def test_truncation_keeps_true_counts(work):
     full = sheet_text(work, REL, "model#01")
     doc = sheet_text(work, REL, "model#01", max_entries=5)
-    assert [e["id"] for e in doc["entries"]] == [e["id"] for e in full["entries"][:5]]
+    assert [e["entry_id"] for e in doc["entries"]] == [e["entry_id"] for e in full["entries"][:5]]
     n = full["counts"]["assigned"]
     assert doc["counts"] == {"assigned": n, "matched": n, "returned": 5, "omitted": n - 5, "truncated": True}
     # the filter is applied before the cut
@@ -338,7 +342,7 @@ def test_check_inputs_validates_the_documents(damaged):
 # --- schema ------------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("name", ["sheet-list", "sheet-text"])
+@pytest.mark.parametrize("name", ["sheet-list", "sheet-text", "find-text"])
 def test_examples_are_valid(example, name):
     assert validate("sheet-text", example(name)) == []
 
@@ -348,8 +352,381 @@ def test_schema_rejects_damaged_documents(example):
     doc["entries"][0]["decoded_text"] = "x"  # only compact fields
     assert validate("sheet-text", doc)
     doc = example("sheet-text")
+    doc["entries"][0]["id"] = doc["entries"][0].pop("entry_id")  # the key is entry_id everywhere
+    assert validate("sheet-text", doc)
+    doc = example("sheet-text")
+    doc["entries"][0]["blocked_reason"] = "because"
+    assert validate("sheet-text", doc)
+    doc = example("find-text")
+    del doc["counts"]["blocked_entries_not_searchable"]
+    assert validate("sheet-text", doc)
+    doc = example("sheet-text")
     doc["kind"] = "sheet_other"
     assert validate("sheet-text", doc)
     doc = example("sheet-list")
     doc["files"][0]["sheets"][0]["titles"] *= 6  # at most five
     assert validate("sheet-text", doc)
+
+
+# --- legacy-font gate -----------------------------------------------------------------------------
+
+
+def patch_entries(work: Path, patches: dict[str, dict[str, Any]]) -> None:
+    """Overwrite top-level fields of text-index entries by id (`unicode: True` also marks the decode
+    as Unicode, so non-ASCII text is allowed)."""
+    path = work / "text" / f"{REL}.json"
+    index = load(path)
+    for e in index["entries"]:
+        patch = dict(patches.get(e["id"], {}))
+        if patch.pop("unicode", False):
+            e["decode"]["encoding_used"] = "unicode"
+        e.update(patch)
+    path.write_text(json.dumps(index, ensure_ascii=False), encoding="utf-8")
+
+
+def by_text(doc: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    return {e["display_text"]: e for e in doc["entries"]}
+
+
+def test_entries_carry_meaning_and_blocked_reason(work):
+    got = by_text(sheet_text(work, REL, "model#01"))
+    assert got["TẦNG 2 +3.600"]["meaning"] == "allowed"  # Unicode
+    assert got["TẦNG 2 +3.600"]["blocked_reason"] is None
+    assert got["CB300-V"]["meaning"] == "allowed"  # ASCII, unknown encoding: nothing to decode
+    assert got["4Ø16"]["meaning"] in ("allowed", "blocked")
+    odd = [e for e in got.values() if "encoding_unknown_non_ascii" in e["flags"]]
+    assert odd and all(e["meaning"] == "blocked" and e["blocked_reason"] in BLOCK_REASONS for e in odd)
+    raw = {e["id"]: e["raw_text"] for e in text_index(work)["entries"]}
+    proposed = [e for e in got.values() if "proposed_knowledge_row" in e["flags"]]
+    assert {e["blocked_reason"] for e in proposed if not raw[e["entry_id"]].isascii()} == {
+        "encoding_proposed"
+    }
+    # ASCII raw text in a proposed-row style stays allowed (%%c is ASCII in raw_text)
+    assert [e for e in proposed if raw[e["entry_id"]].isascii() and e["meaning"] == "allowed"]
+    # blocked text is returned as stored, not decoded
+    assert any("tªn" in e["display_text"] for e in odd + proposed)
+
+
+def test_gate_reasons_follow_the_full_entry(damaged):
+    ids = {e["display_text"]: e["entry_id"] for e in sheet_text(damaged, REL, "model#01")["entries"]}
+    conflict = ids["CB300-V"]
+    contradiction = ids["C1"]
+    patch_entries(
+        damaged,
+        {
+            conflict: {"raw_text": "CB300-V\u00aa", "flags": ["knowledge_conflict"]},
+            contradiction: {"raw_text": "C1\u00aa", "flags": ["unicode_evidence_contradicts_font"]},
+        },
+    )
+    got = {e["entry_id"]: e for e in sheet_text(damaged, REL, "model#01")["entries"]}
+    assert got[conflict]["blocked_reason"] == "knowledge_conflict"
+    assert got[contradiction]["blocked_reason"] == "encoding_contradiction"
+    assert got[contradiction]["meaning"] == "blocked"
+
+
+def test_legacy_font_gate_block_counts_styles_and_question_ids(work):
+    doc = sheet_text(work, REL, "model#01")
+    gate = doc["legacy_font_gate"]
+    blocked = [e for e in doc["entries"] if e["meaning"] == "blocked"]
+    assert gate["blocked_entries"] == len(blocked) > 0
+    assert gate["by_reason"] == {
+        r: sum(e["blocked_reason"] == r for e in blocked)
+        for r in BLOCK_REASONS
+        if any(e["blocked_reason"] == r for e in blocked)
+    }
+    assert gate["styles"] == sorted({e["style"] for e in blocked})
+    registry = load(work / "question-registry.json")["questions"]
+    codes = {
+        "font_encoding_proposed",
+        "font_encoding_conflict",
+        "text_encoding_hint",
+        "encoding_unknown_non_ascii",
+    }
+    assert gate["question_ids"] == sorted(
+        q["id"] for q in registry.values() if q["code"] in codes and q["file"] == REL
+    )
+    assert gate["question_ids"]  # the fixture raises them
+    # a sheet without blocked text still reports the file's questions and zero entries
+    clean = sheet_text(work, REL, "Plot#01")["legacy_font_gate"]
+    assert clean["blocked_entries"] == 0 and clean["by_reason"] == {} and clean["styles"] == []
+
+
+def test_gate_counts_the_whole_sheet_not_only_the_returned_entries(work):
+    full = sheet_text(work, REL, "model#01")["legacy_font_gate"]
+    one = sheet_text(work, REL, "model#01", contains="CB300", max_entries=1)
+    assert one["legacy_font_gate"] == full and one["counts"]["returned"] == 1
+
+
+def test_question_ids_skip_obsolete_other_files_and_other_codes(damaged):
+    path = damaged / "question-registry.json"
+    registry = load(path)
+
+    def add(key: str, qid: str, code: str, file: str, status: str = "open") -> None:
+        registry["questions"][key * 16] = {
+            "id": qid, "code": code, "file": file, "producer": "intake", "status": status,
+            "first_seen_run": 1, "last_seen_run": 1,
+        }  # fmt: skip
+
+    add("a", "Q-090", "font_encoding_conflict", REL)
+    add("b", "Q-091", "text_encoding_hint", REL, "obsolete")
+    add("c", "Q-092", "font_encoding_proposed", "other.dxf")
+    add("d", "Q-093", "units_confirm_all", REL)
+    add("e", "Q-1000", "font_encoding_proposed", REL, "answered")
+    path.write_text(json.dumps(registry), encoding="utf-8")
+    ids = sheet_text(damaged, REL, "model#01")["legacy_font_gate"]["question_ids"]
+    assert ids == ["Q-003", "Q-004", "Q-005", "Q-090", "Q-1000"]  # numeric order, answered kept
+
+
+def test_missing_registry_warns_and_lists_no_questions(damaged):
+    (damaged / "question-registry.json").unlink()
+    doc = sheet_text(damaged, REL, "model#01")
+    assert doc["legacy_font_gate"]["question_ids"] == []
+    assert any("question-registry.json is missing" in w for w in doc["warnings"])
+
+
+def test_blocked_text_is_never_decoded_or_translated(work):
+    doc = sheet_text(work, REL, "model#01")
+    index = {e["id"]: e for e in text_index(work)["entries"]}
+    for e in doc["entries"]:
+        if e["meaning"] == "blocked":
+            assert e["display_text"] == index[e["entry_id"]]["display_text"]
+
+
+# --- one key, titles, truncation ------------------------------------------------------------------------
+
+
+def test_entry_id_is_the_key_in_both_tools(work):
+    sheet = list_sheets(work)["files"][0]["sheets"][0]
+    entries = sheet_text(work, REL, "model#01")["entries"]
+    assert all("id" not in e and e["entry_id"].startswith("T") for e in entries)
+    assert {t["entry_id"] for t in sheet["titles"]} <= {e["entry_id"] for e in entries}
+
+
+def test_titles_prefer_keywords_and_drop_grid_labels_numbers_and_years(damaged):
+    index = text_index(damaged)
+    first = [e for e in index["entries"] if e["position"]["x"] == COLUMN_X][:7]
+    texts = ["1", "B2", "2017", "12.5", "mặt bằng  tầng 1", "SECTION A-A", "Notes"]
+    heights = [900.0, 900.0, 900.0, 900.0, 100.0, 200.0, 50.0]
+    patch_entries(
+        damaged,
+        {
+            e["id"]: {"display_text": t, "raw_text": t, "height": h, "flags": [], "unicode": True}
+            for e, t, h in zip(first, texts, heights, strict=True)
+        },
+    )
+    sheet = list_sheets(damaged)["files"][0]["sheets"][0]
+    titles = sheet["titles"]
+    got = [(t["display_text"], t["matched_keyword"]) for t in titles[:3]]
+    assert got == [("SECTION A-A", "SECTION"), ("mặt bằng tầng 1", "MẶT BẰNG"), ("Notes", "NOTE")]
+    shown = {t["display_text"] for t in titles}
+    assert not shown & {"1", "B2", "2017", "12.5"}
+    assert all(t["matched_keyword"] is None for t in titles[3:]) and len(titles) == MAX_TITLES
+    assert all(t["meaning"] == "allowed" and t["blocked_reason"] is None for t in titles)
+    assert validate("sheet-text", list_sheets(damaged)) == []
+
+
+def test_keywords_match_whole_words_in_nfd_and_english(damaged):
+    index = text_index(damaged)
+    first = [e for e in index["entries"] if e["position"]["x"] == COLUMN_X][:4]
+    texts = [
+        unicodedata.normalize("NFD", "CHI TIẾT DẦM"),
+        "Drawing List",
+        "PLANT ROOM",  # 'plan' at the start of another word is not a keyword
+        "foundation plan",
+    ]
+    fields = {"height": 500.0, "flags": [], "unicode": True}
+    patch_entries(
+        damaged,
+        {e["id"]: {"display_text": t, "raw_text": t, **fields} for e, t in zip(first, texts, strict=True)},
+    )
+    got = {
+        t["display_text"]: t["matched_keyword"]
+        for t in list_sheets(damaged)["files"][0]["sheets"][0]["titles"]
+    }
+    assert got[unicodedata.normalize("NFD", "CHI TIẾT DẦM")] == "CHI TIẾT"
+    assert got["Drawing List"] == "DRAWING LIST"
+    assert got["PLANT ROOM"] is None
+    assert got["foundation plan"] == "PLAN"
+
+
+def test_blocked_titles_get_no_keyword_and_sheets_count_blocked_text(damaged):
+    ids = {e["display_text"]: e["id"] for e in text_index(damaged)["entries"]}
+    victim = ids["CB300-V"]
+    patch_entries(
+        damaged,
+        {
+            victim: {
+                "display_text": "PLAN\u00aa", "raw_text": "PLAN\u00aa", "height": 9999.0,
+                "flags": ["proposed_knowledge_row"],
+            }
+        },
+    )  # fmt: skip
+    sheet = list_sheets(damaged)["files"][0]["sheets"][0]
+    top = sheet["titles"][0]
+    assert top["entry_id"] == victim and top["meaning"] == "blocked"
+    assert top["blocked_reason"] == "encoding_proposed" and top["matched_keyword"] is None
+    expected = sheet_text(damaged, REL, "model#01")["legacy_font_gate"]["blocked_entries"]
+    assert sheet["blocked_text_count"] == expected
+    assert list_sheets(damaged)["files"][0]["sheets"][2]["blocked_text_count"] == 0
+
+
+def test_truncation_adds_a_warning_naming_the_max_that_returns_everything(work):
+    doc = sheet_text(work, REL, "model#01", max_entries=5)
+    n = doc["counts"]["assigned"]
+    line = truncation_warning(doc)
+    assert line and f"--max {n}" in line and "\n" not in line
+    assert line in doc["warnings"]
+    full = sheet_text(work, REL, "model#01", max_entries=n)
+    assert truncation_warning(full) is None and full["warnings"] == []
+
+
+def test_default_cap_applies_without_a_filter_and_not_with_one(work, monkeypatch):
+    import tekla_harness.sheet_text as module
+
+    monkeypatch.setattr(module, "DEFAULT_MAX_ENTRIES", 5)
+    plain = sheet_text(work, REL, "model#01")
+    assert plain["query"]["max_entries"] == 5 and plain["counts"]["truncated"]
+    every = sheet_text(work, REL, "model#01", contains="c")
+    assert every["query"]["max_entries"] is None
+    assert every["counts"]["matched"] > 5 and not every["counts"]["truncated"]
+    capped = sheet_text(work, REL, "model#01", contains="c", max_entries=2)
+    assert capped["query"]["max_entries"] == 2 and capped["counts"]["truncated"]
+
+
+# --- find_text ------------------------------------------------------------------------------------------
+
+
+def two_file_work(work: Path, target: Path) -> Path:
+    """A copy of `work` whose inventory also lists plans/zz.dxf (a copy of the first drawing's documents)."""
+    shutil.copytree(work, target)
+    second = "plans/zz.dxf"
+    inv = load(target / "inventory.json")
+    row = next(r for r in inv["files"] if r["path"] == REL)
+    twin = json.loads(json.dumps(row))
+    twin["path"] = second
+    twin["text_index"] = row["text_index"].replace("set.dxf", "zz.dxf")
+    inv["files"].append(twin)
+    (target / "inventory.json").write_text(json.dumps(inv), encoding="utf-8")
+    shutil.copy(target / "text" / f"{REL}.json", target / twin["text_index"])
+    shutil.copy(target / "structure" / f"{REL}.sheets.json", target / "structure" / f"{second}.sheets.json")
+    return target
+
+
+def test_find_text_searches_every_sheet_of_one_file(work):
+    doc = find_text(work, "c1", check_inputs=True)
+    assert validate("sheet-text", doc) == [] and doc["kind"] == "find_text"
+    assert [(h["sheet_id"], h["display_text"]) for h in doc["hits"]] == [
+        ("model#01", "C1"),
+        ("model#02", "C1"),
+    ]
+    first = doc["hits"][0]
+    assert first["file"] == REL and first["sheet_number"]["value"] == "S-101"
+    assert first["meaning"] == "allowed" and first["blocked_reason"] is None
+    assert first["entry_id"] in {e["entry_id"] for e in sheet_text(work, REL, "model#01")["entries"]}
+    assert doc["counts"]["hits"] == 2 and doc["query"] == {"contains": "c1", "file": None, "max_hits": None}
+
+
+def test_find_text_over_two_files_and_the_file_filter(work, tmp_path):
+    target = two_file_work(work, tmp_path / "two")
+    doc = find_text(target, "C1")
+    assert [h["file"] for h in doc["hits"]] == [REL, REL, "plans/zz.dxf", "plans/zz.dxf"]
+    assert [f["path"] for f in doc["files"]] == [REL, "plans/zz.dxf"]
+    assert [f["hits"] for f in doc["files"]] == [2, 2] and doc["counts"]["hits"] == 4
+    only = find_text(target, "C1", file_rel="plans/zz.dxf")
+    assert {h["file"] for h in only["hits"]} == {"plans/zz.dxf"} and only["counts"]["hits"] == 2
+    assert only["query"]["file"] == "plans/zz.dxf"
+
+
+def test_find_text_keeps_diacritics_and_nfc(work):
+    hits = [h["display_text"] for h in find_text(work, "tầng")["hits"]]
+    assert "TẦNG 2 +3.600" in hits and all("TẦNG" in h for h in hits)
+    assert find_text(work, unicodedata.normalize("NFD", "TẦNG"))["hits"] == find_text(work, "tầng")["hits"]
+    assert find_text(work, "tang")["counts"]["hits"] == 0
+
+
+def test_find_text_counts_blocked_entries_and_says_the_search_is_incomplete(work):
+    doc = find_text(work, "zzz-no-such-text")
+    assert doc["counts"]["hits"] == 0
+    blocked = sum(
+        s["legacy_font_gate"]["blocked_entries"]
+        for s in (sheet_text(work, REL, sid) for sid in ("model#01", "model#02", "Plot#01"))
+    )
+    assert doc["counts"]["blocked_entries_not_searchable"] == blocked > 0
+    assert doc["files"][0]["blocked_entries"] == blocked
+    assert doc["notes"] and "incomplete" in doc["notes"][0]
+    assert doc["counts"]["unassigned_entries_not_searched"] == doc["files"][0]["unassigned_entries"]
+
+
+def test_find_text_marks_a_blocked_hit(work):
+    hit = find_text(work, "tªn")["hits"]
+    assert hit and all(h["meaning"] == "blocked" and h["blocked_reason"] for h in hit)
+    assert any("tªn" in h["display_text"] for h in hit)  # matched on the stored text, not decoded
+
+
+def test_find_text_max_keeps_true_counts(work):
+    doc = find_text(work, "c", max_hits=2)
+    assert doc["counts"]["returned"] == 2 and doc["counts"]["truncated"]
+    assert doc["counts"]["hits"] == find_text(work, "c")["counts"]["hits"] > 2
+    assert doc["counts"]["omitted"] == doc["counts"]["hits"] - 2
+
+
+def test_find_text_skips_files_without_sheets_and_says_why(work, tmp_path):
+    target = two_file_work(work, tmp_path / "two")
+    (target / "structure" / "plans" / "zz.dxf.sheets.json").unlink()
+    doc = find_text(target, "C1")
+    rows = {f["path"]: f for f in doc["files"]}
+    assert rows["plans/zz.dxf"]["status"] == "skipped" and "read-structure" in rows["plans/zz.dxf"]["reason"]
+    assert rows[REL]["status"] == "searched" and {h["file"] for h in doc["hits"]} == {REL}
+    assert any("zz.dxf" in w and "missing" in w for w in doc["warnings"])
+
+
+def test_find_text_usage_errors(work):
+    bad: list[dict[str, Any]] = [
+        {"contains": ""},
+        {"contains": "x", "max_hits": 0},
+        {"contains": "x", "file_rel": "nope.dxf"},
+    ]
+    for kwargs in bad:
+        with pytest.raises(ReaderError) as err:
+            find_text(work, **kwargs)
+        assert err.value.exit_code == 2
+
+
+def test_find_text_is_deterministic(work):
+    assert find_text(work, "c") == find_text(work, "c")
+
+
+# --- CLI ------------------------------------------------------------------------------------------------
+
+
+def run_cli(capsys, *argv: str) -> tuple[int, Any, str]:
+    code = main(list(argv))
+    cap = capsys.readouterr()
+    return code, (json.loads(cap.out) if cap.out.strip() else None), cap.err
+
+
+def test_cli_sheet_text_warns_on_stderr_when_truncated(work, capsys):
+    code, doc, err = run_cli(capsys, "sheet-text", str(work), REL, "model#01", "--max", "3")
+    assert code == 0 and doc["counts"]["truncated"]
+    assert f"--max {doc['counts']['assigned']}" in err and len(err.strip().splitlines()) == 1
+    code, doc, err = run_cli(capsys, "sheet-text", str(work), REL, "model#01", "--max", "1000")
+    assert code == 0 and err == "" and not doc["counts"]["truncated"]
+
+
+def test_cli_sheet_text_contains_has_no_default_cap(work, capsys):
+    code, doc, err = run_cli(capsys, "sheet-text", str(work), REL, "model#01", "--contains", "c")
+    assert code == 0 and err == "" and doc["query"]["max_entries"] is None
+
+
+def test_cli_find_text(work, capsys):
+    code, doc, err = run_cli(capsys, "find-text", str(work), "--contains", "c1", "--file", REL)
+    assert code == 0 and doc["kind"] == "find_text" and validate("sheet-text", doc) == []
+    assert doc["counts"]["hits"] == 2 and "incomplete" in err  # blocked entries are called out on stderr
+    code, doc, err = run_cli(capsys, "find-text", str(work), "--contains", "c", "--max", "1")
+    assert code == 0 and doc["counts"]["truncated"] and "truncated" in err
+    for argv in (
+        ["find-text", str(work), "--contains", ""],
+        ["find-text", str(work), "--contains", "x", "--max", "0"],
+    ):
+        code, out, err = run_cli(capsys, *argv)
+        assert code == 2 and out is None and err

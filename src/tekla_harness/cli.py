@@ -27,7 +27,14 @@ from tekla_harness.questions import QuestionsError
 from tekla_harness.read_dxf import CONVERTER_CAPS, probe_dxf
 from tekla_harness.receipt import ReceiptError, receipt_path, write_receipt
 from tekla_harness.schemas import SCHEMA_NAMES, validate
-from tekla_harness.sheet_text import DEFAULT_MAX_ENTRIES, ReaderError, list_sheets, sheet_text
+from tekla_harness.sheet_text import (
+    DEFAULT_MAX_ENTRIES,
+    ReaderError,
+    find_text,
+    list_sheets,
+    sheet_text,
+    truncation_warning,
+)
 from tekla_harness.status import StatusError, build_status
 from tekla_harness.strict_json import MAX_BYTES, StrictJsonError, loads_strict
 from tekla_harness.structure import StructureError, read_structure, run_extractor
@@ -332,6 +339,32 @@ def _cmd_sheet_text(args: argparse.Namespace) -> int:
     except ReaderError as exc:
         print(str(exc), file=sys.stderr)
         return exc.exit_code
+    warning = truncation_warning(doc)
+    if warning:
+        print(warning, file=sys.stderr)
+    print(json.dumps(doc, ensure_ascii=False, indent=2, allow_nan=False))
+    return EXIT_OK
+
+
+def _cmd_find_text(args: argparse.Namespace) -> int:
+    try:
+        doc = find_text(Path(args.work_dir), args.contains, file_rel=args.file, max_hits=args.max)
+    except ReaderError as exc:
+        print(str(exc), file=sys.stderr)
+        return exc.exit_code
+    counts = doc["counts"]
+    if counts["truncated"]:
+        print(
+            f"find-text truncated: {counts['returned']} of {counts['hits']} hits returned; "
+            f"rerun with --max {counts['hits']} (or without --max) to get all of them",
+            file=sys.stderr,
+        )
+    if counts["blocked_entries_not_searchable"]:
+        print(
+            f"find-text: {counts['blocked_entries_not_searchable']} blocked (legacy-font) entries were "
+            "matched on their stored text only: the search is incomplete over them",
+            file=sys.stderr,
+        )
     print(json.dumps(doc, ensure_ascii=False, indent=2, allow_nan=False))
     return EXIT_OK
 
@@ -537,10 +570,24 @@ def build_parser() -> argparse.ArgumentParser:
     p_st.add_argument(
         "--max",
         type=int,
-        default=DEFAULT_MAX_ENTRIES,
-        help=f"entries returned at most (default {DEFAULT_MAX_ENTRIES})",
+        default=None,
+        help=f"entries returned at most (default {DEFAULT_MAX_ENTRIES}; unbounded with --contains)",
     )
     p_st.set_defaults(func=_cmd_sheet_text)
+
+    p_ft = sub.add_parser(
+        "find-text",
+        help="search every sheet of every drawing (or one) for a text: hits with file, sheet, entry id",
+    )
+    p_ft.add_argument(
+        "work_dir", help="the --out folder of `harness intake` (after `harness read-structure`)"
+    )
+    p_ft.add_argument(
+        "--contains", required=True, help="substring to find (NFC, case-insensitive, diacritics significant)"
+    )
+    p_ft.add_argument("--file", help="search only this drawing (input-relative path, as in inventory.json)")
+    p_ft.add_argument("--max", type=int, default=None, help="hits returned at most (default: all)")
+    p_ft.set_defaults(func=_cmd_find_text)
 
     p_cal = sub.add_parser(
         "callouts",
@@ -584,12 +631,17 @@ def build_parser() -> argparse.ArgumentParser:
             "key. This command is meant to be run by the engineer, or on the engineer's explicit "
             "instruction with the engineer's own words. An agent must never invent or paraphrase an "
             "answer. A second answer to the same question supersedes the first. Structured values "
-            "(--value): units_confirm_all, units_conflict, units_suspect, units_unknown and "
-            "grid_units_doubt need unit=mm|cm|m|in|ft; "
-            "grid_family_axis_assignment takes <family_id>=X|Y; member_mark_prefix_meaning takes "
-            "<prefix>=<meaning>; grid_system_select takes an optional systems=S001,S002 (the systems the "
-            "project uses); every other question takes no value. A question whose file changed since it "
-            "was raised is refused: rerun the command that raised it. Exit codes: 1 invalid values or "
+            "(--value): units_confirm_all (the one blocking units question per file) and the units "
+            "evidence codes need unit=mm|cm|m|in|ft; units_answer_contradicts_evidence takes unit= equal to "
+            "the unit already answered (to confirm it; else re-answer units_confirm_all); "
+            "grid_system_axis_unassigned takes one value per direction named in the question, "
+            "dir1=X|Y and dir2=X|Y, distinct; grid_family_axis_assignment takes <family_id>=X|Y; "
+            "member_mark_prefix_meaning takes <prefix>=<meaning>; grid_system_select takes optional "
+            "systems=S001,S002 (the systems the project uses) and separate=S001,S002 (selected systems "
+            "that are different buildings, which closes their conflict); grid_system_conflict cannot be "
+            "answered: answer grid_system_select instead; every other question takes no value. Rerun "
+            "harness grid-system after a units, select or axis answer. A question whose file changed since "
+            "it was raised is refused: rerun the command that raised it. Exit codes: 1 invalid values or "
             "changed file, 2 unknown or obsolete question, blank text or name."
         ),
     )
@@ -609,7 +661,8 @@ def build_parser() -> argparse.ArgumentParser:
             "The drawing-reader agent raises a question here instead of inventing an id. One question per "
             "(code, blocking, file, where): asking the same place again prints the same id (already_asked). "
             "--file is an inventory path (omit it for a project-level question); --code is your own "
-            "lowercase snake_case code (not one a producer owns, exit 2); --text is the English question. "
+            "lowercase snake_case code (not one a producer owns, exit 2); --text is the question in "
+            "Vietnamese, printed verbatim in questions.md. "
             "--withdraw Q-id --reason '...' retires a reader question. Questions go to "
             "reader-questions.json; answer them with `harness answer`. Exit codes: 1 file not in the "
             "inventory or invalid documents, 2 usage or a code owned by a producer."
@@ -621,7 +674,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_ask.add_argument("--sheet", help="the detector sheet id (model#01, <layout>#01)")
     p_ask.add_argument("--where", help="where in the drawing; one question per distinct value")
     p_ask.add_argument("--found", help="what was found there (may be empty)")
-    p_ask.add_argument("--text", help="the question, in English")
+    p_ask.add_argument("--text", help="the question, in Vietnamese (printed verbatim in questions.md)")
     p_ask.add_argument("--blocking", action="store_true", help="the question blocks gate 1 until answered")
     p_ask.add_argument("--withdraw", metavar="Q-ID", help="retire this reader question (needs --reason)")
     p_ask.add_argument("--reason", help="why the question is withdrawn")

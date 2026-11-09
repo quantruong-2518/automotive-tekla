@@ -75,12 +75,20 @@ QUESTION_DOCUMENTS = (
 EXIT_INVALID, EXIT_USAGE = 1, 2
 
 UNITS = ("mm", "cm", "m", "in", "ft")
+# units_confirm_all is THE units question of a probed file (intake); the other codes are legacy (folded into
+# its refs, or non-blocking evidence) but their unit answers still count, so old answers.json stay valid
+UNITS_CONFIRM_CODE = "units_confirm_all"
 UNIT_CODES = frozenset(
-    {"units_confirm_all", "units_conflict", "units_suspect", "units_unknown", "grid_units_doubt"}
+    {UNITS_CONFIRM_CODE, "units_conflict", "units_suspect", "units_unknown", "grid_units_doubt"}
 )
+# grid-system: the answered unit makes the drawing's dimensions implausible; closed by re-confirming the unit
+CONTRADICTION_CODE = "units_answer_contradicts_evidence"
 AXIS_CODE = "grid_family_axis_assignment"
+SYSTEM_AXIS_CODE = "grid_system_axis_unassigned"
+CONFLICT_CODE = "grid_system_conflict"
 PREFIX_CODE = "member_mark_prefix_meaning"
 SELECT_CODE = "grid_system_select"
+AXIS_DIRECTIONS = ("dir1", "dir2")  # value keys of a grid_system_axis_unassigned answer
 
 
 class QuestionsError(Exception):

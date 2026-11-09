@@ -4,6 +4,11 @@
 `schemas/grids.schema.json`. Nothing here is final: gate 1 needs the engineer to confirm the grids
 (RTI-0003), and which family is Tekla X / Y is always asked, never decided.
 
+Two questions are NOT blocking here because another producer owns the blocking one (one question per
+decision): grid_family_axis_assignment (the blocking X/Y question is grid-system's per-system
+grid_system_axis_unassigned; family answers still assign) and grid_units_doubt (the blocking units
+question is intake's units_confirm_all of the file; this one is evidence for it).
+
 Algorithm (deterministic; thresholds are the named constants below):
 
 1. Walk model space and every layout, expanding INSERTs (sheets.Walker), collecting CIRCLEs (and
@@ -95,6 +100,25 @@ MAX_UNPAIRED_LISTED = 100
 MAX_CONFIDENCE = "medium"  # 'high' is reserved for an engineer answer at gate 1 (pairing is heuristic)
 
 _METRES = {"mm": 0.001, "cm": 0.01, "m": 1.0, "in": 0.0254, "ft": 0.3048}
+
+
+def implausible_spacing(median: dict[str, Any] | None, unit: str) -> str | None:
+    """The grid-spacing plausibility test (PLAUSIBLE_SPACING_M) for `unit`: the evidence, in plain words, when
+    the median grid spacing of a file read in `unit` falls outside the range; None when it is plausible, or
+    when the median ({"value", "count"}, drawing units) or the unit is unknown (nothing to test)."""
+    factor = _METRES.get(unit)
+    if median is None or factor is None:
+        return None
+    metres = median["value"] * factor
+    if PLAUSIBLE_SPACING_M[0] <= metres <= PLAUSIBLE_SPACING_M[1]:
+        return None
+    return (
+        f"median grid spacing {median['value']:g} drawing units = {metres:g} m in {unit} over "
+        f"{median['count']} spacing(s); plausible range {PLAUSIBLE_SPACING_M[0]:g} m to "
+        f"{PLAUSIBLE_SPACING_M[1]:g} m"
+    )
+
+
 _LABEL_RE = re.compile(
     r"^(?:[A-Za-z]{1,2}[a-z]?|\d{1,3}[A-Za-z]?|[A-Za-z]\d{1,2}[a-z]?)(?:'{1,2}|\u2032)?$"
     r"|^[A-Za-z0-9]{1,3}/[A-Za-z0-9]{1,3}$"
@@ -1377,9 +1401,10 @@ def extract_grids(
     else:
         ctx.ask(
             "grid_family_axis_assignment",
-            True,
-            "Which grid family is Tekla X (lines parallel to Y) and which is Y? "
-            "Directions are given per family.",
+            False,
+            "Not blocking: Tekla X / Y is asked once per grid system by `harness grid-system` "
+            "(grid_system_axis_unassigned, --value dir1=X --value dir2=Y). Optionally, which grid family is "
+            "Tekla X (lines parallel to Y) and which is Y? Directions are given per family.",
             listed(f.fid for f in families_found),
             "; ".join(
                 f"{f.fid}: dir ({rnum(f.d[0])}, {rnum(f.d[1])}) "
@@ -1400,9 +1425,10 @@ def extract_grids(
         if metres is None or not (PLAUSIBLE_SPACING_M[0] <= metres <= PLAUSIBLE_SPACING_M[1]):
             ctx.ask(
                 "grid_units_doubt",
-                True,
-                "The declared drawing unit makes the grid spacings implausible for a building (or no unit is "
-                "declared). What unit are the drawing coordinates in?",
+                False,
+                "Evidence for this file's units_confirm_all question (intake), which is the one to answer "
+                "(--value unit=...): the declared drawing unit makes the grid spacings implausible for a "
+                "building (or no unit is declared).",
                 "header $INSUNITS",
                 f"median spacing {rnum(median)} drawing units, declared unit '{unit}'"
                 + (f" = {rnum(metres)} m" if metres is not None else ""),

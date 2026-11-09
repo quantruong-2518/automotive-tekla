@@ -10,7 +10,7 @@ inside it. Only `*.md` indexes are tracked by git; downloads are git-ignored.
 | `vendor/` | Shallow clones of existing DWG/DXF skills, tools and libraries (read-only study) | `vendor/INDEX.md` |
 | `references/` | Reading and takeoff methodology (drawing set, steel, RC, CAD, QA, research) | `references/README.md`, `references/reading-checklist.md` |
 | `samples/CONVERSION-REPORT.md` | First real DWG→DXF run (LibreDWG 0.14, 29 files); local-only | — |
-| `proposals/` | Drafts awaiting engineer approval (ADR-0005 amendment, skills) | each file's status line |
+| `proposals/` | Drafts awaiting engineer approval (ADR-0005 amendment) and the skill review/eval records (REVIEW-1, EVAL-1, EVAL-2); the skills themselves are active in `.claude/skills/` | each file's status line |
 
 Primary-source project notes outside the lab (cite these, not the lab, in skills):
 `docs/research/tekla-modelling-from-drawings.md`, `docs/research/vn-structural-drawing-conventions.md`,

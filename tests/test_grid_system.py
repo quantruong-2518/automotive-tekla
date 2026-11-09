@@ -18,10 +18,12 @@ from tekla_harness.grid_system import (
     GridSystemError,
     build_grid_systems,
     consumed_answers_digest,
+    grid_system_questions,
     render_grid_system_svg,
 )
 from tekla_harness.grids import coordinate_string
 from tekla_harness.intake import dump_json
+from tekla_harness.questions import question_key
 from tekla_harness.schemas import validate
 
 REPO = Path(__file__).resolve().parents[1]
@@ -146,8 +148,9 @@ def _family_json(
     }
 
 
-def _row(path: str, digest: str, example: Any) -> dict[str, Any]:
+def _row(path: str, digest: str, example: Any, median: dict[str, Any] | None = None) -> dict[str, Any]:
     row = copy.deepcopy(example("intake")["files"][0])
+    row["units"]["dimension_median"] = median  # none unless a test sets it: no contradiction test
     stem = path
     row.update(
         path=path,
@@ -175,6 +178,7 @@ class Work:
         unit: str = "mm",
         duplicates: dict[str, str] | None = None,
         content: str | None = None,
+        median: dict[str, Any] | None = None,
     ) -> None:
         duplicates = duplicates or {}
         dxf_sha = sha("dxf:" + (content or path))
@@ -259,7 +263,7 @@ class Work:
         base.parent.mkdir(parents=True, exist_ok=True)
         Path(f"{base}.grids.json").write_text(json.dumps(grids), encoding="utf-8")
         Path(f"{base}.sheets.json").write_text(json.dumps(sheets), encoding="utf-8")
-        self.rows.append(_row(path, sha(content or path), self.example))
+        self.rows.append(_row(path, sha(content or path), self.example, median))
 
     def finish(self) -> Path:
         inv = copy.deepcopy(self.example("intake"))
@@ -356,7 +360,8 @@ def test_one_system_across_three_independent_views(tmp_path, example):
     }
     assert codes(doc).count("grid_system_select") == 1
     assert "grid_system_conflict" not in codes(doc)
-    assert all(q["blocking"] for q in doc["questions"])
+    blocking = {q["code"] for q in doc["questions"] if q["blocking"]}
+    assert blocking == {"grid_system_select", "grid_system_axis_unassigned"}  # units: intake's question
 
 
 @pytest.mark.parametrize("how", ["duplicate_of", "same_block", "same_sheet", "evidence_not_independent"])
@@ -589,7 +594,9 @@ def test_units_not_answered_gives_no_mm_and_a_blocking_question(tmp_path, exampl
     assert s["units"]["status"] == "not_confirmed" and s["units"]["reason"] == "units not confirmed"
     assert "units_not_confirmed" in s["flags"]
     q = [q for q in doc["questions"] if q["code"] == "grid_system_units_unconfirmed"]
-    assert len(q) == 1 and q[0]["blocking"] and "S001" in q[0]["where"]
+    # evidence only: the file's units_confirm_all (intake) is the one blocking units question
+    assert len(q) == 1 and not q[0]["blocking"] and "S001" in q[0]["where"]
+    assert "units_confirm_all" in q[0]["message"]
     assert s["tekla_grid"] is None
 
 
@@ -692,7 +699,10 @@ def test_without_two_agreeing_answers_the_same_building_stays_two_systems(tmp_pa
     assert [s["system_id"] for s in doc["systems"]] == ["S001", "S002"] and doc["summary"]["conflicts"] == 1
     (conflict,) = [q for q in doc["questions"] if q["code"] == "grid_system_conflict"]
     assert conflict["blocking"]
-    assert ("mm" in conflict["found"]) == (len(answers) == 2)  # a millimetre comparison says so
+    # no millimetre comparison: a lone answer converts nothing, and in "wrong-pair" b_mm.dxf (6000 units
+    # read as metres) is contradicted by its own grid spacings
+    assert "mm" not in conflict["found"]
+    assert ("units_answer_contradicts_evidence" in codes(doc)) == (len(answers) == 2)
     assert all(s["evidence"]["files"] == 1 for s in doc["systems"])
 
 
@@ -713,10 +723,16 @@ def test_identical_numbers_with_different_answered_units_are_not_the_same_buildi
     assert len(same["systems"]) == 1 and same["systems"][0]["units"]["answered"] == "mm"
 
 
-def test_answers_digest_covers_only_the_active_units_and_axis_answers():
+def test_answers_digest_covers_only_the_active_answers_grid_system_reads():
     base = [ans("units_suspect", "a.dxf", {"unit": "cm"})]
     digest = consumed_answers_digest(base)
-    assert consumed_answers_digest([*base, ans("grid_system_select", None, {})]) == digest
+    assert consumed_answers_digest([*base, ans("grid_label_missing", "a.dxf", {})]) == digest
+    for code, values in (
+        ("grid_system_select", {"systems": ["S001"]}),
+        ("grid_system_axis_unassigned", {"dir1": "X"}),
+        ("units_answer_contradicts_evidence", {"unit": "cm"}),
+    ):
+        assert consumed_answers_digest([*base, ans(code, None, values)]) != digest, code
     assert (
         consumed_answers_digest([*base, ans("units_suspect", "a.dxf", {"unit": "m"}, "superseded")]) == digest
     )
@@ -746,7 +762,8 @@ def test_axis_assignment_answer(tmp_path, example):
         "coordinate_y": "0 2*6000 4500",
         "label_y": "A B C D",
     }
-    assert "grid_system_axis_unassigned" not in codes(doc)
+    (axis,) = [q for q in doc["questions"] if q["code"] == "grid_system_axis_unassigned"]
+    assert not axis["blocking"]  # still raised (its answer keeps its key), no longer blocking
 
 
 def test_axis_assignment_missing_or_contradictory(tmp_path, example):
@@ -771,6 +788,211 @@ def test_axis_assignment_missing_or_contradictory(tmp_path, example):
     nofile = build_grid_systems(work, answers=[ans("grid_family_axis_assignment", None, {"F001": "Y"})])
     assert nofile["systems"][0]["axis_assignment"]["status"] == "not_answered"
     assert any("no file" in x for x in nofile["warnings"])
+
+
+# --- gate-1 questions: one X/Y question per system, rejected systems, conflicts, contradicted units -----
+
+
+def keyed(doc: dict[str, Any]) -> list[dict[str, Any]]:
+    """The raw questions of a document with the registry key Ledger.sync gives them."""
+    sha = {f["path"]: f["sha256"] for f in doc["files"]}
+    return [
+        {**q, "key": question_key(q["code"], q["file"], sha.get(q["file"]) if q["file"] else None, q["refs"])}
+        for q in grid_system_questions(doc)
+    ]
+
+
+def answer_to(
+    doc: dict[str, Any], code: str, values: dict[str, Any], where: str | None = None
+) -> dict[str, Any]:
+    """An active answer bound (by key) to this run's question of `code` (whose first ref is at `where`)."""
+    (q,) = [q for q in keyed(doc) if q["code"] == code and where in (None, q["refs"][0]["where"])]
+    return {**ans(code, q["file"], values), "key": q["key"]}
+
+
+def blocking_of(doc: dict[str, Any]) -> list[tuple[str, str]]:
+    return sorted((q["code"], q["where"][:4]) for q in doc["questions"] if q["blocking"])
+
+
+def _two_buildings(tmp_path: Path, example: Any) -> Path:
+    """S001 (A-D x 1-3) and S002 (A-C x 1-3, other spacings): the same labels, a conflict."""
+    other = [
+        view(
+            gid,
+            sheet,
+            fam(f"F{k:03d}", ["A", "B", "C"], [3600.0, 4800.0], angle=0.0),
+            fam(f"F{k + 1:03d}", NUMBERS, [5400.0, 5400.0], angle=90.0),
+        )
+        for gid, sheet, k in (("V003", "model#03", 5), ("V004", "model#04", 7))
+    ]
+    w = Work(tmp_path, example)
+    w.add_file("plans.dxf", [plan("V001", "model#01", 1), plan("V002", "model#02", 3), *other])
+    return w.finish()
+
+
+def test_one_axis_question_per_system_answered_by_direction_and_kept_once_answered(tmp_path, example):
+    work = _two_buildings(tmp_path, example)
+    doc = build_grid_systems(work)
+    axis = [q for q in keyed(doc) if q["code"] == "grid_system_axis_unassigned"]
+    assert [(q["refs"][0]["where"], q["count"], q["blocking"]) for q in axis] == [
+        ("S001", 1, True),
+        ("S002", 1, True),
+    ]
+    assert axis[0]["subjects"] == [{"name": "dir1", "count": 2}, {"name": "dir2", "count": 2}]
+    assert (
+        axis[0]["refs"][0]["found"]
+        == "dir1: V001/F001 labels A B C D, angle 0 deg; dir2: V001/F002 labels 1 2 3, angle 90 deg"
+    )
+    assert [s["axis_question_key"] for s in doc["systems"]] == [q["key"] for q in axis]
+    answer = answer_to(doc, "grid_system_axis_unassigned", {"dir1": "Y", "dir2": "X"}, "S001")
+    after = build_grid_systems(work, answers=[answer])
+    s1 = after["systems"][0]
+    assert s1["axis_assignment"]["status"] == "answered"
+    assert [d["tekla_axis"] for d in s1["directions"]] == ["Y", "X"]
+    again = {q["refs"][0]["where"]: q for q in keyed(after) if q["code"] == "grid_system_axis_unassigned"}
+    assert [again[q["refs"][0]["where"]]["key"] for q in axis] == [q["key"] for q in axis]  # same keys
+    assert (again["S001"]["blocking"], again["S002"]["blocking"]) == (False, True)
+    # an answer bound to another key, or that does not assign every direction, assigns nothing
+    for wrong in (
+        {**answer, "key": "0" * 16},
+        {**answer, "values": {"dir1": "Y"}},
+        {**answer, "values": {"dir1": "X", "dir2": "X"}},
+        {**answer, "values": {}},
+    ):
+        out = build_grid_systems(work, answers=[wrong])
+        assert out["systems"][0]["axis_assignment"]["status"] == "not_answered", wrong["values"]
+    assert any(
+        "not used" in w for w in build_grid_systems(work, answers=[{**answer, "values": {}}])["warnings"]
+    )
+
+
+def test_systems_outside_the_selection_raise_no_blocking_question(tmp_path, example):
+    work = _two_buildings(tmp_path, example)
+    doc = build_grid_systems(work)
+    assert blocking_of(doc) == [
+        ("grid_system_axis_unassigned", "S001"),
+        ("grid_system_axis_unassigned", "S002"),
+        ("grid_system_conflict", "S001"),
+        ("grid_system_select", "S001"),
+    ]
+    select = answer_to(doc, "grid_system_select", {"systems": ["S001"]})
+    after = build_grid_systems(work, answers=[select])
+    assert blocking_of(after) == [("grid_system_axis_unassigned", "S001"), ("grid_system_select", "S001")]
+    assert after["conflicts"] == [
+        {
+            "systems": ["S001", "S002"],
+            "blocking": False,
+            "closed_by": "not_selected",
+            "question_key": next(q["key"] for q in keyed(after) if q["code"] == "grid_system_conflict"),
+        }
+    ]
+    # a select answer to an older question (another key: the system ids may mean other systems) is not used
+    stale = build_grid_systems(work, answers=[{**select, "key": "f" * 16}])
+    assert blocking_of(stale) == blocking_of(doc)
+
+
+def test_a_conflict_closes_only_on_structured_values(tmp_path, example):
+    """EVAL-1 F-26: words in the select answer ("S004/S005 are variant views of 267, not used") or an answer
+    to the conflict question itself never close the conflict or the axis questions."""
+    work = _two_buildings(tmp_path, example)
+    doc = build_grid_systems(work)
+    words = {**answer_to(doc, "grid_system_select", {}), "answer_text": "S002 is a variant view, not used"}
+    conflict = answer_to(doc, "grid_system_conflict", {})
+    after = build_grid_systems(work, answers=[words, conflict])
+    assert blocking_of(after) == blocking_of(doc)
+    assert after["conflicts"][0]["blocking"] and after["conflicts"][0]["closed_by"] is None
+    separate = answer_to(
+        doc, "grid_system_select", {"systems": ["S001", "S002"], "separate": ["S001", "S002"]}
+    )
+    apart = build_grid_systems(work, answers=[separate])
+    assert apart["conflicts"][0]["closed_by"] == "separate" and not apart["conflicts"][0]["blocking"]
+    assert ("grid_system_conflict", "S001") not in blocking_of(apart)
+    assert ("grid_system_axis_unassigned", "S002") in blocking_of(
+        apart
+    )  # a selected building still needs X/Y
+
+
+def test_a_units_answer_the_drawing_contradicts_blocks_until_confirmed(tmp_path, example):
+    w = Work(tmp_path, example)
+    w.add_file("plans.dxf", [plan("V001", "model#01", 1)], median={"value": 6000.0, "count": 5})
+    work = w.finish()
+    metres = {**ans("units_confirm_all", "plans.dxf", {"unit": "m"}), "answer_text": "it is metres"}
+    doc = build_grid_systems(work, answers=[metres])
+    assert doc["files"][0]["units_answer"] == {"status": "contradicted", "unit": None}
+    s = doc["systems"][0]
+    assert s["units"]["reason"] == "units answer contradicted by the drawing" and s["tekla_grid"] is None
+    assert all(d["mm"] is None for d in s["directions"])
+    (q,) = [q for q in doc["questions"] if q["code"] == "units_answer_contradicts_evidence"]
+    assert q["blocking"] and q["file"] == "plans.dxf"
+    assert 'Q-001 units_confirm_all unit=m: "it is metres"' in q["found"]  # the answer, quoted
+    assert "6000 drawing units = 6000 m in m" in q["found"]  # and the evidence
+    confirm = answer_to(doc, "units_answer_contradicts_evidence", {"unit": "m"})
+    ok = build_grid_systems(work, answers=[metres, confirm])
+    assert ok["systems"][0]["units"]["status"] == "confirmed"
+    wrong = build_grid_systems(work, answers=[metres, {**confirm, "values": {"unit": "mm"}}])
+    assert wrong["systems"][0]["units"]["status"] == "not_confirmed"
+    mm = build_grid_systems(work, answers=[ans("units_confirm_all", "plans.dxf", {"unit": "mm"})])
+    assert "units_answer_contradicts_evidence" not in codes(mm)  # 6 m: plausible
+    assert mm["systems"][0]["units"]["status"] == "confirmed"
+
+
+def test_a_units_answer_the_grid_spacings_contradict_blocks_without_dimension_evidence(tmp_path, example):
+    """Header mm, drawing really in metres, fewer than 3 linear dimensions (median null): the spacing test
+    under the ANSWERED unit still blocks (6 units = 0.006 m)."""
+    w = Work(tmp_path, example)
+    w.add_file(
+        "plans.dxf",
+        [
+            view(
+                "V001",
+                "model#01",
+                fam("F001", ["A", "B", "C"], [6.0, 6.0]),
+                fam("F002", ["1", "2"], [7.0], angle=0.0),
+            )
+        ],
+        median=None,
+    )
+    work = w.finish()
+    mm = {**ans("units_confirm_all", "plans.dxf", {"unit": "mm"}), "answer_text": "it is mm"}
+    doc = build_grid_systems(work, answers=[mm])
+    assert doc["files"][0]["grid_spacing_median"] == {"value": 6.0, "count": 3}
+    assert doc["files"][0]["units_answer"] == {"status": "contradicted", "unit": None}
+    assert validate("grid-system", doc) == []
+    (q,) = [q for q in doc["questions"] if q["code"] == "units_answer_contradicts_evidence"]
+    assert q["blocking"] and q["file"] == "plans.dxf"
+    assert 'Q-001 units_confirm_all unit=mm: "it is mm"' in q["found"]
+    assert "median grid spacing 6 drawing units = 0.006 m in mm over 3 spacing(s)" in q["found"]
+    assert doc["systems"][0]["tekla_grid"] is None
+    # the same unit confirmed on the contradiction question closes it; a plausible unit never raises it
+    confirm = answer_to(doc, "units_answer_contradicts_evidence", {"unit": "mm"})
+    ok = build_grid_systems(work, answers=[mm, confirm])
+    assert ok["systems"][0]["units"]["status"] == "confirmed"
+    metres = build_grid_systems(work, answers=[ans("units_confirm_all", "plans.dxf", {"unit": "m"})])
+    assert "units_answer_contradicts_evidence" not in codes(metres)  # 6 m: plausible
+    assert metres["systems"][0]["units"]["status"] == "confirmed"
+
+
+def test_select_key_changes_when_two_systems_swap_files(tmp_path, example):
+    """Sheet ids (model#01) repeat across files: the select key must name the representative's file, or an
+    old systems=S001 answer would select the other building after the S-ids swap."""
+    doc = build_grid_systems(_two_unit_work(tmp_path, example))
+    assert [s["system_id"] for s in doc["systems"]] == ["S001", "S002"]
+    assert len({s["directions"][0]["representative"]["sheet"] for s in doc["systems"]}) == 1
+
+    def select_key(d: dict[str, Any]) -> str:
+        (q,) = [q for q in grid_system_questions(d) if q["code"] == "grid_system_select"]
+        return question_key("grid_system_select", None, None, q["refs"])
+
+    swapped = copy.deepcopy(doc)
+    a, b = swapped["systems"]
+    for da, db in zip(a["directions"], b["directions"], strict=True):
+        da["representative"]["file"], db["representative"]["file"] = (
+            db["representative"]["file"],
+            da["representative"]["file"],
+        )
+    assert select_key(swapped) != select_key(doc)
+    (q,) = [q for q in grid_system_questions(doc) if q["code"] == "grid_system_select"]
+    assert all(f"[file {r['file']}, sha256 " in r["found"] for r in q["refs"])
 
 
 # --- SVG -------------------------------------------------------------------------------------------

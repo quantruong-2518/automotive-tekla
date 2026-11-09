@@ -17,6 +17,10 @@
       "declared_unit": "mm",
       "views": 3,
       "families_usable": 6,
+      "grid_spacing_median": {
+        "value": 6000.0,
+        "count": 9
+      },
       "units_answer": {
         "status": "answered",
         "unit": "mm"
@@ -187,7 +191,8 @@
         "label_y": "A B C D"
       },
       "svg": "structure/grid-systems/S001.svg",
-      "note": "Proposal only: drawing-unit spacings of the representative family (never averaged). Confirm the system, its building, units and Tekla X/Y at gate 1."
+      "note": "Proposal only: drawing-unit spacings of the representative family (never averaged). Confirm the system, its building, units and Tekla X/Y at gate 1.",
+      "axis_question_key": "3a1f0c9b7d2e4a61"
     },
     {
       "system_id": "S002",
@@ -324,7 +329,8 @@
       },
       "tekla_grid": null,
       "svg": "structure/grid-systems/S002.svg",
-      "note": "Proposal only: drawing-unit spacings of the representative family (never averaged). Confirm the system, its building, units and Tekla X/Y at gate 1."
+      "note": "Proposal only: drawing-unit spacings of the representative family (never averaged). Confirm the system, its building, units and Tekla X/Y at gate 1.",
+      "axis_question_key": "8c4d2b1a9e0f7c35"
     }
   ],
   "unassigned_families": [],
@@ -339,18 +345,29 @@
     "single_source": 1,
     "conflicts": 1
   },
+  "conflicts": [
+    {
+      "systems": [
+        "S001",
+        "S002"
+      ],
+      "blocking": true,
+      "closed_by": null,
+      "question_key": "5b7e2f90c1d84a36"
+    }
+  ],
   "questions": [
     {
       "code": "grid_system_select",
       "blocking": true,
-      "message": "Gate 1: which of these grid systems are the project's grids, and which building or structure is each? None is used until confirmed.",
+      "message": "Gate 1: which of these grid systems are the project's grids, and which building or structure is each? None is used until confirmed. Structured values (optional): systems=S001,S002 (the systems the project uses; the others stop blocking) and separate=S001,S002 (selected systems that are different buildings: closes the conflicts between them).",
       "where": "S001, S002",
       "found": "S001: A B C D x 1 2 3 (2 view(s), 2 independent, 1 file(s)); S002: A B C x 1 2 3 (1 view(s), 1 independent, 1 file(s))"
     },
     {
       "code": "grid_system_conflict",
       "blocking": true,
-      "message": "Two grid systems use the same axis labels with different spacings or order, so they are kept apart. Are they different buildings or structures, or is one of them wrong?",
+      "message": "Two grid systems use the same axis labels with different spacings or order, so they are kept apart. Are they different buildings or structures, or is one of them wrong? An answer here closes nothing: answer grid_system_select with systems= leaving one of them out, or with separate=S001,S002 when they are different buildings, then rerun harness grid-system.",
       "where": "S001 (structural-set.dxf, sheet model#01, V001/F001) vs S002 (structural-set.dxf, sheet model#03, V003/F005)",
       "found": "A-B: 6000 vs 3600; B-C: 6000 vs 4800; 1-2: 7200 vs 5400; 2-3: 7200 vs 5400",
       "file": "structural-set.dxf",
@@ -358,19 +375,27 @@
     },
     {
       "code": "grid_system_axis_unassigned",
+      "blocking": false,
+      "message": "Not blocking: Tekla X / Y is assigned. Which direction of this grid system is Tekla X (lines parallel to Y) and which is Y? Answer with --value for dir1 and dir2 as listed in found (e.g. dir1=X), or answer grid_family_axis_assignment per family.",
+      "where": "S001",
+      "found": "dir1: V001/F001 labels A B C D, angle 0 deg; dir2: V001/F002 labels 1 2 3, angle 90 deg",
+      "file": "structural-set.dxf",
+      "sheet": "model#01"
+    },
+    {
+      "code": "grid_system_axis_unassigned",
       "blocking": true,
-      "message": "Which direction of this grid system is Tekla X (lines parallel to Y) and which is Y?",
+      "message": "Which direction of this grid system is Tekla X (lines parallel to Y) and which is Y? Answer with --value for dir1 and dir2 as listed in found (e.g. dir1=X), or answer grid_family_axis_assignment per family. (no axis answer covers every direction)",
       "where": "S002",
-      "found": "no axis answer covers every direction; V003/F005: labels A B C, angle 0 deg; V003/F006: labels 1 2 3, angle 90 deg",
+      "found": "dir1: V003/F005 labels A B C, angle 0 deg; dir2: V003/F006 labels 1 2 3, angle 90 deg",
       "file": "structural-set.dxf",
       "sheet": "model#03"
     }
   ],
   "question_counts": {
-    "grid_system_axis_unassigned": 1,
+    "grid_system_axis_unassigned": 2,
     "grid_system_conflict": 1,
     "grid_system_select": 1
   },
   "warnings": []
 }
-

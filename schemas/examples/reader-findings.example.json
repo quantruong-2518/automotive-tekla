@@ -1,0 +1,72 @@
+{
+  "schema_version": "0.1",
+  "kind": "reader_findings",
+  "project_id": "demo-findings",
+  "next_id": 5,
+  "findings": [
+    {
+      "id": "F-001",
+      "kind": "sheet_class",
+      "status": "active",
+      "file": "plans/set.dxf",
+      "file_sha256": "aa3cd98b17eb640c0f66a796c431bf33aecd884692d62168115020030cf1b050",
+      "sheet": "model#01",
+      "entries": [
+        { "id": "T000001", "display_text": "GENERAL NOTES" }
+      ],
+      "value": "general_notes",
+      "fields": {},
+      "questions": [],
+      "confidence": "medium"
+    },
+    {
+      "id": "F-002",
+      "kind": "note_item",
+      "status": "active",
+      "file": "plans/set.dxf",
+      "file_sha256": "aa3cd98b17eb640c0f66a796c431bf33aecd884692d62168115020030cf1b050",
+      "sheet": "model#01",
+      "entries": [
+        { "id": "T000002", "display_text": "Concrete grade C30/37 for all" },
+        { "id": "T000003", "display_text": "foundations and columns" }
+      ],
+      "value": "Concrete grade C30/37 for all foundations and columns",
+      "fields": { "topic": "concrete_class" },
+      "questions": [],
+      "confidence": "medium"
+    },
+    {
+      "id": "F-003",
+      "kind": "structural_system",
+      "status": "withdrawn",
+      "file": "plans/set.dxf",
+      "file_sha256": "aa3cd98b17eb640c0f66a796c431bf33aecd884692d62168115020030cf1b050",
+      "sheet": null,
+      "entries": [
+        { "id": "T000004", "display_text": "4 STOREY" }
+      ],
+      "value": "four storeys above ground",
+      "fields": { "aspect": "floors" },
+      "questions": [],
+      "confidence": "low",
+      "note": "read from one title only",
+      "withdrawn_reason": "sheet S-102 shows five floor levels"
+    },
+    {
+      "id": "F-004",
+      "kind": "cross_check",
+      "status": "active",
+      "file": "plans/set.dxf",
+      "file_sha256": "aa3cd98b17eb640c0f66a796c431bf33aecd884692d62168115020030cf1b050",
+      "sheet": null,
+      "entries": [
+        { "id": "T000002", "display_text": "Concrete grade C30/37 for all" },
+        { "id": "T000010", "display_text": "C25 concrete" }
+      ],
+      "value": "the general note gives C30/37, the foundation plan note gives C25",
+      "fields": {},
+      "questions": ["Q-012"],
+      "confidence": "medium"
+    }
+  ]
+}

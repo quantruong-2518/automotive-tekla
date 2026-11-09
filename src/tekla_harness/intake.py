@@ -14,6 +14,10 @@ One deterministic command for the future `drawing-intake` skill. Writes into the
     text/<path>.json        text-index document of each DXF that was probed (extract_text)
     converted/<path>.dxf    DXF produced from each DWG
 
+Units: every probed file gets ONE blocking units question, `units_confirm_all` (answered with a structured
+`unit=`); the probe's units_conflict / units_suspect / units_unknown questions are not asked apart: their
+where / found / message are refs of that question (FOLDED_UNITS_CODES).
+
 The input folder is never written. Everything is validated and serialised in memory before the
 first document is written, so a bug never leaves an invalid document on disk.
 
@@ -49,6 +53,7 @@ from tekla_harness.questions import (
     dump_json,
     load_ledger,
     merged_question,
+    question_group,
     questions_document,
     questions_per_file,
 )
@@ -72,8 +77,12 @@ _NO_READER_TOOL = "intake_no_reader"
 UNITS_CONFIRM_ALL_MESSAGE = (
     "Header units are unreliable on real drawings and are not accepted automatically. Confirm the "
     "drawing unit of this DXF (against a known dimension, a PDF or your own knowledge) before any "
-    "extraction. Replaces the non-blocking units_confirm probe question."
+    "extraction: answer with --value unit=mm|cm|m|in|ft. This is the file's only blocking units question; "
+    "the probe's units evidence (header unit vs measurement system, implausible dimensions, unknown unit) "
+    "is listed in its refs. Replaces the non-blocking units_confirm probe question."
 )
+# probe units questions whose evidence is folded into the file's units_confirm_all refs (not asked apart)
+FOLDED_UNITS_CODES = ("units_confirm", "units_conflict", "units_suspect", "units_unknown")
 _MESSAGES = {
     "conversion_empty": (
         "The DWG converted to a DXF without any entity in any layout although the DWG is not tiny. "
@@ -342,8 +351,18 @@ def _units_of(entry: _Entry) -> dict[str, Any] | None:
     flags = sorted({q["code"] for q in entry.probe["questions"] if q["code"].startswith("units_")})
     units = entry.probe.get("units")
     if units is None:  # probe status partial and the units section failed
-        return {"value": "unknown", "confidence": "low", "flags": sorted({*flags, "units_not_read"})}
-    return {"value": units["value"], "confidence": units["confidence"], "flags": flags}
+        return {
+            "value": "unknown",
+            "confidence": "low",
+            "flags": sorted({*flags, "units_not_read"}),
+            "dimension_median": None,
+        }
+    return {
+        "value": units["value"],
+        "confidence": units["confidence"],
+        "flags": flags,
+        "dimension_median": units["dimension_median"],
+    }
 
 
 def _inventory_row(entry: _Entry) -> dict[str, Any]:
@@ -390,14 +409,16 @@ def _inventory_row(entry: _Entry) -> dict[str, Any]:
 
 
 def _units_group(entries: list[_Entry]) -> list[dict[str, Any]]:
-    refs = []
+    """One blocking units_confirm_all per probed file: the header ref first, then one ref per folded probe
+    units question (its where, found and message verbatim), so the count is the true number of refs."""
+    out = []
     for e in entries:
         units = _units_of(e)
         if units is None:
             continue
         code = e.probe["units"]["header_code"] if e.probe and "units" in e.probe else None
         flags = ", ".join(units["flags"]) or "none"
-        refs.append(
+        refs: list[dict[str, Any]] = [
             {
                 "file": e.rel,
                 "where": "header $INSUNITS",
@@ -407,8 +428,19 @@ def _units_group(entries: list[_Entry]) -> list[dict[str, Any]]:
                 "confidence": units["confidence"],
                 "flags": units["flags"],
             }
-        )
-    return questions_per_file("units_confirm_all", True, UNITS_CONFIRM_ALL_MESSAGE, refs)
+        ]
+        for q in (e.probe or {}).get("questions", []):
+            if q["code"] in FOLDED_UNITS_CODES and q["code"] != "units_confirm":
+                refs.append(
+                    {
+                        "file": e.rel,
+                        "where": q["where"],
+                        "found": q["found"],
+                        "message": f"{q['code']}: {q['message']}",
+                    }
+                )
+        out.append(question_group("units_confirm_all", True, UNITS_CONFIRM_ALL_MESSAGE, refs, file=e.rel))
+    return out
 
 
 def _probe_groups(entries: list[_Entry]) -> list[dict[str, Any]]:
@@ -417,7 +449,7 @@ def _probe_groups(entries: list[_Entry]) -> list[dict[str, Any]]:
         if not (e.probed and e.probe):
             continue
         for q in e.probe["questions"]:
-            if q["code"] == "units_confirm":  # subsumed by units_confirm_all
+            if q["code"] in FOLDED_UNITS_CODES:  # folded into the file's units_confirm_all
                 continue
             ref = {"file": e.rel, "where": q["where"], "found": q["found"]}
             groups.setdefault((not q["blocking"], q["code"], e.rel), []).append((q["message"], ref))

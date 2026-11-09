@@ -349,7 +349,32 @@ def _units(
         "header_code": code,
         "confidence": confidence,
         "evidence": evidence,
+        "dimension_median": dimension_median(magnitudes),
     }, questions
+
+
+def dimension_median(magnitudes: list[float] | None) -> dict[str, Any] | None:
+    """Median |length| of the modelspace linear and aligned dimensions in drawing units and how many there
+    are; None when the audit is unavailable or fewer than MAGNITUDE_MIN_DIMS exist (the check is skipped)."""
+    if magnitudes is None or len(magnitudes) < MAGNITUDE_MIN_DIMS:
+        return None
+    return {"value": float(statistics.median(magnitudes)), "count": len(magnitudes)}
+
+
+def implausible_dimensions(median: dict[str, Any] | None, unit: str) -> str | None:
+    """The units_suspect magnitude test for `unit` (not only the declared one): the evidence, in plain words,
+    when the median modelspace linear dimension read in `unit` falls outside MAGNITUDE_MIN_M..MAGNITUDE_MAX_M;
+    None when it is plausible, or when the median or the unit is unknown (nothing to test)."""
+    factor = _METRES_PER_UNIT.get(unit)
+    if median is None or factor is None:
+        return None
+    metres = median["value"] * factor
+    if MAGNITUDE_MIN_M <= metres <= MAGNITUDE_MAX_M:
+        return None
+    return (
+        f"median |linear dimension| {median['value']:g} drawing units = {metres:g} m in {unit} over "
+        f"{median['count']} dimension(s); plausible range {MAGNITUDE_MIN_M:g} m to {MAGNITUDE_MAX_M:g} m"
+    )
 
 
 def _magnitude_check(

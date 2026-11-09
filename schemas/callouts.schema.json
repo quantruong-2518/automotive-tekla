@@ -4,7 +4,7 @@
   "title": "Callout candidates of an intake work folder",
   "description": "Deterministic candidates (`callouts.py`) for rebar callouts, rebar grades, steel section labels, steel grades, plates, bolts and member marks, found in the text indexes of a work folder. A candidate is text that looks like a notation, never a decision. `parsed` is filled ONLY for notations the research marks verified (docs/research/vn-structural-drawing-conventions.md, 'Parsing patterns'); otherwise it is null and `unparsed_reason` says why. `rule` names the pattern or detector. Parsed numbers are copied from the text: nothing is computed (no quantity, length, weight, unit conversion) and no catalogue is consulted. `provenance` is 'derived' from the text entry's provenance, with `file` relative to the input folder and `sheet` the printed sheet number or 'unknown'. The questions are not in this document: `harness callouts` writes them, numbered, to callouts-questions.json; `question_counts` here only says how many things are asked per code.",
   "type": "object",
-  "required": ["schema_version", "kind", "project_id", "inventory_sha256", "files", "skipped_sheets", "candidates", "question_counts", "summary", "warnings"],
+  "required": ["schema_version", "kind", "project_id", "inventory_sha256", "files", "skipped_sheets", "candidates", "blocked_entries", "question_counts", "summary", "warnings"],
   "additionalProperties": false,
   "properties": {
     "schema_version": { "const": "0.1" },
@@ -28,6 +28,11 @@
       }
     },
     "candidates": { "type": "array", "description": "In scan order: files by path, text entries in index order, lines, position in the line.", "items": { "$ref": "#/$defs/candidate" } },
+    "blocked_entries": {
+      "type": "array",
+      "description": "Text entries the legacy-font gate blocks (text_gate.py: non-ASCII text in an unknown, proposed or contradicted encoding) that would otherwise have yielded a candidate: listed verbatim with the reason, never read. In scan order.",
+      "items": { "$ref": "#/$defs/blocked_entry" }
+    },
     "question_counts": {
       "type": "object",
       "description": "Per question code, how many things are asked over the whole project: one callout_ambiguous per ambiguous notation, one member_mark_prefix_meaning per member mark prefix, 1 grade_legacy_mapping when legacy grade groups appear. Codes with none are absent. callouts-questions.json splits these per file.",
@@ -53,6 +58,18 @@
           }
         }
       ]
+    },
+    "blocked_entry": {
+      "type": "object",
+      "required": ["file", "sheet", "entry_id", "display_text", "reason"],
+      "additionalProperties": false,
+      "properties": {
+        "file": { "type": "string", "minLength": 1 },
+        "sheet": { "type": ["string", "null"] },
+        "entry_id": { "type": "string", "pattern": "^T[0-9]{6,}$" },
+        "display_text": { "type": "string", "description": "Verbatim (whitespace collapsed, capped), never interpreted." },
+        "reason": { "enum": ["knowledge_conflict", "encoding_proposed", "encoding_contradiction", "encoding_unknown"] }
+      }
     },
     "file": {
       "type": "object",
@@ -201,7 +218,7 @@
     },
     "summary": {
       "type": "object",
-      "required": ["candidates", "parsed", "unparsed", "by_kind", "by_confidence", "by_file", "by_sheet", "member_mark_prefixes", "files_scanned", "files_skipped"],
+      "required": ["candidates", "parsed", "unparsed", "by_kind", "by_confidence", "by_file", "by_sheet", "member_mark_prefixes", "files_scanned", "files_skipped", "blocked_entries"],
       "additionalProperties": false,
       "properties": {
         "candidates": { "type": "integer", "minimum": 0 },
@@ -235,7 +252,8 @@
         },
         "member_mark_prefixes": { "type": "integer", "minimum": 0 },
         "files_scanned": { "type": "integer", "minimum": 0 },
-        "files_skipped": { "type": "integer", "minimum": 0 }
+        "files_skipped": { "type": "integer", "minimum": 0 },
+        "blocked_entries": { "type": "integer", "minimum": 0, "description": "Length of the document's blocked_entries." }
       }
     }
   }

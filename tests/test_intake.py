@@ -142,7 +142,12 @@ def test_inventory_rows(done):
     assert list(rows) == sorted(rows)
     a = rows["a.dxf"]
     assert (a["format"], a["converter"], a["confidence_cap"], a["outcome"]) == ("dxf", "none", "high", "read")
-    assert a["units"] == {"value": "mm", "confidence": "medium", "flags": ["units_confirm"]}
+    assert a["units"] == {
+        "value": "mm",
+        "confidence": "medium",
+        "flags": ["units_confirm"],
+        "dimension_median": None,  # fewer than 3 modelspace linear dimensions
+    }
     assert a["layouts"][0] == "Model" and a["modelspace_entity_total"] == 1
     assert a["probe"] == "probe/a.dxf.json" and a["converted"] is None and a["conversion"] is None
     assert a["dwg_version"] is None and a["dimension_override_differs"] == 0
@@ -255,7 +260,8 @@ def test_one_units_question_per_dxf(done):
     units = [q for q in questions if q["code"] == "units_confirm_all"]
     assert [q["file"] for q in units] == ["a.dxf", "good.dwg", "sub/b.dxf"]
     assert [q["code"] for q in questions[:3]] == ["units_confirm_all"] * 3
-    assert all(q["blocking"] is True and q["truncated"] is False and q["count"] == 1 for q in units)
+    assert all(q["blocking"] is True and q["truncated"] is False for q in units)
+    assert [q["count"] for q in units] == [1, 1, 2]  # b.dxf: header ref + its folded units_unknown
     refs = {q["file"]: q["refs"][0] for q in units}
     assert all(r["file"] == f for f, r in refs.items())
     assert (refs["a.dxf"]["unit"], refs["a.dxf"]["confidence"], refs["a.dxf"]["flags"]) == (
@@ -266,6 +272,38 @@ def test_one_units_question_per_dxf(done):
     assert refs["good.dwg"]["unit"] == "m"
     assert "units_unknown" in refs["sub/b.dxf"]["flags"] and refs["sub/b.dxf"]["confidence"] == "low"
     assert not any(q["code"] == "units_confirm" for q in questions)  # subsumed, not repeated
+    # one blocking units question per file: the probe's units_unknown is a ref of it, not a question
+    assert not any(q["code"] in ("units_unknown", "units_conflict", "units_suspect") for q in questions)
+    folded = next(q for q in units if q["file"] == "sub/b.dxf")["refs"][1]
+    probe = load(out, "probe/sub/b.dxf.json")
+    unknown = next(q for q in probe["questions"] if q["code"] == "units_unknown")
+    assert (folded["where"], folded["found"]) == (unknown["where"], unknown["found"])  # verbatim
+    assert folded["message"] == f"units_unknown: {unknown['message']}"
+
+
+def test_units_evidence_folds_into_the_one_units_question_with_true_counts(tmp_path):
+    """EVAL-1 F-04: file 267 had units_confirm_all + units_conflict + units_suspect (three blocking units
+    questions from intake alone). Now one blocking question, the evidence verbatim in its refs."""
+    root = tmp_path / "in"
+    root.mkdir()
+    doc = new("R2018")
+    doc.header["$INSUNITS"] = 6  # metres ...
+    doc.header["$MEASUREMENT"] = 0  # ... but an imperial measurement system: units_conflict
+    for i in range(3):  # 4000 'm' dimensions: units_suspect
+        doc.modelspace().add_linear_dim(base=(0, 3 + i), p1=(0, 0), p2=(4000 + i, 0)).render()
+    doc.saveas(root / "m.dxf")
+    run_intake(root, tmp_path / "work", "demo-units")
+    questions = load(tmp_path / "work", "questions.json")["questions"]
+    units = [q for q in questions if q["code"].startswith("units_")]
+    assert [(q["code"], q["blocking"]) for q in units] == [("units_confirm_all", True)]
+    (q,) = units
+    probe = load(tmp_path / "work", "probe/m.dxf.json")
+    evidence = [p for p in probe["questions"] if p["code"] in ("units_conflict", "units_suspect")]
+    assert len(evidence) == 2 and q["count"] == 3 and not q["truncated"]
+    assert [(r["where"], r["found"]) for r in q["refs"][1:]] == [(p["where"], p["found"]) for p in evidence]
+    assert set(q["refs"][0]["flags"]) >= {"units_conflict", "units_suspect"}
+    median = load(tmp_path / "work", "inventory.json")["files"][0]["units"]["dimension_median"]
+    assert median == {"value": 4001.0, "count": 3}
 
 
 def test_question_ids_order_and_blocking_summary(done):
@@ -277,15 +315,14 @@ def test_question_ids_order_and_blocking_summary(done):
         ("units_confirm_all", "a.dxf"),
         ("units_confirm_all", "good.dwg"),
         ("units_confirm_all", "sub/b.dxf"),
-        ("units_unknown", "sub/b.dxf"),
         ("read_failed", "sub/bad.dwg"),
         ("no_reader_implemented", "c.pdf"),
         ("no_reader_implemented", "notes.txt"),
     ]
     summary = load(out, "inventory.json")["summary"]
     assert summary["questions"] == len(questions) == result.summary["questions"]
-    assert summary["blocking_questions"] == sum(q["blocking"] for q in questions) == 7
-    assert doc["summary"] == {"questions": 7, "blocking_questions": 7, "answered": 0, "blocking_open": 7}
+    assert summary["blocking_questions"] == sum(q["blocking"] for q in questions) == 6
+    assert doc["summary"] == {"questions": 6, "blocking_questions": 6, "answered": 0, "blocking_open": 6}
     assert all(q["answer"] is None and len(q["key"]) == 16 for q in questions)
 
 
@@ -625,7 +662,7 @@ def test_cli_intake_exit_codes_and_summary(folder, tmp_path, template, capsys, m
     args = ["intake", str(folder), "--out", str(out), "--project-id", "demo-intake"]
     assert main(args) == 1
     summary = json.loads(capsys.readouterr().out)
-    assert summary["files"] == 6 and summary["blocking_questions"] == 7
+    assert summary["files"] == 6 and summary["blocking_questions"] == 6
     assert summary["read_failures"] == ["sub/bad.dwg"]
     assert summary["outputs"]["inventory"] == str(out.resolve() / "inventory.json")
     assert main(["intake", str(folder), "--out", str(folder / "w"), "--project-id", "demo-intake"]) == 2

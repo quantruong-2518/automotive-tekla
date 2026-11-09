@@ -24,17 +24,67 @@
     "max_entries": 4
   },
   "counts": {
-    "assigned": 29,
+    "assigned": 28,
     "matched": 5,
     "returned": 4,
     "omitted": 1,
     "truncated": true
   },
+  "legacy_font_gate": {
+    "blocked_entries": 1,
+    "by_reason": {
+      "encoding_proposed": 1
+    },
+    "styles": [
+      "VntimeH"
+    ],
+    "question_ids": [
+      "Q-003",
+      "Q-004",
+      "Q-005"
+    ]
+  },
   "entries": [
     {
-      "id": "T000043",
-      "row": 4,
+      "entry_id": "T000041",
+      "row": 2,
       "display_text": "CB300-V",
+      "meaning": "allowed",
+      "blocked_reason": null,
+      "encoding": "unknown",
+      "confidence": "medium",
+      "flags": [],
+      "layer": "0",
+      "style": "Standard",
+      "x": 62000.0,
+      "y": 56500.0,
+      "height": 350.0,
+      "rotation": 0.0,
+      "entity_type": "TEXT"
+    },
+    {
+      "entry_id": "T000042",
+      "row": 3,
+      "display_text": "C1",
+      "meaning": "allowed",
+      "blocked_reason": null,
+      "encoding": "unknown",
+      "confidence": "medium",
+      "flags": [],
+      "layer": "0",
+      "style": "Standard",
+      "x": 62000.0,
+      "y": 56000.0,
+      "height": 350.0,
+      "rotation": 0.0,
+      "entity_type": "TEXT"
+    },
+    {
+      "entry_id": "T000043",
+      "row": 4,
+      "display_text": "C2",
+      "meaning": "allowed",
+      "blocked_reason": null,
       "encoding": "unknown",
       "confidence": "medium",
       "flags": [],
@@ -47,39 +97,11 @@
       "entity_type": "TEXT"
     },
     {
-      "id": "T000044",
-      "row": 5,
-      "display_text": "C1",
-      "encoding": "unknown",
-      "confidence": "medium",
-      "flags": [],
-      "layer": "0",
-      "style": "Standard",
-      "x": 62000.0,
-      "y": 55000.0,
-      "height": 350.0,
-      "rotation": 0.0,
-      "entity_type": "TEXT"
-    },
-    {
-      "id": "T000045",
-      "row": 6,
-      "display_text": "C2",
-      "encoding": "unknown",
-      "confidence": "medium",
-      "flags": [],
-      "layer": "0",
-      "style": "Standard",
-      "x": 62000.0,
-      "y": 54500.0,
-      "height": 350.0,
-      "rotation": 0.0,
-      "entity_type": "TEXT"
-    },
-    {
-      "id": "T000015",
-      "row": 10,
+      "entry_id": "T000015",
+      "row": 9,
       "display_text": "C",
+      "meaning": "allowed",
+      "blocked_reason": null,
       "encoding": "unknown",
       "confidence": "medium",
       "flags": [],
@@ -92,5 +114,7 @@
       "entity_type": "TEXT"
     }
   ],
-  "warnings": []
+  "warnings": [
+    "sheet-text truncated: 4 of 5 matching entries returned (1 omitted); rerun with --max 28 to get all of them"
+  ]
 }

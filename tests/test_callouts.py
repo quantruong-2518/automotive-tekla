@@ -495,17 +495,13 @@ def test_texts_claimed_by_grids_or_levels_are_not_member_marks(damaged):
 
 
 def test_unknown_encoding_and_case_uncertain_text_is_low(doc):
-    literal = [c for c in doc["candidates"] if "diameter_sign_literal_non_unicode" in c["flags"]]
-    assert (
-        len(literal) == 1 and literal[0]["confidence"] == "low"
-    )  # a literal O-stroke in an unknown encoding
-    assert literal[0]["encoding"] == "unknown" and literal[0]["parsed"]["form"] == "count_diameter"
-    non_ascii = [c for c in doc["candidates"] if "encoding_unknown_non_ascii" in c["flags"] and c["parsed"]]
-    assert non_ascii and all(c["confidence"] == "low" for c in non_ascii)
+    # review fix: the legacy-font gate blocks non-ASCII text in an unknown encoding, so a literal O-stroke
+    # (4Ø16 in VntimeH) and "4%%c16 tên" are no candidates; they are listed as blocked_entries instead
+    assert not [c for c in doc["candidates"] if "diameter_sign_literal_non_unicode" in c["flags"]]
     same_code = [
         c for c in find(doc, f"4{DIA_SIGN}16", "rebar_callout", "model#01") if c["encoding"] == "unknown"
     ]
-    assert any(
+    assert any(  # the same notation through %%c is ASCII in raw_text: allowed
         c["confidence"] == "medium" and "diameter_sign_literal_non_unicode" not in c["flags"]
         for c in same_code
     )
@@ -740,3 +736,21 @@ def test_schema_member_marks_are_low_and_lexical(example):
     mark["confidence"] = "low"
     del mark["lexical"]
     assert validate("callouts", doc)
+
+
+def test_blocked_text_yields_no_candidate_and_is_listed_verbatim(work, doc):
+    """A non-ASCII text in an unknown-encoding font is never read (text_gate), even if it looks like 4Ø16."""
+    from tekla_harness.text_gate import meaning_block_reason
+
+    entries = {e["id"]: e for e in load(work / "text" / f"{REL}.json")["entries"]}
+    blocked_ids = {i for i, e in entries.items() if meaning_block_reason(e)}
+    assert blocked_ids
+    assert not [c for c in doc["candidates"] if c["text_ref"]["entry_id"] in blocked_ids]
+    listed = {b["entry_id"]: b for b in doc["blocked_entries"]}
+    assert listed and set(listed) <= blocked_ids
+    literal = [b for b in doc["blocked_entries"] if b["display_text"] == f"4{DIA_SIGN}16"]
+    assert len(literal) == 1
+    assert literal[0]["reason"] == meaning_block_reason(entries[literal[0]["entry_id"]])
+    assert literal[0]["sheet"] == "model#01" and literal[0]["file"] == REL
+    assert doc["summary"]["blocked_entries"] == len(doc["blocked_entries"])
+    assert validate("callouts", doc) == []

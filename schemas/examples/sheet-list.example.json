@@ -7,7 +7,7 @@
       "path": "plans/set.dxf",
       "status": "listed",
       "reason": null,
-      "text_entries": 51,
+      "text_entries": 52,
       "unassigned_text": 0,
       "sheets": [
         {
@@ -26,35 +26,51 @@
             "confidence": "medium"
           },
           "duplicate_of": null,
-          "text_count": 29,
+          "text_count": 28,
+          "blocked_text_count": 1,
           "titles": [
             {
-              "entry_id": "T000001",
-              "display_text": "S-101",
+              "entry_id": "T000040",
+              "display_text": "MẶT BẰNG TẦNG 2",
+              "meaning": "allowed",
+              "blocked_reason": null,
+              "matched_keyword": "MẶT BẰNG",
               "height": 350.0,
               "truncated": false
             },
             {
-              "entry_id": "T000002",
-              "display_text": "A",
+              "entry_id": "T000001",
+              "display_text": "S-101",
+              "meaning": "allowed",
+              "blocked_reason": null,
+              "matched_keyword": null,
               "height": 350.0,
               "truncated": false
             },
             {
               "entry_id": "T000003",
               "display_text": "SHEET NO.",
-              "height": 350.0,
-              "truncated": false
-            },
-            {
-              "entry_id": "T000004",
-              "display_text": "REV",
+              "meaning": "allowed",
+              "blocked_reason": null,
+              "matched_keyword": null,
               "height": 350.0,
               "truncated": false
             },
             {
               "entry_id": "T000005",
               "display_text": "DATE",
+              "meaning": "allowed",
+              "blocked_reason": null,
+              "matched_keyword": null,
+              "height": 350.0,
+              "truncated": false
+            },
+            {
+              "entry_id": "T000006",
+              "display_text": "TEMPLATE-ONLY",
+              "meaning": "allowed",
+              "blocked_reason": null,
+              "matched_keyword": null,
               "height": 350.0,
               "truncated": false
             }
@@ -76,35 +92,51 @@
             "confidence": "medium"
           },
           "duplicate_of": null,
-          "text_count": 18,
+          "text_count": 19,
+          "blocked_text_count": 0,
           "titles": [
             {
-              "entry_id": "T000022",
-              "display_text": "S-102",
+              "entry_id": "T000047",
+              "display_text": "MẶT CẮT 1-1",
+              "meaning": "allowed",
+              "blocked_reason": null,
+              "matched_keyword": "MẶT CẮT",
               "height": 350.0,
               "truncated": false
             },
             {
-              "entry_id": "T000023",
-              "display_text": "A",
+              "entry_id": "T000022",
+              "display_text": "S-102",
+              "meaning": "allowed",
+              "blocked_reason": null,
+              "matched_keyword": null,
               "height": 350.0,
               "truncated": false
             },
             {
               "entry_id": "T000024",
               "display_text": "SHEET NO.",
-              "height": 350.0,
-              "truncated": false
-            },
-            {
-              "entry_id": "T000025",
-              "display_text": "REV",
+              "meaning": "allowed",
+              "blocked_reason": null,
+              "matched_keyword": null,
               "height": 350.0,
               "truncated": false
             },
             {
               "entry_id": "T000026",
               "display_text": "DATE",
+              "meaning": "allowed",
+              "blocked_reason": null,
+              "matched_keyword": null,
+              "height": 350.0,
+              "truncated": false
+            },
+            {
+              "entry_id": "T000027",
+              "display_text": "TEMPLATE-ONLY",
+              "meaning": "allowed",
+              "blocked_reason": null,
+              "matched_keyword": null,
               "height": 350.0,
               "truncated": false
             }
@@ -126,29 +158,33 @@
             "confidence": "medium"
           },
           "duplicate_of": null,
-          "text_count": 4,
+          "text_count": 5,
+          "blocked_text_count": 0,
           "titles": [
             {
               "entry_id": "T000039",
               "display_text": "GENERAL NOTE",
+              "meaning": "allowed",
+              "blocked_reason": null,
+              "matched_keyword": "NOTE",
               "height": 350.0,
-              "truncated": false
-            },
-            {
-              "entry_id": "T000049",
-              "display_text": "S-201",
-              "height": 3.5,
-              "truncated": false
-            },
-            {
-              "entry_id": "T000050",
-              "display_text": "B",
-              "height": 3.5,
               "truncated": false
             },
             {
               "entry_id": "T000051",
               "display_text": "GENERAL NOTES",
+              "meaning": "allowed",
+              "blocked_reason": null,
+              "matched_keyword": "NOTE",
+              "height": 3.5,
+              "truncated": false
+            },
+            {
+              "entry_id": "T000049",
+              "display_text": "S-201",
+              "meaning": "allowed",
+              "blocked_reason": null,
+              "matched_keyword": null,
               "height": 3.5,
               "truncated": false
             }
@@ -162,7 +198,7 @@
     "listed": 1,
     "skipped": 0,
     "sheets": 3,
-    "text_entries": 51
+    "text_entries": 52
   },
   "warnings": []
 }

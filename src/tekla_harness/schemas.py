@@ -34,6 +34,8 @@ SCHEMA_NAMES = (
     "grid-system",
     "status",
     "cache-entry",
+    "reader-findings",
+    "marks",
     "spec-receipt",
     "run-journal",
 )
