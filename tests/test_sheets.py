@@ -565,6 +565,39 @@ def test_numbers_that_are_not_codes_are_left_out_of_the_gap_check(tmp_path):
     assert _gap(result) is None
 
 
+# review minor: a run of more than SHEET_GAP_MAX_RUN missing numbers is a numbering jump, not a gap
+
+
+def _jumps(result: dict[str, Any]) -> list[str]:
+    return [w for w in result["warnings"] if "numbering jump" in w]
+
+
+def test_hundreds_numbering_is_a_jump_not_a_gap(tmp_path):
+    _, result = run(_numbered(tmp_path, _corner("S-101", "S-201", "S-301")))
+    assert _gap(result) is None
+    assert _jumps(result) == [
+        "Sheet numbers jump from S-101 (model#01) to S-201 (model#02): 99 numbers skipped, taken as a "
+        "numbering jump (more than 9), not asked as a gap.",
+        "Sheet numbers jump from S-201 (model#02) to S-301 (model#03): 99 numbers skipped, taken as a "
+        "numbering jump (more than 9), not asked as a gap.",
+    ]
+
+
+def test_a_small_gap_is_asked_next_to_a_numbering_jump(tmp_path):
+    _, result = run(_numbered(tmp_path, _corner("S-101", "S-102", "S-201", "S-202", "S-204")))
+    q = _gap(result)
+    assert q is not None and q["found"] == "missing 203 (between S-202 on model#04 and S-204 on model#05)"
+    assert q["where"] == "model#04, model#05"
+    assert len(_jumps(result)) == 1 and "from S-102 (model#02) to S-201 (model#03)" in _jumps(result)[0]
+
+
+@pytest.mark.parametrize(("last", "asked"), [("KC-11", True), ("KC-12", False)])
+def test_nine_missing_numbers_are_still_a_gap_ten_are_a_jump(tmp_path, last, asked):
+    _, result = run(_numbered(tmp_path, _corner("KC-01", last)))
+    assert (_gap(result) is not None) is asked
+    assert bool(_jumps(result)) is not asked
+
+
 def test_inline_label_is_medium(tmp_path):
     def extra(msp, w, h):
         msp.add_text("SHEET NO: S-301", height=250, dxfattribs={"insert": (w - 8000, 1000)})

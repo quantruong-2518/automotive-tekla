@@ -554,6 +554,10 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
       on each side, and the sheets without a detected number. `KT 1/18` counts as 1, `KC-05A` as 5;
       other values are left out. Corpus: 290 `missing 25`, 461 `missing 6-9` (three sheets there have
       no detected number); no other known file.
+    - Sheets: more than 9 missing sheet numbers in a row (`SHEET_GAP_MAX_RUN`) is a numbering jump, not
+      a gap: `S-101 / S-201 / S-301` (numbering by hundreds) no longer asks `missing 102-200; 202-300`.
+      Each jump is a warning with the numbers and sheets on each side; shorter gaps next to it are still
+      asked. The known gaps (290: 1 number, 461: 4) do not change.
   - Tool wave 3, package T:
     - W4 (safety): `harness find-text` and `harness sheet-text --contains` never match a blocked
       (legacy-font) entry, on its stored, decoded or any normalised text; before, typing the stored legacy

@@ -48,7 +48,8 @@ Algorithm (deterministic, every threshold is a named constant below):
    for sheet_number and revision).
 5. Number gaps. One non-blocking sheet_number_gap question per file lists the numbers that a letter
    series skips and no sheet of any series carries, with the sheets on each side
-   (`_number_gap_question`).
+   (`_number_gap_question`). More than SHEET_GAP_MAX_RUN missing numbers in a row is a numbering jump
+   (S-101 to S-201), given as a warning and not asked.
 
 Not done here (documented gaps): frames drawn as four LINEs, rotated frame rectangles, clipped
 viewports (the rectangle is used), and the drawing list / sheet index (`drawing_list.status` is
@@ -98,6 +99,7 @@ MAX_LISTED = 50  # ids listed in one question
 CORNER_U = 0.25
 CORNER_V = 0.20
 CORNER_POS_TOL = 0.03  # frame shares: two corner codes at 'the same position' on different sheets
+SHEET_GAP_MAX_RUN = 9  # missing numbers in a row asked as a gap; a longer run is a numbering jump
 
 _CONF_ORDER = {"low": 0, "medium": 1, "high": 2}
 _BUILDING_UNITS = {"mm", "cm", "m", "in", "ft"}
@@ -1102,13 +1104,17 @@ _NUMBER_PARTS_RE = re.compile(
 )
 
 
-def _number_gap_question(sheets: list[dict[str, Any]]) -> dict[str, Any] | None:
-    """One non-blocking sheet_number_gap question per file, or None when no printed number is skipped.
+def _number_gap_question(sheets: list[dict[str, Any]]) -> tuple[dict[str, Any] | None, list[str]]:
+    """(one non-blocking sheet_number_gap question per file or None when no printed number is skipped,
+    one warning per numbering jump).
 
     A number is missing when it lies between the lowest and highest number of one letter series and no
     sheet of ANY series carries it: on 290 one counter runs over Kc and KT sheets (Kc - 13, KT - 14,
     Kc - 15), so KT - 14 fills the Kc series. Consecutive missing numbers are one range, given with the
-    sheets on each side. Sheets without a chosen number are listed: they may carry a missing one."""
+    sheets on each side. Sheets without a chosen number are listed: they may carry a missing one.
+    A range of more than SHEET_GAP_MAX_RUN numbers is a numbering jump, not a gap (review: S-101, S-201,
+    S-301 number by hundreds): it is a warning with the sheets on each side, never asked. The known gaps
+    are 1 (290) and 4 (461) numbers long; hundreds numbering skips 98 or more."""
     by_number: dict[int, list[tuple[str, str]]] = defaultdict(list)  # number -> (sheet id, printed value)
     series: dict[str, list[int]] = defaultdict(list)
     for s in sheets:
@@ -1124,8 +1130,6 @@ def _number_gap_question(sheets: list[dict[str, Any]]) -> dict[str, Any] | None:
     missing = sorted(
         {n for nums in series.values() for n in range(min(nums), max(nums) + 1) if n not in by_number}
     )
-    if not missing:
-        return None
     runs: list[list[int]] = []
     for n in missing:
         if runs and runs[-1][-1] == n - 1:
@@ -1135,18 +1139,28 @@ def _number_gap_question(sheets: list[dict[str, Any]]) -> dict[str, Any] | None:
     order = {s["sheet_id"]: i for i, s in enumerate(sheets)}
     around: set[str] = set()
     parts = []
+    jumps = []
     for run in runs:
         lo, hi = by_number[run[0] - 1], by_number[run[-1] + 1]
+        if len(run) > SHEET_GAP_MAX_RUN:
+            jumps.append(
+                f"Sheet numbers jump from {lo[0][1]} ({', '.join(sid for sid, _ in lo)}) to {hi[0][1]} "
+                f"({', '.join(sid for sid, _ in hi)}): {len(run)} numbers skipped, taken as a numbering jump "
+                f"(more than {SHEET_GAP_MAX_RUN}), not asked as a gap."
+            )
+            continue
         around.update(sid for sid, _ in lo + hi)
         span = str(run[0]) if len(run) == 1 else f"{run[0]}-{run[-1]}"
         parts.append(
             f"missing {span} (between {lo[0][1]} on {', '.join(sid for sid, _ in lo)} "
             f"and {hi[0][1]} on {', '.join(sid for sid, _ in hi)})"
         )
+    if not parts:
+        return None, jumps
     unnumbered = [s["sheet_id"] for s in sheets if s["title_block"]["sheet_number"] is None]
     if unnumbered:
         parts.append(f"{len(unnumbered)} sheet(s) without a detected number: {listed(unnumbered)}")
-    return question(
+    gap = question(
         SHEET_GAP_CODE,
         False,
         "The printed sheet numbers of this file skip some numbers: is a sheet missing from the set, does "
@@ -1154,6 +1168,7 @@ def _number_gap_question(sheets: list[dict[str, Any]]) -> dict[str, Any] | None:
         listed(sorted(around, key=order.__getitem__)),
         "; ".join(parts),
     )
+    return gap, jumps
 
 
 def _choose(cands: list[dict[str, Any]], fld: str) -> tuple[dict[str, Any] | None, list[str]]:
@@ -1574,7 +1589,8 @@ def extract_sheets(dxf_path: str | Path, text_index: dict[str, Any], *, doc: Dra
                     shown,
                 )
             )
-    gap = _number_gap_question(sheets)
+    gap, jumps = _number_gap_question(sheets)
+    warnings.extend(jumps)
     if gap is not None:
         questions.append(gap)
     signatures: dict[tuple[str, ...], list[str]] = defaultdict(list)
