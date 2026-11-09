@@ -548,6 +548,11 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
     `harness extract-text` decodes nothing and flags `knowledge_conflict` (the gate blocks it), and
     `harness read-dxf` gives no hint and asks `font_encoding_conflict`. An agreeing row changes nothing.
     This replaces P1's "a `.Vn*` family decides before an approved font-file row" for disagreeing rows.
+  - Grid extractor (`read-structure`) applies the legacy-font gate: a label-shaped text in a bubble that
+    `text_gate` blocks (`4/g14`, `2/G20` in a TCVN3 style) is never a label or an axis; it is listed in
+    `grids.json` `blocked_candidates` (entry id, value as shown, reason, sheet; count in
+    `summary.blocked_candidates`), and a family line ending in such a circle asks `grid_label_missing`.
+    `grids` schema: both fields added, optional (`$id` stays 0.1).
 - `guard_tekla_write.py` now exits 2 (the blocking code) on any internal error instead of
   relying on an undocumented `onFailure` setting; the setting was removed.
 - `guard_tekla_write.py` no longer blocks commands that only mention `tekla-cli` as data

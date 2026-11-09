@@ -129,6 +129,26 @@
             "type": "integer",
             "minimum": 0
           }
+        },
+        "blocked_candidates": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Length of blocked_candidates."
+        }
+      }
+    },
+    "blocked_candidates": {
+      "type": "array",
+      "description": "Label-shaped texts in a bubble circle that the legacy-font gate blocks (text_gate.meaning_block_reason, e.g. '4/g14' in a TCVN3 style): listed, never a label, axis or question text. A circle holding only such a text is a bubble without a readable label: not empty, not other text, and a family line ending in it raises grid_label_missing.",
+      "items": {
+        "type": "object",
+        "required": ["entry_id", "value_text", "reason", "sheet"],
+        "additionalProperties": false,
+        "properties": {
+          "entry_id": { "type": "string", "pattern": "^T[0-9]{6,}$" },
+          "value_text": { "type": "string", "description": "The label-shaped text as the text index shows it, verbatim." },
+          "reason": { "enum": ["knowledge_conflict", "encoding_proposed", "encoding_contradiction", "encoding_unknown", "legacy_ascii_suspect"] },
+          "sheet": { "type": "string", "description": "Detector id of the sheet the circle is on ('unknown' off-sheet)." }
         }
       }
     },

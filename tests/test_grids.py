@@ -455,6 +455,42 @@ def test_label_pattern(label, ok):
     assert bool(_LABEL_RE.match(label)) is ok
 
 
+def test_a_label_the_legacy_font_gate_blocks_makes_no_axis_and_is_listed(tmp_path):
+    # review of tool wave 2 (F1 item 3): grids took labels from blocked text. In a TCVN3 style '4/g14' and
+    # '2/G20' are rebar callouts written in ASCII ('legacy_ascii_suspect'), not sub-axes; '1/A' stays one.
+    def fn(msp):
+        msp.doc.styles.add(".VnTime", font="vntime.ttf")
+        for x, label in ((0.0, "1"), (6000.0, "1/A"), (12000.0, "4/g14"), (18000.0, "2/G20")):
+            msp.add_line((x, 0), (x, 12000))
+            msp.add_circle((x, -R), R)
+            msp.add_text(label, height=TH, dxfattribs={"style": ".VnTime"}).set_placement(
+                (x, -R), align=TextEntityAlignment.MIDDLE_CENTER
+            )
+        for y, label in ((2000.0, "A"), (8000.0, "B")):
+            msp.add_line((-2000, y), (20000, y))
+            _bubble(msp, (-2000 - R, y), label)
+
+    result = run(_plain(tmp_path, fn))
+    labels = [a["label"]["value"] for f in _all_families(result) for a in f["axes"] if a["label"]]
+    assert "1/A" in labels and "4/g14" not in labels and "2/G20" not in labels
+    blocked = result["blocked_candidates"]
+    assert [(b["value_text"], b["reason"]) for b in blocked] == [
+        ("4/g14", "legacy_ascii_suspect"),
+        ("2/G20", "legacy_ascii_suspect"),
+    ]
+    assert all(b["entry_id"].startswith("T") and b["sheet"] == "unknown" for b in blocked)
+    assert result["summary"]["blocked_candidates"] == 2
+    # a circle holding only a blocked label is neither a bubble, nor 'other text', nor unpaired
+    assert result["summary"]["bubbles_labelled"] == 4 and result["summary"]["bubbles_other_text"] == 0
+    assert result["unpaired_bubbles"]["count"] == 0
+    # its line ends in a bubble whose label cannot be read: asked as a missing label, never used (the line
+    # at 18000 is beyond the 1.5-spacing reach of the unlabelled-line check)
+    fam = family(result, "unknown", "1 1/A")
+    assert [(u["offset"], u["empty_bubble"]) for u in fam["unlabelled_lines"]] == [(12000.0, True)]
+    assert len(questions(result, "grid_label_missing")) == 1 and not questions(result, "grid_axis_unlabelled")
+    assert all("4/g14" not in q["found"] and "2/G20" not in q["found"] for q in result["questions"])
+
+
 def test_suffix_labels_are_axes_in_order(tmp_path):
     result = run(
         _plain(

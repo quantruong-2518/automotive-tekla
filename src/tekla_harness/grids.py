@@ -77,6 +77,7 @@ from tekla_harness.sheets import (
     text_box,
     text_center,
 )
+from tekla_harness.text_gate import meaning_block_reason
 
 SCHEMA_VERSION = "0.1"
 BUBBLE_TEXT_RADIUS = 0.9  # label centre within this x r of the circle centre
@@ -593,10 +594,13 @@ def _dimension(e: Any, handle: str | None, space: str, ctx: _Ctx) -> _Dim | None
 
 
 def _find_bubbles(circles: list[_Circle], entries: list[dict[str, Any]], ctx: _Ctx):
-    """(bubbles, circles with two labels, circles with a label and other text, empty circles).
+    """(bubbles, circles with two labels, circles with a label and other text, empty circles, circles whose
+    only label the legacy-font gate blocks, the blocked label entries with their circle's sheet).
 
     A circle holding any text besides its one label (a section or detail callout: number + sheet) is
-    not a bubble; a repeat of the label's own text is not 'other text'.
+    not a bubble; a repeat of the label's own text is not 'other text'. A label-shaped text whose meaning
+    `text_gate.meaning_block_reason` blocks is never a label ('4/g14' in a TCVN3 style is a rebar callout):
+    it is listed, and its circle is a bubble without a readable label (not empty, not other text).
     """
     texts_by_space: dict[str, _Index] = {}
     cell_r = statistics.median(c.r for c in circles) if circles else 1.0
@@ -613,9 +617,12 @@ def _find_bubbles(circles: list[_Circle], entries: list[dict[str, Any]], ctx: _C
     ambiguous = 0
     other_text = 0
     empty: list[_Circle] = []
+    unreadable: list[_Circle] = []
+    blocked: dict[str, tuple[dict[str, Any], str, str]] = {}  # entry id -> (entry, reason, sheet)
     for circle in circles:
         idx = texts_by_space.get(circle.space)
         hits: list[dict[str, Any]] = []
+        blocked_here: list[dict[str, Any]] = []
         inside_texts: set[str] = set()
         if idx is not None:
             for c, e, is_label in idx.near(circle.c, circle.r):
@@ -624,9 +631,17 @@ def _find_bubbles(circles: list[_Circle], entries: list[dict[str, Any]], ctx: _C
                 inside_texts.add(e["display_text"].strip())
                 h = e.get("height")
                 if is_label and (h is None or 0.15 * circle.r <= h <= 1.6 * circle.r):
-                    hits.append(e)
+                    reason = meaning_block_reason(e)
+                    if reason is None:
+                        hits.append(e)
+                    else:
+                        blocked_here.append(e)
+                        sheet = ctx.locator.locate(circle.space, *circle.c)
+                        blocked.setdefault(e["id"], (e, reason, sheet))
         labels = {e["display_text"].strip() for e in hits}
-        if not inside_texts:
+        if blocked_here and inside_texts == {e["display_text"].strip() for e in blocked_here}:
+            unreadable.append(circle)
+        elif not inside_texts:
             empty.append(circle)
         elif len(labels) > 1:
             ambiguous += 1
@@ -635,7 +650,11 @@ def _find_bubbles(circles: list[_Circle], entries: list[dict[str, Any]], ctx: _C
         elif hits:
             entry = min(hits, key=lambda e: e["id"])
             bubbles.append(_Bubble(circle, entry, ctx.locator.locate(circle.space, *circle.c)))
-    return bubbles, ambiguous, other_text, empty
+    blocked_list = [
+        {"entry_id": e["id"], "value_text": e["display_text"].strip(), "reason": reason, "sheet": sheet}
+        for e, reason, sheet in sorted(blocked.values(), key=lambda t: t[0]["id"])
+    ]
+    return bubbles, ambiguous, other_text, empty, unreadable, blocked_list
 
 
 def _pair(bubbles: list[_Bubble], segs: list[_Seg], ctx: _Ctx) -> tuple[list[_Axis], list[_Bubble]]:
@@ -1411,7 +1430,8 @@ def extract_grids(
     )
     walker = Walker(doc, bool(text_index["file"]["handles_reliable"]))
     segs, circles, dims = _collect(doc, walker, ctx)
-    bubbles, ambiguous, other_text, empty = _find_bubbles(circles, text_index["entries"], ctx)
+    found = _find_bubbles(circles, text_index["entries"], ctx)
+    bubbles, ambiguous, other_text, empty, unreadable, blocked = found
     axes, unpaired = _pair(bubbles, segs, ctx)
     views, isolated = _views(axes)
     groups: list[_Group] = []
@@ -1430,7 +1450,7 @@ def extract_grids(
             fam.spacings = [b.offset - a.offset for a, b in zip(fam.axes, fam.axes[1:], strict=False)]
             _check_family(fam, g, ctx)
         _check_view(g, ctx)
-    _unlabelled(groups, segs, empty, ctx)
+    _unlabelled(groups, segs, empty + unreadable, ctx)  # a blocked label is a missing label for the line
     matched = _match_dimensions(groups, dims)
     all_fams = [(g, f) for g in groups for f in g.families]
     cross = _cross_checks(all_fams, ctx, _Copies(sheets_result, text_index))
@@ -1520,6 +1540,7 @@ def extract_grids(
             "count": len(unpaired),
             "listed": [b.as_json() for b in unpaired_sorted[:MAX_UNPAIRED_LISTED]],
         },
+        "blocked_candidates": blocked,
         "summary": {
             "circles": len(circles),
             "bubbles_labelled": len(bubbles),
@@ -1533,6 +1554,7 @@ def extract_grids(
             "dimensions_linear": len(dims),
             "dimensions_matched": matched,
             "walk_skipped": dict(sorted(walker.skipped.items())),
+            "blocked_candidates": len(blocked),
         },
         "questions": ctx.questions,
         "question_counts": dict(sorted(ctx.q_counts.items())),
