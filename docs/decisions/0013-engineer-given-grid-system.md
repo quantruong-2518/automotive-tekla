@@ -36,8 +36,11 @@ drawings, so a recorded route is needed as well.
    | `sheet` | no | the detector sheet id the grid was read from: `sheet=model#05` | string |
 
    Both directions are required: a usable system has two (decision 1). An answer without values is
-   recorded as words and builds nothing. Which direction becomes Tekla X or Y is not part of this
-   answer: it is asked afterwards on the built system, like for a detected one (decision 3).
+   recorded as words and builds nothing, so it does not close the question either, even from the
+   engineer: the file still has no usable system, and gate 1 stays shut on it until the engineer gives
+   the values or the file leaves the input set (orchestrator default, tool wave 3; reversible by the
+   engineer). Which direction becomes Tekla X or Y is not part of this answer: it is asked afterwards on
+   the built system, like for a detected one (decision 3).
 3. A grid system is built from that answer only when the answer is active, structured, and recorded with
    `answered_by_role: engineer`. The system carries `source: engineer_answer` and the answer id as its
    provenance. It then goes through the same gate-1 steps as a detected system: select, X/Y, units.
