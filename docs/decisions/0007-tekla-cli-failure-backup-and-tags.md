@@ -61,3 +61,9 @@ guard has a gap:
 - `SPEC_ID` must stay unique within a lot (already checked by `check_spec`).
 - Still to verify on the test model: whether objects inserted before a crash without
   `CommitChanges` persist (To verify #9), and the backup macro (To verify #13).
+
+## Amendment (2026-11-08)
+
+Decision 2 "differs" is widened by the engineer: also a different kind (column, beam, ...), a
+rotation more than 0.01° away, or a different class when the spec gives one. A different name is
+reported only. Details, journal and resume rules: [ADR-0012](0012-run-journal-and-resume-planner.md).

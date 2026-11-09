@@ -68,7 +68,7 @@ User-invoked skills (`/name`) only the engineer can run: suggest them, do not im
 | Library API lookup | `context7` (Python and other libraries), `microsoft-docs` (.NET, C#, Windows) | Neither covers Tekla Open API: use principle 8 sources. |
 | Engineer decision with several dependent open branches (a gate, a threshold, a flow) | `grilling` (engineer: `/grill-me`) | Rounds in Vietnamese; every answer recorded in an ADR, RTI or `docs/roadmap.md` before acting. |
 | Harness decision only a person outside the session can answer (licence, Tekla version, company UDA names) | `/to-questionnaire` | Save to `docs/questionnaires/`, prose in the recipient's language. Drawing questions in a project run go to `questions.md` instead. |
-| Session near its context limit, or work continues in a new session | `/handoff` | — |
+| Session near its context limit, or work continues in a new session | `/handoff` | Multi-session topics live in the main checkout's `.handoff/` (one `<topic>.md` + one row in `INDEX.md`, git-excluded). At startup the `handoff_reminder` hook lists the open rows: ask the engineer which one to resume before any other work. Delete a row and its file only after the engineer confirms in chat that the topic is cleared. |
 
 ## Where things live
 

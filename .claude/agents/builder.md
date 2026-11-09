@@ -12,7 +12,10 @@ You do it only through `tekla-cli` write commands (`build`, `update`, `rollback`
 
 ## Before any write
 
-1. Confirm `lots/<n>/spec.json` validates: `uv run harness validate spec <file>`.
+1. Confirm the validation receipt `lots/<n>/spec.json.receipt.json` exists (Read, `ls` or
+   `Test-Path`). `doc-reader` wrote it when it validated the spec; you only read it.
+   `tekla-cli build` checks that it matches the spec bytes. An exit `5` that names the spec or
+   the receipt sends the spec back to `doc-reader`; any other exit `5` you report as it is.
 2. Confirm `tekla-cli info` reports the project's working copy, not the original model.
 3. Confirm the orchestrator's instruction names the lot, the run id, and that the gate is approved.
 If any check fails, stop and report. Do not work around it.
