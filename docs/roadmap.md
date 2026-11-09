@@ -58,15 +58,23 @@ mutation testing, independent review, then one commit.
 | S4 | Write commands, backup macro, tag `objects.inp` | Tekla machine to run |
 | S5 | Integration tests on the test model (RTI-0007); the 19 checks in `tekla/api-notes.md` | Tekla machine only |
 
-Step 3 is done only when S5 passes on Tekla 2024.
+Step 3 is done only when S5 passes on the Tekla version the engineer confirms (see below).
+
+**Paused after S1c (engineer, 2026-11-09).** S1–S1c and RTI-0008/0009 are merged. S2–S5 depend on
+the exact Tekla version, so they wait until Steps 1 and 2 are done. At that point, ask the
+engineer for the Tekla version and configuration, record it here and in an ADR-0009 amendment
+(NuGet pin, `TSAppConfigPatcherTask`, contract, `tekla/api-notes.md` deltas), then start S2.
+Building once for the confirmed version is cheaper than building for a guess.
 
 ## Open before later steps
 
-- Tekla version: **2024 Diamond** (engineer, 2026-11-06); NuGet pinned to 2024.0.4 whatever the
-  service pack (`tekla/api-notes.md`). Tekla machine for S5: the Windows host of the
-  development WSL (engineer, 2026-11-07); Tekla 2024 is not installed there yet (no
-  `C:\Program Files\Tekla Structures` on 2026-11-07), and it needs the .NET SDK and an empty
-  test model. Still open: when Tekla is installed.
+- Tekla version: first given as **2024 Diamond** (engineer, 2026-11-06); on 2026-11-09 the
+  engineer reported the company uses **2026 Diamond**. ADR-0009, the contract and
+  `tekla/api-notes.md` still pin `Tekla.Structures.*` 2024.0.4; they change only when the version
+  is confirmed at the restart of Step 3 (above). Known 2026 deltas: Model package
+  netstandard2.0-only, x64-only DLLs (projects are already x64), IFC2x3 export in the API.
+  Tekla machine for S5: the Windows host of the development WSL (engineer, 2026-11-07); no Tekla
+  is installed there yet, and it needs the .NET SDK and an empty test model.
 - Resume "differs" tolerance for contract rule 6: **0.1 mm** on start and end points; profile
   and material compared exactly (engineer, 2026-11-07; ADR-0007).
 - Original models live on local drives, so the local-only rule of ADR-0009 Amendment 2 stays
