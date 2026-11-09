@@ -78,6 +78,7 @@ HEADING_PLAN = (
     "DETAIL OF AB-20B",
     "AB-20B",
     "DETAIL ON CP7A",
+    "CP1",  # a plain plan mark of the CP family: the CP headings are compared
     "gm1",
 )
 
@@ -168,6 +169,22 @@ def test_without_a_schedule_the_headings_alone_are_compared(no_schedule):
     assert [(x["key"], x["compared_with"]) for x in m["plan_only"]] == [("d2", "detail_heading")]
 
 
+def test_headings_compare_only_families_that_have_both_plan_marks_and_headings(tmp_path):
+    """EVAL-3 433: the only headings are 'CỘT C1'..'C6'; footings M1..M8 were never compared with any
+    heading, so they are no plan_only finding. 286: pile caps 'ĐÀI CỌC ĐC1'.. have headings but no plain
+    plan label is read, so they are no schedule_only finding either."""
+    from _callout_fixtures import build_work
+    from tekla_harness.marks import extract_marks
+
+    s1 = ["D1", "D2", "DẦM D1", "M1", "M2", "ĐÀI CỌC DC1", "ĐÀI CỌC DC2"]
+    work = build_work(tmp_path, s1=s1, styled=[], s2=[], paper=[])
+    (m,) = extract_marks(work, tmp_path / "input")["matching"]
+    assert [x["key"] for x in m["matched"]] == ["d1"]
+    assert [x["key"] for x in m["plan_only"]] == ["d2"]  # the D family was compared
+    assert m["schedule_only"] == []  # DC has headings only: not compared
+    assert m["detail_headings"] == 1  # only the headings that took part in a comparison
+
+
 def test_with_neither_source_nothing_is_compared(tmp_path):
     from _callout_fixtures import build_work
     from tekla_harness.marks import extract_marks
@@ -245,7 +262,7 @@ def test_a_schedule_is_a_source_but_unread_tables_keep_every_set_incomplete(head
     assert "D7" not in sets["D"]["members"] and "D8" not in sets["D"]["members"]  # blocked rows: never read
     # the fixture holds an unparsed table and a header-blocked one: rows may be missing anywhere in the file
     assert not any(s["complete"] for s in heading_doc["summary"]["mark_sets"])
-    assert sets["AB"]["members"] == ["AB-20B"] and sets["CP"]["source"] == ["detail_heading"]
+    assert sets["AB"]["members"] == ["AB-20B"] and sets["CP"]["source"] == ["detail_heading", "plan_marks"]
 
 
 # --- mutation-test follow-ups ---------------------------------------------------------------------------

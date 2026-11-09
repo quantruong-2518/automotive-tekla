@@ -1275,21 +1275,34 @@ def _match_file(
     no title; a title-form plan mark ('DẦM D3', 'ĐÀI CỌC ĐC2 (SL= 01)') and a 'DETAIL OF <mark>' line
     (`detail_of`) are detail headings, the second source. A key with a plan mark and a schedule row or a
     heading is matched (`compared_with` schedule when a row exists, else detail_heading); a key with a
-    source and no plan mark is schedule_only; a plan mark with neither is plan_only, listed only when the
-    file has a matchable schedule or a heading (`compared_with` what it was compared with)."""
+    source and no plan mark is schedule_only; a plan mark with neither is plan_only (`compared_with` what
+    it was compared with). The schedule comparison covers the whole file, as before: with a matchable
+    schedule every plan mark without a match is plan_only. The heading comparison covers only the families
+    (prefix, casefolded) that have both a plain plan mark and a heading: a family the heading sweep did not
+    reach (433's footings next to column headings only) or whose plan labels were not read (286's pile
+    caps) is not compared, so its marks are no plan_only / schedule_only finding."""
     plan_by_key: dict[str, list[dict[str, Any]]] = {}
     heads_by_key: dict[str, list[dict[str, Any]]] = {}
     for p in plan:
         if p["form"] == "title":
             ref = {"entry_id": p["text_ref"]["entry_id"], "sheet": p["sheet"], "text": p["display_text"]}
             heads_by_key.setdefault(p["key"], []).append(
-                {"key": p["key"], "mark": p["mark"], "ref": ref, "confidence": p["confidence"]}
+                {
+                    "key": p["key"],
+                    "mark": p["mark"],
+                    "structure": p["_structure"],
+                    "ref": ref,
+                    "confidence": p["confidence"],
+                }
             )
         else:
             plan_by_key.setdefault(p["key"], []).append(p)
     for h in detail_of:
         heads_by_key.setdefault(h["key"], []).append(h)
-    heading_count = sum(len(v) for v in heads_by_key.values())
+    # families the heading comparison covers: a plain plan mark and a heading of the same prefix
+    compared = {ps[0]["_structure"][0] for ps in plan_by_key.values()} & {
+        hs[0]["structure"][0] for hs in heads_by_key.values()
+    }
     sched_by_key: dict[str, list[tuple[dict[str, Any], dict[str, Any], dict[str, Any]]]] = {}
     matchable = [t for t in tables if not t["header_blocked"] and t["mark_column"] is not None]
     for t in matchable:
@@ -1364,7 +1377,7 @@ def _match_file(
             if not match["size_compared"]:
                 reasons = sorted(row_reasons) if row_reasons else [NO_PLAN_SIZE if ss else NO_SCHEDULE_ROW]
                 match["size_not_compared_reason"] = "; ".join(reasons)
-        elif ss or hs:
+        elif ss or (hs and hs[0]["structure"][0] in compared):
             schedule_only.append(
                 {
                     "key": key,
@@ -1374,7 +1387,7 @@ def _match_file(
                     **head_refs(key),
                 }
             )
-        elif matchable or heads_by_key:
+        elif ps and (matchable or ps[0]["_structure"][0] in compared):
             plan_only.append(
                 {
                     "key": key,
@@ -1408,10 +1421,11 @@ def _match_file(
                 ],
             }
         )
+    used = {x["key"] for x in matched + schedule_only}
     return {
         "file": file,
         "schedule_tables": len(matchable),
-        "detail_headings": heading_count,
+        "detail_headings": sum(len(hs) for key, hs in heads_by_key.items() if key in used),
         "matched": matched,
         "schedule_only": schedule_only,
         "plan_only": plan_only,

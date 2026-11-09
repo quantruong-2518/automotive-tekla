@@ -660,7 +660,10 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
       `matched through detail headings only: no schedule row to compare`). `plan_only` is listed only for a
       file with a schedule or a heading; a file with neither is not compared (`none` is never written).
       Changed: a title that used to match a schedule row (`COLUMN C2`) is now a schedule-only key with
-      that heading.
+      that heading. The heading comparison covers only the families (prefix) that have both a plain plan
+      mark and a heading; any other family is not compared through headings, so it gives no plan-only or
+      schedule-only finding (433's footings next to column headings only; 286's pile-cap headings with no
+      plan label read). `matching[].detail_headings` counts the headings that took part.
     - `harness marks` (W6) writes `summary.mark_sets`: one set per file and mark family (prefix,
       upper-cased as in `member_mark_prefix_meaning`) with `members` (one per key, as drawn, natural order,
       gaps kept), `source` (`schedule`, `detail_heading`, `plan_marks`) and `complete`. `complete` is true
