@@ -1300,6 +1300,170 @@ def test_select_key_changes_when_two_systems_swap_files(tmp_path, example):
     assert all(f"[file {r['file']}, sha256 " in r["found"] for r in q["refs"])
 
 
+# --- provenance: an answer the engineer did not give proposes, never confirms (tool wave 3) -------------
+
+
+def sim(answer: dict[str, Any], role: str | None = "simulated") -> dict[str, Any]:
+    """The same answer, recorded by an agent standing in for the engineer (or, role None, before roles)."""
+    out = {k: v for k, v in answer.items() if k != "answered_by_role"}
+    return out if role is None else {**out, "answered_by_role": role}
+
+
+@pytest.mark.parametrize("role", ["simulated", None])
+def test_a_non_engineer_units_answer_converts_nothing(tmp_path, example, role):
+    work = _cm_work(tmp_path, example)
+    doc = build_grid_systems(work, answers=[sim(ans("units_suspect", "plans.dxf", {"unit": "cm"}), role)])
+    check_invariants(doc)
+    s = doc["systems"][0]
+    assert s["units"] == {
+        "declared": "mm",
+        "answered": "cm",
+        "status": "proposed_simulated",
+        "reason": "units answered by a non-engineer role",
+    }
+    assert all(d["mm"] is None for d in s["directions"]) and s["tekla_grid"] is None
+    assert "units_not_confirmed" in s["flags"]
+    assert doc["files"][0]["units_answer"] == {"status": "proposed_simulated", "unit": "cm"}
+    (q,) = [q for q in doc["questions"] if q["code"] == "grid_system_units_unconfirmed"]
+    assert not q["blocking"]  # still raised: the units question it points to stays open
+    # the engineer's own answer confirms
+    ok = build_grid_systems(work, answers=[ans("units_suspect", "plans.dxf", {"unit": "cm"})])
+    assert ok["systems"][0]["units"]["status"] == "confirmed"
+
+
+def test_one_non_engineer_file_keeps_the_units_proposed_and_merges_nothing(tmp_path, example):
+    work = _cm_work(tmp_path, example, files=("a.dxf", "b.dxf"))
+    answers = [
+        ans("units_suspect", "a.dxf", {"unit": "cm"}),
+        sim(ans("units_suspect", "b.dxf", {"unit": "cm"})),
+    ]
+    s = build_grid_systems(work, answers=answers)["systems"][0]
+    assert (s["units"]["status"], s["units"]["reason"]) == (
+        "proposed_simulated",
+        "units answered by a non-engineer role",
+    )
+    assert all(d["mm"] is None for d in s["directions"])
+    # an engineer answer that disagrees, or none for a file, still wins over a proposal as the reason
+    none = build_grid_systems(work, answers=[sim(ans("units_suspect", "a.dxf", {"unit": "cm"}))])
+    assert none["systems"][0]["units"]["reason"] == "units not confirmed"
+    # one building in m and mm merges in millimetres only on the engineer's answers
+    split = build_grid_systems(_two_unit_work(tmp_path / "u", example), answers=[M_MM[0], sim(M_MM[1])])
+    assert [s["system_id"] for s in split["systems"]] == ["S001", "S002"]
+    # a file the engineer answered is not a proposal, whatever another role says on another question
+    both = [
+        *answers[:1],
+        sim(ans("units_confirm_all", "a.dxf", {"unit": "cm"})),
+        answers[0] | {"file": "b.dxf"},
+    ]
+    doc = build_grid_systems(work, answers=both)
+    assert [f["units_answer"] for f in doc["files"]] == [{"status": "answered", "unit": "cm"}] * 2
+    assert doc["systems"][0]["units"]["status"] == "confirmed"
+
+
+@pytest.mark.parametrize("role", ["simulated", None])
+def test_a_non_engineer_axis_answer_assigns_nothing_and_its_question_still_blocks(tmp_path, example, role):
+    work = _cm_work(tmp_path, example)
+    doc = build_grid_systems(work)
+    system_answer = sim(answer_to(doc, "grid_system_axis_unassigned", {"dir1": "Y", "dir2": "X"}), role)
+    family_answer = sim(ans("grid_family_axis_assignment", "plans.dxf", {"F001": "Y", "F002": "X"}), role)
+    for answer in (system_answer, family_answer):
+        out = build_grid_systems(work, answers=[ans("units_suspect", "plans.dxf", {"unit": "cm"}), answer])
+        check_invariants(out)
+        s = out["systems"][0]
+        assert s["axis_assignment"]["status"] == "proposed_simulated", answer["code"]
+        assert "engineer" in s["axis_assignment"]["reason"]
+        assert all(d["tekla_axis"] is None for d in s["directions"]) and s["tekla_grid"] is None
+        assert "axis_unassigned" in s["flags"]
+        (q,) = [q for q in out["questions"] if q["code"] == "grid_system_axis_unassigned"]
+        assert q["blocking"]
+    # an engineer answer next to a contradicting non-engineer one decides alone
+    engineer = answer_to(doc, "grid_system_axis_unassigned", {"dir1": "Y", "dir2": "X"})
+    both = build_grid_systems(work, answers=[engineer, sim(family_answer, role) | {"values": {"F001": "X"}}])
+    assert both["systems"][0]["axis_assignment"]["status"] == "answered"
+
+
+@pytest.mark.parametrize("role", ["simulated", None])
+def test_a_non_engineer_select_answer_closes_no_conflict(tmp_path, example, role):
+    work = _two_buildings(tmp_path, example)
+    doc = build_grid_systems(work)
+    for values, would in (
+        ({"systems": ["S001"]}, "not_selected"),
+        ({"systems": ["S001", "S002"], "separate": ["S001", "S002"]}, "separate"),
+    ):
+        after = build_grid_systems(work, answers=[sim(answer_to(doc, "grid_system_select", values), role)])
+        check_invariants(after)
+        assert blocking_of(after) == blocking_of(doc), values
+        (c,) = after["conflicts"]
+        assert (c["blocking"], c["closed_by"], c["proposed_closed_by"]) == (True, None, would)
+        assert any("non-engineer" in w and "grid_system_select" in w for w in after["warnings"])
+    engineer = build_grid_systems(work, answers=[answer_to(doc, "grid_system_select", {"systems": ["S001"]})])
+    assert "proposed_closed_by" not in engineer["conflicts"][0]
+    assert "proposed_closed_by" not in doc["conflicts"][0]
+    # one system declared separate is not two separate buildings: nothing would close
+    half = {"systems": ["S001", "S002"], "separate": ["S001"]}
+    after = build_grid_systems(work, answers=[sim(answer_to(doc, "grid_system_select", half), role)])
+    assert "proposed_closed_by" not in after["conflicts"][0]
+    eng_half = build_grid_systems(work, answers=[answer_to(doc, "grid_system_select", half)])
+    assert eng_half["conflicts"][0]["closed_by"] is None and eng_half["conflicts"][0]["blocking"]
+
+
+def test_a_non_engineer_file_set_answer_keeps_the_sets_pending(tmp_path, example):
+    work = _with_file_set(_two_files(tmp_path, example))
+    _set_answers(work, [sim(_file_set_answer(set1=["a.dxf"], set2=["b.dxf"]))])
+    run_grid_systems(work, svg=False)
+    doc = _gs_doc(work)
+    assert doc["file_sets"] == {"status": "pending", "sets": None, "question_id": FILE_SET_ID}
+    (c,) = doc["conflicts"]  # still compared, and waiting for the engineer's answer
+    assert c["blocking"] is False and c["closed_by"] is None
+    assert any("non-engineer" in w and "file_set_relation" in w for w in doc["warnings"])
+
+
+def test_a_conflict_retired_by_the_engineer_file_set_answer_says_so(tmp_path, example):
+    work = _with_file_set(_two_files(tmp_path, example))
+    run_grid_systems(work, svg=False)
+    conflict = _one(_gs_questions(work), "grid_system_conflict")
+    _set_answers(work, [_file_set_answer(set1=["a.dxf"], set2=["b.dxf"])])
+    run_grid_systems(work, svg=False)
+    registry = json.loads((work / "question-registry.json").read_text(encoding="utf-8"))
+    entry = registry["questions"][conflict["key"]]
+    assert entry["status"] == "obsolete"
+    assert entry["obsolete_reason"] == "superseded by an answer to file_set_relation"
+
+
+def test_a_conflict_gone_while_a_non_engineer_file_set_answer_is_active_was_not_superseded(tmp_path, example):
+    """The sets stay pending under a non-engineer answer, so a conflict that goes away (here: b.dxf's grid
+    redrawn, same file) went for another reason."""
+    work = _with_file_set(_two_files(tmp_path, example))
+    _set_answers(work, [sim(_file_set_answer(set1=["a.dxf"], set2=["b.dxf"]))])
+    run_grid_systems(work, svg=False)
+    conflict = _one(_gs_questions(work), "grid_system_conflict")
+    w = Work(work, example)
+    w.add_file("a.dxf", [plan("V001", "model#01", 1), plan("V002", "model#02", 3)])
+    w.add_file("b.dxf", [plan("V001", "model#01", 1), plan("V002", "model#02", 3)])  # same content (sha)
+    w.finish()
+    run_grid_systems(work, svg=False)
+    registry = json.loads((work / "question-registry.json").read_text(encoding="utf-8"))
+    entry = registry["questions"][conflict["key"]]
+    assert entry["obsolete_reason"] == "the latest grid-system run no longer raises it"
+
+
+def test_a_non_engineer_confirmation_of_a_contradicted_unit_confirms_nothing(tmp_path, example):
+    w = Work(tmp_path, example)
+    w.add_file("plans.dxf", [plan("V001", "model#01", 1)], median={"value": 6000.0, "count": 5})
+    work = w.finish()
+    metres = ans("units_confirm_all", "plans.dxf", {"unit": "m"})
+    doc = build_grid_systems(work, answers=[metres])
+    confirm = answer_to(doc, "units_answer_contradicts_evidence", {"unit": "m"})
+    out = build_grid_systems(work, answers=[metres, sim(confirm)])
+    assert out["systems"][0]["units"]["status"] == "not_confirmed"
+    assert out["files"][0]["units_answer"] == {"status": "contradicted", "unit": None}
+    # a non-engineer unit the drawing contradicts is still flagged (it is what an agent would build on)
+    proposed = build_grid_systems(work, answers=[sim(metres)])
+    assert "units_answer_contradicts_evidence" in codes(proposed)
+    assert proposed["files"][0]["units_answer"] == {"status": "proposed_simulated", "unit": "m"}
+    assert proposed["systems"][0]["units"]["reason"] == "units answered by a non-engineer role"
+
+
 # --- SVG -------------------------------------------------------------------------------------------
 
 

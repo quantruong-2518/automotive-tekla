@@ -52,6 +52,13 @@ Rules (deterministic; the thresholds are heuristics, see the schema description)
    system and their systems are never compared (no conflict, no relation). While it is open, a conflict
    between two systems with no file in common does not block ("pending Q-x"); a conflict inside one file
    always does. Without a live question (one readable file, or an older intake) nothing changes.
+10. Who answered (tool wave 3): only an answer with `answered_by_role` engineer confirms units, assigns
+   Tekla X/Y, selects systems, closes a conflict or answers the file sets. An answer an agent gave
+   (simulated), or one recorded before roles, is a proposal: units and X/Y that only such answers give are
+   `proposed_simulated` (nothing converted or assigned, the X/Y question keeps blocking), a select answer
+   that would close a conflict is recorded as `proposed_closed_by` (the conflict keeps blocking), a file
+   set answer leaves the sets pending; each is warned. A non-engineer unit is still tested against the
+   drawing (units_answer_contradicts_evidence), but only the engineer's answer confirms it.
 
 `render_grid_system_svg(system)` draws one system (axes, bubbles, labels, spacing dimensions,
 coordinate strings, units, the PROPOSAL banner) as plain SVG text; spacing labels that would overlap their
@@ -98,6 +105,7 @@ from tekla_harness.questions import (
     CONTRADICTION_CODE,
     FILE_SET_CODE,
     FILE_SET_KEY,
+    ROLES,
     SELECT_CODE,
     SYSTEM_AXIS_CODE,
     UNIT_CODES,
@@ -123,6 +131,13 @@ MAX_QUESTIONS_PER_CODE = 100
 BANNER = "PROPOSAL — not confirmed (gate 1)"
 UNIT_TO_MM = {"mm": 1.0, "cm": 10.0, "m": 1000.0, "in": 25.4, "ft": 304.8}
 EXIT_OK, EXIT_INVALID, EXIT_USAGE, EXIT_ENV = 0, 1, 2, 3
+ENGINEER_ROLE = ROLES[0]  # answers.json answered_by_role of the engineer's own answer
+PROPOSED = "proposed_simulated"  # a value that rests on an answer the engineer did not give
+UNITS_NOT_ENGINEER = "units answered by a non-engineer role"
+AXIS_NOT_ENGINEER = (
+    "Tekla X / Y rest on an answer the engineer did not give (simulated, or no role recorded): it assigns "
+    "nothing until the engineer answers"
+)
 
 _REF_RE = re.compile(r"^(V\d{3,})/(F\d{3,}) on sheet ")
 
@@ -648,6 +663,14 @@ def _same_set(a: _System, b: _System, set_of: dict[str, int]) -> bool:
     return set_of.get(a.rep.file, 0) == set_of.get(b.rep.file, 0)
 
 
+def _closure(a: str, b: str, selected: set[str], separate: set[str]) -> str | None:
+    """What a selection closes the conflict between systems a and b by: one of them left out, or both
+    declared separate buildings; None when it stays open."""
+    if a not in selected or b not in selected:
+        return "not_selected"
+    return "separate" if {a, b} <= separate else None
+
+
 def _systems(
     clusters: list[list[_Member]], ctx: dict[str, _FileCtx], set_of: dict[str, int]
 ) -> list[_System]:
@@ -687,6 +710,19 @@ def _systems(
 
 def _active(answers: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
     return [a for a in answers or [] if isinstance(a, dict) and a.get("status") == "active"]
+
+
+def _by_engineer(answer: dict[str, Any]) -> bool:
+    """The engineer gave this answer: `answered_by_role` engineer. A simulated answer, or one recorded before
+    roles existed, only proposes (tool wave 3): it never confirms, assigns, selects or closes anything."""
+    return answer.get("answered_by_role") == ENGINEER_ROLE
+
+
+def _not_engineer(answer: dict[str, Any], what: str) -> str:
+    return (
+        f"the {answer.get('code')} answer {answer.get('key')!r} was given by a non-engineer role "
+        f"({answer.get('answered_by_role') or 'none recorded'}): {what}"
+    )
 
 
 def units_by_file(
@@ -735,7 +771,8 @@ def consumed_answers_digest(answers: list[dict[str, Any]] | None) -> str:
     """sha256 over the active answers this module reads (units, family and system axis assignment, the
     grid_system_select answer, units contradiction confirmations, the file_set_relation answer): code, file,
     key, values. `harness status` compares it with the current answers.json to see whether grid-systems.json
-    is stale."""
+    is stale. Who answered is not part of it (yet): an engineer's answer that replaces a simulated one with
+    the same values leaves the document 'fresh' but still proposed, which blocks, never opens, gate 1."""
     rows = sorted(
         (
             str(a.get("code")),
@@ -886,12 +923,13 @@ def _contradictions(
     inventory_units: dict[str, dict[str, Any] | None],
     sha: dict[str, str],
     spacing_medians: dict[str, dict[str, Any] | None],
+    confirmers: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     """Files whose answered unit fails the units_suspect magnitude test (read_dxf.implausible_dimensions) on
     the probe's median dimension, or the grid plausibility range (grids.implausible_spacing) on the median
     grid spacing of the file's families: one units_answer_contradicts_evidence each, quoting the answer(s)
     and the evidence. `confirmed`: this very question was answered with the same unit (a deliberate
-    confirmation)."""
+    confirmation) by one of `confirmers` (the engineer's answers)."""
     out = []
     for path in sorted(statuses):
         status, unit = statuses[path]
@@ -914,7 +952,7 @@ def _contradictions(
             and a.get("code") == CONTRADICTION_CODE
             and isinstance(a.get("values"), dict)
             and a["values"].get("unit") == unit
-            for a in active
+            for a in confirmers
         )
         out.append({"file": path, "unit": unit, "where": where, "found": found, "confirmed": confirmed})
     return out
@@ -929,6 +967,30 @@ def _mm(spacings: list[float], factor: float) -> dict[str, Any]:
     return {"spacings": values, "coordinates": coordinate_string(values)}
 
 
+def _axis_state(
+    s: _System, axes: dict[tuple[str, str], set[str]], system_axes: dict[int, str] | None
+) -> tuple[str, str | None, list[set[str]]]:
+    """(status, reason, Tekla axes per direction): every contributing family of a direction must agree."""
+    rep = s.rep
+    per_dir: list[set[str]] = []
+    for d in range(len(rep.fams)):
+        got: set[str] = set()
+        for m in s.members:
+            f = s.family_of(m, d)
+            if f is not None:
+                got |= axes.get((f.file, f.family_id), set())
+        if system_axes and d in system_axes:
+            got.add(system_axes[d])
+        per_dir.append(got)
+    if any(len(g) > 1 for g in per_dir) or (
+        len(per_dir) == 2 and all(len(g) == 1 for g in per_dir) and per_dir[0] == per_dir[1]
+    ):
+        return "contradictory", "axis answers contradict each other for this system", per_dir
+    if any(not g for g in per_dir):
+        return "not_answered", "no axis answer covers every direction", per_dir
+    return "answered", None, per_dir
+
+
 def _system_json(
     sid: str,
     s: _System,
@@ -936,9 +998,17 @@ def _system_json(
     units: dict[str, tuple[str, str | None]],
     axes: dict[tuple[str, str], set[str]],
     system_axes: dict[int, str] | None = None,
+    *,
+    proposals: dict[str, str] | None = None,
+    proposed_axes: dict[tuple[str, str], set[str]] | None = None,
+    proposed_system_axes: dict[int, str] | None = None,
 ) -> dict[str, Any]:
     """`system_axes`: direction index -> Tekla axis from this system's own grid_system_axis_unassigned
-    answer; unioned with the family answers (a disagreement is 'contradictory')."""
+    answer; unioned with the family answers (a disagreement is 'contradictory'). Both come from the
+    engineer's answers only. `proposals` (file -> unit), `proposed_axes` and `proposed_system_axes` are what
+    the answers of every role (non-engineer ones included) would give: a value that only they give is
+    `proposed_simulated` and converts or assigns nothing."""
+    proposals = proposals or {}
     rep = s.rep
     full = s.full()
     groups = _components([m.view for m in full], ctx)
@@ -965,34 +1035,25 @@ def _system_json(
         reason = "units answer contradicted by the drawing"
     elif any(st == "invalid" for st, _ in statuses):
         reason = "units answer invalid"
-    elif any(st == "not_answered" for st, _ in statuses):
+    elif any(units[f][0] == "not_answered" and f not in proposals for f in files):
         reason = "units not confirmed"
+    elif any(units[f][0] == "not_answered" for f in files):
+        reason = UNITS_NOT_ENGINEER  # every file has a unit, but some only from a non-engineer answer
     unit_answer = units[rep.file][1] if reason is None else None
     factor = UNIT_TO_MM[unit_answer] if unit_answer is not None else None
     if factor is None:
         flags.add("units_not_confirmed")
     elif len({u for _, u in statuses}) > 1:
         flags.add("answered_units_differ")
+    if reason == UNITS_NOT_ENGINEER:
+        unit_answer = units[rep.file][1] or proposals.get(rep.file)  # named, never converted
 
-    # axis assignment: every contributing family of a direction must agree
-    per_dir: list[set[str]] = []
-    for d in range(len(rep.fams)):
-        got: set[str] = set()
-        for m in s.members:
-            f = s.family_of(m, d)
-            if f is not None:
-                got |= axes.get((f.file, f.family_id), set())
-        if system_axes and d in system_axes:
-            got.add(system_axes[d])
-        per_dir.append(got)
-    if any(len(g) > 1 for g in per_dir) or (
-        len(per_dir) == 2 and all(len(g) == 1 for g in per_dir) and per_dir[0] == per_dir[1]
+    axis_status, axis_reason, per_dir = _axis_state(s, axes, system_axes)
+    if (
+        axis_status != "answered"
+        and _axis_state(s, proposed_axes or {}, proposed_system_axes)[0] == "answered"
     ):
-        axis_status, axis_reason = "contradictory", "axis answers contradict each other for this system"
-    elif any(not g for g in per_dir):
-        axis_status, axis_reason = "not_answered", "no axis answer covers every direction"
-    else:
-        axis_status, axis_reason = "answered", None
+        axis_status, axis_reason = PROPOSED, AXIS_NOT_ENGINEER
     if axis_status != "answered":
         flags.add("axis_unassigned")
 
@@ -1079,7 +1140,11 @@ def _system_json(
         "units": {
             "declared": declared,
             "answered": unit_answer,
-            "status": "confirmed" if factor is not None else "not_confirmed",
+            "status": "confirmed"
+            if factor is not None
+            else PROPOSED
+            if reason == UNITS_NOT_ENGINEER
+            else "not_confirmed",
             "reason": reason,
         },
         "axis_assignment": {"status": axis_status, "reason": axis_reason},
@@ -1142,22 +1207,41 @@ def build_grid_systems(
     inputs = _load_inputs(work)
     warnings = list(inputs.warnings)
     active = _active(answers)
+    # only the engineer's answers confirm, assign, select or close; the others are proposals (tool wave 3)
+    engineer = [a for a in active if _by_engineer(a)]
+    others = [a for a in active if not _by_engineer(a)]
     file_paths = [f["path"] for f in inputs.files if f["status"] == "read"]
-    set_of, file_sets = _file_sets(active, file_set, inputs.readable, file_paths, warnings)
-    units = units_by_file(active, file_paths, warnings)
-    axes = _axis_answers(active, warnings)
+    set_of, file_sets = _file_sets(engineer, file_set, inputs.readable, file_paths, warnings)
+    for a in others:
+        if file_set is not None and a.get("code") == FILE_SET_CODE and a.get("key") == file_set[0]:
+            warnings.append(_not_engineer(a, "recorded, the file sets stay pending"))
+    units = units_by_file(engineer, file_paths, warnings)
+    proposals = {
+        f: str(u)
+        for f, (st, u) in units_by_file(others, file_paths, warnings).items()
+        if st == "answered" and units[f][0] == "not_answered"
+    }
+    for f, u in sorted(proposals.items()):
+        warnings.append(f"{f}: units {u} only from a non-engineer answer: proposed, converts nothing")
+    axes = _axis_answers(engineer, warnings)
+    proposed_axes = _axis_answers(active, [])
     sha = {f["path"]: f["sha256"] for f in inputs.files}
 
-    # an answered unit that the drawing's own dimensions contradict converts nothing until it is confirmed
+    # an answered unit that the drawing's own dimensions contradict converts nothing until the engineer
+    # confirms it; a non-engineer unit is tested too (an agent builds on it), where no engineer answered
     probed = sorted(p for p, u in inputs.inventory_units.items() if u is not None)
+    by_engineer, by_others = units_by_file(engineer, probed, []), units_by_file(others, probed, [])
+    effective = {p: by_engineer[p] if by_engineer[p][0] != "not_answered" else by_others[p] for p in probed}
     contradictions = _contradictions(
-        active, units_by_file(active, probed, []), inputs.inventory_units, sha, inputs.spacing_medians
+        active, effective, inputs.inventory_units, sha, inputs.spacing_medians, engineer
     )
     for c in contradictions:
-        if not c["confirmed"] and c["file"] in units:
+        if not c["confirmed"] and units.get(c["file"], ("",))[0] == "answered":
             units[c["file"]] = ("contradicted", None)
     for f in inputs.files:
         st = units.get(f["path"])
+        if f["path"] in proposals:
+            st = (PROPOSED, proposals[f["path"]])
         f["units_answer"] = None if st is None else {"status": st[0], "unit": st[1]}
 
     for v in inputs.views:  # an agreeing units answer lets the matching compare this file in millimetres
@@ -1173,6 +1257,7 @@ def build_grid_systems(
     axis_wheres: dict[str, str] = {}
     axis_keys: dict[str, str] = {}
     system_axes: dict[str, dict[int, str]] = {}
+    proposed_system_axes: dict[str, dict[int, str]] = {}  # whatever role answered
     for sid, s in zip(ids, systems, strict=True):
         rf = s.rep.fams[0]
         axis_found[sid] = _axis_found(s)
@@ -1182,9 +1267,23 @@ def build_grid_systems(
             (a for a in active if a.get("code") == SYSTEM_AXIS_CODE and a.get("key") == axis_keys[sid]), None
         )
         if answer is not None:
-            system_axes[sid] = _system_axis_values(answer, len(s.rep.fams), sid, warnings)
+            proposed_system_axes[sid] = _system_axis_values(answer, len(s.rep.fams), sid, warnings)
+            if _by_engineer(answer):
+                system_axes[sid] = proposed_system_axes[sid]
+            else:
+                warnings.append(_not_engineer(answer, f"recorded, assigns no Tekla X / Y to {sid}"))
     docs = [
-        _system_json(sid, s, inputs.ctx, units, axes, system_axes.get(sid))
+        _system_json(
+            sid,
+            s,
+            inputs.ctx,
+            units,
+            axes,
+            system_axes.get(sid),
+            proposals=proposals,
+            proposed_axes=proposed_axes,
+            proposed_system_axes=proposed_system_axes.get(sid),
+        )
         for sid, s in zip(ids, systems, strict=True)
     ]
 
@@ -1194,17 +1293,24 @@ def build_grid_systems(
 
     # the grid_system_select answer of THIS run's question (bound by key): which systems are used, which
     # are declared separate buildings
+    # (only the engineer's answer selects; a non-engineer one is what it WOULD select: proposed_closed_by)
     selected, separate = set(ids), set()
+    proposed: tuple[set[str], set[str]] | None = None
     select_key = question_key(SELECT_CODE, None, None, _select_refs(docs, sha)) if docs else None
     select = next((a for a in active if a.get("code") == SELECT_CODE and a.get("key") == select_key), None)
     if select is not None and isinstance(select.get("values"), dict):
-        chosen, apart = select["values"].get("systems"), select["values"].get("separate")
-        if isinstance(chosen, list) and chosen:
-            selected = {str(x) for x in chosen}
-        if isinstance(apart, list):
-            separate = {str(x) for x in apart}
-        for sid in sorted((selected | separate) - set(ids)):
+        chosen, apart = set(ids), set()
+        if isinstance(select["values"].get("systems"), list) and select["values"]["systems"]:
+            chosen = {str(x) for x in select["values"]["systems"]}
+        if isinstance(select["values"].get("separate"), list):
+            apart = {str(x) for x in select["values"]["separate"]}
+        for sid in sorted((chosen | apart) - set(ids)):
             warnings.append(f"the {SELECT_CODE} answer names {sid}, which is not a system of this run")
+        if _by_engineer(select):
+            selected, separate = chosen, apart
+        else:
+            proposed = (chosen, apart)
+            warnings.append(_not_engineer(select, "recorded, selects and closes nothing"))
 
     ask = _Ask()
     clashes: list[tuple[str, str, str, str, str]] = []  # where, found, file, sheet, what differs (message)
@@ -1249,13 +1355,9 @@ def build_grid_systems(
         )
     conflicts: list[dict[str, Any]] = []
     for (where, found, file, sheet, what), (a, b), wait in zip(clashes, pairs, pending, strict=True):
-        closed_by = (
-            "not_selected"
-            if a not in selected or b not in selected
-            else "separate"
-            if {a, b} <= separate
-            else None
-        )
+        closed_by = _closure(a, b, selected, separate)
+        # one select answer is active: when it is a non-engineer's, the engineer's selection is "all"
+        would = _closure(a, b, *proposed) if proposed is not None else None
         base = (
             "Two grid systems use the same axis labels with different spacings or order, so they are kept "
             f"apart ({what}). Are they different buildings or structures, or is one of them wrong?"
@@ -1274,6 +1376,11 @@ def build_grid_systems(
                 f"them out, or with separate={a},{b} when they are different buildings, then rerun "
                 "harness grid-system."
             )
+            if would is not None:
+                message += (
+                    f" A {SELECT_CODE} answer by a non-engineer role would close it ({would}); it closes "
+                    "nothing until the engineer answers."
+                )
             if wait and file_sets is not None:
                 message = (
                     f"Not blocking yet: pending {file_sets['question_id']} ({FILE_SET_CODE}): the two "
@@ -1290,6 +1397,7 @@ def build_grid_systems(
                 "systems": [a, b],
                 "blocking": blocking,
                 "closed_by": closed_by,
+                **({"proposed_closed_by": would} if would is not None else {}),
                 "question_key": _own_key(CONFLICT_CODE, file, where, found, sheet, sha) if raised else None,
             }
         )
@@ -1502,8 +1610,12 @@ def run_grid_systems(work_dir: str | Path, *, svg: bool = True) -> GridSystemsRe
             f"'{ledger.registry['project_id']}'",
         )
     hashes = {f["path"]: f["sha256"] for f in doc["files"]}
+    # a conflict between two file sets is not compared any more BECAUSE of the engineer's file_set_relation
+    # answer: its registry entry says so (a non-engineer answer leaves the sets pending: nothing retired)
+    answered_sets = (doc.get("file_sets") or {}).get("status") == "answered"
+    superseded = {CONFLICT_CODE: FILE_SET_CODE} if answered_sets else None
     try:
-        questions = ledger.sync("grid-system", grid_system_questions(doc), hashes)
+        questions = ledger.sync("grid-system", grid_system_questions(doc), hashes, superseded_by=superseded)
     except QuestionsError as exc:
         raise GridSystemError(exc.exit_code, str(exc)) from exc
     _link_conflicts(doc, questions)

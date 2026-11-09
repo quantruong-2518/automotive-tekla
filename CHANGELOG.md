@@ -574,6 +574,14 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
       (286 model#05). A ratio-1 ELLIPSE is a circle only when it, too, is a full turn (a door swing in an
       unevenly scaled block was counted). 285 now gives 1-2-3-4-5 = 3130/3540/3520/4590 x A-B-C =
       4250/3730 (and 4254 on model#03), 286 gives 1-2-3 = 3400/3980 x A-B-C = 4840/4190 on 13 sheets.
+    - `harness grid-system` reads only the engineer's answers (`answered_by_role` engineer) as decisions.
+      Units or Tekla X/Y that only a simulated or role-less answer gives are `proposed_simulated`
+      (`units.answered` names the proposed unit; nothing is converted or assigned; the X/Y question keeps
+      blocking); a `grid_system_select` answer from another role selects nothing and records what it would
+      close as `proposed_closed_by` (the conflict keeps blocking); a `file_set_relation` answer from another
+      role leaves the file sets pending; a `units_answer_contradicts_evidence` confirmation counts only from
+      the engineer. Each such answer is named in `warnings`. A conflict that the engineer's file-set answer
+      retires records `obsolete_reason` "superseded by an answer to file_set_relation".
 
 ### Changed
 - Question lifecycle (tool wave 2, EVAL-2 fix 5):
