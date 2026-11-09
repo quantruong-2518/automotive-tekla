@@ -496,6 +496,11 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
       (`harness validate reader-questions`), with example; examples `grid-system-answer` and
       `sheet-region`.
     - `status`: `gate1.closed` stays optional until `harness status` always writes it.
+  - Tool wave 3, seam: a registry entry that a producer run makes obsolete records `obsolete_reason`
+    (W5), first match wins: its input file was removed, or changed (asked again under a new key), or
+    the producer declared its code superseded by an answer to another code (`Ledger.sync(...,
+    superseded_by={code: answer_code})`, only while such an answer is active), else the latest run no
+    longer raises it. Set on the transition, kept while obsolete, dropped when the key is raised again.
 
 ### Changed
 - Question lifecycle (tool wave 2, EVAL-2 fix 5):

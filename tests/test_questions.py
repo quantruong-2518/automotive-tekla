@@ -23,6 +23,10 @@ from tekla_harness.cli import main
 from tekla_harness.intake import IntakeError, run_intake
 from tekla_harness.marks import run_marks
 from tekla_harness.questions import (
+    OBSOLETE_FILE_CHANGED,
+    OBSOLETE_FILE_REMOVED,
+    OBSOLETE_NOT_RAISED,
+    OBSOLETE_SUPERSEDED,
     QuestionsError,
     load_ledger,
     question_group,
@@ -315,6 +319,171 @@ def test_an_answer_goes_stale_when_its_producer_no_longer_raises_the_question(tm
     # a new question gets a new id: the obsolete one is never reused
     third = ledger.sync("structure", [raw("grid_x", "1"), raw("grid_z", "3")], hashes)
     assert third[1]["id"] not in (q1["id"], q2["id"]) and ledger.registry["next_id"] == 4
+
+
+# --- why an entry became obsolete (tool wave 3, W5) -----------------------------------------------
+
+
+A_SHA, B_SHA = "ab" * 32, "cd" * 32
+
+
+def _raw(code: str, found: str = "f", file: str | None = "a.dxf") -> dict[str, Any]:
+    return question_group(code, True, "m", [{"file": file, "where": "w", "found": found}], file=file)
+
+
+def _activate(ledger: Any, q: dict[str, Any], values: dict[str, Any] | None = None) -> None:
+    ledger.answers["answers"].append(
+        {
+            "key": q["key"],
+            "question_id": q["id"],
+            "code": q["code"],
+            "file": q["file"],
+            "answer_text": "yes",
+            "values": values or {},
+            "answered_by": "A. Nguyen",
+            "answered_by_role": "engineer",
+            "answered_on": "2026-11-09",
+            "status": "active",
+        }
+    )
+    ledger.mark_answered(q["key"], True)
+
+
+def _entry(ledger: Any, q: dict[str, Any]) -> dict[str, Any]:
+    return ledger.registry["questions"][q["key"]]
+
+
+def test_obsolete_reason_not_raised(tmp_path):
+    ledger = load_ledger(tmp_path, PROJECT, create=True)
+    keep, gone, project = ledger.sync(
+        "structure", [_raw("grid_x"), _raw("grid_y"), _raw("grid_p", file=None)], {"a.dxf": A_SHA}
+    )
+    ledger.sync("structure", [_raw("grid_x")], {"a.dxf": A_SHA})
+    assert _entry(ledger, gone)["obsolete_reason"] == OBSOLETE_NOT_RAISED.format(producer="structure")
+    assert _entry(ledger, project)["obsolete_reason"] == OBSOLETE_NOT_RAISED.format(producer="structure")
+    assert "obsolete_reason" not in _entry(ledger, keep)
+    assert validate("question-registry", ledger.registry) == []
+
+
+def test_obsolete_reason_file_removed_or_changed_from_the_hashes(tmp_path):
+    ledger = load_ledger(tmp_path, PROJECT, create=True)
+    on_a, on_b = ledger.sync(
+        "marks", [_raw("mark_x"), _raw("mark_y", file="b.dxf")], {"a.dxf": A_SHA, "b.dxf": A_SHA}
+    )
+    ledger.sync("marks", [], {"a.dxf": B_SHA})  # a.dxf changed, b.dxf removed
+    assert _entry(ledger, on_a)["obsolete_reason"] == OBSOLETE_FILE_CHANGED
+    assert _entry(ledger, on_b)["obsolete_reason"] == OBSOLETE_FILE_REMOVED
+
+
+def test_obsolete_reason_file_removed_or_changed_from_stale_files(tmp_path):
+    ledger = load_ledger(tmp_path, PROJECT, create=True)
+    on_a, on_b = ledger.sync("intake", [_raw("xref_unresolved"), _raw("multiple_scales", file="b.dxf")], {})
+    # intake's own diff names the files even when the hashes say nothing (no recorded sha256 here)
+    ledger.sync("intake", [], {"a.dxf": A_SHA, "b.dxf": A_SHA}, {"a.dxf": "changed", "b.dxf": "removed"})
+    assert _entry(ledger, on_a)["obsolete_reason"] == OBSOLETE_FILE_CHANGED
+    assert _entry(ledger, on_b)["obsolete_reason"] == OBSOLETE_FILE_REMOVED
+
+
+def test_intakes_diff_wins_over_the_hashes(tmp_path):
+    ledger = load_ledger(tmp_path, PROJECT, create=True)
+    (q,) = ledger.sync("intake", [_raw("xref_unresolved")], {"a.dxf": A_SHA})
+    ledger.sync(
+        "intake", [], {}, {"a.dxf": "changed"}
+    )  # the diff says changed: not "removed" from the hashes
+    assert _entry(ledger, q)["obsolete_reason"] == OBSOLETE_FILE_CHANGED
+
+
+def test_an_entry_without_a_recorded_sha_and_a_present_file_is_simply_not_raised(tmp_path):
+    ledger = load_ledger(tmp_path, PROJECT, create=True)
+    (q,) = ledger.sync("structure", [_raw("grid_x")], {"a.dxf": A_SHA})
+    del _entry(ledger, q)["file_sha256"]  # an entry written before file_sha256 existed
+    ledger.sync("structure", [], {"a.dxf": B_SHA})
+    assert _entry(ledger, q)["obsolete_reason"] == OBSOLETE_NOT_RAISED.format(producer="structure")
+
+
+def test_obsolete_reason_superseded_needs_the_declared_code_and_an_active_answer(tmp_path):
+    ledger = load_ledger(tmp_path, PROJECT, create=True)
+    file_set, unrelated = ledger.sync(
+        "intake", [_raw("file_set_relation", file=None), _raw("xref_unresolved", file=None)], {"a.dxf": A_SHA}
+    )
+    _activate(ledger, unrelated)  # an active answer to ANOTHER code supersedes nothing
+    conflict, other = ledger.sync(
+        "grid-system", [_raw("grid_system_conflict", file=None), _raw("grid_system_select", file=None)], {}
+    )
+    declared = {"grid_system_conflict": "file_set_relation"}
+    ledger.sync("grid-system", [], {}, superseded_by=declared)  # declared, but no answer yet
+    assert _entry(ledger, conflict)["obsolete_reason"] == OBSOLETE_NOT_RAISED.format(producer="grid-system")
+
+    second = tmp_path / "second"
+    second.mkdir()
+    ledger2 = load_ledger(second, PROJECT, create=True)
+    (file_set,) = ledger2.sync("intake", [_raw("file_set_relation", file=None)], {"a.dxf": A_SHA})
+    _activate(ledger2, file_set, {"set1": ["a.dxf"]})
+    conflict, other = ledger2.sync(
+        "grid-system", [_raw("grid_system_conflict", file=None), _raw("grid_system_select", file=None)], {}
+    )
+    ledger2.sync("grid-system", [], {}, superseded_by=declared)
+    assert _entry(ledger2, conflict)["obsolete_reason"] == OBSOLETE_SUPERSEDED.format(
+        code="file_set_relation"
+    )
+    # a code the producer did not declare is simply no longer raised
+    assert _entry(ledger2, other)["obsolete_reason"] == OBSOLETE_NOT_RAISED.format(producer="grid-system")
+
+
+def test_obsolete_reason_precedence_file_before_superseded(tmp_path):
+    ledger = load_ledger(tmp_path, PROJECT, create=True)
+    (prefix,) = ledger.sync("callouts", [_raw("grade_legacy_mapping", file=None)], {})
+    _activate(ledger, prefix)
+    on_a, on_b = ledger.sync(
+        "marks", [_raw("mark_x"), _raw("mark_x", "g", file="b.dxf")], {"a.dxf": A_SHA, "b.dxf": A_SHA}
+    )
+    ledger.sync("marks", [], {"a.dxf": B_SHA}, superseded_by={"mark_x": "grade_legacy_mapping"})
+    assert _entry(ledger, on_a)["obsolete_reason"] == OBSOLETE_FILE_CHANGED  # changed beats superseded
+    assert _entry(ledger, on_b)["obsolete_reason"] == OBSOLETE_FILE_REMOVED  # removed beats superseded
+
+
+def test_obsolete_reason_is_set_once_and_cleared_when_the_key_comes_back(tmp_path):
+    ledger = load_ledger(tmp_path, PROJECT, create=True)
+    (q,) = ledger.sync("structure", [_raw("grid_x")], {"a.dxf": A_SHA})
+    ledger.sync("structure", [], {"a.dxf": A_SHA})
+    first = _entry(ledger, q)["obsolete_reason"]
+    assert first == OBSOLETE_NOT_RAISED.format(producer="structure")
+    ledger.sync("structure", [], {})  # later the file goes too: the reason of the transition stays
+    assert _entry(ledger, q)["obsolete_reason"] == first
+    (again,) = ledger.sync("structure", [_raw("grid_x")], {"a.dxf": A_SHA})  # same content: same key
+    assert again["key"] == q["key"] and _entry(ledger, q)["status"] == "open"
+    assert "obsolete_reason" not in _entry(ledger, q)
+
+
+def test_obsolete_reason_leaves_other_producers_and_legacy_entries_alone(tmp_path):
+    ledger = load_ledger(tmp_path, PROJECT, create=True)
+    (theirs,) = ledger.sync("callouts", [_raw("callout_x")], {"a.dxf": A_SHA})
+    (legacy,) = ledger.sync("structure", [_raw("grid_x")], {"a.dxf": A_SHA})
+    _entry(ledger, legacy)["status"] = "obsolete"  # retired before obsolete_reason existed
+    ledger.sync("structure", [], {})
+    assert "obsolete_reason" not in _entry(ledger, legacy)
+    assert "obsolete_reason" not in _entry(ledger, theirs) and _entry(ledger, theirs)["status"] == "open"
+
+
+def test_a_removed_file_records_why_its_questions_are_obsolete(world):
+    root, work = world
+    (root / "other.dxf").unlink()
+    rerun_all(root, work)
+    registry = load(work / "question-registry.json")
+    assert validate("question-registry", registry) == []
+    reasons = {e["obsolete_reason"] for e in registry["questions"].values() if e["file"] == "other.dxf"}
+    assert reasons == {OBSOLETE_FILE_REMOVED}
+
+
+def test_a_changed_file_records_why_its_old_questions_are_obsolete(world):
+    root, work = world
+    old = {k for k, e in load(work / "question-registry.json")["questions"].items() if e["file"] == "set.dxf"}
+    build_set(root, "set.dxf", sheet2_number="S-888")
+    rerun_all(root, work)
+    registry = load(work / "question-registry.json")["questions"]
+    gone = {registry[k].get("obsolete_reason") for k in old if registry[k]["status"] == "obsolete"}
+    assert gone == {OBSOLETE_FILE_CHANGED}
+    assert all("obsolete_reason" not in e for e in registry.values() if e["status"] != "obsolete")
 
 
 def test_structure_answers_of_a_changed_file_go_stale_at_intake(world):

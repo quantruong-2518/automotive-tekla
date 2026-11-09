@@ -25,7 +25,9 @@ Rules (deterministic, conservative: when in doubt nothing closes):
   * units_answered: a live grid_units_doubt whose file's live units_confirm_all (same file content) has an
     active answer; `question_id` is that units question.
   * other_file_set is not derived: once file_set_relation is answered, harness grid-system no longer
-    compares two sets, so a cross-set conflict is no longer raised at all (obsolete, not closed).
+    compares two sets, so a cross-set conflict is no longer raised at all (obsolete, not closed). Its
+    registry `obsolete_reason` says so when harness grid-system passes Ledger.sync
+    `superseded_by={grid_system_conflict: file_set_relation}` (questions.OBSOLETE_SUPERSEDED).
 
 Read-only: never writes. A missing document closes nothing; an unreadable or invalid one is an error
 (QuestionsError, exit 1), never silently skipped.

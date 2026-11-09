@@ -9,7 +9,8 @@ identity that does not depend on the position:
             asked again.
   id        Q-001.. allocated by the registry (`question-registry.json`) in increasing order and NEVER
             reused. A key keeps its id for ever. A key its producer no longer raises becomes 'obsolete'
-            (kept, not deleted).
+            (kept, not deleted), with an `obsolete_reason` (OBSOLETE_*: file removed, file changed,
+            superseded by an answer the producer names, or not raised any more).
   answer    `answers.json`: the engineer's words, bound to the key. An answer whose file was changed or
             removed (or whose question is no longer raised) becomes 'stale'; it is never deleted and never
             re-bound to another key.
@@ -44,6 +45,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -98,6 +100,13 @@ FILE_SET_KEY = re.compile(r"set[1-9][0-9]*")
 ROLES = ("engineer", "simulated")
 # why a question is closed without an answer of its own (intake schema closed_by.reason; lifecycle.py)
 CLOSURE_REASONS = ("not_selected", "separate", "units_answered", "rejected_systems_only", "other_file_set")
+# why a producer run made a registry entry obsolete (registry `obsolete_reason`, tool wave 3 W5), in the
+# precedence order Ledger.sync applies: the file went, the file changed, an answer superseded it, or simply
+# not raised any more
+OBSOLETE_FILE_REMOVED = "its input file was removed"
+OBSOLETE_FILE_CHANGED = "its input file changed (the question is asked again under a new key)"
+OBSOLETE_SUPERSEDED = "superseded by an answer to {code}"
+OBSOLETE_NOT_RAISED = "the latest {producer} run no longer raises it"
 
 
 @dataclass(frozen=True)
@@ -351,13 +360,18 @@ class Ledger:
         raw: list[dict[str, Any]],
         file_hashes: dict[str, str],
         stale_files: dict[str, str] | None = None,
+        *,
+        superseded_by: Mapping[str, str] | None = None,
     ) -> list[dict[str, Any]]:
         """Register this run's questions of `producer` and return them rendered, in the producer's order:
         id, key, code, blocking, file, message, count, truncated, refs, [subjects], answer.
 
-        New keys get the next ids (in order). Keys of this producer that were not raised become obsolete.
-        An active answer becomes stale when its file is in `stale_files` (path -> 'changed' | 'removed')
-        or when its question is no longer raised. `file_hashes`: input-relative path -> sha256."""
+        New keys get the next ids (in order). Keys of this producer that were not raised become obsolete,
+        with `obsolete_reason` set on that transition (_obsolete_reason) and dropped if the key is raised
+        again. An active answer becomes stale when its file is in `stale_files` (path -> 'changed' |
+        'removed') or when its question is no longer raised. `file_hashes`: input-relative path -> sha256.
+        `superseded_by`: question code -> answer code, for codes this run stopped raising BECAUSE of an
+        answer to that code (e.g. grid-system: grid_system_conflict -> file_set_relation)."""
         if producer not in PRODUCERS:
             raise ValueError(f"unknown producer '{producer}'")
         registry, entries = self.registry, self.registry["questions"]
@@ -419,7 +433,14 @@ class Ledger:
             entry["file_sha256"] = file_hashes.get(q["file"]) if q["file"] is not None else None
         for key, entry in entries.items():
             if entry["producer"] == producer:
-                entry["status"] = "obsolete" if key not in seen else ("answered" if key in active else "open")
+                if key in seen:  # raised (again): a revived key forgets why it was obsolete
+                    entry.pop("obsolete_reason", None)
+                    entry["status"] = "answered" if key in active else "open"
+                elif entry["status"] != "obsolete":  # the reason is the transition's; later runs keep it
+                    entry["status"] = "obsolete"
+                    entry["obsolete_reason"] = self._obsolete_reason(
+                        entry, producer, file_hashes, stale_files or {}, superseded_by or {}
+                    )
             elif entry["status"] != "obsolete":  # another producer's question whose answer just went stale
                 entry["status"] = "answered" if key in active else "open"
 
@@ -442,6 +463,34 @@ class Ledger:
             rendered.append(out)
         self.check()
         return rendered
+
+    def _obsolete_reason(
+        self,
+        entry: dict[str, Any],
+        producer: str,
+        file_hashes: dict[str, str],
+        stale_files: dict[str, str],
+        superseded_by: Mapping[str, str],
+    ) -> str:
+        """Why `producer`'s run no longer raises this entry (OBSOLETE_*), first match wins: its file was
+        removed (intake's diff, or absent from the run's hashes) or changed (intake's diff, or a sha256 other
+        than the one recorded when it was raised); the producer declared its code superseded by an answer
+        to another code (`superseded_by`: code -> answer code) and such an answer is active; else not
+        raised. A project-level entry (file null) has no file reason."""
+        file = entry["file"]
+        if file is not None:
+            diff = stale_files.get(file)
+            if diff == "removed" or (diff is None and file not in file_hashes):
+                return OBSOLETE_FILE_REMOVED
+            recorded = entry.get("file_sha256")
+            if diff == "changed" or (recorded is not None and file_hashes.get(file) != recorded):
+                return OBSOLETE_FILE_CHANGED
+        answer_code = superseded_by.get(entry["code"])
+        if answer_code is not None and any(
+            a["code"] == answer_code and a["status"] == "active" for a in self.answers["answers"]
+        ):
+            return OBSOLETE_SUPERSEDED.format(code=answer_code)
+        return OBSOLETE_NOT_RAISED.format(producer=producer)
 
     def write(self) -> None:
         """Registry (always) and answers (when they changed); call BEFORE writing any question document."""
