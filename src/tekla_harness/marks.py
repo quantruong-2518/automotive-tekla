@@ -1664,9 +1664,7 @@ def extract_marks(
         mine_t = [t for t in tables if t["file"] == f["path"]]
         match = _match_file(f["path"], mine_p, mine_t, headings.get(f["path"], []))
         matching.append(match)
-        uncertain = bool(f["unparsed_tables"] or f["blocked_marks"]) or any(
-            t["header_blocked"] for t in mine_t
-        )
+        uncertain = _may_hide_rows(f, mine_t)
         mark_sets += _mark_sets(f["path"], mine_p, mine_t, headings.get(f["path"], []), match, uncertain)
     for p in plan:
         p.pop("_structure", None)
@@ -1698,6 +1696,12 @@ def extract_marks(
 
 
 SET_SOURCES = ("schedule", "detail_heading", "plan_marks")
+
+
+def _may_hide_rows(info: dict[str, Any], tables: list[dict[str, Any]]) -> bool:
+    """The file has a table whose rows were not read: an unparsed table, a header-blocked table or a
+    blocked mark. Such rows may belong to any family, so no mark set of the file is complete."""
+    return bool(info["unparsed_tables"] or info["blocked_marks"]) or any(t["header_blocked"] for t in tables)
 
 
 def _mark_sets(

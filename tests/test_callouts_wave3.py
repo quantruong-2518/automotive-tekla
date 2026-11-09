@@ -121,6 +121,8 @@ def test_a_glyph_callout_keeps_its_neighbours():
         f"a2{U_GRAVE}20",  # glued to the token before
         f"2{U_GRAVE}20x",  # glued to the token after
         f"3{U_GRAVE}{U_GRAVE}20",
+        "3D20",  # an ASCII letter is never a glyph
+        "2b10a150",
     ],
 )
 def test_not_a_glyph_callout(line):
@@ -224,6 +226,16 @@ def test_a_sheet_code_and_a_title_block_value_are_rejected_not_dropped(reject_do
     assert others and {r["kind"] for r in others} == {"member_mark"}
 
 
+def test_a_sign_right_after_a_candidate_is_not_covered_by_it():
+    from tekla_harness.callouts import _uncovered_signs
+
+    line = f"4{DIA}16{DIA}"  # the loose form reads '4Ø16'; the second sign belongs to no candidate
+    hits = scan_line(line)
+    assert [(h.start, h.end) for h in hits] == [(0, 4)]
+    assert _uncovered_signs(line, hits) == [line]
+    assert _uncovered_signs(f"4{DIA}16 x", scan_line(f"4{DIA}16 x")) == []
+
+
 def test_texts_claimed_by_grids_or_levels_are_rejected_with_the_claimer(reject_work, tmp_path):
     target = tmp_path / "copy"
     shutil.copytree(reject_work, target)
@@ -310,13 +322,28 @@ def test_callout_unparsed_sheets_ref_counts_every_sheet():
             "unparsed_code": GLYPH,
         }
 
-    cands = [cand(1, "model#02"), cand(2, None), cand(3, "model#02"), cand(4, "model#01")]
+    cands = [
+        cand(1, "model#02"),
+        cand(2, None),
+        cand(3, "model#02"),
+        cand(4, "model#01"),
+        cand(5, "model#01"),
+    ]
     (q,) = callout_questions(cands)
-    found = "model#01 (1), model#02 (2), no sheet (1)"
+    found = "model#01 (2), model#02 (2), no sheet (1)"
     assert q["refs"][-1] == {"file": REL, "where": "sheets", "found": found}
-    assert [r["where"] for r in q["refs"][:-1]] == [f"text entry T{n:06d}" for n in (1, 2, 3, 4)]
+    assert [r["where"] for r in q["refs"][:-1]] == [f"text entry T{n:06d}" for n in (1, 2, 3, 4, 5)]
     assert "sheet" not in q["refs"][1]  # a text on no sheet
-    assert (q["count"], q["truncated"]) == (4, False)
+    assert (q["count"], q["truncated"]) == (5, False)  # exactly five examples: nothing left out
+    # a legacy grade group is asked by grade_legacy_mapping, never by callout_unparsed
+    legacy = {
+        **cand(6, "model#01"),
+        "kind": "rebar_grade",
+        "display_text": "AIII",
+        "rule": "LEGACY_GROUP (x)",
+    }
+    legacy["unparsed_code"] = "grade_unverified"
+    assert [q["code"] for q in callout_questions([legacy])] == ["grade_legacy_mapping"]
 
 
 def test_every_unparsed_candidate_is_asked_by_exactly_one_question(glyph_doc, reject_doc):

@@ -30,7 +30,17 @@ def test_a_mark_with_a_length_in_brackets_is_the_mark(text, mark, numbers):
 
 
 @pytest.mark.parametrize(
-    "text", ["L=4700", "LT1(L=)", "LT1(L=4700", "LT1(L=4700) D2", "LT1(H=4700)", "(L=4700)"]
+    "text",
+    [
+        "L=4700",
+        "LT1(L=)",
+        "LT1(L=4700",
+        "LT1(L=4700) D2",
+        "LT1(H=4700)",
+        "(L=4700)",
+        "M20(L=4700)",  # the mark part itself is a bolt label
+        "I300(L=4700)",  # ... or a section label
+    ],
 )
 def test_not_a_mark_with_a_length(text):
     assert parse_mark(text) is None
@@ -236,3 +246,79 @@ def test_a_schedule_is_a_source_but_unread_tables_keep_every_set_incomplete(head
     # the fixture holds an unparsed table and a header-blocked one: rows may be missing anywhere in the file
     assert not any(s["complete"] for s in heading_doc["summary"]["mark_sets"])
     assert sets["AB"]["members"] == ["AB-20B"] and sets["CP"]["source"] == ["detail_heading"]
+
+
+# --- mutation-test follow-ups ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("text", "mark"),
+    [("DETAIL OF CP1", "CP1"), ("DETAIL ON AB-20B", "AB-20B"), ("detail of jp2 (thickness 16mm)", "jp2")],
+)
+def test_detail_of_headings(text, mark):
+    from tekla_harness.marks import parse_detail_of
+
+    found = parse_detail_of(text)
+    assert found is not None and found.text == mark
+
+
+@pytest.mark.parametrize(
+    "text", ["DETAIL D1", "DETAIL OF STIFFENER", "DETAIL OF I300", "DETAILS OF CP1", "OF CP1"]
+)
+def test_not_detail_of_headings(text):
+    from tekla_harness.marks import parse_detail_of
+
+    assert parse_detail_of(text) is None
+
+
+def test_every_heading_counts_and_a_low_heading_lowers_the_match(tmp_path):
+    from _callout_fixtures import build_work
+    from tekla_harness.marks import extract_marks
+
+    # .VnTimeH is a capital font: its ASCII text is case-uncertain, so the heading is low
+    work = build_work(
+        tmp_path,
+        s1=["DẦM D1", "D1", "DẦM D2", "D2"],
+        styled=[("beam d1", ".VnTimeH")],
+        s2=["DẦM D2"],
+        paper=[],
+    )
+    (m,) = extract_marks(work, tmp_path / "input")["matching"]
+    assert m["detail_headings"] == 4  # every heading counts, not every key
+    matched = by_key(m["matched"])
+    assert len(matched["d2"]["detail_headings"]) == 2 and matched["d2"]["confidence"] == "medium"
+    assert matched["d1"]["confidence"] == "low"  # its heading "beam d1" is case-uncertain
+
+
+def test_plan_marks_alone_are_never_a_complete_set(tmp_path):
+    doc = marks_doc(tmp_path, ["M1", "M2"])
+    assert doc["matching"][0]["plan_only"] == []  # nothing compared ...
+    assert sets_of(doc)["M"]["complete"] is False  # ... and still not complete
+
+
+def test_mark_sets_read_only_mark_shaped_cells_of_readable_tables():
+    from tekla_harness.marks import _mark_sets
+
+    def table(blocked: bool, marks: list[tuple[str, str, Any]]) -> dict[str, Any]:
+        row = {"marks": [{"key": k, "text": t, "_structure": st} for k, t, st in marks]}
+        return {"header_blocked": blocked, "mark_column": None if blocked else 0, "rows": [row]}
+
+    tables = [
+        table(False, [("x 1", "X 1", None), ("d4", "D4", ("d", (4,), ""))]),  # 'X 1' is no mark shape
+        table(True, [("q1", "Q1", ("q", (1,), ""))]),  # a header-blocked table is never read
+    ]
+    sets = _mark_sets("f.dxf", [], tables, [], {"plan_only": [], "notation_variants": []}, False)
+    assert sets == [
+        {"file": "f.dxf", "family": "D", "members": ["D4"], "complete": True, "source": ["schedule"]}
+    ]
+
+
+@pytest.mark.parametrize(
+    ("unparsed", "blocked", "header_blocked", "hides"),
+    [(0, 0, False, False), (1, 0, False, True), (0, 1, False, True), (0, 0, True, True)],
+)
+def test_which_files_may_hide_rows(unparsed, blocked, header_blocked, hides):
+    from tekla_harness.marks import _may_hide_rows
+
+    info = {"unparsed_tables": unparsed, "blocked_marks": blocked}
+    assert _may_hide_rows(info, [{"header_blocked": False}, {"header_blocked": header_blocked}]) is hides
