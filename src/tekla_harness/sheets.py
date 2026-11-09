@@ -43,6 +43,9 @@ Algorithm (deterministic, every threshold is a named constant below):
    Constant text of the frame's own block is template text and never a value. A field value is chosen
    only when ALL its candidates agree; any disagreement is a title_field_conflict question (blocking
    for sheet_number and revision).
+5. Number gaps. One non-blocking sheet_number_gap question per file lists the numbers that a letter
+   series skips and no sheet of any series carries, with the sheets on each side
+   (`_number_gap_question`).
 
 Not done here (documented gaps): frames drawn as four LINEs, rotated frame rectangles, clipped
 viewports (the rectangle is used), and the drawing list / sheet index (`drawing_list.status` is
@@ -68,6 +71,7 @@ from ezdxf.document import Drawing
 from ezdxf.filemanagement import readfile
 
 from tekla_harness.detect import sha256_file
+from tekla_harness.questions import SHEET_GAP_CODE
 
 SCHEMA_VERSION = "0.1"
 SHEET_UNKNOWN = "unknown"  # provenance.sheet when a value lies on no detected sheet
@@ -1061,6 +1065,70 @@ def _same_height(a: float, b: float) -> bool:
     return abs(a - b) <= 1e-6 * max(abs(a), abs(b), 1.0)
 
 
+# --- gaps in the printed numbers (tool wave 3, KC-25 on 290) ---------------------------------------------
+
+# A chosen sheet number as letters and a sequence number: 'KC-05', 'Kc - 13', 'S-101A' (a letter suffix
+# counts as its number), 'KT 1/18' (sheet 1 of 18). Anything else ('A1-02', 'GENERAL') is left out of the
+# gap check.
+_NUMBER_PARTS_RE = re.compile(
+    r"^(?P<prefix>[a-z]{1,4})\s?(?:[-:.]\s?(?P<n>\d{1,3})[a-z]?|(?P<n2>\d{1,3})\s?/\s?\d{1,3})$"
+)
+
+
+def _number_gap_question(sheets: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """One non-blocking sheet_number_gap question per file, or None when no printed number is skipped.
+
+    A number is missing when it lies between the lowest and highest number of one letter series and no
+    sheet of ANY series carries it: on 290 one counter runs over Kc and KT sheets (Kc - 13, KT - 14,
+    Kc - 15), so KT - 14 fills the Kc series. Consecutive missing numbers are one range, given with the
+    sheets on each side. Sheets without a chosen number are listed: they may carry a missing one."""
+    by_number: dict[int, list[tuple[str, str]]] = defaultdict(list)  # number -> (sheet id, printed value)
+    series: dict[str, list[int]] = defaultdict(list)
+    for s in sheets:
+        chosen = s["title_block"]["sheet_number"]
+        if chosen is None:
+            continue
+        m = _NUMBER_PARTS_RE.match(fold(chosen["value"]))
+        if m is None:
+            continue
+        n = int(m.group("n") or m.group("n2"))
+        by_number[n].append((s["sheet_id"], chosen["value"]))
+        series[m.group("prefix")].append(n)
+    missing = sorted(
+        {n for nums in series.values() for n in range(min(nums), max(nums) + 1) if n not in by_number}
+    )
+    if not missing:
+        return None
+    runs: list[list[int]] = []
+    for n in missing:
+        if runs and runs[-1][-1] == n - 1:
+            runs[-1].append(n)
+        else:
+            runs.append([n])
+    order = {s["sheet_id"]: i for i, s in enumerate(sheets)}
+    around: set[str] = set()
+    parts = []
+    for run in runs:
+        lo, hi = by_number[run[0] - 1], by_number[run[-1] + 1]
+        around.update(sid for sid, _ in lo + hi)
+        span = str(run[0]) if len(run) == 1 else f"{run[0]}-{run[-1]}"
+        parts.append(
+            f"missing {span} (between {lo[0][1]} on {', '.join(sid for sid, _ in lo)} "
+            f"and {hi[0][1]} on {', '.join(sid for sid, _ in hi)})"
+        )
+    unnumbered = [s["sheet_id"] for s in sheets if s["title_block"]["sheet_number"] is None]
+    if unnumbered:
+        parts.append(f"{len(unnumbered)} sheet(s) without a detected number: {listed(unnumbered)}")
+    return question(
+        SHEET_GAP_CODE,
+        False,
+        "The printed sheet numbers of this file skip some numbers: is a sheet missing from the set, does "
+        "the numbering jump on purpose, or was a number misread?",
+        listed(sorted(around, key=order.__getitem__)),
+        "; ".join(parts),
+    )
+
+
 def _choose(cands: list[dict[str, Any]], fld: str) -> tuple[dict[str, Any] | None, list[str]]:
     """(chosen sourced_string or None, distinct values among ALL candidates of the field).
 
@@ -1479,6 +1547,9 @@ def extract_sheets(dxf_path: str | Path, text_index: dict[str, Any], *, doc: Dra
                     shown,
                 )
             )
+    gap = _number_gap_question(sheets)
+    if gap is not None:
+        questions.append(gap)
     signatures: dict[tuple[str, ...], list[str]] = defaultdict(list)
     for s in sheets:
         texts = tuple(sorted(entry_by_id[t]["display_text"] for t in s["text_ids"]))

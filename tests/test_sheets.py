@@ -325,6 +325,74 @@ def test_a_rotated_code_in_a_horizontal_frame_is_not_a_number(tmp_path):
     assert sheet(result, "model#01")["title_block"]["sheet_number"] is None
 
 
+# --- tool wave 3: gaps in a file's printed sheet numbers (sheet_number_gap, not blocking) ---------------
+
+
+def _corner(*numbers: str) -> list[list[_Spec]]:
+    return [[(n, 0.92, 0.05, 300)] if n else [] for n in numbers]
+
+
+def _gap(result: dict[str, Any]) -> dict[str, Any] | None:
+    gaps = [q for q in result["questions"] if q["code"] == "sheet_number_gap"]
+    assert len(gaps) <= 1  # one question per file
+    return gaps[0] if gaps else None
+
+
+def test_a_missing_number_in_the_sequence_is_asked(tmp_path):
+    _, result = run(_numbered(tmp_path, _corner("KC-23", "KC-24", "KC-26", "KC-27")))
+    q = _gap(result)
+    assert q is not None and not q["blocking"]
+    assert q["where"] == "model#02, model#03"
+    assert q["found"] == "missing 25 (between KC-24 on model#02 and KC-26 on model#03)"
+
+
+def test_a_run_of_missing_numbers_is_one_range_and_duplicates_name_every_sheet(tmp_path):
+    _, result = run(_numbered(tmp_path, _corner("S-01", "S-01", "S-05", "S-06")))
+    q = _gap(result)
+    assert q is not None
+    assert q["found"] == "missing 2-4 (between S-01 on model#01, model#02 and S-05 on model#03)"
+    assert q["where"] == "model#01, model#02, model#03"
+
+
+def test_several_gaps_and_sheets_without_a_number_are_listed(tmp_path):
+    _, result = run(_numbered(tmp_path, _corner("KC-01", "KC-03", "", "KC-05")))
+    q = _gap(result)
+    assert q is not None
+    assert q["found"] == (
+        "missing 2 (between KC-01 on model#01 and KC-03 on model#02); "
+        "missing 4 (between KC-03 on model#02 and KC-05 on model#04); "
+        "1 sheet(s) without a detected number: model#03"
+    )
+    assert q["where"] == "model#01, model#02, model#04"
+
+
+def test_a_number_taken_by_another_prefix_fills_the_gap(tmp_path):
+    # 290: one counter runs over Kc and KT sheets (Kc - 13, KT - 14, Kc - 15)
+    _, result = run(_numbered(tmp_path, _corner("Kc - 13", "KT - 14", "Kc - 15")))
+    assert _gap(result) is None
+
+
+def test_no_gap_question_for_a_complete_sequence_or_a_single_number(tmp_path):
+    _, result = run(_numbered(tmp_path, _corner("KC-01", "KC-02", "KC-03")))
+    assert _gap(result) is None
+    _, result = run(_numbered(tmp_path, _corner("KC-07", "")))
+    assert _gap(result) is None
+
+
+def test_sheet_x_of_y_and_letter_suffixes_count_by_their_number(tmp_path):
+    _, result = run(_numbered(tmp_path, _corner("KT 1/18", "KT 2/18", "KT-04A")))
+    q = _gap(result)
+    assert q is not None and q["found"] == "missing 3 (between KT 2/18 on model#02 and KT-04A on model#03)"
+
+
+def test_numbers_that_are_not_codes_are_left_out_of_the_gap_check(tmp_path):
+    def extra(msp, w, h):
+        msp.add_text("SHEET NO: GENERAL", height=250, dxfattribs={"insert": (w - 8000, 1000)})
+
+    _, result = run(_frames_only(tmp_path, extra))
+    assert _gap(result) is None
+
+
 def test_inline_label_is_medium(tmp_path):
     def extra(msp, w, h):
         msp.add_text("SHEET NO: S-301", height=250, dxfattribs={"insert": (w - 8000, 1000)})

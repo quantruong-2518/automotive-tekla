@@ -530,6 +530,12 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
       model text shown on a layout sheet is never in that sheet's corner. Corpus: 285 model#03
       `kc- 03`, 290 model#16-18 `Kc - 13` and 267 model#16-20 / #43-44 are now read; the false
       `gĐ-3` on 286 model#04 is gone.
+    - Sheets: new non-blocking question `sheet_number_gap`, one per file, when the chosen sheet numbers
+      of a letter series skip numbers that no sheet of any series carries (one counter may run over
+      several series, as Kc and KT on 290). `found` gives each missing number or range with the sheets
+      on each side, and the sheets without a detected number. `KT 1/18` counts as 1, `KC-05A` as 5;
+      other values are left out. Corpus: 290 `missing 25`, 461 `missing 6-9` (three sheets there have
+      no detected number); no other known file.
 
 ### Changed
 - Question lifecycle (tool wave 2, EVAL-2 fix 5):
