@@ -136,6 +136,8 @@ def test_a_non_engineer_answer_leaves_a_blocking_question_open(world, role, labe
     block = block_of(rendered.text, q["id"])
     assert label in block and code_span("structural (agent guess)") in block
     assert f"**Lệnh trả lời ({MD_ENGINEER}):**" in block
+    assert "- **Trả lời:** chưa tính vì không phải kỹ sư trả lời; kỹ sư tự trả lời lại" in block
+    assert "không đóng được câu này" not in block  # that is said only of a code no answer closes
     assert rendered.summary["blocking_open"] == sum(
         p["questions"]["blocking_open"] for p in status["producers"]
     )
@@ -243,6 +245,31 @@ def test_a_conflict_pending_on_the_file_sets_says_so_and_not_that_it_closed(two_
     assert f"đang chờ câu {file_set} ({code_span('file_set_relation')})" in block, block
     assert "đã đóng" not in block and "không còn chặn" not in block
     assert MD_ENGINEER in block
+
+
+@pytest.mark.parametrize(
+    ("item_blocking", "conflict", "pending"),
+    [
+        (False, {"blocking": False, "closed_by": None}, "Q-003"),
+        (True, {"blocking": False, "closed_by": None}, None),  # a refused written closure made it blocking
+        (False, {"blocking": True, "closed_by": None}, None),  # grid-system itself says it blocks
+        (False, {"blocking": False, "closed_by": "separate"}, None),  # a closure, not a wait
+        (False, None, None),  # not in grid-systems.json
+    ],
+)
+def test_a_conflict_is_pending_only_when_grid_system_left_it_waiting(item_blocking, conflict, pending):
+    from tekla_harness.questions_md import Context, pending_file_set
+
+    key = "c" * 16
+    q = Item(
+        id="Q-015", key=key, code=CONFLICT_CODE, blocking=item_blocking, file="a.dxf", message="m",
+        count=1, truncated=False, refs=[], subjects=None, source="grid-system-questions.json",
+        producer="grid-system", topic="grids", answer=None,
+    )  # fmt: skip
+    ctx = Context(work_rel="work", out_dir=Path("out"), work=Path("work"), pending_file_set="Q-003")
+    if conflict is not None:
+        ctx.conflicts = {key: {"systems": ["S001", "S002"], "question_key": key, **conflict}}
+    assert pending_file_set(q, ctx) == pending
 
 
 def test_a_non_blocking_conflict_with_no_closure_and_no_pending_file_set_shows_how_to_close(two_files):
