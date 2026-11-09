@@ -1714,3 +1714,85 @@ def test_corpus_wrong_units_are_caught(name):
     result = probe_dxf(path)
     assert result["units"]["confidence"] == "low"
     assert {"units_conflict", "units_suspect"} & set(codes(result, blocking=True))
+
+
+# --- legacy_ascii_text (tool wave 3, W3) ----------------------------------------------------------------
+
+LEGACY_SUSPECT = ["4/g14", "/G10", "1/G16", "chi tiESt", "haFn 200", "coJC vaF", "DiJa"]  # 7: over the cap
+
+
+def _legacy_entry(eid: str, style: str | None, text: str, *, flagged: bool, font: str | None = None) -> dict:
+    return {
+        "id": eid,
+        "style": style,
+        "font_file": font,
+        "display_text": text,
+        "raw_text": text,
+        "flags": ["legacy_ascii_suspect"] if flagged else [],
+    }
+
+
+def test_legacy_ascii_text_is_one_question_per_style_with_count_and_five_examples(tmp_path):
+    from tekla_harness.extract_text import extract_text
+    from tekla_harness.questions import LEGACY_ASCII_CODE
+
+    def fn(doc):
+        doc.styles.add(".VnTime", font="vntime.ttf")
+        style = doc.styles.add("kt..9", font="plain.shx")
+        style.set_extended_font_data("VnSimH")  # a legacy family of unknown encoding
+        msp = doc.modelspace()
+        for i, text in enumerate(LEGACY_SUSPECT):
+            msp.add_text(text, dxfattribs={"style": ".VnTime", "height": 2.5, "insert": (0, 9 * i)})
+        msp.add_text("D1 200x300", dxfattribs={"style": ".VnTime", "height": 2.5, "insert": (0, 99)})
+        msp.add_text("haFn 200", dxfattribs={"style": "kt..9", "height": 2.5, "insert": (50, 0)})
+
+    path = make(tmp_path, fn)
+    text = extract_text(path, knowledge=EMPTY_TABLE)
+    flagged = [e for e in text["entries"] if "legacy_ascii_suspect" in e["flags"]]
+    assert len(flagged) == len(LEGACY_SUSPECT) + 1  # the fixture is what the test says
+    got = read_dxf.legacy_ascii_questions(text, "plans/a.dxf", probe(path)["text_styles"])
+    assert [q["code"] for q in got] == [LEGACY_ASCII_CODE] * 2
+    first, second = got  # sorted by style name
+    assert all(q["blocking"] is False and q["file"] == "plans/a.dxf" for q in got)
+    vn = [e for e in flagged if e["style"] == ".VnTime"]
+    assert first["count"] == len(vn) == 7 and first["truncated"] is True
+    assert [r["found"].split(":")[0] for r in first["refs"]] == [e["id"] for e in vn[:5]]
+    assert all(r["file"] == "plans/a.dxf" and ".VnTime" in r["where"] for r in first["refs"])
+    assert first["refs"][0]["found"] == f"{vn[0]['id']}: 4/g14"  # quoted as stored, never decoded
+    assert "'.VnTime'" in first["message"] and "vntime.ttf" in first["message"]
+    assert "7 " in first["message"] and "family none" in first["message"]
+    assert second["count"] == 1 and second["truncated"] is False and len(second["refs"]) == 1
+    assert "'kt..9'" in second["message"] and "plain.shx" in second["message"]
+    assert "family VnSimH" in second["message"]
+    assert "D1 200x300" not in json.dumps(got)  # not flagged: not listed
+    # no legacy_ascii_suspect entry: no question
+    clean = {"entries": [_legacy_entry("T000001", "S", "D1", flagged=False)]}
+    assert read_dxf.legacy_ascii_questions(clean, "plans/a.dxf", []) == []
+
+
+def test_legacy_ascii_text_without_style_or_probe_styles_says_so():
+    text = {
+        "entries": [
+            _legacy_entry("T000002", None, "4/g14", flagged=True),
+            _legacy_entry("T000001", "B", "haFn", flagged=True, font="b.shx"),
+            _legacy_entry("T000003", "B", "tieRp", flagged=True, font="b.shx"),
+        ]
+    }
+    got = read_dxf.legacy_ascii_questions(text, "x.dxf", None)
+    assert [q["refs"][0]["where"] for q in got] == ["text style (no style)", "text style B"]
+    assert "font file none" in got[0]["message"]
+    assert "family unknown (the probe has no text_styles section)" in got[1]["message"]
+    assert [r["found"] for r in got[1]["refs"]] == ["T000001: haFn", "T000003: tieRp"]
+    assert got[1]["count"] == 2 and got[1]["truncated"] is False
+    # deterministic: the same input gives the same questions in the same order
+    assert read_dxf.legacy_ascii_questions(text, "x.dxf", None) == got
+
+
+def test_legacy_ascii_text_examples_are_the_first_ids_in_numeric_order():
+    ids = ["T1000001", "T999998", "T1000000", "T000007", "T999999", "T000003", "T000005"]  # 7 digits after 6
+    text = {"entries": [_legacy_entry(i, "S", "4/g14", flagged=True) for i in ids]}
+    (got,) = read_dxf.legacy_ascii_questions(text, "x.dxf", [{"name": "S", "family": ""}])
+    assert [r["found"].split(":")[0] for r in got["refs"]] == [
+        "T000003", "T000005", "T000007", "T999998", "T999999",
+    ]  # fmt: skip
+    assert got["count"] == 7 and got["truncated"] is True

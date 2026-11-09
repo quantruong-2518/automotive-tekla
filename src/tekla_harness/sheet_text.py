@@ -17,7 +17,8 @@ encodings keep their flags and stay as stored).
 Legacy-font gate (`text_gate.meaning_block_reason`, computed on the FULL text-index entry): every entry any
 tool returns carries `meaning` ("allowed" | "blocked") and `blocked_reason`. A blocked entry is quoted
 verbatim with its entry id; no meaning may be taken from it. `sheet_text` also reports the sheet's
-`legacy_font_gate` (counts, styles, and the open question ids that ask for the encoding).
+`legacy_font_gate` (counts, styles, and the open question ids that ask for the encoding or, for
+`legacy_ascii_suspect` entries, what the file's legacy-ASCII style holds: legacy_ascii_text, tool wave 3 W3).
 
 Reading order: rows from the top of the sheet down (larger y first); two entries share a row when their
 y differs from the y of the row's FIRST entry by at most 0.6 x the median text height of the sheet (heights
@@ -47,6 +48,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from tekla_harness.questions import LEGACY_ASCII_CODE
 from tekla_harness.schemas import validate
 from tekla_harness.text_gate import BLOCK_REASONS, meaning_block_reason
 
@@ -64,6 +66,7 @@ ENCODING_QUESTION_CODES = frozenset(
     {"font_encoding_proposed", "font_encoding_conflict", "text_encoding_hint", "encoding_unknown_non_ascii"}
 )
 REGISTRY_FILE = "question-registry.json"
+LEGACY_ASCII_REASON = "legacy_ascii_suspect"  # the gate reason legacy_ascii_text questions cover (W3)
 # title keywords, in rank order; matched as whole words (plural 's' allowed) on NFC + casefold text
 TITLE_KEYWORDS = (
     "MẶT BẰNG", "MẶT CẮT", "MẶT ĐỨNG", "CHI TIẾT", "BỐ TRÍ", "THỐNG KÊ", "GHI CHÚ", "DANH MỤC",
@@ -320,35 +323,51 @@ def _compact(row: int | None, e: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
-def _gate(entries: list[dict[str, Any]], question_ids: list[str]) -> dict[str, Any]:
-    """The `legacy_font_gate` block over a set of full entries. `question_ids` only when an answer can
-    unblock something: no encoding answer unblocks `legacy_ascii_suspect` (ASCII stays ASCII in every
-    encoding), so a sheet whose blocked entries are all of that kind, or that has none, lists no question."""
+def _id_order(qid: str) -> tuple[int, str]:
+    return len(qid), qid
+
+
+def _font_question_ids(reasons: list[str], question_ids: list[str], legacy_ids: list[str]) -> list[str]:
+    """The questions that cover these blocked reasons: the encoding questions when a reason an encoding
+    answer can lift is present (none lifts `legacy_ascii_suspect`: ASCII stays ASCII in every encoding), and
+    the file's legacy_ascii_text questions when `legacy_ascii_suspect` is (tool wave 3, W3; their answer
+    records the engineer's reading of the style and decodes nothing)."""
+    ids = set(question_ids) if any(r != LEGACY_ASCII_REASON for r in reasons) else set()
+    if LEGACY_ASCII_REASON in reasons:
+        ids |= set(legacy_ids)
+    return sorted(ids, key=_id_order)
+
+
+def _gate(
+    entries: list[dict[str, Any]], question_ids: list[str], legacy_ids: list[str] | None = None
+) -> dict[str, Any]:
+    """The `legacy_font_gate` block over a set of full entries; `question_ids` per `_font_question_ids`, so
+    a sheet with no blocked entry lists no question."""
     reasons = [r for r in (meaning_block_reason(e) for e in entries) if r is not None]
     styles = {e["style"] or "" for e in entries if meaning_block_reason(e) is not None}
-    answerable = any(r != "legacy_ascii_suspect" for r in reasons)
     return {
         "blocked_entries": len(reasons),
         "by_reason": {r: reasons.count(r) for r in BLOCK_REASONS if r in reasons},
         "styles": sorted(styles),
-        "question_ids": question_ids if answerable else [],
+        "question_ids": _font_question_ids(reasons, question_ids, legacy_ids or []),
     }
 
 
-def _encoding_question_ids(inv: Inventory, file_rel: str) -> tuple[list[str], list[str]]:
-    """(ids, warnings): non-obsolete registry questions of this file asking about the text encoding."""
+def _encoding_question_ids(inv: Inventory, file_rel: str) -> tuple[list[str], list[str], list[str]]:
+    """(encoding ids, legacy_ascii_text ids, warnings): non-obsolete registry questions of this file asking
+    about the text encoding, and those asking what a legacy-ASCII style holds."""
     path = inv.work / REGISTRY_FILE
     if not path.is_file():
-        return [], [f"{REGISTRY_FILE} is missing: legacy_font_gate.question_ids is empty"]
+        return [], [], [f"{REGISTRY_FILE} is missing: legacy_font_gate.question_ids is empty"]
     registry = read_json(path, REGISTRY_FILE)
-    found = [
-        q["id"]
+    live = [
+        q
         for q in registry.get("questions", {}).values()
-        if q.get("file") == file_rel
-        and q.get("code") in ENCODING_QUESTION_CODES
-        and q.get("status") != "obsolete"
+        if q.get("file") == file_rel and q.get("status") != "obsolete"
     ]
-    return sorted(found, key=lambda i: (len(i), i)), []
+    encoding = [q["id"] for q in live if q.get("code") in ENCODING_QUESTION_CODES]
+    legacy = [q["id"] for q in live if q.get("code") == LEGACY_ASCII_CODE]
+    return sorted(encoding, key=_id_order), sorted(legacy, key=_id_order), []
 
 
 # --- public functions ------------------------------------------------------------------------------------
@@ -601,7 +620,7 @@ def sheet_text(
         if max_entries is None:
             max_entries = DEFAULT_MAX_ENTRIES
     shown = matched if max_entries is None else matched[:max_entries]
-    question_ids, id_warnings = _encoding_question_ids(inv, file_rel)
+    question_ids, legacy_ids, id_warnings = _encoding_question_ids(inv, file_rel)
     doc = {
         "schema_version": SCHEMA_VERSION,
         "kind": "sheet_text",
@@ -620,7 +639,7 @@ def sheet_text(
             "omitted": len(matched) - len(shown),
             "truncated": len(shown) < len(matched),
         },
-        "legacy_font_gate": _gate(entries, question_ids),
+        "legacy_font_gate": _gate(entries, question_ids, legacy_ids),
         "entries": [_compact(r, e) for r, e in shown],
         "warnings": [*loaded.warnings, *id_warnings, *hidden],
     }
@@ -664,6 +683,7 @@ def find_text(
     needle = normalize(contains)
     files: list[dict[str, Any]] = []
     hits: list[dict[str, Any]] = []
+    font_ids: set[str] = set()  # the questions covering the blocked entries in scope (W3)
     for row in rows:
         loaded = load_file(inv, row, check_inputs=check_inputs)
         warnings.extend(f"{loaded.rel}: {w}" for w in loaded.warnings)
@@ -698,11 +718,14 @@ def find_text(
                 for sh in loaded.sheets["sheets"]
             ]
             summary["sheets_searched"] = len(groups)
+        reasons: list[str] = []
         for sheet_id, number, entries in groups:
             for e in entries:
                 summary["entries_searched"] += 1
-                if meaning_block_reason(e) is not None:  # never compared (W4): reachable by id only
+                reason = meaning_block_reason(e)
+                if reason is not None:  # never compared (W4): reachable by id only
                     summary["blocked_entries"] += 1
+                    reasons.append(reason)
                     continue
                 if needle not in normalize(e["display_text"]):
                     continue
@@ -718,6 +741,10 @@ def find_text(
                         "blocked_reason": None,
                     }
                 )
+        if reasons:
+            encoding_ids, legacy_ids, id_warnings = _encoding_question_ids(inv, loaded.rel)
+            font_ids.update(_font_question_ids(reasons, encoding_ids, legacy_ids))
+            warnings.extend(f"{loaded.rel}: {w}" for w in id_warnings)
     blocked = sum(f["blocked_entries"] for f in files)
     off_sheet_total = sum(f["unassigned_entries"] or 0 for f in files)
     shown = hits if max_hits is None else hits[:max_hits]
@@ -728,6 +755,7 @@ def find_text(
             "ASCII) in the searched scope are never matched, on any form of their text: this search is "
             "incomplete over them; read them by entry id or with sheet-text, and ask the engineer to approve "
             "the font row"
+            + (f" (font questions: {', '.join(sorted(font_ids, key=_id_order))})" if font_ids else "")
         )
     doc = {
         "schema_version": SCHEMA_VERSION,

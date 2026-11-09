@@ -33,6 +33,7 @@ from ezdxf.version import __version__ as EZDXF_VERSION
 from tekla_harness.detect import sha256_file
 from tekla_harness.encoding import font_hint, guess_encoding_from_font, scrub_surrogates
 from tekla_harness.knowledge import FontEncodingRow, FontEncodingTable, default_font_encodings
+from tekla_harness.questions import LEGACY_ASCII_CODE, question_group
 from tekla_harness.readlog import timed_attempt
 
 SCHEMA_VERSION = "0.1"
@@ -80,6 +81,8 @@ _DIM_TYPES = {
 _PLAIN_NUMBER = re.compile(r"^[+-]?(\d+(\.\d+)?|\.\d+)$")
 _GROUP_5 = re.compile(rb"(?m)^[ \t]*5[ \t]*\r?\n[ \t]*[0-9A-Fa-f]+[ \t]*\r?$")
 MAX_STYLES_LISTED = 10  # style names named in one knowledge question
+MAX_LEGACY_EXAMPLES = 5  # example entries listed in one legacy_ascii_text question (count stays the total)
+NO_STYLE = "(no style)"
 
 TOLERANCE_RULE = (
     "Tolerance is half of the displayed precision: 0.5 * 10^-DIMDEC "
@@ -741,6 +744,47 @@ def _text_styles(
             }
         )
     return styles, hints, questions
+
+
+def legacy_ascii_questions(
+    text_index: dict[str, Any], rel: str, text_styles: list[dict[str, Any]] | None
+) -> list[dict[str, Any]]:
+    """legacy_ascii_text questions of one file (tool wave 3, W3): one per text style holding entries flagged
+    `legacy_ascii_suspect` (extract_text), sorted by style name ('(no style)' when an entry has none).
+
+    Built from the file's text index, since the probe itself reads no text, plus the probe's `text_styles`
+    rows for the TrueType family. Raw intake questions (no id, key or answer): not blocking, `count` is
+    the style's flagged entries, refs list the first MAX_LEGACY_EXAMPLES in id order, each quoted as stored
+    with its entry id (never decoded). The answer records the engineer's reading of the style; it decodes
+    and unblocks nothing (the legacy-font gate stays shut).
+    """
+    by_style: dict[str, list[dict[str, Any]]] = {}
+    for e in sorted(text_index["entries"], key=lambda e: (len(e["id"]), e["id"])):
+        if "legacy_ascii_suspect" in e["flags"]:
+            by_style.setdefault(e["style"] if e["style"] is not None else NO_STYLE, []).append(e)
+    families = None if text_styles is None else {s["name"]: s["family"] for s in text_styles}
+    out = []
+    for style, entries in sorted(by_style.items()):
+        font = next((e["font_file"] for e in entries if e["font_file"]), None)
+        if families is None:
+            family = "unknown (the probe has no text_styles section)"
+        else:
+            family = families.get(style) or "none"
+        n = len(entries)
+        message = (
+            f"{n} pure-ASCII text entr{'y' if n == 1 else 'ies'} in text style '{style}' (font file "
+            f"{font or 'none'}, TrueType family {family}) {'has' if n == 1 else 'have'} the shape legacy "
+            "Vietnamese text takes when stored as ASCII (flag legacy_ascii_suspect), so the legacy-font gate "
+            "blocks them. Open the drawing at the example entries listed and say what this style holds and "
+            "whether its text can be read as it is stored. The answer records your reading of the style; it "
+            "decodes nothing and unblocks nothing."
+        )
+        refs = [
+            {"file": rel, "where": f"text style {style}", "found": f"{e['id']}: {e['display_text']}"}
+            for e in entries
+        ]
+        out.append(question_group(LEGACY_ASCII_CODE, False, message, refs, MAX_LEGACY_EXAMPLES, file=rel))
+    return out
 
 
 def _unreadable(scan: _Scan, handles_ok: bool) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:

@@ -119,6 +119,7 @@ FONT_QUESTION_CODES = (
     "font_encoding_conflict",
     "encoding_unknown_non_ascii",
     "text_encoding_hint",
+    "legacy_ascii_text",  # tool wave 3 (W3): what a legacy-ASCII style holds; its answer decodes nothing
 )
 CONFIDENCE_RANK = {"low": 0, "medium": 1, "high": 2}
 MAX_LISTED = 8

@@ -292,6 +292,22 @@ def test_no_font_question_in_the_registry_is_said(work):
     assert "no font question is registered" in msg
 
 
+def test_a_legacy_ascii_text_question_is_a_font_question(work):
+    # tool wave 3 (W3): intake asks legacy_ascii_text per file and style; the refusal points at it
+    path = work / "question-registry.json"
+    registry = load(path)
+    qid = f"Q-{registry['next_id']:03d}"
+    registry["next_id"] += 1
+    registry["questions"]["e" * 16] = {
+        "id": qid, "code": "legacy_ascii_text", "file": REL, "producer": "intake", "status": "open",
+        "first_seen_run": 1, "last_seen_run": 1,
+    }  # fmt: skip
+    path.write_text(json.dumps(registry), encoding="utf-8")
+    edit_index(work, {REST: {"flags": ["legacy_ascii_suspect"]}})
+    msg = refused(work, 1, kind="structural_system", entries=[REST], value="v", fields=["aspect=floors"])
+    assert "legacy_ascii_suspect" in msg and f"{qid} (legacy_ascii_text, open)" in msg
+
+
 def test_sheets_document_missing_refuses_a_sheet_finding(work):
     (work / "structure" / f"{REL}.sheets.json").unlink()
     assert "read-structure" in refused(

@@ -544,6 +544,15 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
       blocked entries of the searched files or sheets whatever the query, and no longer writes the
       deprecated `blocked_entries_not_searchable`; hits are always `allowed`. sheet-text `--contains` warns
       how many blocked entries of the sheet it never matches.
+    - W3: `read_dxf.legacy_ascii_questions(text_index, file, probe text_styles)` builds the
+      `legacy_ascii_text` questions of one file: one per text style holding `legacy_ascii_suspect`
+      entries, not blocking, `count` = the style's flagged entries, the first 5 listed by entry id and
+      quoted as stored, the message naming the style, its font file and its TrueType family. Not yet
+      called by `harness intake` (wiring pending, see the package report). The sheet-text
+      `legacy_font_gate.question_ids` lists the file's live `legacy_ascii_text` questions when the sheet
+      has `legacy_ascii_suspect` entries (encoding questions still only when an encoding answer can lift
+      a reason); find-text `notes` names the questions covering the blocked entries in scope; `harness
+      finding` counts `legacy_ascii_text` as a font question when it refuses a blocked entry.
 
 ### Changed
 - Question lifecycle (tool wave 2, EVAL-2 fix 5):

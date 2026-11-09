@@ -492,17 +492,55 @@ def _gate_entry(raw: str, flags: list[str], encoding: str = "unknown") -> dict[s
     ("entries", "ids"),
     [
         # review of tool wave 2 (F1 item 6): no encoding answer unblocks ASCII Telex-style text, so a sheet
-        # whose only blocked entries are legacy_ascii_suspect lists no question
-        ([_gate_entry("haFn 200", ["legacy_ascii_suspect"], "tcvn3")], []),
+        # whose only blocked entries are legacy_ascii_suspect lists no encoding question; tool wave 3 (W3)
+        # lists the file's legacy_ascii_text question for them instead (Q-007 here)
+        ([_gate_entry("haFn 200", ["legacy_ascii_suspect"], "tcvn3")], ["Q-007"]),
         ([_gate_entry("D1", [])], []),  # nothing blocked: nothing to unblock
         ([_gate_entry("b\xb6n", ["encoding_unknown_non_ascii"])], ["Q-003"]),
-        ([_gate_entry("haFn 200", ["legacy_ascii_suspect"]), _gate_entry("b\xb6n", [])], ["Q-003"]),
+        ([_gate_entry("haFn 200", ["legacy_ascii_suspect"]), _gate_entry("b\xb6n", [])], ["Q-003", "Q-007"]),
     ],
 )
 def test_gate_lists_only_questions_that_can_unblock(entries, ids):
     from tekla_harness.sheet_text import _gate
 
-    assert _gate(entries, ["Q-003"])["question_ids"] == ids
+    assert _gate(entries, ["Q-003"], ["Q-007"])["question_ids"] == ids
+    assert _gate(entries, ["Q-003"], [])["question_ids"] == [i for i in ids if i != "Q-007"]
+
+
+def test_gate_lists_the_legacy_ascii_text_questions_of_the_file(damaged):
+    """W3: on 267, every legacy_ascii_suspect entry's file has a live question covering it (M6)."""
+    path = damaged / "question-registry.json"
+    registry = load(path)
+
+    def add(key: str, qid: str, file: str, status: str = "open") -> None:
+        registry["questions"][key * 16] = {
+            "id": qid, "code": "legacy_ascii_text", "file": file, "producer": "intake", "status": status,
+            "first_seen_run": 1, "last_seen_run": 1,
+        }  # fmt: skip
+
+    add("a", "Q-095", REL)
+    add("b", "Q-096", REL, "obsolete")
+    add("c", "Q-097", "other.dxf")
+    add("d", "Q-098", REL, "answered")  # an answered question still covers its style
+    path.write_text(json.dumps(registry), encoding="utf-8")
+    before = sheet_text(damaged, REL, "model#01")["legacy_font_gate"]["question_ids"]
+    assert "Q-095" not in before  # no legacy_ascii_suspect entry on the sheet: not listed
+    plot = sheet_text(damaged, REL, "Plot#01")["entries"]
+    model = [e for e in sheet_text(damaged, REL, "model#01")["entries"] if e["meaning"] == "allowed"]
+    patch_entries(
+        damaged,
+        {
+            plot[0]["entry_id"]: {"flags": ["legacy_ascii_suspect"]},
+            model[0]["entry_id"]: {"flags": ["legacy_ascii_suspect"]},
+        },
+    )
+    gate = sheet_text(damaged, REL, "Plot#01")["legacy_font_gate"]
+    assert gate["by_reason"] == {"legacy_ascii_suspect": 1}
+    assert gate["question_ids"] == ["Q-095", "Q-098"]  # no encoding question: it cannot unblock ASCII
+    mixed = sheet_text(damaged, REL, "model#01")["legacy_font_gate"]["question_ids"]
+    assert mixed == sorted([*before, "Q-095", "Q-098"], key=lambda i: (len(i), i))
+    notes = find_text(damaged, "zzz-no-such-text")["notes"]
+    assert notes and "Q-095" in notes[0] and "Q-096" not in notes[0] and "Q-097" not in notes[0]
 
 
 def test_missing_registry_warns_and_lists_no_questions(damaged):
