@@ -613,6 +613,8 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
       `harness ask` now checks `reader-questions.json` against the `reader-questions` schema before it
       writes it.
     - `harness status` always writes `gate1.closed`, as `[]` when nothing is closed (W5).
+    - `status` schema: `gate1.closed` is required (`$id` still 0.1; example updated). A status output
+      written before tool wave 3 without it no longer validates; rerun `harness status`.
 
 ### Changed
 - Question lifecycle (tool wave 2, EVAL-2 fix 5):

@@ -176,6 +176,7 @@
       "grid-system: 4 blocking question(s) open (Q-023, Q-024, Q-025, Q-026)",
       "callouts: outputs missing (callouts.json, callouts-questions.json not found); rerun harness callouts work",
       "grid-system: outputs stale (grid-systems.json was built before the latest answers it reads (units, axes, selection)); rerun harness grid-system work"
-    ]
+    ],
+    "closed": []
   }
 }

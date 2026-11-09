@@ -520,12 +520,13 @@ def test_reader_questions_schema(example):
     assert validate("reader-questions", bad)
 
 
-def test_status_gate1_closed_may_be_empty(example):
-    # W5: status always writes gate1.closed (package C). Required in the schema only once status.py does:
-    # making it required here broke tests/test_ask.py (status omits an empty list today).
+def test_status_gate1_closed_is_required_and_may_be_empty(example):
+    # W5: harness status always writes gate1.closed (package C), so the schema requires it
     doc = example("status")
     doc["gate1"]["closed"] = []
     assert validate("status", doc) == []
+    del doc["gate1"]["closed"]
+    assert validate("status", doc)
 
 
 def test_wave3_schemas_keep_id_0_1():
