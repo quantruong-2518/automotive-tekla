@@ -132,6 +132,15 @@ Each is recorded again under "Deviations" in the report. None changes the pass b
    readable again for the simulator (H) and the judges; the key's sha256 is re-checked before judging.
 5. **Judges per arm.** J1 and J2 are two fresh Opus judges per arm (four judge agents), each with the full
    brief; they never see this protocol file.
+6. **Criterion 5 takes the stricter M4 (2026-11-09, still before any EVAL-3 output).** Review fix F3
+   (after amendment 1) makes `harness status` count only the engineer's answer for intake,
+   read-structure, grid-system and reader questions. Every simulated answer therefore leaves its question
+   open in `M4_status`, which adds answered content questions to the open list and lowers the procedural
+   share. Criterion 5 now holds only when BOTH `M4_status` and `M4_status_if_engineer` have a procedural
+   share below 50 %; `metrics.py` reports the larger one as `M4_criterion5_share`. This can only make the
+   bar harder. Checked on a scratch intake of 267 + Steel_02 (not an arm input): simulated unit answers
+   leave no `units:` gate-1 reason (they become `answers:` reasons), so the rev-5 reader precondition for
+   steps 3–7 still holds.
 
 ## 9. Limits stated up front
 

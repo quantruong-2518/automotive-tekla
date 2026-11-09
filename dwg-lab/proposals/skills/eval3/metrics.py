@@ -30,6 +30,11 @@ Pre-run amendment (2026-11-08, before any EVAL-3 output existed; EVAL-3-PROTOCOL
                        work folder whose simulated answers are relabelled engineer: a diagnostic only, to show
                        what the closures would do with real engineer answers. The registry-based M4 stays,
                        as `M4_gate1_blockers`, for comparison with the eval-2 dry run.
+  Criterion-5 share    (second amendment, 2026-11-09, still before any EVAL-3 output) review fix F3 made
+                       `harness status` count only engineer answers for the gate-1 producers, so `M4_status`
+                       keeps every question the simulator answered open and lowers the procedural share.
+                       `M4_criterion5_share` is the larger of the two shares (`M4_status`,
+                       `M4_status_if_engineer`; None counts as 0): the stricter number decides criterion 5.
   M3 background        `--background-repo` points the background vocabulary at the repo copy whose skills
                        were under test (rev 5), instead of this script's own repo.
 """
@@ -434,6 +439,9 @@ def main(argv: list[str] | None = None) -> int:
         "M4_status_if_engineer": m4_status_if_engineer(work),
         "M5_questions": m5,
     }
+    doc["M4_criterion5_share"] = max(
+        doc["M4_status"]["procedural_share"] or 0.0, doc["M4_status_if_engineer"]["procedural_share"] or 0.0
+    )
     json.dump(doc, sys.stdout, ensure_ascii=False, indent=2)
     sys.stdout.write("\n")
     return 0
