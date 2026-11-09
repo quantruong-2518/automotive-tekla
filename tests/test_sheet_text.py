@@ -679,16 +679,69 @@ def test_find_text_counts_blocked_entries_and_says_the_search_is_incomplete(work
         s["legacy_font_gate"]["blocked_entries"]
         for s in (sheet_text(work, REL, sid) for sid in ("model#01", "model#02", "Plot#01"))
     )
-    assert doc["counts"]["blocked_entries_not_searchable"] == blocked > 0
+    assert doc["counts"]["blocked_in_scope"] == blocked > 0
+    assert "blocked_entries_not_searchable" not in doc["counts"]  # deprecated (tool wave 3, W4)
     assert doc["files"][0]["blocked_entries"] == blocked
-    assert doc["notes"] and "incomplete" in doc["notes"][0]
+    assert doc["notes"] and "incomplete" in doc["notes"][0] and "never matched" in doc["notes"][0]
     assert doc["counts"]["unassigned_entries_not_searched"] == doc["files"][0]["unassigned_entries"]
 
 
-def test_find_text_marks_a_blocked_hit(work):
-    hit = find_text(work, "tªn")["hits"]
-    assert hit and all(h["meaning"] == "blocked" and h["blocked_reason"] for h in hit)
-    assert any("tªn" in h["display_text"] for h in hit)  # matched on the stored text, not decoded
+# --- W4 (tool wave 3): blocked text is never matched -----------------------------------------------------
+
+
+def test_find_text_never_matches_a_blocked_entry_on_its_stored_text(work):
+    """EVAL-3 F-B17: typing the stored legacy form of a word ('tªn') found blocked entries and in effect
+    decoded them. A blocked entry is reachable by entry id or sheet listing only."""
+    stored = [e for e in sheet_text(work, REL, "model#01")["entries"] if "tªn" in e["display_text"]]
+    assert stored and all(e["meaning"] == "blocked" for e in stored)  # the fixture has such text
+    doc = find_text(work, "tªn")
+    assert doc["hits"] == [] and doc["counts"]["hits"] == 0
+    assert all(h["meaning"] == "allowed" for q in ("c", "t", "1", "ª") for h in find_text(work, q)["hits"])
+
+
+def test_find_text_never_matches_a_blocked_entry_on_any_decoded_or_normalised_form(damaged):
+    on_sheet = {e["entry_id"] for e in sheet_text(damaged, REL, "model#01")["entries"]}
+    index = text_index(damaged)
+    victim = next(
+        e for e in index["entries"] if e["id"] in on_sheet and meaning_block_reason(e) == "encoding_unknown"
+    )
+    decoded = "Thép Gân ZQX"  # what a decoding would give; stored nowhere a reader may take it from
+    patch_entries(
+        damaged,
+        {victim["id"]: {"display_text": decoded, "decoded_text": decoded, "plain_text": decoded}},
+    )
+    assert meaning_block_reason(next(e for e in text_index(damaged)["entries"] if e["id"] == victim["id"]))
+    for query in (decoded, "thép gân", unicodedata.normalize("NFD", "THÉP GÂN"), "zqx", victim["raw_text"]):
+        assert find_text(damaged, query)["hits"] == [], query
+        assert sheet_text(damaged, REL, "model#01", contains=query)["entries"] == [], query
+
+
+def test_blocked_in_scope_does_not_depend_on_the_query(work, loose):
+    """A count that moved with the query would say whether blocked text contains it (a leak)."""
+    queries = ("zzz-no-such-text", "tªn", "c1", "c", "b\xb6n", "ª")
+    counts = {q: find_text(work, q)["counts"]["blocked_in_scope"] for q in queries}
+    assert len(set(counts.values())) == 1 and counts["c"] > 0, counts
+    rows = {q: find_text(work, q)["files"][0]["blocked_entries"] for q in queries}
+    assert set(rows.values()) == set(counts.values())
+    off = {q: find_text(loose, q, unassigned=True)["counts"]["blocked_in_scope"] for q in queries}
+    assert set(off.values()) == {1}, off  # --unassigned: the blocked entries of that scope
+    assert find_text(loose, "c1")["counts"]["blocked_in_scope"] == 0  # no sheet: nothing in scope
+
+
+def test_sheet_text_contains_never_matches_a_blocked_entry(work):
+    full = sheet_text(work, REL, "model#01")
+    blocked = [e for e in full["entries"] if e["meaning"] == "blocked"]
+    assert any("tªn" in e["display_text"] for e in blocked)
+    doc = sheet_text(work, REL, "model#01", contains="tªn")
+    assert doc["entries"] == [] and doc["counts"]["matched"] == 0
+    assert doc["legacy_font_gate"] == full["legacy_font_gate"]  # the gate still covers the whole sheet
+    n = full["legacy_font_gate"]["blocked_entries"]
+    hidden = [w for w in doc["warnings"] if "never matched" in w]
+    assert hidden and hidden[0].startswith(f"{n} blocked")  # the sheet's count, whatever the query
+    other = sheet_text(work, REL, "model#01", contains="t")
+    assert [w for w in other["warnings"] if "never matched" in w] == hidden
+    assert all(e["meaning"] == "allowed" for e in other["entries"])
+    assert not [w for w in full["warnings"] if "never matched" in w]  # no filter, nothing hidden
 
 
 def test_find_text_max_keeps_true_counts(work):
@@ -804,7 +857,8 @@ def test_sheet_text_unassigned_reaches_the_text_of_a_sheetless_file(loose):
     assert doc["counts"]["assigned"] == 3 and doc["legacy_font_gate"]["blocked_entries"] == 1
     assert doc["entries"][2]["meaning"] == "blocked"
     only_c1 = sheet_text(loose, LOOSE, None, unassigned=True, contains="c1")
-    assert only_c1["counts"]["matched"] == 2 and only_c1["query"]["max_entries"] is None
+    # 'C1 b\xb6n' is blocked: never matched (tool wave 3, W4)
+    assert only_c1["counts"]["matched"] == 1 and only_c1["query"]["max_entries"] is None
 
 
 def test_find_text_unassigned_searches_only_the_unassigned_entries(loose, work):
@@ -812,12 +866,11 @@ def test_find_text_unassigned_searches_only_the_unassigned_entries(loose, work):
     assert validate("sheet-text", doc) == []
     assert [(h["sheet_id"], h["sheet_number"], h["display_text"]) for h in doc["hits"]] == [
         ("unassigned", None, "C1"),
-        ("unassigned", None, "C1 b\xb6n"),
-    ]
+    ]  # 'C1 b\xb6n' is blocked: never matched (tool wave 3, W4)
     assert doc["query"] == {"contains": "c1", "file": None, "max_hits": None, "unassigned": True}
     counts = doc["counts"]
     assert counts["unassigned_entries_searched"] == 3 and counts["unassigned_entries_not_searched"] == 0
-    assert counts["blocked_entries_not_searchable"] == 1
+    assert counts["blocked_in_scope"] == 1
     assert doc["files"][0] == {
         "path": LOOSE,
         "status": "searched",
@@ -826,7 +879,7 @@ def test_find_text_unassigned_searches_only_the_unassigned_entries(loose, work):
         "entries_searched": 3,
         "blocked_entries": 1,
         "unassigned_entries": 3,
-        "hits": 2,
+        "hits": 1,
     }
     # without the flag the same file has nothing to search, as before
     plain = find_text(loose, "c1")
@@ -871,8 +924,9 @@ def test_unassigned_and_a_sheet_id_exclude_each_other(loose):
 def test_cli_unassigned(loose, capsys):
     code, doc, _ = run_cli(capsys, "sheet-text", str(loose), LOOSE, "--unassigned")
     assert code == 0 and doc["sheet"]["sheet_id"] == "unassigned" and doc["counts"]["assigned"] == 3
-    code, doc, _ = run_cli(capsys, "find-text", str(loose), "--contains", "C1", "--unassigned")
-    assert code == 0 and doc["counts"]["hits"] == 2
+    code, doc, err = run_cli(capsys, "find-text", str(loose), "--contains", "C1", "--unassigned")
+    assert code == 0 and doc["counts"]["hits"] == 1  # the blocked 'C1 b\xb6n' is never matched
+    assert "never matched" in err and doc["counts"]["blocked_in_scope"] == 1
     code, out, err = run_cli(capsys, "sheet-text", str(loose), LOOSE, "model#01", "--unassigned")
     assert code == 2 and out is None and "--unassigned" in err
 

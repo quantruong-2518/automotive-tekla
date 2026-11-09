@@ -26,8 +26,9 @@ id. Entries without a position go last, in id order, with row null. Rotated text
 like any other.
 
 `contains` is a plain substring test after Unicode NFC + casefold on both sides. Diacritics are significant
-('tầng' does not match 'tang'). Blocked entries are matched on their stored text only, which rarely contains
-a Vietnamese word: a search is incomplete over them and says how many there were. `sheet_text` output is
+('tầng' does not match 'tang'). Blocked entries are never matched, on any form of their text (tool wave 3,
+W4: typing the stored legacy form of a word would otherwise read them); a search is incomplete over them
+and says how many there were, a count that does not depend on the query. `sheet_text` output is
 capped at `max_entries` (default DEFAULT_MAX_ENTRIES; unbounded with `contains`); the counts are always the
 true ones and a truncated output carries a warning naming the `--max` that returns everything.
 
@@ -260,6 +261,31 @@ _KEYWORD_PATTERNS = tuple(
     (kw, re.compile(r"(?<!\w)" + r"\s+".join(re.escape(w) for w in normalize(kw).split()) + r"s?(?!\w)"))
     for kw in TITLE_KEYWORDS
 )
+
+
+def _matching(
+    ordered: list[tuple[int | None, dict[str, Any]]], contains: str
+) -> list[tuple[int | None, dict[str, Any]]]:
+    """The allowed entries whose display_text contains `contains` (NFC + casefold). A blocked entry is
+    never compared, on any form of its text: matching it would read it (tool wave 3, W4)."""
+    needle = normalize(contains)
+    return [
+        (r, e)
+        for r, e in ordered
+        if meaning_block_reason(e) is None and needle in normalize(e["display_text"])
+    ]
+
+
+def _hidden_warning(entries: list[dict[str, Any]]) -> list[str]:
+    """One warning when a --contains filter left blocked entries out (whatever the query, so the line says
+    nothing about their text)."""
+    blocked = sum(meaning_block_reason(e) is not None for e in entries)
+    if not blocked:
+        return []
+    return [
+        f"{blocked} blocked (legacy-font) entries are never matched by --contains: read them without "
+        "--contains or by entry id"
+    ]
 
 
 def _meaning(e: dict[str, Any]) -> dict[str, Any]:
@@ -565,9 +591,10 @@ def sheet_text(
             "sheet_number": printed_number(sh),
             "duplicate_of": sh["duplicate_of"],
         }
+    hidden: list[str] = []
     if contains is not None and contains != "":
-        needle = normalize(contains)
-        matched = [(r, e) for r, e in ordered if needle in normalize(e["display_text"])]
+        matched = _matching(ordered, contains)
+        hidden = _hidden_warning(entries)
     else:
         contains = None
         matched = ordered
@@ -595,7 +622,7 @@ def sheet_text(
         },
         "legacy_font_gate": _gate(entries, question_ids),
         "entries": [_compact(r, e) for r, e in shown],
-        "warnings": [*loaded.warnings, *id_warnings],
+        "warnings": [*loaded.warnings, *id_warnings, *hidden],
     }
     warning = truncation_warning(doc)
     if warning:
@@ -615,9 +642,10 @@ def find_text(
     """Every entry of every sheet of every file (or of `file_rel`) whose text contains `contains`.
 
     Hits come in file path, sheet and reading order. `max_hits` None: unbounded; `counts.hits` is always
-    the true number. Blocked entries are matched on their stored text only, so the search is incomplete
-    over them: `counts.blocked_entries_not_searchable` is how many were examined (matched or not) and
-    `notes` says so. Entries on no sheet or on several sheets are not searched (counted separately).
+    the true number. Blocked entries are never matched, on their stored, decoded or any normalised text
+    (tool wave 3, W4): matching would read them. `counts.blocked_in_scope` is how many there are in the
+    searched files or sheets, the same for every query, and `notes` says the search is incomplete over
+    them. Entries on no sheet or on several sheets are not searched (counted separately).
     `unassigned` (tool wave 2, fix 4): search only those entries instead, in `unassigned_order`; hits carry
     sheet_id 'unassigned' and a null sheet_number, `counts.unassigned_entries_searched` says how many."""
     if not contains:
@@ -672,9 +700,10 @@ def find_text(
             summary["sheets_searched"] = len(groups)
         for sheet_id, number, entries in groups:
             for e in entries:
-                reason = meaning_block_reason(e)
                 summary["entries_searched"] += 1
-                summary["blocked_entries"] += reason is not None
+                if meaning_block_reason(e) is not None:  # never compared (W4): reachable by id only
+                    summary["blocked_entries"] += 1
+                    continue
                 if needle not in normalize(e["display_text"]):
                     continue
                 summary["hits"] += 1
@@ -685,8 +714,8 @@ def find_text(
                         "sheet_number": number,
                         "entry_id": e["id"],
                         "display_text": e["display_text"],
-                        "meaning": "allowed" if reason is None else "blocked",
-                        "blocked_reason": reason,
+                        "meaning": "allowed",
+                        "blocked_reason": None,
                     }
                 )
     blocked = sum(f["blocked_entries"] for f in files)
@@ -695,9 +724,10 @@ def find_text(
     notes = []
     if blocked:
         notes.append(
-            f"{blocked} blocked entries (unknown, proposed or contradicted font encoding) were matched on "
-            "their stored text only, which rarely contains a Vietnamese word: this search is incomplete over "
-            "them; read them with sheet-text and ask the engineer to approve the font row"
+            f"{blocked} blocked entries (unknown, proposed or contradicted font encoding, or legacy-looking "
+            "ASCII) in the searched scope are never matched, on any form of their text: this search is "
+            "incomplete over them; read them by entry id or with sheet-text, and ask the engineer to approve "
+            "the font row"
         )
     doc = {
         "schema_version": SCHEMA_VERSION,
@@ -714,7 +744,7 @@ def find_text(
             "returned": len(shown),
             "omitted": len(hits) - len(shown),
             "truncated": len(shown) < len(hits),
-            "blocked_entries_not_searchable": blocked,
+            "blocked_in_scope": blocked,
             "unassigned_entries_not_searched": 0 if unassigned else off_sheet_total,
             **({"unassigned_entries_searched": off_sheet_total} if unassigned else {}),
         },

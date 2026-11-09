@@ -536,6 +536,14 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
       on each side, and the sheets without a detected number. `KT 1/18` counts as 1, `KC-05A` as 5;
       other values are left out. Corpus: 290 `missing 25`, 461 `missing 6-9` (three sheets there have
       no detected number); no other known file.
+  - Tool wave 3, package T:
+    - W4 (safety): `harness find-text` and `harness sheet-text --contains` never match a blocked
+      (legacy-font) entry, on its stored, decoded or any normalised text; before, typing the stored legacy
+      form of a word (`thèng kª`) found and in effect decoded blocked text (EVAL-3 F-B17). Blocked entries
+      are reached by entry id or sheet listing only. find-text reports `counts.blocked_in_scope`, the
+      blocked entries of the searched files or sheets whatever the query, and no longer writes the
+      deprecated `blocked_entries_not_searchable`; hits are always `allowed`. sheet-text `--contains` warns
+      how many blocked entries of the sheet it never matches.
 
 ### Changed
 - Question lifecycle (tool wave 2, EVAL-2 fix 5):
