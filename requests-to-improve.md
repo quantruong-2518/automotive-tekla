@@ -110,7 +110,12 @@ Severity: `critical` · `major` · `minor`.
 - Source: independent design review of slice S1b (ADR-0010 Amendment 1), 2026-11-08
 - Classification: safety layer · Severity: minor (the receipt is not a gate; gate approval stays
   with the engineer) · Status: **done** (Unreleased; approved by the engineer 2026-11-08; PR #8, master
-  `3307060`; a live check in a new Claude Code session is still to do)
+  `3307060`; live-checked 2026-11-09 in a fresh Claude Code 2.1.319 session on master)
+- Live check (2026-11-09, `claude -p` in a master worktree, `acceptEdits`, `cp`/`echo` allowed):
+  Write and Edit of a receipt were denied by the permission rule ("denied by your permission
+  settings"); `cp`, `echo >`, a two-line `cd` + `cp`, and `ls … | xargs cp` were denied by the
+  hook; a control Write, `cat`, `test -f` and `harness validate spec` were allowed, and the
+  receipt it wrote matched the spec's SHA-256. PowerShell was not exercised (Linux).
 - Root cause: the receipt is a plain JSON file holding the spec's SHA-256. Any agent with file
   write access (`builder` has Write) can create a receipt for a spec that was never validated,
   and the CLI cannot tell. Signing adds nothing while the key sits on the same machine.
