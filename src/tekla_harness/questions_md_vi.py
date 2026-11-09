@@ -423,8 +423,9 @@ CODES: dict[str, tuple[str, str, str]] = {
     # --- levels ---
     "level_storey_selection": (
         "levels",
-        "Có ít hơn hai cao độ gắn được với tên tầng, nên chưa biết cao độ nào là sàn tầng (bậc cửa, hố, "
-        "bậc thềm cũng là cao độ). Cao độ nào là sàn tầng?",
+        "Chưa biết chắc cao độ nào là sàn tầng: hoặc có ít hơn hai cao độ gắn được với tên tầng, hoặc có "
+        "cao độ mang chữ chỉ tầng nhưng không có tên tầng nên chiều cao tầng đã tính bỏ qua nó (danh sách ở "
+        "mục Đã thấy; bậc cửa, hố, bậc thềm cũng là cao độ). Cao độ nào là sàn tầng?",
         "Danh sách tầng và cao độ tầng của mô hình.",
     ),
     "level_none_found": (
