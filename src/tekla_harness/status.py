@@ -30,7 +30,8 @@ question is harmless) and is reported in `blocking_unknown`.
 
 Tool wave 2:
   * a question `lifecycle.closures` closes (another answer or selection settles it) leaves the `blocking` and
-    `blocking_open` counts and is listed in `gate1.closed` with its reason, but only when the closure keeps
+    `blocking_open` counts and is listed in `gate1.closed` with its reason (tool wave 3, W5: `gate1.closed`
+    is always written, [] when nothing is closed), but only when the closure keeps
     the contract (`check_closures`: its reason fits the closed question's producer and code, the question
     is not the reader's, and it names a live question of the code the reason needs, which the engineer
     answered; other_file_set is never accepted). A refused closure leaves the
@@ -799,8 +800,8 @@ def build_status(work_dir: str | Path) -> dict[str, Any]:
                 f"{p['producer']}: outputs {out['status']} ({out['reason']}); rerun {out['rerun']}"
             )
 
-    gate1: dict[str, Any] = {"ready_for_gate1": not reasons, "reasons": reasons}
     entries = registry["questions"]
+    # always written, [] when nothing is closed (tool wave 3, W5)
     closed = sorted(
         (
             {
@@ -813,8 +814,7 @@ def build_status(work_dir: str | Path) -> dict[str, Any]:
         ),
         key=lambda row: _id_number(row["id"]),
     )
-    if closed:
-        gate1["closed"] = closed
+    gate1: dict[str, Any] = {"ready_for_gate1": not reasons, "reasons": reasons, "closed": closed}
     if non_engineer:
         gate1["non_engineer_answers"] = non_engineer
     doc = {

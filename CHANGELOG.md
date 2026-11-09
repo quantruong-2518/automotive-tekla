@@ -612,6 +612,7 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
       active answer, simulated included). A live entry missing from `reader-questions.json` is exit 1.
       `harness ask` now checks `reader-questions.json` against the `reader-questions` schema before it
       writes it.
+    - `harness status` always writes `gate1.closed`, as `[]` when nothing is closed (W5).
 
 ### Changed
 - Question lifecycle (tool wave 2, EVAL-2 fix 5):
