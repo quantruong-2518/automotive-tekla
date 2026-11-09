@@ -71,6 +71,9 @@ drawings, so a recorded route is needed as well.
   in. This is a new input path into gate 1, so the commit that adds it carries a `Safety:` line.
 - An agent can still record an answer with `--role engineer` (RTI-0011, open). This ADR adds no new
   bypass: a forged role here has the same effect as one on any other gate-1 question.
+- A project whose every file is answered `no_grid=yes` has no grid system at all, and gate 1 stays shut
+  on "no grid system": a Tekla model needs one. `no_grid=yes` on a file that also has a selected detected
+  system is not flagged as a contradiction yet (open; tool wave 3 gridgate fix report).
 - The answer is a second source of truth beside the drawing. Spacings are checked against the
   dimensions, but labels and order are taken as given.
 - Rejected: building a grid from a simulated answer, so that evals could pass gate 1. Gate 1 never opens
