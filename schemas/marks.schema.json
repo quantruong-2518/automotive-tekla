@@ -509,7 +509,7 @@
             },
             "mark_sets": {
               "type": "array",
-              "description": "Tool wave 3 (W6): one entry per file and mark family (prefix, as in member_mark_prefix_meaning), for the report to copy instead of listing the marks it happened to cite. complete is true only when a parsed schedule or the detail-heading sweep covers the family; otherwise the report writes 'ít nhất' (at least).",
+              "description": "Tool wave 3 (W6): one entry per file and mark family (prefix, as in member_mark_prefix_meaning), for the report to copy instead of listing the marks it happened to cite. complete is true only when a parsed schedule covers the family, or detail headings and plain plan marks name the same keys, and the file has no blocked plain text (a blocked text may be a heading); a shorthand heading list (warnings) keeps the families it may name incomplete; otherwise the report writes 'ít nhất' (at least).",
               "items": {
                 "type": "object",
                 "required": ["file", "family", "members", "complete", "source"],
