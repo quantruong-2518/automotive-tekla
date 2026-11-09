@@ -33,13 +33,19 @@ Algorithm (deterministic, every threshold is a named constant below):
    carrying ATTRIBs of two or more fields, or within TITLE_REGION_MARGIN text heights of a title-field
    label: a section callout's SHEET_NO is not), a text 'label: value' (`inline_label`, medium at most),
    a value text right of or below a label text (`adjacent_label`, low), or, for the sheet number only
-   and only when nothing else was found, the single sheet-code-looking text in the lower-right quadrant
-   (`pattern`, low; TCVN 5571 places the title block there). Constant text of the frame's own block
-   is template text and never a value. A field value is chosen only when ALL its candidates agree;
-   any disagreement is a title_field_conflict question (blocking for sheet_number and revision).
+   and only when nothing else was found, a sheet-code-looking text in the title-block corner
+   (`pattern`, low; TCVN 5571 places the title block at the lower right): the last CORNER_U of the
+   frame along the text's reading direction and the lowest CORNER_V across it. A portrait frame is
+   also read at 90 and 270 degrees (a landscape sheet drawn turned). A member mark is never a number
+   (`_pick_corner_numbers`: the same code twice on its sheet, a mark family on its sheet, or the code
+   twice outside every title block of the file); among the rest a position repeated in other sheets'
+   corners wins, then the tallest; ties stay a conflict, and every corner code not taken is a warning.
+   Constant text of the frame's own block is template text and never a value. A field value is chosen
+   only when ALL its candidates agree; any disagreement is a title_field_conflict question (blocking
+   for sheet_number and revision).
 
-Not done here (documented gaps): frames drawn as four LINEs, rotated frames, clipped viewports
-(the rectangle is used), and the drawing list / sheet index (`drawing_list.status` is
+Not done here (documented gaps): frames drawn as four LINEs, rotated frame rectangles, clipped
+viewports (the rectangle is used), and the drawing list / sheet index (`drawing_list.status` is
 'not_searched'; nothing is asserted about it).
 """
 
@@ -79,6 +85,12 @@ TITLE_REGION_MARGIN = 10.0  # text heights around the title-block anchors (label
 SAME_SIZE_TOL = 0.005  # relative: two frames are 'the same size'
 CONTAIN_TOL = 0.01  # relative to the larger frame's short side
 MAX_LISTED = 50  # ids listed in one question
+# Title-block corner for the sheet-code pattern (tool wave 3, EVAL-3 a1): the last quarter of the frame along
+# the reading direction and the lowest fifth across it. Corpus numbers sit at 0.92-0.97 along and 0.01-0.06
+# up (267, 270, 285, 290, 461); the tie-beam mark taken on 286 sat at 0.59 / 0.44.
+CORNER_U = 0.25
+CORNER_V = 0.20
+CORNER_POS_TOL = 0.03  # frame shares: two corner codes at 'the same position' on different sheets
 
 _CONF_ORDER = {"low": 0, "medium": 1, "high": 2}
 _BUILDING_UNITS = {"mm", "cm", "m", "in", "ft"}
@@ -768,38 +780,54 @@ def _horizontal(entry: dict[str, Any]) -> bool:
     return min(rot, 360.0 - rot) < 1.0
 
 
+def _candidate(
+    fld: str,
+    value: str,
+    kind: str,
+    key: str,
+    ventry: dict[str, Any],
+    lentry: dict | None,
+    conf: str,
+    sheet_id: str,
+    file_path: str,
+) -> dict[str, Any] | None:
+    """One title-block candidate (schema `candidates[]`), or None when the value is blank."""
+    value = value.strip().strip(_COLONS).strip()
+    if not value:
+        return None
+    vbox = text_box(ventry) or (ventry["position"]["x"], ventry["position"]["y"]) * 2
+    return {
+        "field": fld,
+        "value": value,
+        "evidence": {
+            "kind": kind,
+            "key": key,
+            "value_text_id": ventry["id"],
+            "label_text_id": lentry["id"] if lentry else None,
+            "position": [rnum(ventry["position"]["x"]), rnum(ventry["position"]["y"])],
+        },
+        "confidence": conf,
+        "provenance": {
+            "file": file_path,
+            "sheet": sheet_id,
+            "method": "dxf_entity",
+            "region": {"bbox": rbox(vbox)},
+        },
+    }
+
+
 def _title_candidates(
     entries: list[dict[str, Any]], ctx: _SheetCtx, file_path: str, cap: str
 ) -> list[dict[str, Any]]:
+    """Candidates from field ATTRIBs and labels; the sheet-code pattern is `_pick_corner_numbers`."""
     out: list[dict[str, Any]] = []
 
     def add(
         fld: str, value: str, kind: str, key: str, ventry: dict[str, Any], lentry: dict | None, conf: str
     ):
-        value = value.strip().strip(_COLONS).strip()
-        if not value:
-            return
-        vbox = text_box(ventry) or (ventry["position"]["x"], ventry["position"]["y"]) * 2
-        out.append(
-            {
-                "field": fld,
-                "value": value,
-                "evidence": {
-                    "kind": kind,
-                    "key": key,
-                    "value_text_id": ventry["id"],
-                    "label_text_id": lentry["id"] if lentry else None,
-                    "position": [rnum(ventry["position"]["x"]), rnum(ventry["position"]["y"])],
-                },
-                "confidence": conf,
-                "provenance": {
-                    "file": file_path,
-                    "sheet": ctx.sheet_id,
-                    "method": "dxf_entity",
-                    "region": {"bbox": rbox(vbox)},
-                },
-            }
-        )
+        cand = _candidate(fld, value, kind, key, ventry, lentry, conf, ctx.sheet_id, file_path)
+        if cand is not None:
+            out.append(cand)
 
     labels: list[tuple[dict[str, Any], str, tuple[float, float, float, float]]] = []
     values: list[tuple[dict[str, Any], tuple[float, float, float, float]]] = []
@@ -880,26 +908,157 @@ def _title_candidates(
                 "low",
             )
 
-    if not any(c["field"] == "sheet_number" for c in out):
-        x0, y0, x1, y1 = ctx.box
-        quadrant = ((x0 + x1) / 2, y0, x1, (y0 + y1) / 2)
-        hits = [
-            (e, box)
-            for e, box in values
-            if _SHEET_CODE_RE.match(e["display_text"].strip()) and inside(quadrant, *box_center(box))
-        ]
-        if len(hits) == 1:
-            add(
-                "sheet_number",
-                hits[0][0]["display_text"],
-                "pattern",
-                "sheet_code_lower_right",
-                hits[0][0],
-                None,
-                "low",
-            )
-    out.sort(key=lambda c: (c["field"], c["evidence"]["value_text_id"], c["evidence"]["kind"]))
     return out
+
+
+def _candidate_order(c: dict[str, Any]) -> tuple[str, str, str]:
+    return (c["field"], c["evidence"]["value_text_id"], c["evidence"]["kind"])
+
+
+# --- printed sheet number in the title-block corner (tool wave 3, EVAL-3 a1) -------------------------
+
+
+def _code_key(text: str) -> str:
+    """A sheet code or mark compared as letters and digits only ('Kc - 13' and 'KC-13' are one code)."""
+    return re.sub(r"[^0-9a-z]", "", fold(text))
+
+
+def _right_angle(entry: dict[str, Any]) -> int | None:
+    """The text's rotation when it is a multiple of 90 degrees (within 1 degree), else None."""
+    rot = (entry.get("rotation") or 0.0) % 360.0
+    quarter = round(rot / 90.0)
+    return (quarter % 4) * 90 if abs(rot - quarter * 90.0) < 1.0 else None
+
+
+def _reading_position(
+    frame: tuple[float, float, float, float], point: tuple[float, float], rotation: int
+) -> tuple[float, float]:
+    """(u, v) of a point in a frame read along `rotation`: u from the reading left (0) to right (1), v from
+    the reading bottom (0) to top (1). At 270 the reading 'right' is world -y and 'up' is world +x."""
+    a = (point[0] - frame[0]) / (frame[2] - frame[0])
+    b = (point[1] - frame[1]) / (frame[3] - frame[1])
+    return {0: (a, b), 90: (b, 1.0 - a), 180: (1.0 - a, 1.0 - b), 270: (1.0 - b, a)}[rotation]
+
+
+@dataclass
+class _CornerHit:
+    """A sheet-code-shaped text in a frame's title-block corner."""
+
+    entry: dict[str, Any]
+    sheet_id: str
+    u: float
+    v: float
+    key: str
+    prefix: str
+
+
+def _corner_scan(
+    entries: list[dict[str, Any]], ctx: _SheetCtx
+) -> tuple[list[_CornerHit], list[dict[str, Any]]]:
+    """(sheet-code texts in the frame's title-block corner, sheet-code texts elsewhere on the sheet).
+
+    The corner is the last CORNER_U of the frame along the text's reading direction and the lowest
+    CORNER_V across it (TCVN 5571 puts the title block at the lower right). A landscape frame is read at
+    0 degrees only; a portrait frame also at 90 and 270 degrees (a landscape sheet drawn turned, as on 267
+    and 290). Constant text of the frame's own block is template text and never a value."""
+    x0, y0, x1, y1 = ctx.box
+    portrait = (y1 - y0) > (x1 - x0)
+    allowed = (0, 90, 270) if portrait else (0,)
+    corner: list[_CornerHit] = []
+    body: list[dict[str, Any]] = []
+    for e in entries:
+        text = e["display_text"].strip()
+        if e["position"]["x"] is None or "\n" in text or not _SHEET_CODE_RE.match(text):
+            continue
+        box = text_box(e)
+        rot = _right_angle(e)
+        # a model text shown through a layout's viewport has model coordinates: never in that layout's box
+        if box is not None and rot in allowed and not ctx.template(e) and inside(ctx.box, *box_center(box)):
+            u, v = _reading_position(ctx.box, box_center(box), rot)  # type: ignore[arg-type]
+            if u >= 1.0 - CORNER_U and v <= CORNER_V:
+                key = _code_key(text)
+                prefix = re.match(r"[a-z]*", key)
+                corner.append(_CornerHit(e, ctx.sheet_id, u, v, key, prefix.group(0) if prefix else ""))
+                continue
+        body.append(e)
+    return corner, body
+
+
+def _pick_corner_numbers(
+    corner: dict[str, list[_CornerHit]],
+    body: dict[str, list[dict[str, Any]]],
+    unplaced_codes: Counter[str],
+    need: set[str],
+) -> tuple[dict[str, list[_CornerHit]], list[str]]:
+    """Sheet-number picks for the sheets in `need` (no other sheet-number candidate), and one warning per
+    corner code not picked. Rules, in order:
+
+    1. A member mark is never a sheet number. A corner code is a mark when the same code appears on
+       another text of its own sheet (a sheet prints its number once), when two or more other texts of its
+       sheet share its letters with other numbers (a mark family such as gĐ-1, gĐ-2), or when the code
+       appears two or more times outside every title-block corner of the file. A single listing on another
+       sheet is allowed: a drawing list names each sheet once (270 has one).
+    2. A code at a position that repeats in another sheet's corner (within CORNER_POS_TOL) beats one that
+       does not; then the tallest wins. Codes that tie on both are all kept, so they become a
+       title_field_conflict question, never a silent choice."""
+    outside = Counter(unplaced_codes)
+    for texts in body.values():
+        outside.update(_code_key(e["display_text"]) for e in texts)
+    marks: dict[int, str] = {}
+    for sid, hits in corner.items():
+        own = Counter(_code_key(e["display_text"]) for e in body.get(sid, []))
+        own.update(h.key for h in hits)
+        families: Counter[str] = Counter()
+        for key, n in own.items():
+            families[re.match(r"[a-z]*", key).group(0)] += n  # type: ignore[union-attr]
+        for h in hits:
+            others = families[h.prefix] - own[h.key]
+            if own[h.key] >= 2:
+                marks[id(h)] = f"the same text appears {own[h.key]} times on this sheet (a member mark)"
+            elif others >= 2:
+                marks[id(h)] = f"{others} other texts on this sheet share its letters (a mark family)"
+            elif outside[h.key] >= 2:
+                marks[id(h)] = f"it appears {outside[h.key]} times outside the title blocks (a mark)"
+    usable = [h for hits in corner.values() for h in hits if id(h) not in marks]
+    picks: dict[str, list[_CornerHit]] = {}
+    warnings: list[str] = []
+    for sid in [sid for sid in corner if sid in need]:  # sheet order
+        hits = corner[sid]
+
+        def rank(h: _CornerHit) -> tuple[bool, float]:
+            repeats = any(
+                o.sheet_id != h.sheet_id
+                and abs(o.u - h.u) <= CORNER_POS_TOL
+                and abs(o.v - h.v) <= CORNER_POS_TOL
+                for o in usable
+            )
+            return (repeats, float(h.entry.get("height") or 0.0))
+
+        ranked = [(rank(h), h) for h in hits if id(h) not in marks]
+        best = max((r for r, _ in ranked), default=None)
+        chosen = [
+            h for r, h in ranked if best is not None and r[0] == best[0] and _same_height(r[1], best[1])
+        ]
+        if chosen:
+            picks[sid] = chosen
+        for r, h in ranked:
+            if h not in chosen and best is not None:
+                why = "a code at a position repeated on other sheets" if r[0] != best[0] else "a taller code"
+                warnings.append(
+                    f"{sid}: corner code '{h.entry['display_text'].strip()}' ({h.entry['id']}) is "
+                    f"not the sheet number: {why} was preferred."
+                )
+        for h in hits:
+            if id(h) in marks:
+                warnings.append(
+                    f"{sid}: corner code '{h.entry['display_text'].strip()}' ({h.entry['id']}) is "
+                    f"not the sheet number: {marks[id(h)]}."
+                )
+    return picks, warnings
+
+
+def _same_height(a: float, b: float) -> bool:
+    return abs(a - b) <= 1e-6 * max(abs(a), abs(b), 1.0)
 
 
 def _choose(cands: list[dict[str, Any]], fld: str) -> tuple[dict[str, Any] | None, list[str]]:
@@ -1199,8 +1358,10 @@ def extract_sheets(dxf_path: str | Path, text_index: dict[str, Any], *, doc: Dra
         final.append(s)
     sheets = final
 
-    # title blocks
-    conflicted: set[tuple[str, str]] = set()  # (sheet, field) with disagreeing candidates
+    # title blocks: field ATTRIBs and labels per sheet, then the sheet-code pattern over all sheets
+    title_cands: dict[str, list[dict[str, Any]]] = {}
+    corner: dict[str, list[_CornerHit]] = {}
+    body: dict[str, list[dict[str, Any]]] = {}
     for s in sheets:
         src = frame_sources.get(s["sheet_id"])
 
@@ -1222,7 +1383,35 @@ def extract_sheets(dxf_path: str | Path, text_index: dict[str, Any], *, doc: Dra
 
         ctx = _SheetCtx(s["sheet_id"], tuple(s["bbox"]), is_template, own_insert)  # type: ignore[arg-type]
         mine = [entry_by_id[t] for t in s["text_ids"]]
-        cands = _title_candidates(mine, ctx, file_path, cap)
+        title_cands[s["sheet_id"]] = _title_candidates(mine, ctx, file_path, cap)
+        corner[s["sheet_id"]], body[s["sheet_id"]] = _corner_scan(mine, ctx)
+    on_sheets = {t for s in sheets for t in s["text_ids"]}
+    unplaced = Counter(
+        _code_key(e["display_text"])
+        for e in entries
+        if e["id"] not in on_sheets and _SHEET_CODE_RE.match(e["display_text"].strip())
+    )
+    need = {sid for sid, cands in title_cands.items() if not any(c["field"] == "sheet_number" for c in cands)}
+    picks, corner_warnings = _pick_corner_numbers(corner, body, unplaced, need)
+    warnings.extend(corner_warnings)
+    conflicted: set[tuple[str, str]] = set()  # (sheet, field) with disagreeing candidates
+    for s in sheets:
+        cands = title_cands[s["sheet_id"]]
+        for h in picks.get(s["sheet_id"], []):
+            cand = _candidate(
+                "sheet_number",
+                h.entry["display_text"],
+                "pattern",
+                "sheet_code_lower_right",
+                h.entry,
+                None,
+                "low",
+                s["sheet_id"],
+                file_path,
+            )
+            if cand is not None:
+                cands.append(cand)
+        cands.sort(key=_candidate_order)
         number, _ = _choose(cands, "sheet_number")
         revision, _ = _choose(cands, "revision")
         s["title_block"] = {"sheet_number": number, "revision": revision, "candidates": cands}

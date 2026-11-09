@@ -520,6 +520,16 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
     - Levels: a sign with one space before the digits right after `(` is a sign, so
       `(+ 6.00M LEVEL)` gives the level +6.000 (161 and Steel_01). Elsewhere a spaced sign after other
       text is still read as a dash (`TẦNG 2 - 3.600`).
+    - Sheets: the sheet-number pattern (used only when no title field gives one) looks in the title-block
+      corner, the last quarter of the frame along the text's reading direction and its lowest fifth,
+      not the lower-right quadrant. A portrait frame is also read at 90 and 270 degrees. A member mark
+      is never a number: a code that appears twice on its sheet, has a mark family on its sheet
+      (`gĐ-1`, `gĐ-2`), or appears twice outside every title block. Among several corner codes a
+      position repeated in other sheets' corners wins, then the tallest; a tie stays a
+      `title_field_conflict`. Every corner code not taken is listed in `warnings` with its reason. A
+      model text shown on a layout sheet is never in that sheet's corner. Corpus: 285 model#03
+      `kc- 03`, 290 model#16-18 `Kc - 13` and 267 model#16-20 / #43-44 are now read; the false
+      `gĐ-3` on 286 model#04 is gone.
 
 ### Changed
 - Question lifecycle (tool wave 2, EVAL-2 fix 5):
