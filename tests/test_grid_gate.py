@@ -108,7 +108,12 @@ def select_all(work: Path, *, leave_out: str | None = None) -> None:
 
 
 def answer_new_axes(work: Path) -> None:
-    answer_blocking(work, ("grid-system-questions.json",), skip=(CONFLICT_CODE, GRID_MISSING_CODE))
+    """The engineer gives Tekla X / Y to every system still waiting for it (an answer-built system's
+    directions carry no angle: dir1 X, dir2 Y)."""
+    for q in questions_of(work, "grid-system-questions.json"):
+        if q["code"] == "grid_system_axis_unassigned" and q["blocking"] and q["answer"] is None:
+            values = {"dir1": "X", "dir2": "Y"}
+            record_answer(work, q["id"], "test answer", "tester", values, role="engineer")
 
 
 def test_world3_is_blocked_by_the_missing_grid_only(w3):
@@ -265,6 +270,44 @@ def test_an_answer_built_system_closes_the_question_only_while_grid_systems_is_f
     status = build_status(w3)
     assert grid_step(status)["outputs"]["status"] == "stale"
     assert q["id"] in grid_step(status)["blocking_open_ids"]
+
+
+def test_an_answer_built_system_that_disagrees_with_a_detected_one_keeps_gate1_shut(w3):
+    """Review M1: the engineer gives notes.dxf the labels of S001 at other spacings; the systems conflict,
+    and only the select answer (separate=, or leaving one out) closes it, like two detected systems."""
+    detected = [s for s in load(w3 / "grid-systems.json")["systems"] if s.get("source") != "engineer_answer"]
+    d1, d2 = detected[0]["directions"]
+    values = {
+        "dir1_labels": ",".join(d1["labels"]),
+        "dir1_spacings": ",".join(str(int(v) + 1000) for v in d1["spacings"]),
+        "dir2_labels": ",".join(d2["labels"]),
+        "dir2_spacings": ",".join(str(int(v) + 1000) for v in d2["spacings"]),
+    }
+    q = missing_q(w3)
+    record_answer(w3, q["id"], "grid", "A. Nguyen", values, role="engineer")
+    run_grid_systems(w3)
+    (system,) = built(w3)
+    sid = system["system_id"]
+    select_all(w3)  # every system used; only the detected two declared separate
+    run_grid_systems(w3)
+    answer_new_axes(w3)
+    run_grid_systems(w3)
+    doc = load(w3 / "grid-systems.json")
+    open_conflicts = [c for c in doc["conflicts"] if sid in c["systems"] and c["closed_by"] is None]
+    assert open_conflicts and all(c["blocking"] for c in open_conflicts)
+    status = build_status(w3)
+    assert status["gate1"]["ready_for_gate1"] is False
+    assert any(
+        f" and {sid} conflict (" in r or f"grid systems: {sid} and " in r for r in status["gate1"]["reasons"]
+    )
+    # declared a separate building too: the conflicts close, gate 1 opens
+    select = find(questions_of(w3, "grid-system-questions.json"), SELECT_CODE)
+    every = ",".join(r["where"] for r in select["refs"])
+    record_answer(
+        w3, select["id"], "all separate", "A. Nguyen", {"systems": every, "separate": every}, role="engineer"
+    )
+    run_grid_systems(w3)
+    assert build_status(w3)["gate1"]["ready_for_gate1"] is True
 
 
 def test_questions_md_shows_a_grid_answer_that_built_nothing_as_open(w3):

@@ -1751,6 +1751,149 @@ def test_the_answers_digest_covers_the_grid_answer():
     assert consumed_answers_digest([*base, ans(MISSING, "a.dxf", GRID)]) != consumed_answers_digest(base)
 
 
+# --- review M1: an answer-built system is conflict-checked like a detected one (ADR-0013 decision 6) --------
+
+
+def _conflict_pairs(doc: dict[str, Any]) -> list[tuple[list[str], bool, str | None]]:
+    return [(c["systems"], c["blocking"], c["closed_by"]) for c in doc["conflicts"]]
+
+
+def _system(doc: dict[str, Any], sid: str) -> dict[str, Any]:
+    (s,) = [s for s in doc["systems"] if s["system_id"] == sid]
+    return s
+
+
+def test_an_answer_built_system_that_disagrees_with_a_detected_one_conflicts(tmp_path, example):
+    """house.dxf's detected S001 is A B C = 4250 / 3730; the answer gives A B C = 4000 / 3730."""
+    work = _no_grid(tmp_path, example)
+    values = {**GRID, "dir2_spacings": [4000, 3730]}
+    out = build_grid_systems(work, answers=[answer_to(build_grid_systems(work), MISSING, values)])
+    check_invariants(out)
+    assert _conflict_pairs(out) == [(["S001", "S002"], True, None)]
+    assert _system(out, "S002")["relations"]["conflicts_with"] == ["S001"]
+    assert _system(out, "S001")["relations"]["conflicts_with"] == ["S002"]
+    assert "conflict" in _system(out, "S002")["flags"] and "conflict" in _system(out, "S001")["flags"]
+    (q,) = [q for q in out["questions"] if q["code"] == "grid_system_conflict"]
+    assert q["blocking"] and q["file"] == "house.dxf"
+    assert "A-B: 4250 vs 4000" in q["message"] and "shared labels A B C" in q["found"]
+    # the key does not depend on the system ids or the spacings: the same labels, other spacings, same key
+    again = build_grid_systems(
+        work,
+        answers=[answer_to(build_grid_systems(work), MISSING, {**GRID, "dir2_spacings": [4100, 3730]})],
+    )
+    (q2,) = [q for q in keyed(again) if q["code"] == "grid_system_conflict"]
+    assert q2["key"] == next(q for q in keyed(out) if q["code"] == "grid_system_conflict")["key"]
+
+
+def test_an_answer_built_system_that_agrees_with_a_detected_one_is_compatible(tmp_path, example):
+    work = _no_grid(tmp_path, example)
+    out = build_grid_systems(work, answers=[answer_to(build_grid_systems(work), MISSING, GRID)])
+    assert out["conflicts"] == []
+    assert _system(out, "S002")["relations"]["compatible_with"] == ["S001"]
+    assert _system(out, "S001")["relations"]["compatible_with"] == ["S002"]
+
+
+def test_a_select_answer_closes_an_answer_built_conflict_like_any_other(tmp_path, example):
+    work = _no_grid(tmp_path, example)
+    grid = answer_to(build_grid_systems(work), MISSING, {**GRID, "dir2_spacings": [4000, 3730]})
+    out = build_grid_systems(work, answers=[grid])
+    separate = answer_to(
+        out, "grid_system_select", {"systems": ["S001", "S002"], "separate": ["S001", "S002"]}
+    )
+    assert _conflict_pairs(build_grid_systems(work, answers=[grid, separate])) == [
+        (["S001", "S002"], False, "separate")
+    ]
+    only = answer_to(out, "grid_system_select", {"systems": ["S002"]})
+    assert _conflict_pairs(build_grid_systems(work, answers=[grid, only])) == [
+        (["S001", "S002"], False, "not_selected")
+    ]
+
+
+def _b_answer(
+    work: Path, *, file_set: tuple[str, str] | None = None, extra: tuple[dict[str, Any], ...] = ()
+) -> dict[str, Any]:
+    """a.dxf (A-D x 1-3) and b.dxf (A-C x 1-3, other spacings); the engineer keeps S001 only, then gives
+    b.dxf's grid as the other building's: A B C = 3600 / 4800, 1 2 3 = 5400 / 5400 (b.dxf's own S002)."""
+    first = build_grid_systems(work, answers=list(extra), file_set=file_set)
+    only_a = answer_to(first, "grid_system_select", {"systems": ["S001"]})
+    rejected = build_grid_systems(work, answers=[*extra, only_a], file_set=file_set)
+    values = {
+        "dir1_labels": ["A", "B", "C"],
+        "dir1_spacings": [3600, 4800],
+        "dir2_labels": NUMBERS,
+        "dir2_spacings": [5400, 5400],
+    }
+    grid = answer_to(rejected, MISSING, values)
+    assert grid["file"] == "b.dxf"
+    return build_grid_systems(work, answers=[*extra, only_a, grid], file_set=file_set)
+
+
+def test_an_answer_built_system_is_compared_with_the_systems_of_other_files(tmp_path, example):
+    out = _b_answer(_two_files(tmp_path, example))
+    check_invariants(out)
+    assert [s["system_id"] for s in _built(out)] == ["S003"]
+    # S001 (a.dxf) vs S002 (b.dxf, detected) as before, and now S001 vs S003 (b.dxf, built); S002 and S003
+    # agree (compatible)
+    assert _conflict_pairs(out) == [(["S001", "S002"], True, None), (["S001", "S003"], True, None)]
+    assert _system(out, "S003")["relations"]["compatible_with"] == ["S002"]
+
+
+def test_an_answer_built_conflict_across_files_waits_for_the_file_sets(tmp_path, example):
+    work = _two_files(tmp_path, example)
+    pending = _b_answer(work, file_set=(FILE_SET_KEY, FILE_SET_ID))
+    assert _conflict_pairs(pending) == [(["S001", "S002"], False, None), (["S001", "S003"], False, None)]
+    one_set = _file_set_answer(set1=["a.dxf", "b.dxf"])
+    one = _b_answer(work, file_set=(FILE_SET_KEY, FILE_SET_ID), extra=(one_set,))
+    assert _conflict_pairs(one) == [(["S001", "S002"], True, None), (["S001", "S003"], True, None)]
+    two_sets = _file_set_answer(set1=["a.dxf"], set2=["b.dxf"])
+    two = _b_answer(work, file_set=(FILE_SET_KEY, FILE_SET_ID), extra=(two_sets,))
+    assert two["conflicts"] == []  # two sets are never compared, a built system included
+    # S003 is compared with b.dxf's own S002 only (same set), never with a.dxf's S001
+    assert _system(two, "S003")["relations"] == {
+        "compatible_with": ["S002"],
+        "conflicts_with": [],
+        "subset_of": [],
+    }
+
+
+def test_two_answer_built_systems_are_compared(tmp_path, example):
+    """house.dxf and shed.dxf: neither has a usable system; both grids are given, and disagree on 1-2."""
+    w = Work(tmp_path, example)
+    w.add_file(
+        "house.dxf", [view("V001", "model#05", fam("F001", ["A", "B", "C"], [4250.0, 3730.0], angle=0.0))]
+    )
+    w.add_file("shed.dxf", [view("V001", "model#01", fam("F001", ["X", "Y"], [5000.0], angle=0.0))])
+    work = w.finish()
+    first = build_grid_systems(work)
+    house = answer_to(first, MISSING, GRID, "house.dxf: no usable grid system")
+    shed_values = {"dir1_labels": ["1", "2", "3"], "dir1_spacings": [3000, 3000], "dir2_labels": ["X", "Y"],
+                   "dir2_spacings": [5000]}  # fmt: skip
+    shed = answer_to(first, MISSING, shed_values, "shed.dxf: no usable grid system")
+    out = build_grid_systems(work, answers=[house, shed])
+    check_invariants(out)
+    assert [s["system_id"] for s in _built(out)] == ["S003", "S004"]
+    assert (["S003", "S004"], True, None) in _conflict_pairs(out)
+    (q,) = [q for q in out["questions"] if q["code"] == "grid_system_conflict" and "S004" in q["message"]]
+    assert "1-2: 3130 vs 3000" in q["message"]
+
+
+# --- review M2: only an answer that builds a grid keeps grid_system_missing raised -------------------------
+
+
+def test_a_words_only_engineer_answer_does_not_keep_the_question_raised(tmp_path, example):
+    """Select S001 only: b.dxf is asked; the engineer answers in words only; then selects both again. b.dxf is
+    covered by a selected system again, so it is no longer asked (the words-only answer goes stale)."""
+    work = _two_files(tmp_path, example)
+    only_a = answer_to(build_grid_systems(work), "grid_system_select", {"systems": ["S001"]})
+    rejected = build_grid_systems(work, answers=[only_a])
+    words = answer_to(rejected, MISSING, {})
+    again = build_grid_systems(work, answers=[only_a, words])
+    assert [q["file"] for q in again["questions"] if q["code"] == MISSING] == ["b.dxf"]  # still not covered
+    both = answer_to(again, "grid_system_select", {"systems": ["S001", "S002"], "separate": ["S001", "S002"]})
+    final = build_grid_systems(work, answers=[both, words])
+    assert MISSING not in codes(final)
+
+
 def test_an_answer_built_system_is_drawn(tmp_path, example):
     work = _no_grid(tmp_path, example)
     answer = answer_to(build_grid_systems(work), MISSING, GRID)

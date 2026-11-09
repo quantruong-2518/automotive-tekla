@@ -65,8 +65,11 @@ Rules (deterministic; the thresholds are heuristics, see the schema description)
    detected in the file and why they are not usable are in the message). An active ENGINEER answer to it
    with dir1/dir2 labels and spacings builds a system `source: engineer_answer` after the detected ones
    (no view, family or contributor; the answer is its provenance), which then goes through select, X/Y
-   and units like any other; while that answer is active the question stays raised (its answer would go
-   stale otherwise). A non-engineer, words-only or malformed answer builds nothing (warned). The given
+   and units like any other, and is compared with every other system like two detected ones (rule 2 on
+   its given directions, cumulative positions, no rounding step; file sets as in rule 9). While that
+   answer is active the question stays raised (its answer would go stale otherwise). A non-engineer,
+   words-only or malformed answer builds nothing (warned), and the question is raised only while the file
+   has no usable system (so such an answer goes stale once the file is covered again). The given
    spacings are compared with the linear dimensions grids.py placed between two of the given axes
    (labels case-blind, spans as sums; DRAFTING_TOL): a disagreement raises a blocking
    `grid_answer_contradicts_drawing` quoting both, and a grid nothing could be checked against is warned.
@@ -671,12 +674,20 @@ def _system_conflict(a: _System, b: _System) -> tuple[list[tuple[_Fam, _Fam]], l
     """The first pair of full members (representatives first) that disagree on a shared label pair: every
     conflicting family pair of those two members (a's family first) and every difference; None when the
     systems never disagree."""
-    for ma in a.full():
-        for mb in b.full():
+    return _members_conflict([m.view.fams for m in a.full()], [m.view.fams for m in b.full()])
+
+
+def _members_conflict(
+    a: list[list[_Fam]], b: list[list[_Fam]]
+) -> tuple[list[tuple[_Fam, _Fam]], list[str]] | None:
+    """_system_conflict over the families of each full member (representative first) of two systems; an
+    answer-built system has one member, its given directions (_given_fams)."""
+    for fams_a in a:
+        for fams_b in b:
             found: list[str] = []
             pairs: list[tuple[_Fam, _Fam]] = []
-            for fa in ma.view.fams:
-                for fb in mb.view.fams:
+            for fa in fams_a:
+                for fb in fams_b:
                     c = _compare(fa, fb)
                     if c.relation == "conflict":
                         pairs.append((fa, fb))
@@ -708,13 +719,15 @@ def _conflict_identity(pairs: list[tuple[_Fam, _Fam]]) -> tuple[str, str, _Fam]:
     return where, found, first
 
 
-def _related(a: _System, b: _System) -> bool:
-    return any(_compare(fa, fb).relation != "disjoint" for fa in a.rep.fams for fb in b.rep.fams)
+def _related(a: list[_Fam], b: list[_Fam]) -> bool:
+    """The representative families of two systems share at least two labels in some direction."""
+    return any(_compare(fa, fb).relation != "disjoint" for fa in a for fb in b)
 
 
-def _same_set(a: _System, b: _System, set_of: dict[str, int]) -> bool:
-    """Two systems are compared only when they belong to one file set (a system never spans two)."""
-    return set_of.get(a.rep.file, 0) == set_of.get(b.rep.file, 0)
+def _same_set(a: str, b: str, set_of: dict[str, int]) -> bool:
+    """Two systems are compared only when their representative files belong to one file set (a system never
+    spans two)."""
+    return set_of.get(a, 0) == set_of.get(b, 0)
 
 
 def _closure(a: str, b: str, selected: set[str], separate: set[str]) -> str | None:
@@ -1303,6 +1316,38 @@ def _given_axis_found(grid: _GivenGrid) -> str:
     )
 
 
+def _factor(units: dict[str, tuple[str, str | None]], file: str) -> float | None:
+    """mm per drawing unit of a file with an agreeing engineer units answer; None otherwise."""
+    status, unit = units[file]
+    return UNIT_TO_MM[unit] if status == "answered" and unit is not None else None
+
+
+def _given_fams(grid: _GivenGrid, factor: float | None) -> list[_Fam]:
+    """The directions of an answer-built system as families, for the pairwise conflict check (ADR-0013
+    decision 6, review M1): positions are the cumulative given spacings, with no rounding step (only the
+    drafting tolerance applies), compared in millimetres when the file has an agreeing engineer units
+    answer (`factor`), like a detected family. Their view and family ids name the answered question's key
+    and the direction, never the positional system id, so a conflict question keeps its key."""
+    key = str(grid.answer["key"])
+    return [
+        _Fam(
+            file=grid.file,
+            sheet=grid.sheet or SHEET_UNKNOWN,
+            group_id=f"answer {key}",
+            family_id=AXIS_DIRECTIONS[d],
+            labels=list(labels),
+            pos={lbl: sum(spacings[:k]) for k, lbl in enumerate(labels)},
+            spacings=list(spacings),
+            step=0.0,
+            angle=0.0,
+            complete=True,
+            confidence=MAX_CONFIDENCE,
+            factor=factor,
+        )
+        for d, (labels, spacings) in enumerate(grid.directions)
+    ]
+
+
 def _given_axes(n_dirs: int, system_axes: dict[int, str] | None) -> tuple[str, str | None]:
     """X/Y of an answer-built system: only from its own grid_system_axis_unassigned answer (it has no
     family a grid_family_axis_assignment answer could name)."""
@@ -1421,9 +1466,10 @@ def _ask_given_grids(
     warnings: list[str],
 ) -> None:
     """ADR-0013 §1 and §5. grid_system_missing for every read file that no selected two-direction DETECTED
-    system covers, and for every file the engineer answered it for (the question stays raised under its
-    key, so the answer stays bound and the system it built stays: Ledger.sync makes an answer to a question
-    no longer raised stale). grid_answer_contradicts_drawing for every answer-built system that a linear
+    system covers, and for every file whose engineer answer built a system (`engineer_answered`: the
+    question stays raised under its key, so the answer stays bound and the system it built stays:
+    Ledger.sync makes an answer to a question no longer raised stale; an answer that builds nothing does
+    not keep it raised). grid_answer_contradicts_drawing for every answer-built system that a linear
     dimension between two of its axes disagrees with; a system nothing could be checked against is
     warned."""
     usable: set[str] = set()
@@ -1577,9 +1623,7 @@ def build_grid_systems(
 
     for v in inputs.views:  # an agreeing units answer lets the matching compare this file in millimetres
         for f in v.fams:
-            status, unit = units[f.file]
-            if status == "answered" and unit is not None:
-                f.factor = UNIT_TO_MM[unit]
+            f.factor = _factor(units, f.file)
     systems = _systems(_clusters(inputs.views, set_of), inputs.ctx, set_of)
     ids = [f"S{k:03d}" for k in range(1, len(systems) + 1)]
     place: dict[str, tuple[str, str | None]] = {}  # system -> (file, sheet) its questions are filed under
@@ -1600,11 +1644,11 @@ def build_grid_systems(
         if not _by_engineer(answer):
             warnings.append(_not_engineer(answer, "recorded, builds nothing"))
             continue
-        engineer_answered.add(f)
         grid, why = _given_grid(answer, f)
-        if grid is None:
+        if grid is None:  # the question is raised only while the file is not covered (review M2)
             warnings.append(f"the {GRID_MISSING_CODE} answer {key!r} for {f} builds nothing: {why}")
         else:
+            engineer_answered.add(f)
             given.append(grid)
     given_ids = [f"S{k:03d}" for k in range(len(ids) + 1, len(ids) + len(given) + 1)]
 
@@ -1695,27 +1739,33 @@ def build_grid_systems(
     ask = _Ask()
     clashes: list[tuple[str, str, str, str, str]] = []  # where, found, file, sheet, what differs (message)
     pairs: list[tuple[str, str]] = []
-    files_of = [{m.view.file for m in s.members} for s in systems]
+    # every system against every other, answer-built ones included (ADR-0013 decision 6): per system (in
+    # all_ids order) its full members' families, its representative's, its files and its file-set file
+    given_fams = [_given_fams(grid, _factor(units, grid.file)) for grid in given]
+    members = [[m.view.fams for m in s.full()] for s in systems] + [[fams] for fams in given_fams]
+    reps = [s.rep.fams for s in systems] + given_fams
+    files_of = [{m.view.file for m in s.members} for s in systems] + [{grid.file} for grid in given]
+    set_files = [s.rep.file for s in systems] + [grid.file for grid in given]
     waiting = file_sets is not None and file_sets["status"] == "pending"
     pending: list[bool] = []  # per clash: two systems with no file in common while the file sets are asked
-    for i in range(len(systems)):
-        for j in range(i + 1, len(systems)):
-            if not _same_set(systems[i], systems[j], set_of):
+    for i in range(len(all_ids)):
+        for j in range(i + 1, len(all_ids)):
+            if not _same_set(set_files[i], set_files[j], set_of):
                 continue
-            hit = _system_conflict(systems[i], systems[j])
+            hit = _members_conflict(members[i], members[j])
             if hit is not None:
-                docs[i]["relations"]["conflicts_with"].append(ids[j])
-                docs[j]["relations"]["conflicts_with"].append(ids[i])
+                docs[i]["relations"]["conflicts_with"].append(all_ids[j])
+                docs[j]["relations"]["conflicts_with"].append(all_ids[i])
                 fam_pairs, diffs = hit
                 where, found, filed = _conflict_identity(fam_pairs)
                 fa, fb = fam_pairs[0]
-                what = f"{_where(ids[i], fa)} vs {_where(ids[j], fb)}: {'; '.join(diffs[:20])}"
+                what = f"{_where(all_ids[i], fa)} vs {_where(all_ids[j], fb)}: {'; '.join(diffs[:20])}"
                 clashes.append((where, found, filed.file, filed.sheet, what))
-                pairs.append((ids[i], ids[j]))
+                pairs.append((all_ids[i], all_ids[j]))
                 pending.append(waiting and not files_of[i] & files_of[j])
-            elif _related(systems[i], systems[j]):
-                docs[i]["relations"]["compatible_with"].append(ids[j])
-                docs[j]["relations"]["compatible_with"].append(ids[i])
+            elif _related(reps[i], reps[j]):
+                docs[i]["relations"]["compatible_with"].append(all_ids[j])
+                docs[j]["relations"]["compatible_with"].append(all_ids[i])
     for k, s in enumerate(systems):
         docs[k]["relations"]["subset_of"] = [ids[i] for i in s.subset_of]
 
@@ -1768,7 +1818,7 @@ def build_grid_systems(
                     "question is answered they are compared only when they are in one set. " + message
                 )
             for sid in (a, b):  # the flag asks for action: only while a conflict of the system is open
-                d = docs[ids.index(sid)]
+                d = docs[all_ids.index(sid)]
                 d["flags"] = sorted({*d["flags"], "conflict"})
         blocking = closed_by is None and not wait
         raised = ask(CONFLICT_CODE, message, where, found, file, sheet, blocking=blocking)

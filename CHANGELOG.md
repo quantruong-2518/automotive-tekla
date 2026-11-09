@@ -741,6 +741,14 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
     after a simulated one makes it stale until `harness grid-system` reruns; every existing
     `grid-systems.json` reads as stale once. Every used system needs `units.status` confirmed and, once
     its units and X/Y are, a non-null `tekla_grid`.
+  - `harness grid-system` compares a system built from a `grid_system_missing` answer with every other
+    system, detected or built, like two detected ones: shared labels in order, distances between
+    consecutive shared labels within the drafting tolerance (in mm when both files have an engineer units
+    answer), the same file-set rules. A disagreement is a `grid_system_conflict` (blocking until the
+    select answer leaves one out or declares both separate); an agreement is `compatible_with`. The
+    conflict question's key names the answered question's key, not the system id. A
+    `grid_system_missing` answer that builds nothing (words only, malformed) no longer keeps the question
+    raised: once the file is covered by a selected system again, it is not asked and the answer goes stale.
 - Tool wave 2, package F2 (review of P4, marks and dimensions):
   - `harness dimensions` measures block content on its block definition (ezdxf `origin_of_copy`), not on
     the virtual copy: a linear dimension stored without an angle in an INSERT rotated by 90 degrees
