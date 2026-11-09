@@ -12,9 +12,10 @@ question is intake's units_confirm_all of the file; this one is evidence for it)
 Algorithm (deterministic; thresholds are the named constants below):
 
 1. Walk model space and every layout, expanding INSERTs (sheets.Walker), collecting CIRCLEs (and
-   circular ELLIPSEs from scaled blocks), straight segments (LINE, 2-vertex open polylines) and linear
-   DIMENSIONs, all in world / paper coordinates. A bubble is therefore found by its CIRCLE centre,
-   whatever the block's base point or mirroring.
+   ARCs or circular ELLIPSEs from scaled blocks whose sweep is a full turn within FULL_ARC_GAP_DEG: a
+   bubble drawn as an arc from 90.00006 to 90.0000031 degrees is a circle, a door swing is not), straight
+   segments (LINE, 2-vertex open polylines) and linear DIMENSIONs, all in world / paper coordinates. A
+   bubble is therefore found by its circle centre, whatever the block's base point or mirroring.
 2. Bubble = circle whose centre (within BUBBLE_TEXT_RADIUS x r) holds exactly one distinct axis-label
    text from the text index (ATTRIB, text inside a block, or loose TEXT), of height 0.15 r .. 1.6 r,
    and no other text. Two different label texts in one circle: ambiguous; a label plus other text (a
@@ -86,6 +87,9 @@ LINE_THROUGH_CENTRE = 0.35  # the line passes within this x r of the centre
 END_NEAR_BUBBLE = 8.0  # the nearer line end lies within this x r of the centre (bubbles often sit past a gap)
 SAME_LINE_TOL = 0.1  # x r: two collinear axes are the same line
 FAMILY_ANGLE_TOL = 0.5  # degrees
+# Heuristic: an ARC (or a ratio-1 ELLIPSE) whose sweep falls short of a full turn by at most this many degrees
+# is drawn as a circle (EVAL-3 285/286: block SADF, an arc from 90.00006 to 90.0000031 degrees)
+FULL_ARC_GAP_DEG = 1.0
 ORTHO_TOL = 0.1  # degrees
 DIM_POINT_TOL = 0.05  # x r: a dimension extension point lies on an axis
 SCALE_TOL = 1e-3  # relative: two spacing sets differ by one ratio
@@ -174,7 +178,7 @@ _LABEL_RE = re.compile(
 )
 _LABEL_TOKEN_RE = re.compile(r"\d+|[A-Za-z]+|['\u2032]+|/")
 _NUMBER_RE = re.compile(r"^\s*[-+]?\d+(?:\.\d+)?\s*$")
-_GEOMETRY = frozenset({"LINE", "LWPOLYLINE", "POLYLINE", "CIRCLE", "ELLIPSE", "DIMENSION"})
+_GEOMETRY = frozenset({"LINE", "LWPOLYLINE", "POLYLINE", "CIRCLE", "ARC", "ELLIPSE", "DIMENSION"})
 
 
 # --- primitives --------------------------------------------------------------------------------
@@ -531,8 +535,17 @@ def _collect(doc: Drawing, walker: Walker, ctx: _Ctx):
                         c = e.ocs().to_wcs(c)
                     if e.dxf.radius > 0:
                         circles.append(_Circle((c.x, c.y), float(e.dxf.radius), space, p.block_path))
+                elif kind == "ARC":
+                    sweep = (float(e.dxf.end_angle) - float(e.dxf.start_angle)) % 360.0
+                    if e.dxf.radius > 0 and sweep >= 360.0 - FULL_ARC_GAP_DEG:
+                        c = e.dxf.center
+                        if e.dxf.get("extrusion", (0, 0, 1))[2] < 0:
+                            c = e.ocs().to_wcs(c)
+                        circles.append(_Circle((c.x, c.y), float(e.dxf.radius), space, p.block_path))
                 elif kind == "ELLIPSE":
-                    if abs(float(e.dxf.ratio) - 1.0) < 1e-3:
+                    span = math.degrees((float(e.dxf.end_param) - float(e.dxf.start_param)) % math.tau)
+                    full = span >= 360.0 - FULL_ARC_GAP_DEG or span == 0.0  # 0 and 2 pi: a whole ellipse
+                    if abs(float(e.dxf.ratio) - 1.0) < 1e-3 and full:
                         c, major = e.dxf.center, e.dxf.major_axis
                         circles.append(_Circle((c.x, c.y), math.hypot(major.x, major.y), space, p.block_path))
                 elif kind == "DIMENSION":
@@ -687,7 +700,70 @@ def _pair(bubbles: list[_Bubble], segs: list[_Seg], ctx: _Ctx) -> tuple[list[_Ax
         seg = best[1]
         sheet = ctx.locator.locate(seg.space, *seg.mid)
         axes.append(_Axis(seg, [b], "line", sheet if sheet != SHEET_UNKNOWN else b.sheet, seg.space))
+    through, unpaired = _pair_through(unpaired, segs)
+    for seg, ends in through:
+        sheet = ctx.locator.locate(seg.space, *seg.mid)
+        axes.append(_Axis(seg, ends, "line", sheet if sheet != SHEET_UNKNOWN else ends[0].sheet, seg.space))
     return _merge_same_line(axes, ctx), unpaired
+
+
+def _on_segment(c: tuple[float, float], s: _Seg, r: float) -> bool:
+    """The line of `s` passes within LINE_THROUGH_CENTRE x r of `c`, and `c` projects inside the segment."""
+    if _dist_to_line(c, s.a, s.b) > LINE_THROUGH_CENTRE * r:
+        return False
+    t = ((c[0] - s.a[0]) * (s.b[0] - s.a[0]) + (c[1] - s.a[1]) * (s.b[1] - s.a[1])) / (s.length**2)
+    return 0.0 <= t <= 1.0
+
+
+def _pair_through(
+    bubbles: list[_Bubble], segs: list[_Seg]
+) -> tuple[list[tuple[_Seg, list[_Bubble]]], list[_Bubble]]:
+    """Bubbles no line END reaches (step 3): a grid line drawn through the bubbles at both of its ends and on
+    to the frame (EVAL-3 286). Two bubbles of one label, at least MIN_AXIS_LENGTH radii apart, whose centres
+    both lie on one segment make that segment their axis (the longest such segment); a line through one
+    bubble alone (a wall through a mark) pairs nothing. Returns (segment, bubbles) pairs and the rest."""
+    if not bubbles:
+        return [], []
+    r_min = min(b.circle.r for b in bubbles)
+    step = 4 * statistics.median(b.circle.r for b in bubbles)
+    index: dict[str, _Index] = defaultdict(lambda: _Index(step))
+    for s in segs:
+        if s.length < MIN_AXIS_LENGTH * r_min:
+            continue
+        n = math.ceil(s.length / step)
+        for k in range(n + 1):
+            t = k / n
+            index[s.space].add((s.a[0] + t * (s.b[0] - s.a[0]), s.a[1] + t * (s.b[1] - s.a[1])), s)
+    by_label: dict[tuple[str, str], list[_Bubble]] = defaultdict(list)
+    for b in bubbles:
+        if b.label:
+            by_label[(b.circle.space, b.label)].append(b)
+    used: set[int] = set()
+    out: list[tuple[_Seg, list[_Bubble]]] = []
+    for b in bubbles:
+        if id(b) in used or not b.label:
+            continue
+        c, r = b.circle.c, b.circle.r
+        found = {s.sid: s for s in index[b.circle.space].near(c, step)}
+        # a segment through both centres, MIN_AXIS_LENGTH radii apart, is at least that long
+        candidates = sorted(
+            (s for s in found.values() if _on_segment(c, s, r)), key=lambda s: (-s.length, s.sid)
+        )
+        for s in candidates:
+            ends = [
+                o
+                for o in by_label[(b.circle.space, b.label)]
+                if o is not b
+                and id(o) not in used
+                and math.dist(o.circle.c, c) >= MIN_AXIS_LENGTH * max(r, o.circle.r)
+                and _on_segment(o.circle.c, s, o.circle.r)
+            ]
+            if ends:
+                pair = [b, *ends]
+                used.update(id(x) for x in pair)
+                out.append((s, pair))
+                break
+    return out, [b for b in bubbles if id(b) not in used]
 
 
 def _merge_same_line(axes: list[_Axis], ctx: _Ctx) -> list[_Axis]:

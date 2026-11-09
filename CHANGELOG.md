@@ -566,6 +566,14 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
       cell is invented. `entries[].row` indexes `rows`; `counts.assigned` and `legacy_font_gate` stay the
       whole sheet's; `--contains` and `--max` work as without a region. A box that misses the frame is
       warned about. On 286 the `Ø<10mm` row reads `Ø<10mm | CI | 225` (T001075, T001074, T001072).
+  - Tool wave 3, package G:
+    - `harness read-structure` finds grid bubbles drawn as an ARC that is a full turn within
+      `FULL_ARC_GAP_DEG` (1 degree; EVAL-3 285 and 286 block `SADF`, an arc from 90.00006 to 90.0000031
+      degrees), and a grid line drawn through the bubbles at both of its ends and on to the frame pairs
+      with them when two bubbles of one label, at least `MIN_AXIS_LENGTH` radii apart, both lie on it
+      (286 model#05). A ratio-1 ELLIPSE is a circle only when it, too, is a full turn (a door swing in an
+      unevenly scaled block was counted). 285 now gives 1-2-3-4-5 = 3130/3540/3520/4590 x A-B-C =
+      4250/3730 (and 4254 on model#03), 286 gives 1-2-3 = 3400/3980 x A-B-C = 4840/4190 on 13 sheets.
 
 ### Changed
 - Question lifecycle (tool wave 2, EVAL-2 fix 5):

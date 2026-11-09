@@ -212,6 +212,143 @@ def test_bubbles_at_both_ends_make_one_axis(tmp_path):
     assert fam["proposal"]["coordinates"] == "0 2*6000"
 
 
+def _arc_grid(msp, start: float, end: float, scale: float = 1.0, mirror: bool = False):
+    """The 285/286 bubble (block SADF): an ARC whose sweep is a hair short of 360 degrees, off the block's
+    base point, in a block inserted at a uniform scale (mirrored: x scale negative), the label a loose
+    TEXT at its centre."""
+    blk = msp.doc.blocks.new("SADF")
+    off = (187.5, 250.0)  # the arc centre in the block, as in SADF
+    blk.add_arc(off, R / scale, start, end)
+    blk.add_line((off[0], off[1] + 1.5 * R / scale), (off[0], off[1] + 2 * R / scale))  # cross-hair tick
+    sx = -scale if mirror else scale
+
+    def bubble(c: tuple[float, float], label: str) -> None:
+        insert = (c[0] - sx * off[0], c[1] - scale * off[1])
+        msp.add_blockref("SADF", insert, dxfattribs={"xscale": sx, "yscale": scale})
+        msp.add_text(label, height=TH).set_placement(c, align=TextEntityAlignment.MIDDLE_CENTER)
+
+    for x, label in ((0.0, "1"), (6000.0, "2"), (12000.0, "3")):
+        msp.add_line((x, 0), (x, 12000))
+        bubble((x, -R), label)
+    for y, label in ((2000.0, "a"), (8000.0, "b")):
+        msp.add_line((-2000, y), (14000, y))
+        bubble((-2000 - R, y), label)
+
+
+@pytest.mark.parametrize(
+    ("start", "end", "mirror"),
+    [(90.00006, 90.0000031, False), (90.00006, 90.0000031, True), (90.0, 89.2, False), (90.0, 89.0, False)],
+)
+def test_a_bubble_drawn_as_an_almost_full_arc_is_a_bubble(tmp_path, start, end, mirror):
+    """EVAL-3 285 / 286: the grid bubble is block SADF, an ARC from 90.00006 to 90.0000031 degrees (a full
+    circle short by 0.00006 degrees), not a CIRCLE; 0 of the plan bubbles were found. A gap up to
+    FULL_ARC_GAP_DEG (1 degree) is still a circle; a mirrored insert puts the arc where it is drawn."""
+    result = run(_plain(tmp_path, lambda m: _arc_grid(m, start, end, scale=0.5436755, mirror=mirror)))
+    numbers = family(result, "unknown", "1 2 3")
+    assert numbers["proposal"]["coordinates"] == "0 2*6000"
+    assert family(result, "unknown", "a b")["proposal"]["coordinates"] == "0 6000"
+    assert numbers["axes"][0]["bubbles"][0]["radius"] == pytest.approx(R)
+    assert result["summary"]["bubbles_paired"] == 5
+
+
+@pytest.mark.parametrize(("start", "end"), [(0.0, 90.0), (90.0, 88.5), (45.0, 45.0)])
+def test_an_arc_short_of_a_full_circle_is_not_a_bubble(tmp_path, start, end):
+    """A door swing or any arc that is not (almost) a full circle never holds a grid label."""
+    result = run(_plain(tmp_path, lambda m: _arc_grid(m, start, end)))
+    assert result["summary"]["circles"] == 0 and result["groups"] == []
+
+
+def test_a_partial_ellipse_of_ratio_one_is_not_a_bubble(tmp_path):
+    """An ARC in a block scaled unevenly explodes into an ELLIPSE: only a full one is a circle."""
+
+    def fn(msp):
+        for x, label in ((0.0, "1"), (6000.0, "2"), (12000.0, "3")):
+            msp.add_line((x, 0), (x, 12000))
+            msp.add_ellipse((x, -R), major_axis=(R, 0), ratio=1.0, start_param=0.0, end_param=math.pi / 2)
+            msp.add_text(label, height=TH).set_placement((x, -R), align=TextEntityAlignment.MIDDLE_CENTER)
+        msp.add_ellipse((30000, 0), major_axis=(R, 0), ratio=1.0)  # a full one still counts
+        msp.add_arc((50000, 0), 0.0, 90.00006, 90.0000031)  # a point, not a circle
+
+    result = run(_plain(tmp_path, fn))
+    assert result["summary"]["circles"] == 1 and result["groups"] == []
+
+
+def _through_grid(msp, top: bool = True, gap: float = 15000.0, top_labels: tuple[str, ...] = ("1", "2", "3")):
+    """The 286 model#05 plan: every grid line runs from frame edge to frame edge, through the bubbles at both
+    of its ends, so no line END lies near a bubble."""
+    for x, label, other in zip((0.0, 3400.0, 7380.0), ("1", "2", "3"), top_labels, strict=True):
+        msp.add_line((x, -8000), (x, gap + 8000))
+        _bubble(msp, (x, 0), label)
+        if top:
+            _bubble(msp, (x, gap), other)
+    for y, label in ((2000.0, "A"), (6840.0, "B"), (11030.0, "C")):
+        msp.add_line((-9000, y), (16000, y))
+        _bubble(msp, (-3000, y), label)
+        if top:
+            _bubble(msp, (gap - 5000, y), label)
+
+
+def test_a_grid_line_through_two_bubbles_of_one_label_is_an_axis(tmp_path):
+    """EVAL-3 286 model#05: 1-2-3 = 3400/3980 and A-B-C = 4840/4190 were missed (lines drawn through)."""
+    result = run(_plain(tmp_path, _through_grid))
+    numbers = family(result, "unknown", "1 2 3")
+    assert numbers["proposal"]["coordinates"] == "0 3400 3980"
+    assert family(result, "unknown", "A B C")["proposal"]["coordinates"] == "0 4840 4190"
+    assert [len(a["bubbles"]) for a in numbers["axes"]] == [2, 2, 2]
+    assert {a["pairing"] for a in numbers["axes"]} == {"line"}
+    assert result["unpaired_bubbles"]["count"] == 0
+
+
+def test_the_longest_line_through_both_bubbles_is_the_axis(tmp_path):
+    def fn(msp):
+        _through_grid(msp)
+        msp.add_line((0, -5000), (0, 20000))  # a shorter line through the same two bubbles
+
+    result = run(_plain(tmp_path, fn))
+    axis = family(result, "unknown", "1 2 3")["axes"][0]
+    assert (axis["line"]["start"], axis["line"]["end"]) == ([0.0, -8000.0], [0.0, 23000.0])
+
+
+def test_one_bubble_on_a_line_that_runs_through_it_is_not_an_axis(tmp_path):
+    """A long line through a single bubble (a wall through a mark) proves nothing: both ends are needed. A
+    bubble of the same label beside the line (parallel offset), or past the line's end, is not its other
+    end."""
+
+    def fn(msp):
+        _through_grid(msp, top=False)
+        _bubble(msp, (1500, 15000), "1")  # beside line 1, within its length
+        _bubble(msp, (3400, 30000), "2")  # on line 2's extension, 7000 past its end (17.5 radii)
+
+    result = run(_plain(tmp_path, fn))
+    assert result["groups"] == [] and result["unpaired_bubbles"]["count"] == 8
+
+
+def test_bubbles_of_two_labels_on_one_line_are_not_an_axis(tmp_path):
+    result = run(_plain(tmp_path, lambda m: _through_grid(m, top_labels=("7", "8", "9"))))
+    assert not [f for f in families(result, "unknown") if f["proposal"] and "1" in f["proposal"]["labels"]]
+    assert family(result, "unknown", "A B C")["proposal"]["coordinates"] == "0 4840 4190"
+
+
+def test_a_bubble_ends_one_axis_only(tmp_path):
+    """The top bubble of axis 1 also sits on a long horizontal line through another '1' bubble: that line
+    does not take it again."""
+
+    def fn(msp):
+        _through_grid(msp)
+        msp.add_line((-9000, 15000), (40000, 15000))
+        _bubble(msp, (30000, 15000), "1")
+
+    result = run(_plain(tmp_path, fn))
+    assert [len(a["bubbles"]) for a in family(result, "unknown", "1 2 3")["axes"]] == [2, 2, 2]
+    assert [b["center"] for b in result["unpaired_bubbles"]["listed"]] == [[30000.0, 15000.0]]
+
+
+def test_two_bubbles_of_one_label_too_close_on_a_line_are_not_an_axis(tmp_path):
+    """Two same-label bubbles closer than MIN_AXIS_LENGTH radii on one long line are not an axis's ends."""
+    result = run(_plain(tmp_path, lambda m: _through_grid(m, gap=8 * R)))
+    assert result["groups"] == [] and result["unpaired_bubbles"]["count"] == 12
+
+
 def test_numbered_circle_on_a_short_leader_is_not_an_axis(tmp_path):
     def fn(msp):
         _simple_grid(msp)
