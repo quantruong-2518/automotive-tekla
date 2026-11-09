@@ -508,7 +508,8 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
     (exit 2 on misuse) but not implemented yet (exit 3, nothing written) until their package lands:
     `harness ask --amend Q-id [--text T] [--places P ...]` (package C; `--places` only with `--amend`) and
     `harness sheet-text W FILE SHEET --region x0,y0,x1,y1` (package T; four finite numbers, x0 < x1,
-    y0 < y1, a sheet id and no `--unassigned`). `harness find-text` warns with `blocked_in_scope` when the
+    y0 < y1, a sheet id and no `--unassigned`; write negative coordinates as `--region=-5000,...`,
+    which the help says, because argparse takes a `-` value after a space for an option). `harness find-text` warns with `blocked_in_scope` when the
     output has it. `harness answer --help` names the `grid_system_missing` keys.
 
 ### Changed

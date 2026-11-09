@@ -707,7 +707,9 @@ def build_parser() -> argparse.ArgumentParser:
         type=_region,
         metavar="X0,Y0,X1,Y1",
         help="with a sheet id: only the entries inside this box (coordinates of the sheet's space, as in "
-        "list-sheets' frame), grouped into rows and cells, e.g. to read one notes-table cell",
+        "list-sheets' frame), grouped into rows and cells, e.g. to read one notes-table cell. Write it "
+        "with '=' (--region=-5000,-178000,0,-176000): a value starting with '-' after a space is taken "
+        "for an option",
     )
     p_st.add_argument("--contains", help="keep only entries whose text contains this (NFC, case-insensitive)")
     p_st.add_argument(

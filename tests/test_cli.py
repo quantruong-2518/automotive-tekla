@@ -292,6 +292,16 @@ def test_sheet_text_region_reaches_package_ts_stub(tmp_path, capsys):
     assert "not implemented yet" in err and "--region" in err and "Traceback" not in err
 
 
+def test_sheet_text_region_takes_negative_model_coordinates_with_equals(tmp_path, capsys):
+    # model-space boxes are often negative (286's rebar table sits near y -177151); argparse reads a
+    # value starting with '-' after a space as an option, so the help names the '=' form
+    argv = ["sheet-text", str(tmp_path), "a.dxf", "model#01", "--region=-5000,-178000,0,-176000"]
+    assert main(argv) == 3
+    assert "not implemented yet" in capsys.readouterr().err
+    assert main(["sheet-text", "--help"]) == 0
+    assert "--region=-5000" in " ".join(capsys.readouterr().out.split())
+
+
 @pytest.mark.parametrize(
     "region",
     ["1,2,3", "1,2,3,4,5", "a,2,3,4", "5,0,1,4", "0,5,4,1", "0,0,0,4", "nan,0,1,1", "0,0,inf,1"],
