@@ -1186,13 +1186,17 @@ def _scan_file(
 MAX_NOT_MARK_EXAMPLES = 5
 # one mark as a title-form text this often on a sheet: the sheet's labels, not headings
 MIN_PLAN_LABEL_REPEATS = 3
+# a detail heading carries the number of members it stands for: `(sl= 02)`, `SL: 2`, `số lượng 5 cái`
+_QUANTITY_TAIL = re.compile(r"\bsl\s*[=:]|số\s*lượng")
 
 
 def _read_repeated_titles_as_plan_labels(rel: str, plan: list[dict[str, Any]], warnings: list[str]) -> None:
     """R-f (290 `dẦm d-n`): a framing plan may label its beams with the member word. A detail title stands
     once on its sheet (twice for two views), a plan label repeats (`dẦm d-1` six times): when one mark of a
-    family (prefix) appears as a title-form text `MIN_PLAN_LABEL_REPEATS` times on a sheet, every title-form
-    text of that family on the sheet is a plan label, so it loses its title form (and the member-word
+    family (prefix) appears as a title-form text `MIN_PLAN_LABEL_REPEATS` times on a sheet and no title of
+    that family on the sheet carries a quantity tail (`_QUANTITY_TAIL`: a detail sheet heads one beam with its
+    count and labels its cross-sections with bare titles, 285 KC-17), every title-form text of that family
+    on the sheet is a plan label, so it loses its title form (and the member-word
     evidence) and is no detail heading. One warning per file counts them per sheet."""
     groups: dict[tuple[str | None, str], list[dict[str, Any]]] = {}
     for p in plan:
@@ -1202,6 +1206,10 @@ def _read_repeated_titles_as_plan_labels(rel: str, plan: list[dict[str, Any]], w
     for (sheet, _), docs in groups.items():
         if max(Counter(d["key"] for d in docs).values()) < MIN_PLAN_LABEL_REPEATS:
             continue
+        if any(
+            _QUANTITY_TAIL.search(unicodedata.normalize("NFC", d["display_text"]).casefold()) for d in docs
+        ):
+            continue  # a count tail (`(sl= 02)`) makes the family's titles detail headings (285 KC-17)
         for d in docs:
             d["form"] = (
                 "with_size" if d["size"] else ("sub_number" if len(d["lexical"]["numbers"]) > 1 else "plain")

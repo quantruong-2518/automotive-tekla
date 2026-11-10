@@ -781,7 +781,9 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
     - `marks` (EVAL-4 R-f): when one mark of a family appears three times or more as a title-form text
       (`dẦm d-1`) on a sheet, every title-form text of that family on the sheet is a plan label, not a detail
       heading (form `plain` / `with_size` / `sub_number`, no `title_member_word`); one warning per file counts
-      them per sheet. 290 `dẦm d-n`: matched 5 -> 16, schedule_only 17 -> 5.
+      them per sheet. 290 `dẦm d-n`: matched 5 -> 16, schedule_only 17 -> 5. Review fix C1: a family
+      with a quantity tail (`(sl= 02)`, `SL: 2`, `số lượng 5`) on the sheet is never demoted: a detail
+      sheet heads one beam with its count and labels its cross-sections with bare titles (285 KC-17).
   - Tool wave 4, package T (text), visibility: `harness extract-text` fills `printed`,
     `not_printed_reasons` and `print_uncertain_reasons` on every entry. Not printed: group 60 on the entity
     (TEXT, MTEXT, ATTRIB, MULTILEADER, DIMENSION, also on block content), ATTRIB flag bit 1 (`invisible`

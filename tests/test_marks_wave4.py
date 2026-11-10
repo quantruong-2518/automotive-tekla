@@ -884,3 +884,43 @@ def test_a_demoted_title_keeps_the_form_of_its_mark(tmp_path):
         ("D-6", "plain"): 1,
     }
     assert {p["size"]["text"] for p in marks["plan_marks"] if p["mark"] == "d-4"} == {"220x400"}
+
+
+# --- review C1 (285 detail sheets): a quantity tail makes a title a detail heading ---------------------
+
+
+@pytest.mark.parametrize(
+    "heading",
+    ["dẦm d1 (sl= 02)", "dẦm d1 (SL: 2)", "dẦm d1 sl= 02", "dẦm d1 số lượng 5 cái", "dẦm d1 (SỐ LƯỢNG: 5)"],
+)
+def test_a_title_with_a_quantity_tail_keeps_its_family_headings(tmp_path, heading):
+    """285 KC-17: one heading with a count tail and two section labels `DẦM D1` under its cross-sections
+    are three title-form texts of one mark on a DETAIL sheet: none is a plan label."""
+    work = build_work(tmp_path, s1=[heading, "DẦM D1", "DẦM D1", "DẦM D2"], styled=[], s2=[], paper=[])
+    marks = extract_marks(work, tmp_path / "input", check_inputs=True)
+    forms = Counter((p["mark"].lower(), p["form"]) for p in marks["plan_marks"] if p["mark"][0] in "dD")
+    assert forms == {("d1", "title"): 3, ("d2", "title"): 1}
+    assert not [w for w in marks["warnings"] if "plan labels" in w]
+
+
+def test_the_tail_exempts_only_its_own_family_on_its_own_sheet(tmp_path):
+    work = build_work(
+        tmp_path,
+        # sheet 1: D1 has a tailed heading (detail sheet), C1 repeats with no tail (a plan)
+        s1=["dẦm d1 (sl= 02)", "DẦM D1", "DẦM D1", "dẦm c1", "dẦm c1", "dẦm c1"],
+        # sheet 2: a D1 plan, no tail anywhere on that sheet
+        s2=["dẦm d1", "dẦm d1", "dẦm d1"],
+        styled=[],
+        paper=[],
+    )
+    marks = extract_marks(work, tmp_path / "input")
+    forms = Counter((p["sheet"], p["mark"].lower(), p["form"]) for p in marks["plan_marks"])
+    assert forms[("model#01", "d1", "title")] == 3
+    assert forms[("model#01", "c1", "plain")] == 3
+    assert forms[("model#02", "d1", "plain")] == 3
+
+
+def test_a_word_that_merely_ends_in_sl_is_no_quantity_tail(tmp_path):
+    work = build_work(tmp_path, s1=["dẦm d1 wsl= 2", "DẦM D1", "DẦM D1"], styled=[], s2=[], paper=[])
+    marks = extract_marks(work, tmp_path / "input")
+    assert {p["form"] for p in marks["plan_marks"] if p["mark"].lower() == "d1"} == {"plain"}
