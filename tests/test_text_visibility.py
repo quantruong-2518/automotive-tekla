@@ -231,19 +231,25 @@ def test_a_hard_reason_beats_the_uncertain_one(tmp_path):
     assert printed_state(e) == (False, ["entity_invisible"], [])
 
 
-@pytest.mark.parametrize("mode", [0, 2])
-def test_attmode_not_normal_makes_every_attribute_uncertain_and_keeps_it_printed(tmp_path, mode):
+@pytest.mark.parametrize(
+    ("mode", "flagged"), [(0, (False, ["attribute_invisible"], [])), (2, (True, [], ["attmode_not_normal"]))]
+)
+def test_attmode_not_normal_keeps_attributes_uncertain_but_mode_0_hides_the_flagged_one(
+    tmp_path, mode, flagged
+):
+    # ATTDISP Off ($ATTMODE 0) "makes all attributes invisible" (Autodesk): a flag-1 attribute is hidden under
+    # it and under Normal alike, so it is not printed. ATTDISP On ($ATTMODE 2) shows it: uncertain, printed.
     def fn(doc):
         doc.header["$ATTMODE"] = mode
         doc.blocks.new("B").add_attdef("T", (0, 0), text="d", dxfattribs={"height": 1})
         msp = doc.modelspace()
         ins = msp.add_blockref("B", (0, 0)).add_auto_attribs({"T": "flagged"})
-        ins.attribs[0].dxf.flags = 1  # ATTDISP overrides the invisible mode (Autodesk): not settled
+        ins.attribs[0].dxf.flags = 1
         msp.add_blockref("B", (0, 9)).add_auto_attribs({"T": "plain"})
         text_at(msp, "TEXT", "Arial", insert=(0, 20))
 
     result = index(build(tmp_path, fn))
-    assert printed_state(only(result, plain_text="flagged")) == (True, [], ["attmode_not_normal"])
+    assert printed_state(only(result, plain_text="flagged")) == flagged
     assert printed_state(only(result, plain_text="plain")) == (True, [], ["attmode_not_normal"])
     assert printed_state(only(result, plain_text="TEXT")) == (True, [], [])
     assert only(result, plain_text="flagged")["invisible"] is True  # the flag itself is unchanged

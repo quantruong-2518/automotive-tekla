@@ -747,8 +747,9 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
     `not_printed_reasons` and `print_uncertain_reasons` on every entry. Not printed: group 60 on the entity
     (TEXT, MTEXT, ATTRIB, MULTILEADER, DIMENSION, also on block content), ATTRIB flag bit 1 (`invisible`
     stays that flag only), the effective layer off, frozen or with the plot flag 0. Kept printed but
-    uncertain: an INSERT with group 60 above the entry, `$ATTMODE` other than 1 on an attribute (it then
-    overrides the flag), a layer frozen in some viewport (model space text only) and the `Defpoints` layer
+    uncertain: an INSERT with group 60 above the entry, `$ATTMODE` other than 1 on an attribute (mode 2 shows even
+    a flag-1 attribute, so that one is uncertain; mode 0 hides every attribute, so a flag-1 attribute is not
+    printed), a layer frozen in some viewport (model space text only) and the `Defpoints` layer
     (ezdxf rewrites its plot flag to 0 on every load, so only its name counts). Entries stay in the index;
     the flags `layer_off`, `layer_frozen`, `attribute_invisible` and `text_gate` are unchanged. Known
     drawings, not printed: 271 305 (232 on real entities, the exact set of the EVAL-4 hidden list, plus 73

@@ -229,7 +229,7 @@ class _Context:
         frozenset()
     )  # case-folded names of layers with the plot flag off (group 290)
     viewport_frozen: frozenset[str] = frozenset()  # case-folded names of layers frozen in some viewport
-    attmode_normal: bool = True  # header $ATTMODE is 1 (or absent): each attribute shows by its own flag
+    attmode: int = 1  # header $ATTMODE (1 when absent): 0 none shown, 1 by their own flag, 2 all shown
     knowledge: FontEncodingTable = field(default_factory=FontEncodingTable)
     style_cache: dict[str, tuple[str | None, bool]] = field(default_factory=dict)
     family_cache: dict[str, str | None] = field(default_factory=dict)
@@ -638,18 +638,18 @@ def _visibility(
     """(not_printed_reasons, print_uncertain_reasons) of one entry, `layer` being its effective layer.
 
     A hard reason is a setting Autodesk documents as keeping the object off the printed sheet: group 60 on the
-    entity, ATTRIB flag bit 1 (unless `$ATTMODE` overrides it), the layer off, frozen or plot 0. With any, the
-    entry is not printed and nothing uncertain is listed. Otherwise the entry stays printed and lists what
-    the file does not settle: an INSERT with group 60 above it, `$ATTMODE` != 1 on an attribute, a layer
-    frozen in some viewport (model space text only) and the Defpoints layer.
+    entity, ATTRIB flag bit 1 (unless `$ATTMODE` 2 shows every attribute), the layer off, frozen or plot 0.
+    With any, the entry is not printed and nothing uncertain is listed. Otherwise the entry stays printed and
+    lists what the file does not settle: an INSERT with group 60 above it, `$ATTMODE` != 1 on an attribute, a
+    layer frozen in some viewport (model space text only) and the Defpoints layer.
     """
     attribute = entity_type == "ATTRIB"
-    attmode_overrides = attribute and not ctx.attmode_normal
+    attmode_overrides = attribute and ctx.attmode != 1
     key = layer.casefold()
     hard: list[str] = []
     if entity.dxf.get("invisible", 0):
         hard.append("entity_invisible")
-    if attribute_flag and not attmode_overrides:
+    if attribute_flag and not (attribute and ctx.attmode == 2):
         hard.append("attribute_invisible")
     if state == "off":
         hard.append("layer_off")
@@ -1275,7 +1275,7 @@ def _extract_text(
         _layer_states(doc),
         layer_no_plot=_layer_no_plot(doc),
         viewport_frozen=_viewport_frozen(doc),
-        attmode_normal=int(doc.header.get("$ATTMODE", 1)) == 1,
+        attmode=int(doc.header.get("$ATTMODE", 1)),
         knowledge=table,
         codepage=codepage,
         source=source or str(path),
