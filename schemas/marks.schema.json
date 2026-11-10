@@ -171,7 +171,7 @@
       "additionalProperties": false,
       "properties": {
         "column": { "type": ["integer", "null"], "minimum": 0, "description": "Index into `columns`; null when the text centre is in no column." },
-        "entry_id": { "$ref": "#/$defs/entry_id" },
+        "entry_id": { "anyOf": [{ "$ref": "#/$defs/entry_id" }, { "type": "null" }], "description": "Tool wave 4: null only in the placeholder that stands for a blocked header cell in header[]; the cell's id is then in the table's blocked_header_entries." },
         "display_text": { "type": "string", "description": "Verbatim (whitespace collapsed, cut at 200 characters)." },
         "meaning": { "enum": ["allowed", "blocked"], "description": "blocked: no meaning may be taken from this cell (legacy-font gate, or its table's header is blocked)." },
         "block_reason": { "type": ["string", "null"], "description": "A text_gate reason, or 'header_blocked'." }
@@ -220,6 +220,11 @@
               "reason": { "type": "string", "minLength": 1, "description": "A text_gate reason (legacy_ascii_suspect included)." }
             }
           }
+        },
+        "blocked_header_entries": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/entry_id" },
+          "description": "Tool wave 4: the entry ids of the header cells the legacy-font gate blocks. Blocked header cells live here; header[] keeps only a placeholder without the entry id."
         },
         "header": { "type": "array", "items": { "$ref": "#/$defs/cell" } },
         "columns": {

@@ -728,6 +728,16 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
       none and raised a blocking `title_field_conflict`, so a mark among them stays a member mark in
       `marks.json` instead of a `claimed_by_title_block` row. One shape-only candidate (461 `Đn-05`) stays
       claimed. Known drawings: no change (no such tie in their sheets documents).
+- Tool wave 4 (EVAL-4 fixes; the packages fill in the behaviour):
+  - Tool wave 4, seam. Schemas, all new fields optional, `$id` still `0.1`; nothing reads or writes them
+    yet:
+    - `text-index`: per entry `printed` (boolean), `not_printed_reasons` (`entity_invisible`,
+      `attribute_invisible`, `layer_off`, `layer_frozen`, `layer_no_plot`) and `print_uncertain_reasons`
+      (`insert_invisible`, `attmode_not_normal`, `viewport_frozen`, `defpoints_layer`). The flags
+      `layer_off`, `layer_frozen` and `attribute_invisible` stay in `flags`.
+    - `marks`: per table `blocked_header_entries` (entry ids of blocked header cells; `header[]` keeps a
+      placeholder only) and a header `cell` may have `entry_id` null for that placeholder.
+    - `sheets`: `title_block.job_number` (shaped like `sheet_number`) and candidate field `job_number`.
 
 ### Changed
 - Question lifecycle (tool wave 2, EVAL-2 fix 5):

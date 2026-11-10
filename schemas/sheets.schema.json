@@ -121,6 +121,7 @@
       "additionalProperties": false,
       "properties": {
         "sheet_number": { "anyOf": [{ "type": "null" }, { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/sourced_string" }], "description": "Set only when ALL candidates of the field agree; else null and a title_field_conflict question (blocking for sheet_number and revision; a lower-confidence candidate that disagrees is a conflict, not outvoted)." },
+        "job_number": { "anyOf": [{ "type": "null" }, { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/sourced_string" }], "description": "Tool wave 4: the title block's job / contract number (same rules as sheet_number); never a sheet number. Absent in documents written before the field existed." },
         "revision": { "anyOf": [{ "type": "null" }, { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/sourced_string" }] },
         "candidates": { "type": "array", "items": { "$ref": "#/$defs/field_candidate" } }
       }
@@ -130,7 +131,7 @@
       "required": ["field", "value", "evidence", "confidence", "provenance"],
       "additionalProperties": false,
       "properties": {
-        "field": { "enum": ["sheet_number", "revision", "title", "scale", "date", "project"] },
+        "field": { "enum": ["sheet_number", "revision", "title", "scale", "date", "project", "job_number"] },
         "value": { "type": "string", "minLength": 1 },
         "evidence": {
           "type": "object",

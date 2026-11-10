@@ -129,6 +129,17 @@
           "items": { "type": "string" },
           "description": "Reasons a reader should look twice: dxf_unicode_escape_decoded (\\U+XXXX turned into the character), mif_escape_not_decoded (\\M+ multibyte escape left as written), encoding_unknown_non_ascii, codepage_reencode_failed, unknown_special_code, mixed_fonts, inline_font_unknown, unicode_evidence_contradicts_font (Unicode letters in a run whose font said TCVN3 or VNI: not converted), eth_for_d_stroke (U+00D0 Eth, which looks like the Vietnamese D-stroke, inside Vietnamese Unicode text: kept as stored, never replaced), knowledge_conflict (approved knowledge rows disagree about the text style: undecided), proposed_knowledge_row (a proposed knowledge row matches the text style: not applied), style_not_found, style_unresolved, layer_off, layer_frozen, layer_from_insert, attribute_invisible, non_default_extrusion, block_content_attribute, position_is_block_insert, legacy_ascii_suspect (pure-ASCII text that matches a pattern legacy Vietnamese text takes when stored as ASCII, in a TCVN3 / VNI style, or of unknown encoding when its style name, font file or family looks like a legacy Vietnamese font name or its font file holds non-ASCII text of unknown encoding: the legacy-font gate blocks it)."
         },
+        "printed": { "type": "boolean", "description": "Tool wave 4: false when the entry does not print for a reason the file settles (see not_printed_reasons). Absent means printed (visibility.is_printed). A not-printed entry stays in the index; producers leave it out of every value. The flags layer_off, layer_frozen and attribute_invisible stay as they were; printed is derived from them and from the entity's own invisible flag." },
+        "not_printed_reasons": {
+          "type": "array",
+          "items": { "enum": ["entity_invisible", "attribute_invisible", "layer_off", "layer_frozen", "layer_no_plot"] },
+          "description": "Tool wave 4: why printed is false. entity_invisible: the entity's group 60. attribute_invisible: ATTRIB/ATTDEF flag bit 1. layer_off, layer_frozen: the effective layer. layer_no_plot: the layer's plot flag is off."
+        },
+        "print_uncertain_reasons": {
+          "type": "array",
+          "items": { "enum": ["insert_invisible", "attmode_not_normal", "viewport_frozen", "defpoints_layer"] },
+          "description": "Tool wave 4: settings that may stop the entry printing but that the file does not settle. The entry is kept printed; a file with any raises one non-blocking text_visibility_uncertain question."
+        },
         "confidence": { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/confidence" },
         "provenance": {
           "allOf": [
