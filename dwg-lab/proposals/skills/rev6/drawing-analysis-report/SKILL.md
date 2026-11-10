@@ -60,7 +60,8 @@ Vietnamese, these sections in order:
    units, and mm only where the system has it), evidence counts, flags, SVG link, selection
    and X/Y status; a system built from an answer (`source: engineer_answer`) names its
    `source_answer`. A file with no usable or selected grid system is written that way, with its
-   `grid_system_missing` id; a `grid_answer_contradicts_drawing` is printed with both values.
+   `grid_system_missing` id; after the engineer's `no_grid=yes`: `không có lưới trục (kỹ sư xác
+   nhận, Q-…)`; a simulated one is `(mô phỏng)`, still blocking; a `grid_answer_contradicts_drawing` is printed with both values.
    Levels: storey levels confirmed or not, `blocked_candidates` by entry id with the font
    question. Everything unanswered is marked `chờ xác nhận`.
 8. **Cấu kiện và ký hiệu** — from `marks.json`: mark counts per sheet (`summary.by_sheet`);
@@ -71,7 +72,9 @@ Vietnamese, these sections in order:
    marks"; without a schedule, only the families whose mark set `source` holds both
    `plan_marks` and `detail_heading` were compared. Within that scope: matched / schedule-only /
    plan-only counts; a schedule-only key with `compared_with: detail_heading` is `chưa đọc được
-   nhãn trên mặt bằng`, not a member missing from the plan; notation variants; size conflicts
+   nhãn trên mặt bằng`, not a member missing from the plan; in a file whose `marks.json`
+   `warnings` lists a heading list in shorthand, a `plan_only` mark of a family named there is
+   `có thể nằm trong tiêu đề viết tắt (T…)`, not a member without a detail; notation variants; size conflicts
    with question ids beside `summary.size_comparisons` (compared / not compared, by reason).
    From `callouts.json`: parsed vs unparsed per `summary.unparsed_by_code` with the
    `callout_unparsed` ids, and `summary.rejected_by_reason`. No quantities.

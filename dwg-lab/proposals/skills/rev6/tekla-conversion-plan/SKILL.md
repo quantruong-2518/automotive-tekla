@@ -46,7 +46,9 @@ select, X/Y and units like a detected one; that file's read-structure grid quest
 (`grid_none_found`, `grid_gate1_confirmation`) are separate and block until answered. A file
 with no usable or selected grid system is written that way, with its open `grid_system_missing`
 as a blocking reason; after the engineer's `no_grid=yes` it has no grid by the engineer's
-statement. Levels table (confirmed storey levels only, in metres as written; none confirmed → one line saying so with
+statement; its `grid_none_found` / `grid_gate1_confirmation` still block until answered, and a
+project whose every file is `no_grid=yes` keeps gate 1 shut (`grid systems: none found`,
+ADR-0013): list it as a scope blocker. Levels table (confirmed storey levels only, in metres as written; none confirmed → one line saying so with
 the question ids); base point/origin (R13). No tool emits the Tekla Z string or the origin
 coordinates yet: write them as `chờ công cụ + xác nhận` under the R1 gap. Assumptions, each
 tied to a question id or answer; risks Critical / Major / Minor. Lots are a gate-3 decision:

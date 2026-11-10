@@ -57,8 +57,8 @@ items are all blocked for a file is done for that file when one reader question 
 font row in its `decoded_by` changed) is checked again.
 
 `find-text` and `sheet-text --contains` match allowed text only. `counts.blocked_in_scope` counts
-the blocked entries in the searched scope, whatever the query, and `notes` names their font
-questions. While it is above 0, "0 hits" means "not in the allowed text": write that, with the
+the blocked entries in the searched scope, whatever the query, and `notes` names their font questions (its advice to "approve the font row" does not apply to
+`legacy_ascii_text`, whose answer unblocks nothing). While it is above 0, "0 hits" means "not in the allowed text": write that, with the
 count and those Q-ids.
 
 ## A file with no detected sheet
@@ -118,15 +118,21 @@ artefacts as usual. Any `unassigned` text, in this file or another: findings on 
    from the sum of spacings (both in drawing units), or unlabelled grid-layer lines beyond the
    last axis → `reader_grid_extent` quoting both (dimension `handle`, or `block_path` when it is
    null; spacing string). Grids are never rebuilt from member positions or averaged. A question
-   is settled only by its answer or by `harness status` listing it in `gate1.closed`; one that
-   seems to sit on a rejected system stays open until then. `proposed_simulated` (units, X/Y)
+   is settled only when `harness status` drops it from `blocking_open_ids` (the engineer's
+   answer) or lists it in `gate1.closed`; one that seems to sit on a rejected system stays open
+   until then. Producer output (`harness grid-system` stdout, the `summaries` of `harness
+   answer`) counts any answer, simulated included, as answered (`blocking_open 0`): trust status. `proposed_simulated` (units, X/Y)
    and `proposed_closed_by` (conflicts) are proposals: not confirmed, answered or closed.
    A file with no usable or selected grid system has a blocking `grid_system_missing`: write
    "no usable or selected grid system" and name the systems the file does have. Its answer is
    the engineer's own step: grid values (`dir1_labels`, `dir1_spacings`, `dir2_labels`,
    `dir2_spacings`, optional `sheet`), or `no_grid=yes` for a file with no plan that needs a
-   grid. It is settled only by a system whose `source_answer` names it, or by the engineer's
-   `no_grid=yes`; words only or a simulated answer build nothing. You may read the grid off the
+   grid. `harness status` closes it only on the engineer's `no_grid=yes`, or once a
+   fresh `grid-systems.json` holds the system built from the engineer's grid values
+   (`source_answer.key` is the question's key) and the `grid_system_select` answer uses it; words
+   only, invalid values, a built system left out of the select answer, or a simulated answer close
+   nothing. `no_grid=yes` closes only this question: the file's `grid_none_found` /
+   `grid_gate1_confirmation` stay open until answered. You may read the grid off the
    drawing: add it to that question with `ask --supplement` (label and dimension entries cited,
    `Đề xuất (chưa xác nhận)`); it stays evidence, never a gate-1 input. Quote a
    `grid_answer_contradicts_drawing` with both values. *Done when* each system is selected or
@@ -134,8 +140,8 @@ artefacts as usual. Any `unassigned` text, in this file or another: findings on 
 5. **Levels.** `structure/<file>.levels.json`: storey levels vs local ones (beam soffits, steps,
    wet rooms, storage platforms, canopies, landings — even when their title says TẦNG). The
    extractor's `storey_heights` stay unconfirmed; values in `blocked_candidates` are no
-   candidates (cite their entry ids with the font question). When read-structure raised
-   `level_storey_selection` for the file, give it your candidates with `ask --supplement`;
+   candidates (cite their entry ids with the font question). When read-structure raised `level_storey_selection` for the file (fewer than two levels
+   named, or an unnamed level with a storey word skipped; its `found` lists them), give it your candidates with `ask --supplement`;
    otherwise, unless a storey selection is answered, raise one blocking
    `reader_level_storey_selection` per file listing the candidate storey levels verbatim. Quote
    allowed level texts the extractor missed (e.g. `(+ 6.00M LEVEL)`) as candidates. A finding
@@ -154,9 +160,15 @@ artefacts as usual. Any `unassigned` text, in this file or another: findings on 
    schedule, only the families whose mark set `source` holds both `plan_marks` and
    `detail_heading` were compared. A `schedule_only` key with `compared_with: detail_heading`
    means no plain plan label was read for it, not that the plan lacks the member.
+   A heading list in shorthand (`dẦm d2-4, 5`) names no mark: `marks.json` `warnings` lists it
+   with its entry id and the families it may name, and keeps them incomplete. A `plan_only` mark
+   of such a family may be drawn under that heading: never write that its detail is missing; put
+   those marks in one reader question per file that quotes the shorthand headings verbatim
+   (entry ids) and asks which marks they name.
    From `W/callouts.json`: parsed callouts; unparsed ones per `summary.unparsed_by_code` with at
    most 5 examples each and the file's `callout_unparsed` Q-id; a `symbol_glyph_unverified`
-   text (`2ù20`) is quoted as stored, never read as Ø. Before writing that a bar size or callout
+   text (`2ù20`) is quoted as stored, never read as Ø; so is a `rejected` row `diameter_glyph_no_notation`
+   (`ù12`). Before writing that a bar size or callout
    is absent, check `rejected[]` (`summary.rejected_by_reason`) and the unparsed candidates.
    Quantities, lengths and weights stay uncomputed. *Done when* every `schedule_only` and
    `plan_only` mark is in a question or explained by a finding.

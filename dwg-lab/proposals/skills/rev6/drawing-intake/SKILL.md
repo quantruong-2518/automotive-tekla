@@ -45,14 +45,17 @@ Layout: machine artefacts in `projects/<id>/work/`; engineer documents (`questio
   until the answer, a conflict between grids of different files does not block, and its gate-1
   reason points at `file_set_relation`.
 - **After any units, file-set, `grid_system_select`, axis or `grid_system_missing` answer**,
-  rerun `harness grid-system`, then `harness status`: the grid systems read the answers. Status
-  wins over the producer files. A question another answer settles is closed only when
+  rerun `harness grid-system`, then `harness status`: the grid systems read the answers. Status wins over the producer files and their stdout: `harness grid-system` stdout and the
+  `summaries` of `harness answer` count a simulated answer as answered (`blocking_open 0`);
+  `harness status` keeps it blocking. A question another answer settles is closed only when
   `gate1.closed` lists it; a `closures:` reason (the settling answer is not the engineer's)
   leaves it open and blocking. `proposed_simulated` and `proposed_closed_by` in
   `grid-systems.json` record what a non-engineer answer would do: nothing is confirmed or closed.
 - **No usable or selected grid system** for a file → blocking `grid_system_missing`. Its answer
   is the engineer's: the grid values its answer command names, or `no_grid=yes` for a file with
-  no plan that needs a grid. An answer in words only or from another role builds nothing.
+  no plan that needs a grid. An answer in words only, with invalid values, or from another role builds nothing;
+  `no_grid=yes` builds nothing either. `harness status` closes the question only on the
+  engineer's `no_grid=yes` or on a used system built from the engineer's values.
 - **Converter.** LibreDWG output is capped at `medium` (ERROR lines cannot lower it further);
   converter `ERROR` lines make a file `partial` (only their count is kept today); report the
   converter name and that its version is not recorded. `conversion_empty` is unreadable until
@@ -75,10 +78,13 @@ Layout: machine artefacts in `projects/<id>/work/`; engineer documents (`questio
 The answer command that `questions.md` and `harness status` print (`--role engineer`) is the
 engineer's own step: hand it to the engineer, who runs it. You record only an answer the
 orchestrator relays from an eval's engineer simulator: take the question's **Lệnh trả lời** line
-in `questions.md` (it names the values), replace `--role engineer` with `--role simulated`, and
+in `questions.md` (it names the values; for `grid_system_missing`, when the simulator says the
+file holds no plan that needs a grid, take its **Hoặc** line, `--value no_grid=yes` alone; never
+fill in grid values the simulator did not give), replace `--role engineer` with `--role simulated`, and
 put the simulator's words verbatim in `--text`, its name in `--by`. No role stated → ask the
 orchestrator. Gate 1 counts only the engineer's answers. Then rerun the producer the answer
-feeds and `harness status`. The command refuses obsolete ids, changed files and
+feeds and `harness status`. The command refuses obsolete ids, changed files, invalid values (exit 1: `no_grid=yes` with any
+other key, a spacing above 1000000, labels equal ignoring case) and
 `grid_system_conflict` (that one closes through `grid_system_select` with `systems=` or
 `separate=`).
 

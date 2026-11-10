@@ -15,18 +15,45 @@ plan).
 packages merged): every command, flag, field and question code the four skills cite was checked
 against `uv run harness <cmd> --help`, `schemas/`, `src/tekla_harness/` and the CHANGELOG
 [Unreleased] "Tool wave 3" bullets. The changed behaviour was run on three scratch work folders
-built from known drawings with LibreDWG: 286 + 290, 267 + 433, and 461 (list below). The one
-exception is `no_grid=yes` and the status rule of ADR-0013 decision 6 (see "Not verified by
-running").
+built from known drawings with LibreDWG: 286 + 290, 267 + 433, and 461 (list below). **Re-checked at `54d46cb`** (after `fix/w3-gridgate` and the wave-3 review fixes) by an independent
+reviewer: every cited command and flag still exists (`cli.py` changed only in the `harness answer`
+help text). The findings it raised are fixed in "Refresh at 54d46cb" below.
 
-Size (lines, SKILL.md): intake 81 → 88, reader 140 → 181, report 85 → 107, plan 102 → 114. The
+Size (lines, SKILL.md): intake 81 → 94, reader 140 → 193, report 85 → 110, plan 102 → 116 (after
+the 54d46cb refresh; 88, 181, 107, 114 before it). The
 growth carries the wave-3 outputs (mark sets, comparison scope, unparsed codes, the grid route)
 and the rules that keep simulated proposals blocking. The report skill asks for a shorter
 report: each fact once, reasons paraphrased.
 
+## Refresh at 54d46cb (pre-EVAL-4 review, the only pre-run change)
+
+An independent Opus reviewer checked the four skills against the CLI at `54d46cb`. It found nothing
+Critical. The fixes:
+
+| Skill | Change | Finding |
+|---|---|---|
+| intake | Answers: for `grid_system_missing`, a "no plan needs a grid" reply takes the **Hoặc** line (`--value no_grid=yes` alone); grid values are never filled in; the invalid-value refusals (exit 1) are named | M1 (`questions_md.py` Hoặc line) |
+| intake | "No usable or selected grid system": invalid values and `no_grid=yes` build nothing; status closes it only on the engineer's `no_grid=yes` or a used system built from the engineer's values | m2 |
+| intake | Status wins over producer stdout too: `grid-system` stdout and `harness answer` `summaries` show `blocking_open 0` for a simulated answer | m3 |
+| reader | Step 4: a question is settled only when status drops it from `blocking_open_ids` or lists it in `gate1.closed`; trust status over producer output | M2 (`status.py` `answer_counts`) |
+| reader | Step 6: a shorthand heading list names no mark; `plan_only` marks of its family are never written as "detail missing" and go into one reader question per file quoting the headings | M3 (7564542) |
+| reader | Step 4: the exact `grid_system_missing` close rule; `no_grid=yes` leaves `grid_none_found` / `grid_gate1_confirmation` open | m1 (`status.py` `answer_closes`) |
+| reader | Text gate: `find-text` "approve the font row" advice does not apply to `legacy_ascii_text` | m4 (`sheet_text.py` notes) |
+| reader | Step 5: both causes of `level_storey_selection`; step 6: `diameter_glyph_no_notation` (`ù12`) quoted as stored | optional (7be161b; `callouts.py`) |
+| report | §7: a `no_grid=yes` answer line (engineer vs `(mô phỏng)`); §8: `plan_only` of a shorthand-heading family is `có thể nằm trong tiêu đề viết tắt` | m6, M3 |
+| plan | Gate 1 grids: after `no_grid=yes` the file's grid questions still block; an all-`no_grid` project keeps gate 1 shut (scope blocker) | m5 (ADR-0013) |
+
+Checked and unchanged: `level_storey_selection` (the generic supplement rule covers both causes),
+sheet numbers (the skills cite `sheet_number_missing` / `sheet_number_gap` and print only extractor
+numbers), the `mark_sets.complete` wording (`ít nhất` plus `source` when false).
+
 ## Facts that landed differently from the design or the brief
 
-- `harness status` at `a91fa9b` does not yet follow ADR-0013 decision 6. The G+T+C review (C1,
+- `harness status` at `54d46cb` follows ADR-0013 decision 6 (1944872, c1bedc5, 27392a6): it
+  closes `grid_system_missing` only on the engineer's `no_grid=yes` or on a used system built from
+  the engineer's values in a fresh `grid-systems.json`; the role is in the answers digest;
+  answer-built systems are conflict-checked. History: at `a91fa9b` status did not yet follow
+  decision 6. The G+T+C review (C1,
   Critical) found that it closes `grid_system_missing` from an answer's values alone, and that the
   answers digest ignores the role. ADR-0013 was amended at `c058966` (`no_grid=yes`,
   engineer-only; status closes the question only from the built grid or that answer), and the fix
@@ -45,8 +72,8 @@ report: each fact once, reasons paraphrased.
 - Detected grid systems carry no `source` field. Only an answer-built system has
   `source: engineer_answer` and `source_answer`.
 - `harness grid-system`'s own stdout counts a simulated `grid_system_missing` answer as answered
-  (`blocking_open 0`). `harness status` keeps the question blocking and adds an `answers:` reason
-  (461, Q-019). This is one more case of "status wins".
+  (`blocking_open 0`), and so do the `summaries` of `harness answer` (461 at `54d46cb`). `harness
+  status` keeps the question blocking and adds an `answers:` reason (461, Q-019). This is one more case of "status wins".
 - `harness find-text` `notes` names `legacy_ascii_text` among the font questions and advises
   "ask the engineer to approve the font row". The question's own message says its answer "decodes
   nothing and unblocks nothing". The skills follow the message.
@@ -166,21 +193,18 @@ report: each fact once, reasons paraphrased.
   `ask --supplement` on `grid_system_missing` (see above).
 - **`find-text` `notes` wording** for `legacy_ascii_text` ("approve the font row"). The skills
   state that its answer unblocks nothing. Tool note for the next wave.
-- **Heading lists.** A heading list such as `dầm d2-4, 5` gives false members (INTEGRATION M,
-  open). The skills copy `mark_sets` as written. `complete: false` then makes the report write
-  `ít nhất`.
+- **Heading lists in shorthand.** Fixed in the tool by 7564542: a shorthand list (`dầm d2-4, 5`)
+  is not expanded and names no mark; it goes to `marks.json` `warnings` and keeps the family
+  incomplete. `complete` needs a schedule, or headings equal to the plain plan marks, and no
+  blocked plain text in the file. Residual risk: a false `plan_only` (286 at `54d46cb`: 44,
+  including `d2-3`, `d2-4`, `d2-5`, `d2-7`). The reader step 6 and report §8 rules added in the
+  refresh handle it (one reader question per file quoting the shorthand headings).
 
 ## Not verified by running
 
-- **`no_grid=yes`** for `grid_system_missing`. Source: ADR-0013 as amended at `c058966`
-  (decision 2 table and decision 6). It is not in the CLI at `a91fa9b`: `harness answer --help`
-  does not list it, and `src/` has no `no_grid`. It lands on `fix/w3-gridgate`. Cited per the ADR
-  in the intake, reader and plan skills.
-- **ADR-0013 decision 6**: status closes `grid_system_missing` only from the built grid or
-  `no_grid`, the role counts in freshness, and answer-built systems are conflict-checked. Source:
-  ADR-0013 at `c058966`; fix branch pending. The skills' rule (settled by the built system or
-  `no_grid`) does not depend on it.
-- **The engineer-built grid** (`source: engineer_answer`, `source_answer`), the words-only
+- (Moved to "Verified by running" at the 54d46cb refresh: `no_grid=yes` and ADR-0013 decision 6.)
+- **The engineer-built grid** (status side now covered by `tests/test_grid_gate.py`)
+  (`source: engineer_answer`, `source_answer`), the words-only
   engineer answer, and `grid_answer_contradicts_drawing`. All three need `--role engineer`, which
   this check never records. Evidence: the orchestrator's 461 end-to-end run in the wave-3
   integration log (G + C merge) and the CHANGELOG package G and C bullets.
@@ -192,6 +216,12 @@ report: each fact once, reasons paraphrased.
 - **The `--unassigned` route** is unchanged from rev 5 and was not run again.
 
 ## Verified by running (`a91fa9b`, LibreDWG, scratch work folders)
+
+- **`no_grid=yes` (461, simulated, `54d46cb`).** Accepted with exit 0; refused with exit 1 when
+  another key is added. `grid-system` warns "recorded, builds nothing" and its stdout shows
+  `blocking_open 0`; status keeps Q-019 open with an `answers:` reason; `questions.md` prints the
+  **Hoặc** line. Engineer side (closes; gate 1 opens after the rerun; a built system left out of
+  the select answer stays open; role staleness): `tests/test_grid_gate.py`, 18 passed.
 
 - **Pipeline.** `intake`, `read-structure`, `callouts`, `marks`, `grid-system`, `status` and
   `questions-md` exit 0 on 286 + 290, 267 + 433 and 461.
@@ -211,7 +241,8 @@ report: each fact once, reasons paraphrased.
   - `summary.mark_sets`: 433 `M1`…`M8` and `GM1`…`GM5`, `GM7`, `GM8`, both `complete: false` from
     `plan_marks`; 286 `ĐC` from `detail_heading` only.
   - `compared_with`, and `matching[]` `schedule_tables` / `detail_headings`.
-  - `summary.size_comparisons`: 286 + 290 compare 0 and leave 66 not compared, all "matched
+  - `summary.size_comparisons`: 286 + 290 compare 0 and leave 66 not compared (59 at `54d46cb`: 286 lost 7 shorthand heading
+    matches), all "matched
     through detail headings only".
 - **Callouts.**
   - `unparsed_by_code`, including `symbol_glyph_unverified` 538 on 290 (`3ù20`).
