@@ -6,6 +6,7 @@ All tests run on temporary git repositories; the real repository is never touche
 from __future__ import annotations
 
 import json
+import ntpath
 import os
 import subprocess
 import sys
@@ -14,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from conftest import HOOKS, load_hook
+from conftest import HOOKS, LEGACY_CONSOLE_ENV, load_hook
 
 FAR_FUTURE = 48 * 3600  # seconds added to "now" so freshly created worktrees count as idle
 
@@ -43,6 +44,7 @@ def git(cwd: Path, *args: str) -> str:
         cwd=cwd,
         capture_output=True,
         text=True,
+        encoding="utf-8",
         check=True,
     )
     return proc.stdout.strip()
@@ -94,7 +96,8 @@ def use_real_ignore_rules(repo: Path) -> None:
 
 
 def backdate(wt: Path, names: tuple[str, ...] = ("HEAD", "logs/HEAD"), hours: float = 48) -> None:
-    admin = Path(git(wt, "rev-parse", "--absolute-git-dir"))
+    admin = load_hook("session_cleanup").admin_dir(wt)
+    assert admin is not None
     stamp = time.time() - hours * 3600
     for name in names:
         os.utime(admin / name, (stamp, stamp))
@@ -111,8 +114,13 @@ def kept_for(report, name: str) -> dict:
 
 
 def worktree_paths(repo: Path) -> list[str]:
+    """Worktree paths as git prints them, normalised: git prints `C:/x/y` where `str(Path)` is `C:\\x\\y`."""
     out = git(repo, "worktree", "list", "--porcelain")
-    return [line[len("worktree ") :] for line in out.splitlines() if line.startswith("worktree ")]
+    return [norm(line[len("worktree ") :]) for line in out.splitlines() if line.startswith("worktree ")]
+
+
+def norm(path: str | Path) -> str:
+    return os.path.normcase(os.path.normpath(str(path)))
 
 
 # --- worktrees: the all-pass case and one keep case per rule -------------------------------
@@ -311,7 +319,7 @@ def test_worktree_directory_deleted_by_hand_does_not_crash(cleanup_mod, repo, tm
     report = clean(cleanup_mod, repo, tmp_path)
     assert removed_names(report) == ["other"]
     assert not other.exists()
-    assert str(gone) in worktree_paths(repo)  # kept for review: no `git worktree prune`
+    assert norm(gone) in worktree_paths(repo)  # kept for review: no `git worktree prune`
 
 
 def test_git_refusal_keeps_the_worktree_and_never_forces(cleanup_mod, repo, tmp_path, monkeypatch):
@@ -535,7 +543,7 @@ def test_prunable_worktree_is_kept_for_review_and_its_branch_survives(cleanup_mo
     item = kept_for(report, "gone")
     assert item["reason"] == "prunable: directory missing"
     assert item["review"] is True and item["idle"] is True
-    assert str(gone) in worktree_paths(repo)  # nothing was pruned
+    assert norm(gone) in worktree_paths(repo)  # nothing was pruned
     assert report["deleted_branches"] == []
     assert "fix/gone" in git(repo, "branch", "--list", "fix/*")
 
@@ -555,12 +563,18 @@ def somewhere_else(tmp_path: Path) -> Path:
 
 
 def run_hook_in(cwd: Path, project: Path, stdin: str, *args: str) -> subprocess.CompletedProcess[str]:
-    env = {**os.environ, "CLAUDE_PROJECT_DIR": str(project), "HOME": str(cwd / "no-home")}
+    env = {
+        **os.environ,
+        **LEGACY_CONSOLE_ENV,
+        "CLAUDE_PROJECT_DIR": str(project),
+        "HOME": str(cwd / "no-home"),
+    }
     return subprocess.run(
         [sys.executable, str(HOOKS / "session_cleanup.py"), *args],
         input=stdin,
         capture_output=True,
         text=True,
+        encoding="utf-8",
         env=env,
         cwd=cwd,
         check=False,
@@ -891,3 +905,102 @@ def test_dry_run_message_says_would(cleanup_mod):
         out["systemMessage"]
         == "Cleanup: would remove 1 worktree(s), would delete 1 branch(es); 0 kept for review."
     )
+
+
+# --- Windows: path spelling, process liveness, console encoding --------------------------------
+
+
+def test_path_key_folds_separators_and_case_the_windows_way(cleanup_mod):
+    """Git prints `C:/Users/Me/wts/w1`, Python spells `c:\\users\\me\\WTS\\w1\\`: one key for both."""
+    fold = cleanup_mod.fold_path
+    spellings = ["C:/Users/Me/wts/w1", "c:\\users\\me\\WTS\\w1\\", "C:\\Users\\Me\\wts\\.\\w1"]
+    assert {fold(text, ntpath) for text in spellings} == {"c:\\users\\me\\wts\\w1"}
+    assert fold("/a/B/../b/c", os.path) == os.path.normcase("/a/b/c")
+
+
+def test_key_within_is_a_whole_component_prefix_test_on_windows_spellings(cleanup_mod):
+    fold, inside = cleanup_mod.fold_path, cleanup_mod.key_within
+
+    def under(child: str, parent: str) -> bool:
+        return inside(fold(child, ntpath), fold(parent, ntpath), ntpath)
+
+    assert under("C:/Repo/wts/W1/sub", "c:\\repo\\wts\\w1")
+    assert under("C:/repo/wts/w1", "C:\\REPO\\wts\\w1")  # equal paths
+    assert not under("C:/repo/wts/w10", "C:/repo/wts/w1")  # a longer name is not a child
+    assert not under("C:/repo", "C:/repo/wts/w1")
+    assert under("c:/repo", "C:\\")  # a drive root contains everything on it
+    assert not under("D:/repo", "C:\\")
+
+
+class FakeKernel32:
+    """Stands in for `ctypes.WinDLL("kernel32")`: records calls, returns scripted answers."""
+
+    def __init__(self, handle: int, exit_code: int = 0, exit_code_ok: bool = True) -> None:
+        self.handle, self.exit_code, self.exit_code_ok = handle, exit_code, exit_code_ok
+        self.opened: list[tuple[int, bool, int]] = []
+        self.closed: list[int] = []
+
+    def OpenProcess(self, access: int, inherit: bool, pid: int) -> int:
+        self.opened.append((access, inherit, pid))
+        return self.handle
+
+    def GetExitCodeProcess(self, handle: int, code_ref: object) -> int:
+        code_ref._obj.value = self.exit_code  # type: ignore[attr-defined]
+        return 1 if self.exit_code_ok else 0
+
+    def CloseHandle(self, handle: int) -> int:
+        self.closed.append(handle)
+        return 1
+
+
+@pytest.mark.parametrize(
+    ("handle", "exit_code", "exit_ok", "last_error", "alive"),
+    [
+        (0, 0, True, 87, False),  # ERROR_INVALID_PARAMETER: no such pid
+        (0, 0, True, 5, True),  # ERROR_ACCESS_DENIED: it exists
+        (0, 0, True, 1, True),  # any other error: unsure, so alive
+        (7, 259, True, 0, True),  # STILL_ACTIVE
+        (7, 0, True, 0, False),  # exited, but a handle (a Popen) keeps the process object around
+        (7, 1, True, 0, False),
+        (7, 0, False, 0, True),  # cannot read the exit code: unsure, so alive
+    ],
+)
+def test_windows_liveness_decision(cleanup_mod, handle, exit_code, exit_ok, last_error, alive):
+    fake = FakeKernel32(handle, exit_code, exit_ok)
+    assert cleanup_mod.windows_pid_alive(4242, fake, lambda: last_error) is alive
+    assert fake.opened == [(0x1000, False, 4242)]  # PROCESS_QUERY_LIMITED_INFORMATION
+    assert fake.closed == ([handle] if handle else [])  # every opened handle is closed
+
+
+@pytest.mark.parametrize("pid", [0, -1, 2**32, 2**100])
+def test_windows_liveness_never_truncates_a_pid_that_is_not_a_dword(cleanup_mod, pid):
+    fake = FakeKernel32(0)
+    assert cleanup_mod.windows_pid_alive(pid, fake, lambda: 87) is True
+    assert fake.opened == []
+
+
+def test_windows_liveness_is_alive_when_the_api_misbehaves(cleanup_mod):
+    class Broken:
+        def OpenProcess(self, *_a):
+            raise OSError("boom")
+
+    assert cleanup_mod.windows_pid_alive(1, Broken(), lambda: 0) is True
+
+
+def test_hook_prints_non_ascii_paths_under_a_legacy_console_encoding(repo, tmp_path):
+    wt = add_worktree(repo, tmp_path, "wt-\u1ebf", branch="fix/wt-e")  # U+1EBF is not in cp1252
+    backdate(wt)
+    proc = run_hook_in(somewhere_else(tmp_path), repo, "{}", "--repo", str(repo), "--dry-run")
+    assert proc.returncode == 0
+    assert proc.stderr == ""
+    assert "wt-\u1ebf" in json.loads(proc.stdout)["hookSpecificOutput"]["additionalContext"]
+
+
+def test_admin_dir_follows_the_gitdir_pointer_for_a_non_ascii_worktree(tmp_path: Path) -> None:
+    """The admin dir comes from the UTF-8 `gitdir:` pointer, not from decoded git output."""
+    wt = tmp_path / "wt-ế"
+    admin = tmp_path / "main" / ".git" / "worktrees" / "wt-ế"
+    admin.mkdir(parents=True)
+    wt.mkdir()
+    (wt / ".git").write_text(f"gitdir: {admin}\n", encoding="utf-8")
+    assert load_hook("session_cleanup").admin_dir(wt) == admin

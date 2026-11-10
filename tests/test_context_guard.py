@@ -12,7 +12,7 @@ from typing import Any
 
 import pytest
 
-from conftest import HOOKS, load_hook
+from conftest import HOOKS, LEGACY_CONSOLE_ENV, load_hook
 
 SID = "sess-1"
 
@@ -267,12 +267,13 @@ def test_unknown_event_is_silent(cg, monkeypatch, capsys, tmp_path):
 def run_hook(payload: dict[str, Any], tmpdir: Path) -> subprocess.CompletedProcess[str]:
     import os
 
-    env = {**os.environ, "TMPDIR": str(tmpdir)}
+    env = {**os.environ, **LEGACY_CONSOLE_ENV, "TMPDIR": str(tmpdir)}
     return subprocess.run(
         [sys.executable, str(HOOKS / "context_guard.py")],
-        input=json.dumps(payload),
+        input=json.dumps(payload, ensure_ascii=False),
         capture_output=True,
         text=True,
+        encoding="utf-8",
         env=env,
         check=False,
     )
@@ -285,6 +286,16 @@ def test_end_to_end_user_prompt_submit(tmp_path):
     data = json.loads(proc.stdout)
     assert data["hookSpecificOutput"]["hookEventName"] == "UserPromptSubmit"
     assert "255k" in data["systemMessage"]
+
+
+def test_end_to_end_non_ascii_transcript_path_under_a_legacy_console(tmp_path):
+    folder = tmp_path / "t\u00ean-\u1ebf"  # U+1EBF is not in cp1252
+    folder.mkdir()
+    tp = write_transcript(folder / "t.jsonl", [assistant(255_000)])
+    proc = run_hook(ups(tp), tmp_path)
+    assert proc.returncode == 0
+    assert proc.stderr == ""
+    assert "255k" in json.loads(proc.stdout)["systemMessage"]
 
 
 def test_end_to_end_stop(tmp_path):

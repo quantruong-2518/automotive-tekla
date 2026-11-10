@@ -40,13 +40,15 @@ Stdlib only.
 
 from __future__ import annotations
 
+import contextlib
+import ctypes
 import fnmatch
 import json
 import os
 import subprocess
 import sys
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -92,6 +94,7 @@ def run_git(args: list[str], cwd: str | Path, timeout: int = GIT_TIMEOUT) -> tup
             cwd=cwd,
             capture_output=True,
             text=True,
+            encoding="utf-8",
             errors="replace",
             timeout=timeout,
             check=False,
@@ -183,11 +186,27 @@ def hidden_change(wt_path: str) -> str | None:
     return None
 
 
-def newest_admin_mtime(wt_path: str) -> float | None:
+def admin_dir(wt_path: str | Path) -> Path | None:
+    """The worktree's admin dir, read from the `gitdir:` pointer git wrote into `<wt>/.git`.
+
+    The pointer file is authoritative and UTF-8, so a non-ASCII worktree name survives a legacy
+    console code page; `git rev-parse --absolute-git-dir` is the fallback.
+    """
+    try:
+        line = (Path(wt_path) / ".git").read_text(encoding="utf-8").strip()
+    except (OSError, UnicodeDecodeError):
+        line = ""
+    if line.startswith("gitdir:"):
+        pointer = Path(line[len("gitdir:") :].strip())
+        return pointer if pointer.is_absolute() else Path(wt_path) / pointer
     rc, out, _ = run_git(["rev-parse", "--absolute-git-dir"], wt_path)
-    if rc != 0 or not out.strip():
+    return Path(out.strip()) if rc == 0 and out.strip() else None
+
+
+def newest_admin_mtime(wt_path: str) -> float | None:
+    admin = admin_dir(wt_path)
+    if admin is None:
         return None
-    admin = Path(out.strip())
     times: list[float] = []
     for name in ("HEAD", "logs/HEAD"):
         try:
@@ -197,36 +216,73 @@ def newest_admin_mtime(wt_path: str) -> float | None:
     return max(times) if times else None
 
 
-def within(child: Path, parent: Path) -> bool:
-    return child == parent or parent in child.parents
+def fold_path(text: str, pathmod: Any = os.path) -> str:
+    """One spelling per location: `/` or `\\`, upper or lower case (Windows), `.`/`..`, a trailing slash.
+
+    `pathmod` is `os.path` here; tests pass `ntpath` to exercise the Windows rules on any OS.
+    """
+    return pathmod.normcase(pathmod.normpath(text))
+
+
+def path_key(path: str | Path) -> str:
+    """Comparison key of a path from any source (git output, stdin, environment, session file)."""
+    return fold_path(str(Path(path).resolve()))
+
+
+def key_within(child: str, parent: str, pathmod: Any = os.path) -> bool:
+    """Whether the folded `child` is `parent` or lies below it (whole path components only)."""
+    prefix = parent if parent.endswith(pathmod.sep) else parent + pathmod.sep
+    return child == parent or child.startswith(prefix)
 
 
 def in_use(wt_path: str, session_dirs: Sequence[Path], main_path: str) -> bool:
     """A session directory is in this worktree, or (not in the main checkout) the worktree sits inside it."""
-    wt, main = Path(wt_path).resolve(), Path(main_path).resolve()
+    wt, main = path_key(wt_path), path_key(main_path)
     for directory in session_dirs:
         try:
-            cur = directory.resolve()
+            cur = path_key(directory)
         except (OSError, ValueError, RuntimeError):
             continue  # a path that cannot exist cannot hold a session
-        if within(cur, wt) or (within(wt, cur) and not within(cur, main)):
+        if key_within(cur, wt) or (key_within(wt, cur) and not key_within(cur, main)):
             return True
     return False
+
+
+def windows_pid_alive(pid: int, kernel32: Any, last_error: Callable[[], int]) -> bool:
+    """Windows liveness through kernel32; any doubt means alive.
+
+    `OpenProcess` also succeeds for an exited process whose object a handle still keeps alive (a
+    parent's `Popen`), so the exit code decides: `STILL_ACTIVE` (259) is alive, anything else is dead.
+    """
+    if not 0 < pid <= 0xFFFFFFFF:
+        return True  # not a DWORD: ctypes would truncate it silently and test another process
+    try:
+        handle = kernel32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+        if not handle:
+            error = last_error()
+            return error != 87  # only ERROR_INVALID_PARAMETER means no such pid; 5 is access denied
+        code = ctypes.c_ulong()
+        ok = kernel32.GetExitCodeProcess(handle, ctypes.byref(code))
+        kernel32.CloseHandle(handle)
+        return not ok or code.value == 259  # STILL_ACTIVE
+    except Exception:
+        return True
 
 
 def pid_alive(pid: int) -> bool:
     """Whether a process with this pid exists; when unsure, True (an extra keep is harmless)."""
     if sys.platform == "win32":  # os.kill(pid, 0) would terminate the process on Windows
         try:
-            import ctypes
+            from ctypes import wintypes
 
-            kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+            kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)  # type: ignore[attr-defined]
+            kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
             kernel32.OpenProcess.restype = ctypes.c_void_p
-            handle = kernel32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
-            if handle:
-                kernel32.CloseHandle(ctypes.c_void_p(handle))
-                return True
-            return ctypes.get_last_error() == 5  # access denied: the process exists
+            kernel32.GetExitCodeProcess.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_ulong)]
+            kernel32.GetExitCodeProcess.restype = wintypes.BOOL
+            kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
+            kernel32.CloseHandle.restype = wintypes.BOOL
+            return windows_pid_alive(pid, kernel32, ctypes.get_last_error)
         except Exception:
             return True
     try:
@@ -384,8 +440,8 @@ def cleanup(
         if in_use(wt.path, session_dirs, main.path):
             keep("worktree", wt.path, "current session directory", wt.head, review=False, idle=False)
             continue
-        wt_root = Path(wt.path).resolve()
-        if any(within(directory, wt_root) for directory in live):
+        wt_root = path_key(wt.path)
+        if any(key_within(path_key(directory), wt_root) for directory in live):
             keep("worktree", wt.path, "live session", wt.head, review=False, idle=False)
             continue
         if wt.locked:
@@ -572,7 +628,15 @@ def main(argv: list[str]) -> int:
     return 0
 
 
+def _use_utf8_streams() -> None:
+    """Claude Code speaks UTF-8 on stdin/stdout; a Windows console defaults to a legacy code page."""
+    for stream in (sys.stdin, sys.stdout, sys.stderr):
+        with contextlib.suppress(Exception):  # not a reconfigurable text stream: leave it as it is
+            stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
+
+
 def entry(argv: list[str]) -> int:
+    _use_utf8_streams()
     try:
         return main(argv)
     except Exception as exc:  # a cleanup must never break session start

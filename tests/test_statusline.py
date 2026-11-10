@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import sys
@@ -11,7 +12,7 @@ from typing import Any
 
 import pytest
 
-from conftest import HOOKS, load_hook
+from conftest import HOOKS, LEGACY_CONSOLE_ENV, load_hook
 
 GREEN, YELLOW, RED, RESET = "\033[32m", "\033[33m", "\033[31m", "\033[0m"
 ANSI = re.compile(r"\033\[[0-9;]*m")
@@ -164,6 +165,8 @@ def run(payload: str, *args: str) -> subprocess.CompletedProcess[str]:
         input=payload,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        env={**os.environ, **LEGACY_CONSOLE_ENV},
         timeout=30,
         check=False,
     )
@@ -185,6 +188,13 @@ def test_end_to_end_subagents():
     lines = [json.loads(x) for x in proc.stdout.splitlines()]
     assert [x["id"] for x in lines] == ["t1", "t2"]
     assert YELLOW in lines[0]["content"]
+
+
+def test_end_to_end_subagents_non_ascii_input_survives_a_legacy_console():
+    payload = {"columns": 100, "tasks": [task(200_000, description="tên \u1ebf")]}
+    proc = run(json.dumps(payload, ensure_ascii=False), "--subagents")
+    assert proc.stderr == ""
+    assert "tên \u1ebf" in json.loads(proc.stdout)["content"]
 
 
 def test_end_to_end_malformed():

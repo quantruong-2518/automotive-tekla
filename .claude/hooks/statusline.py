@@ -14,6 +14,7 @@ prints nothing; always exits 0. Stdlib only, no subprocess calls.
 
 from __future__ import annotations
 
+import contextlib
 import importlib.util
 import json
 import re
@@ -141,8 +142,16 @@ def render_subagents(data: dict[str, Any]) -> list[str]:
     return lines
 
 
+def _use_utf8_streams() -> None:
+    """Claude Code speaks UTF-8 on stdin/stdout; a Windows console defaults to a legacy code page."""
+    for stream in (sys.stdin, sys.stdout, sys.stderr):
+        with contextlib.suppress(Exception):  # not a reconfigurable text stream: leave it as it is
+            stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
+
+
 def main(argv: list[str] | None = None) -> int:
     args = sys.argv[1:] if argv is None else argv
+    _use_utf8_streams()
     try:
         data = json.loads(sys.stdin.read())
         if not isinstance(data, dict):
