@@ -40,7 +40,11 @@ Rules (deterministic; the thresholds are heuristics, see the schema description)
    {"unit": ...}; an answer without `file` applies to every file) and each file's answers agree with
    themselves; it is the representative's file unit that converts. Files of one system may answer
    different units (flag `answered_units_differ`): they were merged in mm. Otherwise mm is null with the
-   reason. The declared header unit is never used to convert.
+   reason. The declared header unit is never used to convert. The grid-spacing evidence of the units test
+   (`files[].grid_spacing_median`, also read by `harness status`) is the median spacing of the file's PLAN
+   systems (tool wave 4): a single-source system (a key plan) never decides while the file has a system with
+   two or more independent views; a file with only single-source systems takes the median of its systems'
+   medians.
 7. Tekla X/Y: only from active `grid_family_axis_assignment` answers ({"<family_id>": "X"|"Y"}, bound
    to the answer's `file`; family ids restart in every file) that cover every direction of the system
    without contradiction; otherwise null. Also from the system's own `grid_system_axis_unassigned` answer,
@@ -1005,6 +1009,67 @@ def _system_axis_values(answer: dict[str, Any], n_dirs: int, sid: str, warnings:
     return {AXIS_DIRECTIONS.index(k): str(v) for k, v in values.items()}
 
 
+def _independent(s: _System, ctx: dict[str, _FileCtx]) -> int:
+    return len(set(_components([m.view for m in s.full()], ctx)))
+
+
+def _drop_strays(
+    systems: list[_System], ctx: dict[str, _FileCtx]
+) -> tuple[list[_System], list[tuple[_System, _System]]]:
+    """(systems without the strays, [(stray, the system of its file that makes it one)]).
+
+    The file's MAIN system is a two-direction system with three or more axes in each direction, from any
+    number of views (EVAL-4 180: every plan is seen once, as a half of one grid). A STRAY is a system of ONE
+    direction seen in ONE independent view (rebar or pile marks drawn like bubbles: EVAL-3 286 `b bt`, 290
+    `8 1` / `6 1` / `3 16`; 3D views and details), in a file that has a main system. A Tekla grid needs two
+    directions, and the file's grid is already a system; the stray is reported in `unassigned_families`,
+    never silently dropped. A file without a main system keeps its small systems: they may be all it has."""
+    strong = [s for s in systems if len(s.rep.fams) == 2 and min(len(f.labels) for f in s.rep.fams) >= 3]
+    kept: list[_System] = []
+    dropped: list[tuple[_System, _System]] = []
+    for s in systems:
+        stray = len(s.rep.fams) == 1 and _independent(s, ctx) < 2
+        main = next(
+            (m for m in strong if m is not s and any(x.view.file == s.rep.file for x in m.members)), None
+        )
+        if stray and main is not None:
+            dropped.append((s, main))
+        else:
+            kept.append(s)
+    return kept, dropped
+
+
+def _plan_spacing_medians(systems: list[_System], ctx: dict[str, _FileCtx]) -> dict[str, dict[str, Any]]:
+    """file -> {"value", "count"}: the median positive spacing (drawing units) of the file's PLAN systems.
+
+    A system contributes its representative family in the file, once. A single-source system (fewer than two
+    independent full views: a key plan, a stray detail) never decides while the file has a system with two
+    or more independent views. A
+    file whose systems are all single-source takes the median of its systems' medians (each system counts
+    once). Files without a system are absent."""
+    rows: dict[str, list[tuple[bool, list[float]]]] = {}
+    for s in systems:
+        single = len(set(_components([m.view for m in s.full()], ctx))) < 2
+        seen: set[str] = set()
+        for m in s.members:
+            if m.view.file in seen:
+                continue
+            seen.add(m.view.file)
+            values = [v for fam in m.view.fams for v in fam.spacings if v > 0]
+            if values:
+                rows.setdefault(m.view.file, []).append((single, values))
+    out: dict[str, dict[str, Any]] = {}
+    for file, items in rows.items():
+        decisive = [vals for single, vals in items if not single]
+        if decisive:
+            pooled = [v for vals in decisive for v in vals]
+            out[file] = {"value": float(statistics.median(pooled)), "count": len(pooled)}
+        else:  # only single-source systems: each counts once, so a big key plan does not outvote the plans
+            medians = [statistics.median(vals) for _, vals in items]
+            out[file] = {"value": float(statistics.median(medians)), "count": sum(len(v) for _, v in items)}
+    return out
+
+
 def _contradictions(
     active: list[dict[str, Any]],
     statuses: dict[str, tuple[str, str | None]],
@@ -1631,6 +1696,14 @@ def build_grid_systems(
     probed = sorted(p for p, u in inputs.inventory_units.items() if u is not None)
     by_engineer, by_others = units_by_file(engineer, probed, []), units_by_file(others, probed, [])
     effective = {p: by_engineer[p] if by_engineer[p][0] != "not_answered" else by_others[p] for p in probed}
+    # the grid-spacing units evidence is the median of the file's plan systems (a single-source key plan never
+    # decides it), so systems are built once in drawing units before any answered unit converts anything
+    kept, _ = _drop_strays(_systems(_clusters(inputs.views, set_of), inputs.ctx, set_of), inputs.ctx)
+    plan_medians = _plan_spacing_medians(kept, inputs.ctx)
+    for f in inputs.files:
+        if f["status"] == "read":
+            f["grid_spacing_median"] = plan_medians.get(f["path"])
+            inputs.spacing_medians[f["path"]] = f["grid_spacing_median"]
     contradictions = _contradictions(
         active, effective, inputs.inventory_units, sha, inputs.spacing_medians, engineer
     )
@@ -1646,8 +1719,23 @@ def build_grid_systems(
     for v in inputs.views:  # an agreeing units answer lets the matching compare this file in millimetres
         for f in v.fams:
             f.factor = _factor(units, f.file)
-    systems = _systems(_clusters(inputs.views, set_of), inputs.ctx, set_of)
+    systems, strays = _drop_strays(_systems(_clusters(inputs.views, set_of), inputs.ctx, set_of), inputs.ctx)
     ids = [f"S{k:03d}" for k in range(1, len(systems) + 1)]
+    for stray, main in strays:
+        rf = stray.rep.fams[0]
+        inputs.totals["families_unassigned"] += 1
+        inputs.unassigned.append(
+            {
+                "file": rf.file,
+                "sheet": rf.sheet,
+                "group_id": rf.group_id,
+                "family_id": rf.family_id,
+                "labels": rf.label_text(),
+                "reason": "a family of one direction seen in one view, beside the file's grid "
+                f"system {ids[systems.index(main)]}: not proposed as a grid system (rebar or pile marks, a "
+                "3D view, a detail?)",
+            }
+        )
     place: dict[str, tuple[str, str | None]] = {}  # system -> (file, sheet) its questions are filed under
     sys_files: dict[str, list[str]] = {}  # system -> the drawing files it comes from
 
@@ -2040,6 +2128,23 @@ class GridSystemsResult:
     summary: dict[str, Any]
 
 
+def _stdout_question_counts(questions: list[dict[str, Any]], summary: dict[str, int]) -> dict[str, Any]:
+    """The question counts `harness grid-system` prints: the questions document's own counts plus
+    `blocking_without_engineer_answer` and a note. The document counts a question as answered when any answer
+    is recorded for it, a simulated one included, while `harness status` keeps a question that only a
+    non-engineer answered open for gate 1: a bare `blocking_open 0` read as "nothing left to answer"."""
+    out: dict[str, Any] = dict(summary)
+    out["blocking_without_engineer_answer"] = sum(
+        1 for q in questions if q["blocking"] and not (q["answer"] and _by_engineer(q["answer"]))
+    )
+    out["counts_note"] = (
+        "answered and blocking_open count any recorded answer, a simulated one included; "
+        "blocking_without_engineer_answer counts the blocking questions the engineer has not answered "
+        "(run `harness status` for what keeps gate 1 closed)"
+    )
+    return out
+
+
 def run_grid_systems(work_dir: str | Path, *, svg: bool = True) -> GridSystemsResult:
     """`harness grid-system`: build the grid systems of a read-structure work folder from the active answers,
     register the questions (producer 'grid-system') and write `grid-systems.json`,
@@ -2130,7 +2235,7 @@ def run_grid_systems(work_dir: str | Path, *, svg: bool = True) -> GridSystemsRe
             }
             for d in doc["systems"]
         ],
-        **qdoc["summary"],
+        **_stdout_question_counts(questions, qdoc["summary"]),
         "question_counts": doc["question_counts"],
         "stale_answers": ledger.stale_answers(),
         "warnings": doc["warnings"],

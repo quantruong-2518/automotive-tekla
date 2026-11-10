@@ -836,6 +836,55 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
     ids of DATA cells whose text the font gate blocks; such a cell keeps `entry_id` null). The cell `entry_id`
     description now names both null cases (header placeholder, blocked data cell). Nothing writes it until
     package M.
+  - Tool wave 4, package G (grids, `grids.py` and `grid_system.py`; no schema change):
+    - Text, lines, circles and dimensions that do not print are left out of bubbles, labels, axes and
+      dimension evidence (not-printed text entries via `visibility.is_printed`; geometry by its own group 60
+      and its layer off / frozen / plot 0, read from the DXF). An entity on layer 0 inside a block and the
+      contents of an invisible INSERT stay (Autodesk does not settle them). What was left out is counted
+      in `warnings` (the grids schema has no counter field).
+    - Obround bubbles (two straight LINEs and two semicircular ARCs of one radius around the label) count as
+      bubbles, with half the overall length as radius (EVAL-4 180: 0 of its framing-plan bubbles were found).
+    - The grid-spacing units evidence uses plan systems only: `files[].grid_spacing_median` of
+      `grid-systems.json` is the median spacing of the file's systems with two or more independent views
+      (a single-source key plan never decides; a file with only single-source systems takes the median of
+      its systems' medians), so a small key plan no longer raises `units_answer_contradicts_evidence`
+      (EVAL-4 180, Q-199). `grid_units_doubt` in `grids.json` takes the median of the views' medians.
+    - A line or circle on a layer that has no LAYER table row is read as a plain printing layer (a
+      line there was dropped before, counted in `walk_skipped`).
+    - A bubble pairs with the axis line of its sheet's axis style (the layer and linetype most axes of the
+      sheet are on, when one clearly leads) before a nearer line of another style: another end candidate
+      of the style, or a line of the style drawn through the bubbles at both of its ends (EVAL-3 285:
+      the end bubbles took wall lines 110 outside their axes; spacings 3240 / 4700 become 3130 / 4590).
+      A bubble already on a line of the style counts as the other end of that line, so the left bubble of an
+      axis `a` no longer stays on a wall line 90 under it (285: `a a b c` becomes `a b c`).
+    - An axis that differs from its family in two of three things is no axis: its size (bubble radius or
+      label height more than 20 % from the family median), its block (the circle's outermost block name) or
+      its line (layer + linetype); for block and line the family value is the one more than half of the
+      axes share, and a family needs three axes (EVAL-4 264 `5` / `4` on a HIDDEN line, 278 section marker
+      `T`, 271 rebar bubbles `12` / `14` / `20`). The bubbles are listed as unpaired bubbles and the
+      warnings of `grids.json` name each axis and what differs.
+    - A `*` may end an axis label (`2*`, an intermediate axis; EVAL-4 278). Two plans stacked on one sheet,
+      whose shared axes are printed once, are two views: when exactly one family of a view repeats its
+      labels in alike runs of at least two axes (`a b a b`, never `1 2 2` or `1 2 1 3`), the view is cut into
+      one view per run and every other axis of it belongs to each (EVAL-4 278 KC-01). `bubbles_paired` counts
+      each bubble once.
+    - `harness grid-system`: a system of one direction seen in one view (any number of axes: rebar or pile
+      marks, 3D views, details: EVAL-3 286 `b bt`, 290 `8 1` / `6 1` / `3 16`, 180 model#05 / #06) is not
+      proposed as a grid system when its file has a main system, a two-direction system with three or more
+      axes in each direction from any number of views (180: every plan is seen once, as half of one grid).
+      It is listed in `unassigned_families` with the reason, counted in `summary.families_unassigned`, and
+      raises no `grid_system_axis_unassigned` question. 180: 8 systems / 31 blocking grid questions become
+      5 / 17; the other ten known drawings are unchanged.
+    - Schema descriptions (no field changes, `$id` unchanged): `grid-system` `files[].grid_spacing_median` is the median of the file's plan systems (single-source case stated); `grids` `unpaired_bubbles` also holds the bubbles of set-aside axes and views, which have lines.
+    - A view of one direction (one family of two or more axes, nothing across it) whose shared labels contradict
+      every other family that shares two or more of them, while two or more of those families agree with each
+      other, is set aside as an elevation or section: no grid system, no cross-check partner (EVAL-4 278
+      KT-08: `1 2 4` at 10107 / 5192 against 25 plans of `1 2 2* 3 4`). The bubbles are listed as unpaired and
+      a `grids.json` warning says why; a plan (two directions) is never set aside.
+    - `harness grid-system` prints `blocking_without_engineer_answer` (blocking questions the engineer has not
+      answered) and a `counts_note` beside the questions document's `answered` and `blocking_open`, which
+      count a simulated answer as an answer while `harness status` still keeps that question blocking, so
+      `blocking_open 0` read as "nothing left to answer".
 
 ### Changed
 - Question lifecycle (tool wave 2, EVAL-2 fix 5):
