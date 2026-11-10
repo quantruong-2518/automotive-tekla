@@ -44,6 +44,7 @@ def git(cwd: Path, *args: str) -> str:
         cwd=cwd,
         capture_output=True,
         text=True,
+        encoding="utf-8",
         check=True,
     )
     return proc.stdout.strip()
@@ -95,7 +96,8 @@ def use_real_ignore_rules(repo: Path) -> None:
 
 
 def backdate(wt: Path, names: tuple[str, ...] = ("HEAD", "logs/HEAD"), hours: float = 48) -> None:
-    admin = Path(git(wt, "rev-parse", "--absolute-git-dir"))
+    admin = load_hook("session_cleanup").admin_dir(wt)
+    assert admin is not None
     stamp = time.time() - hours * 3600
     for name in names:
         os.utime(admin / name, (stamp, stamp))
@@ -992,3 +994,13 @@ def test_hook_prints_non_ascii_paths_under_a_legacy_console_encoding(repo, tmp_p
     assert proc.returncode == 0
     assert proc.stderr == ""
     assert "wt-\u1ebf" in json.loads(proc.stdout)["hookSpecificOutput"]["additionalContext"]
+
+
+def test_admin_dir_follows_the_gitdir_pointer_for_a_non_ascii_worktree(tmp_path: Path) -> None:
+    """The admin dir comes from the UTF-8 `gitdir:` pointer, not from decoded git output."""
+    wt = tmp_path / "wt-ế"
+    admin = tmp_path / "main" / ".git" / "worktrees" / "wt-ế"
+    admin.mkdir(parents=True)
+    wt.mkdir()
+    (wt / ".git").write_text(f"gitdir: {admin}\n", encoding="utf-8")
+    assert load_hook("session_cleanup").admin_dir(wt) == admin

@@ -94,6 +94,7 @@ def run_git(args: list[str], cwd: str | Path, timeout: int = GIT_TIMEOUT) -> tup
             cwd=cwd,
             capture_output=True,
             text=True,
+            encoding="utf-8",
             errors="replace",
             timeout=timeout,
             check=False,
@@ -185,11 +186,27 @@ def hidden_change(wt_path: str) -> str | None:
     return None
 
 
-def newest_admin_mtime(wt_path: str) -> float | None:
+def admin_dir(wt_path: str | Path) -> Path | None:
+    """The worktree's admin dir, read from the `gitdir:` pointer git wrote into `<wt>/.git`.
+
+    The pointer file is authoritative and UTF-8, so a non-ASCII worktree name survives a legacy
+    console code page; `git rev-parse --absolute-git-dir` is the fallback.
+    """
+    try:
+        line = (Path(wt_path) / ".git").read_text(encoding="utf-8").strip()
+    except (OSError, UnicodeDecodeError):
+        line = ""
+    if line.startswith("gitdir:"):
+        pointer = Path(line[len("gitdir:") :].strip())
+        return pointer if pointer.is_absolute() else Path(wt_path) / pointer
     rc, out, _ = run_git(["rev-parse", "--absolute-git-dir"], wt_path)
-    if rc != 0 or not out.strip():
+    return Path(out.strip()) if rc == 0 and out.strip() else None
+
+
+def newest_admin_mtime(wt_path: str) -> float | None:
+    admin = admin_dir(wt_path)
+    if admin is None:
         return None
-    admin = Path(out.strip())
     times: list[float] = []
     for name in ("HEAD", "logs/HEAD"):
         try:
