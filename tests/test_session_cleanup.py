@@ -689,7 +689,7 @@ def test_each_action_is_logged_as_soon_as_it_succeeds(cleanup_mod, repo, tmp_pat
 
 
 def run_hook(project: Path, *args: str) -> subprocess.CompletedProcess[str]:
-    env = {**os.environ, "CLAUDE_PROJECT_DIR": str(project)}
+    env = {**os.environ, "CLAUDE_PROJECT_DIR": str(project), "HOME": str(project / "no-home")}
     return subprocess.run(
         [sys.executable, str(HOOKS / "session_cleanup.py"), *args],
         input="{}",
@@ -735,3 +735,159 @@ def test_hook_exits_zero_outside_a_git_repository(tmp_path):
 def test_hook_exits_zero_on_bad_arguments(tmp_path):
     proc = run_hook(tmp_path, "--repo")
     assert proc.returncode == 0
+
+
+# --- second review: robustness, liveness, regenerable, hidden changes, wording ---------------
+
+
+def test_one_unusable_session_file_does_not_hide_the_others(cleanup_mod, repo, tmp_path):
+    wt = add_worktree(repo, tmp_path, "w1")
+    sessions = tmp_path / "sessions"
+    write_session(sessions, "a-nul.json", {"pid": os.getpid(), "cwd": "bad\0path"})
+    write_session(sessions, "b-ok.json", {"pid": os.getpid(), "cwd": str(wt)})
+    report = clean(cleanup_mod, repo, tmp_path, sessions_dir=sessions)
+    assert wt.exists()
+    assert kept_for(report, "w1")["reason"] == "live session"
+
+
+def test_a_pid_too_large_for_the_os_counts_as_alive(cleanup_mod, repo, tmp_path):
+    assert cleanup_mod.pid_alive(2**100) is True
+    wt = add_worktree(repo, tmp_path, "w1")
+    sessions = tmp_path / "sessions"
+    write_session(sessions, "big.json", {"pid": 2**100, "cwd": str(wt)})
+    report = clean(cleanup_mod, repo, tmp_path, sessions_dir=sessions)
+    assert wt.exists()
+    assert kept_for(report, "w1")["reason"] == "live session"
+
+
+@pytest.mark.parametrize("stdin", ["[" * 200000, '{"cwd": "a\\u0000b"}'])
+def test_stdin_cwd_survives_pathological_input(cleanup_mod, monkeypatch, stdin):
+    import io
+
+    monkeypatch.setattr(cleanup_mod.sys, "stdin", io.StringIO(stdin))
+    cleanup_mod.stdin_cwd()  # must not raise
+
+
+def test_a_nul_byte_in_a_protected_directory_does_not_stop_cleanup(cleanup_mod, repo, tmp_path):
+    add_worktree(repo, tmp_path, "w1")
+    report = clean(cleanup_mod, repo, tmp_path, protected=[Path("a\0b")])
+    assert removed_names(report) == ["w1"]
+
+
+def test_the_sessions_folder_is_looked_up_at_call_time(cleanup_mod, repo, tmp_path, monkeypatch):
+    wt = add_worktree(repo, tmp_path, "w1")
+    home = tmp_path / "home"
+    (home / ".claude").mkdir(parents=True)
+    write_session(home / ".claude" / "sessions", "a.json", {"pid": os.getpid(), "cwd": str(wt)})
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    report = cleanup_mod.cleanup(repo, current=elsewhere, now=time.time() + FAR_FUTURE)
+    assert wt.exists()
+    assert kept_for(report, "w1")["reason"] == "live session"
+
+
+def test_a_crash_is_swallowed_but_leaves_one_line_on_stderr(cleanup_mod, monkeypatch, capsys):
+    def boom(argv):
+        raise RuntimeError("kaboom")
+
+    monkeypatch.setattr(cleanup_mod, "main", boom)
+    assert cleanup_mod.entry([]) == 0
+    err = capsys.readouterr().err
+    assert len(err.strip().splitlines()) == 1 and "kaboom" in err
+
+
+def own_pid_domain() -> str | None:
+    try:
+        return str(Path("/proc/self/ns/pid").readlink())
+    except OSError:
+        return None
+
+
+@pytest.mark.skipif(own_pid_domain() is None, reason="no /proc pid namespace link")
+def test_a_session_from_another_pid_namespace_counts_as_alive(cleanup_mod, repo, tmp_path):
+    wt = add_worktree(repo, tmp_path, "w1")
+    dead = subprocess.Popen([sys.executable, "-c", "pass"])
+    dead.wait()
+    sessions = tmp_path / "sessions"
+    write_session(sessions, "x.json", {"pid": dead.pid, "cwd": str(wt), "pidDomain": "pid:[1]"})
+    report = clean(cleanup_mod, repo, tmp_path, sessions_dir=sessions)
+    assert wt.exists()
+    assert kept_for(report, "w1")["reason"] == "live session"
+
+
+@pytest.mark.skipif(own_pid_domain() is None, reason="no /proc pid namespace link")
+def test_a_dead_session_in_our_own_pid_namespace_is_ignored(cleanup_mod, repo, tmp_path):
+    add_worktree(repo, tmp_path, "w1")
+    dead = subprocess.Popen([sys.executable, "-c", "pass"])
+    dead.wait()
+    sessions = tmp_path / "sessions"
+    wt_path = tmp_path / "wts" / "w1"
+    write_session(sessions, "x.json", {"pid": dead.pid, "cwd": str(wt_path), "pidDomain": own_pid_domain()})
+    report = clean(cleanup_mod, repo, tmp_path, sessions_dir=sessions)
+    assert removed_names(report) == ["w1"]
+
+
+def test_an_ignored_entry_under_projects_is_never_regenerable(cleanup_mod, repo, tmp_path):
+    use_real_ignore_rules(repo)
+    wt = add_worktree(repo, tmp_path, "w1")
+    (wt / "projects" / "bin").mkdir(parents=True)
+    (wt / "projects" / "bin" / "data.json").write_text("{}", encoding="utf-8")
+    report = clean(cleanup_mod, repo, tmp_path)
+    assert (wt / "projects" / "bin" / "data.json").exists()
+    assert "projects/bin" in kept_for(report, "w1")["reason"]
+
+
+def test_a_file_pattern_does_not_make_a_directory_regenerable(cleanup_mod, repo, tmp_path):
+    use_real_ignore_rules(repo)
+    wt = add_worktree(repo, tmp_path, "w1")
+    (wt / "src" / "data.pyc").mkdir(parents=True)
+    (wt / "src" / "data.pyc" / "precious.txt").write_text("keep", encoding="utf-8")
+    report = clean(cleanup_mod, repo, tmp_path)
+    assert (wt / "src" / "data.pyc" / "precious.txt").exists()
+    assert "src/data.pyc" in kept_for(report, "w1")["reason"]
+
+
+def test_untracked_files_count_even_when_git_is_configured_to_hide_them(cleanup_mod, repo, tmp_path):
+    git(repo, "config", "status.showUntrackedFiles", "no")
+    wt = add_worktree(repo, tmp_path, "w1")
+    (wt / "notes.txt").write_text("keep", encoding="utf-8")
+    report = clean(cleanup_mod, repo, tmp_path)
+    assert wt.exists()
+    assert "notes.txt" in kept_for(report, "w1")["reason"]
+
+
+def test_a_bare_agent_id_in_a_handoff_file_keeps_the_branch(cleanup_mod, repo, tmp_path):
+    git(repo, "branch", "worktree-agent-ab12cd34")
+    git(repo, "branch", "worktree-notes")
+    (repo / ".handoff").mkdir()
+    (repo / ".handoff" / "t.md").write_text("agent ab12cd34 and notes remain", encoding="utf-8")
+    report = clean(cleanup_mod, repo, tmp_path)
+    assert report["deleted_branches"] == []
+    assert "handoff" in kept_for(report, "worktree-agent-ab12cd34")["reason"]
+    assert "handoff" in kept_for(report, "worktree-notes")["reason"]
+
+
+@pytest.mark.parametrize("flag", ["--assume-unchanged", "--skip-worktree"])
+def test_a_hidden_local_change_keeps_the_worktree(cleanup_mod, repo, tmp_path, flag):
+    wt = add_worktree(repo, tmp_path, "w1")
+    git(wt, "update-index", flag, "README.md")
+    (wt / "README.md").write_text("precious edit\n", encoding="utf-8")
+    report = clean(cleanup_mod, repo, tmp_path)
+    assert wt.exists()
+    assert kept_for(report, "w1")["reason"] == "hidden local change: README.md"
+
+
+def test_dry_run_message_says_would(cleanup_mod):
+    report = {
+        "removed_worktrees": [{"target": "/x/w1", "reason": "r", "head": "h", "branch": "fix/w1"}],
+        "deleted_branches": [{"target": "fix/a", "reason": "merged", "head": "a"}],
+        "kept": [],
+    }
+    out = cleanup_mod.build_output(report, dry_run=True)
+    assert out is not None
+    assert (
+        out["systemMessage"]
+        == "Cleanup: would remove 1 worktree(s), would delete 1 branch(es); 0 kept for review."
+    )

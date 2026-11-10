@@ -64,7 +64,6 @@ REGENERABLE = [
     "obj/",
 ]
 LOG_NAME = "claude-session-cleanup.jsonl"
-SESSIONS_DIR = Path.home() / ".claude" / "sessions"  # undocumented; only ever adds keeps
 GIT_TIMEOUT = 15
 MAX_LINES = 20
 
@@ -134,20 +133,24 @@ def list_worktrees(repo: str | Path) -> list[Worktree]:
 
 def is_regenerable(entry: str) -> bool:
     """True if the status entry itself (not a parent directory) is a regenerable path."""
+    if entry.startswith("projects/"):  # engineer data: never regenerable, whatever its name
+        return False
     is_dir = entry.endswith("/")
     name = entry.rstrip("/").rsplit("/", 1)[-1]
     for pattern in REGENERABLE:
         if pattern.endswith("/"):
             if is_dir and name == pattern[:-1]:
                 return True
-        elif fnmatch.fnmatchcase(name, pattern):
+        elif not is_dir and fnmatch.fnmatchcase(name, pattern):
             return True
     return False
 
 
 def unclean_reason(wt_path: str) -> str | None:
     """None when the worktree holds nothing but regenerable ignored entries, else why it is not clean."""
-    rc, out, err = run_git(["status", "--porcelain", "-z", "--ignored=matching"], wt_path)
+    rc, out, err = run_git(
+        ["status", "--porcelain", "-z", "--untracked-files=normal", "--ignored=matching"], wt_path
+    )
     if rc != 0:
         return f"git status failed: {first_line(err)}"
     entries = out.split("\0")
@@ -166,6 +169,17 @@ def unclean_reason(wt_path: str) -> str | None:
             index += 1  # a rename or copy carries its source as the next field
         kind = "untracked file" if code == "??" else "uncommitted change"
         return f"{kind}: {path}"
+    return hidden_change(wt_path)
+
+
+def hidden_change(wt_path: str) -> str | None:
+    """A path flagged assume-unchanged or skip-worktree: `git status` cannot see edits to it."""
+    rc, out, err = run_git(["ls-files", "-v", "-z"], wt_path)
+    if rc != 0:
+        return f"git ls-files failed: {first_line(err)}"
+    for entry in out.split("\0"):
+        if len(entry) > 2 and (entry[0] == "S" or entry[0].islower()):
+            return f"hidden local change: {entry[2:]}"
     return None
 
 
@@ -191,7 +205,10 @@ def in_use(wt_path: str, session_dirs: Sequence[Path], main_path: str) -> bool:
     """A session directory is in this worktree, or (not in the main checkout) the worktree sits inside it."""
     wt, main = Path(wt_path).resolve(), Path(main_path).resolve()
     for directory in session_dirs:
-        cur = directory.resolve()
+        try:
+            cur = directory.resolve()
+        except (OSError, ValueError, RuntimeError):
+            continue  # a path that cannot exist cannot hold a session
         if within(cur, wt) or (within(wt, cur) and not within(cur, main)):
             return True
     return False
@@ -200,21 +217,35 @@ def in_use(wt_path: str, session_dirs: Sequence[Path], main_path: str) -> bool:
 def pid_alive(pid: int) -> bool:
     """Whether a process with this pid exists; when unsure, True (an extra keep is harmless)."""
     if sys.platform == "win32":  # os.kill(pid, 0) would terminate the process on Windows
-        import ctypes
+        try:
+            import ctypes
 
-        kernel32 = ctypes.windll.kernel32
-        handle = kernel32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
-        if handle:
-            kernel32.CloseHandle(handle)
+            kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+            kernel32.OpenProcess.restype = ctypes.c_void_p
+            handle = kernel32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+            if handle:
+                kernel32.CloseHandle(ctypes.c_void_p(handle))
+                return True
+            return ctypes.get_last_error() == 5  # access denied: the process exists
+        except Exception:
             return True
-        return kernel32.GetLastError() == 5  # access denied: the process exists
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
         return False
+    except (OverflowError, ValueError):
+        return True  # a pid this OS cannot even express: unsure
     except OSError:
         return True  # PermissionError: it exists
     return True
+
+
+def own_pid_domain() -> str | None:
+    """Identity of this process's pid namespace (Linux), or None when it cannot be read."""
+    try:
+        return str(Path("/proc/self/ns/pid").readlink())
+    except (OSError, ValueError):
+        return None
 
 
 def live_session_dirs(folder: Path) -> list[Path]:
@@ -222,20 +253,25 @@ def live_session_dirs(folder: Path) -> list[Path]:
     dirs: list[Path] = []
     try:
         files = sorted(folder.glob("*.json"))
-    except OSError:
+    except Exception:
         return dirs
+    domain_here = own_pid_domain()
     for file in files:
         try:
             data = json.loads(file.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
+            if not isinstance(data, dict):
+                continue
+            pid, cwd = data.get("pid"), data.get("cwd")
+            if isinstance(pid, bool) or not isinstance(pid, int) or pid <= 0:
+                continue
+            if not isinstance(cwd, str) or not cwd:
+                continue
+            domain = data.get("pidDomain")
+            foreign = isinstance(domain, str) and domain_here is not None and domain != domain_here
+            if foreign or pid_alive(pid):  # a pid from another namespace cannot be checked here
+                dirs.append(Path(cwd).resolve())
+        except Exception:  # one bad session file must not hide the others
             continue
-        if not isinstance(data, dict):
-            continue
-        pid, cwd = data.get("pid"), data.get("cwd")
-        if isinstance(pid, bool) or not isinstance(pid, int) or pid <= 0:
-            continue
-        if isinstance(cwd, str) and cwd and pid_alive(pid):
-            dirs.append(Path(cwd))
     return dirs
 
 
@@ -326,7 +362,12 @@ def cleanup(
     main = worktrees[0]
     refs = integration_refs(main.path)
     idle_limit = min_idle_hours * 3600
-    live = live_session_dirs(SESSIONS_DIR if sessions_dir is None else sessions_dir)
+    if sessions_dir is None:
+        try:
+            sessions_dir = Path.home() / ".claude" / "sessions"  # undocumented; only ever adds keeps
+        except (RuntimeError, OSError):
+            sessions_dir = None
+    live = live_session_dirs(sessions_dir) if sessions_dir is not None else []
     log = ActionLog(main.path, now, enabled=not dry_run)
 
     def keep(kind: str, target: str, reason: str, head: str, review: bool, idle: bool) -> None:
@@ -344,7 +385,7 @@ def cleanup(
             keep("worktree", wt.path, "current session directory", wt.head, review=False, idle=False)
             continue
         wt_root = Path(wt.path).resolve()
-        if any(within(directory.resolve(), wt_root) for directory in live):
+        if any(within(directory, wt_root) for directory in live):
             keep("worktree", wt.path, "live session", wt.head, review=False, idle=False)
             continue
         if wt.locked:
@@ -441,7 +482,8 @@ def delete_branches(
         if not any(is_ancestor(sha, m, main_path) for m in masters):
             keep(name, "not merged into origin/master or master", sha, idle)
             continue
-        mention = handoff_reason(main_path, [name])
+        needles = [name, name.removeprefix("worktree-"), name.removeprefix("worktree-agent-")]
+        mention = handoff_reason(main_path, needles)
         if mention:
             keep(name, mention, sha, idle)
             continue
@@ -476,11 +518,13 @@ def build_output(report: dict[str, list[dict[str, Any]]], dry_run: bool) -> dict
     text = "\n".join(lines)
     if review:
         text += f"\n\n{REVIEW_REMINDER}"
+    summary = (
+        f"would remove {len(removed_wt)} worktree(s), would delete {len(deleted)} branch(es)"
+        if dry_run
+        else f"removed {len(removed_wt)} worktree(s), {len(deleted)} branch(es)"
+    )
     out: dict[str, Any] = {
-        "systemMessage": (
-            f"Cleanup: removed {len(removed_wt)} worktree(s), {len(deleted)} branch(es); "
-            f"{len(review)} kept for review."
-        ),
+        "systemMessage": f"Cleanup: {summary}; {len(review)} kept for review.",
         "hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": text},
     }
     if dry_run:
@@ -504,7 +548,7 @@ def stdin_cwd() -> Path | None:
         if sys.stdin is None or sys.stdin.isatty():
             return None
         data = json.loads(sys.stdin.read())
-    except (OSError, ValueError):
+    except (OSError, ValueError, RecursionError):
         return None
     cwd = data.get("cwd") if isinstance(data, dict) else None
     return Path(cwd) if isinstance(cwd, str) and cwd else None
@@ -528,8 +572,13 @@ def main(argv: list[str]) -> int:
     return 0
 
 
-if __name__ == "__main__":
+def entry(argv: list[str]) -> int:
     try:
-        sys.exit(main(sys.argv[1:]))
-    except Exception:  # a cleanup must never break session start
-        sys.exit(0)
+        return main(argv)
+    except Exception as exc:  # a cleanup must never break session start
+        sys.stderr.write(f"session_cleanup: skipped after {type(exc).__name__}: {exc}\n")
+        return 0
+
+
+if __name__ == "__main__":
+    sys.exit(entry(sys.argv[1:]))
