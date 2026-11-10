@@ -147,6 +147,7 @@ from tekla_harness.callouts import (
     _SHEET_CODE,
     CALLOUT_PART,
     DETAIL_LABEL,
+    MEMBER_WORDS,
     _check_input_dir,
     _claimed_text_ids,
     _confidence,
@@ -221,33 +222,6 @@ _MARK = re.compile("^" + _BODY + "(?:" + _SIZE + "|(?P<length>" + _LENGTH + "))$
 _MARK_HEAD = re.compile("^" + _BODY + _SIZE + r"(?=$|[\s,;:(])")
 _SPACING_LETTERS = frozenset({"a", "s"})  # Ø8a150: a lone lower-case a / s is a spacing, not a mark
 
-# member-type words of a detail title (matched case-insensitively on NFC text), longest first
-MEMBER_WORDS = (
-    "giằng móng",
-    "dầm móng",
-    "đài cọc",
-    "đài móng",
-    "đài",
-    "lanh tô",
-    "dầm",
-    "cột",
-    "giằng",
-    "móng",
-    "sàn",
-    "vách",
-    "cọc",
-    "tie beam",
-    "pile cap",
-    "footing",
-    "column",
-    "purlin",
-    "rafter",
-    "girder",
-    "brace",
-    "beam",
-    "slab",
-    "wall",
-)
 _TITLE = re.compile(
     r"^(?:(?:chi tiết|mặt cắt|detail of|detail|section)\s+)?(?P<word>"
     + "|".join(re.escape(w) for w in sorted(MEMBER_WORDS, key=len, reverse=True))

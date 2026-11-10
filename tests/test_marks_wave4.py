@@ -761,7 +761,9 @@ def test_a_one_row_line_grid_schedule_with_a_mark_shaped_cell_is_a_table(tmp_pat
 
 def test_a_run_of_numbered_plate_looking_texts_is_a_mark_family(tmp_path):
     work = build_marks_work(
-        tmp_path, plan_texts=("bm-1", "bm-2", "bm-3", "bm-4", "BM12", "PL-1", "PL-2", "pl 7", "D1")
+        tmp_path,
+        # 271 names its footings by a heading with a member word: `bẢn mÓng bm-3`
+        plan_texts=("bm-1", "bm-2", "bm-3", "bm-4", "bẢn mÓng bm-3", "BM12", "PL-1", "PL-2", "pl 7", "D1"),
     )
     marks = extract_marks(work, tmp_path / "input", check_inputs=True)
     plan = sorted(p["mark"] for p in marks["plan_marks"] if p["mark"].lower().startswith(("bm", "pl", "d")))
@@ -783,6 +785,7 @@ def test_a_run_of_numbered_plate_looking_texts_is_a_mark_family(tmp_path):
         "bm-1",
         "bm-2",
         "bm-3",
+        "bm-3",  # the second one is the heading's
         "bm-4",
         "pl 7",
     ]  # callouts keeps its view
@@ -815,7 +818,10 @@ def test_a_run_needs_three_consecutive_numbers_of_one_prefix_style_and_height(tm
         entry("T000012", "D1"),  # no callout pattern claims D1 D2 D3: marks already, no run to report
         entry("T000013", "D2"),
         entry("T000014", "D3"),
+        entry("T000015", "bẢn mÓng bm-3"),  # a heading with a member word names the BM marks ...
+        entry("T000016", "CỘT PL-9"),  # ... and this one the PL marks
     ]
+    # the BM numbers 1 2 4 (+ 3 at another height) are no run; PL-5 6 7 is one, and PL has its heading
     assert numbered_run_labels(entries, sheet_of) == {"T000004", "T000005", "T000006"}
     sheet_of["T000005"] = {"sheet_id": "s2"}  # a run is per sheet
     assert numbered_run_labels(entries, sheet_of) == set()
@@ -1012,3 +1018,56 @@ def test_a_blocked_mark_cell_of_an_allowed_table_is_in_blocked_marks_with_its_id
     ]
     assert cell["meaning"] == "blocked"
     assert_no_blocked_id_cited(doc, work)
+
+
+# --- review M3: a plate tag run is no member family without a member-word heading of its prefix ------------
+
+
+def test_plate_tags_numbered_in_a_connection_detail_stay_plates(tmp_path):
+    """`BM1 BM2 BM3` (bản mã) and `PL1 .. PL4` are plates numbered in a connection detail, not members."""
+    work = build_marks_work(
+        tmp_path, plan_texts=("BM1", "BM2", "BM3", "PL1", "PL2", "PL3", "PL4", "bẢn mÃ BM1", "D1")
+    )
+    marks = extract_marks(work, tmp_path / "input", check_inputs=True)
+    assert {p["mark"] for p in marks["plan_marks"] if p["mark"].upper().startswith(("BM", "PL"))} == set()
+    callouts = extract_callouts(work)
+    by_kind = Counter(
+        (c["kind"], c["display_text"])
+        for c in callouts["candidates"]
+        if c["display_text"][:2] in ("BM", "PL")
+    )
+    assert {k for k in by_kind if k[0] == "member_mark"} == set()
+    assert {c for k, c in by_kind if k == "plate"} == {"BM1", "BM2", "BM3", "PL1", "PL2", "PL3", "PL4"}
+
+
+def test_a_member_word_heading_of_another_prefix_does_not_enable_a_run(tmp_path):
+    work = build_marks_work(tmp_path, plan_texts=("BM1", "BM2", "BM3", "bẢn mÓng bm-9 x", "dầm PL-9"))
+    marks = extract_marks(work, tmp_path / "input")
+    assert not {p["mark"] for p in marks["plan_marks"] if p["mark"].upper().startswith("BM")}
+
+
+def test_which_headings_count_as_member_evidence_for_a_run():
+    from tekla_harness.callouts import numbered_run_labels
+
+    def run(heading: str | None, printed: bool = True) -> set[str]:
+        entries = [
+            {"id": f"T00000{n}", "display_text": f"BM{n}", "style": "S", "height": 3.5} for n in (1, 2, 3)
+        ]
+        if heading is not None:
+            e = {"id": "T000009", "display_text": heading, "style": "S", "height": 3.5}
+            if not printed:
+                e["printed"] = False
+            entries.append(e)
+        return numbered_run_labels(entries, {})
+
+    yes = {"T000001", "T000002", "T000003"}
+    assert run("bẢn mÓng bm-3") == yes
+    assert run("DẦM BM-7") == yes
+    assert run("ghi chú\nchi tiết móng bm 2") == yes  # the heading is one line of the text
+    assert run(None) == set()
+    assert run("bẢn mÃ bm-3") == set()  # a plate word is no member word
+    assert run("móng bm-3 (sl= 2)") == set()  # the mark must end the heading
+    assert run("bm-3") == set()  # no word before it
+    assert run("xdầm bm-3") == set()  # a member word is a whole word
+    assert run("dầmx bm-3") == set()
+    assert run("bẢn mÓng bm-3", printed=False) == set()

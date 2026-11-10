@@ -294,6 +294,35 @@ AMBIGUITIES: dict[str, tuple[bool, str]] = {
     ),
 }
 
+# member-type words of a detail title (matched case-insensitively on NFC text); marks builds its title
+# grammar from them and numbered_run_labels asks for one in the heading that names a run
+MEMBER_WORDS = (
+    "giằng móng",
+    "dầm móng",
+    "đài cọc",
+    "đài móng",
+    "đài",
+    "lanh tô",
+    "dầm",
+    "cột",
+    "giằng",
+    "móng",
+    "sàn",
+    "vách",
+    "cọc",
+    "tie beam",
+    "pile cap",
+    "footing",
+    "column",
+    "purlin",
+    "rafter",
+    "girder",
+    "brace",
+    "beam",
+    "slab",
+    "wall",
+)
+
 # --- candidate hits ----------------------------------------------------------------------------------
 
 
@@ -875,21 +904,44 @@ def footing_m_labels(entries: list[dict[str, Any]], sheet_of: dict[str, dict[str
 
 # 271 `bm-1` .. `bm-7` (footings, two sheets): the plate pattern reads `BM<n>` as a plate tag. A whole text
 # `<letters><n>` that a callout pattern claims but that stands in a run of at least three consecutive numbers
-# of the same prefix, text style and height on one sheet is a family of marks, not a run of plates (a plate
-# schedule does not number its plates 1, 2, 3).
+# of the same prefix, text style and height on one sheet is a family of marks when the file also names that
+# prefix in a member-word heading (271 `bẢn mÓng bm-3`). Without the heading it is a run of plates: bản mã
+# (`BM`) and `PL` plates are numbered 1, 2, 3 in connection details (review M3).
 _RUN_TEXT = re.compile(r"^(?P<prefix>[A-Za-z]{1,3})\s?-?\s?(?P<n>\d{1,3})$")
+_HEADING_END = re.compile(r"(?<=\s)(?P<prefix>[A-Za-z]{1,3})\s?-?\s?\d{1,3}$")
+_MEMBER_WORD = re.compile(
+    r"(?<!\w)(?:" + "|".join(re.escape(w) for w in sorted(MEMBER_WORDS, key=len, reverse=True)) + r")(?!\w)"
+)
 MIN_RUN = 3
+
+
+def member_heading_prefixes(entries: list[dict[str, Any]]) -> set[str]:
+    """Prefixes (casefolded) that a printed text of the file names in a member-word heading: a line that
+    ends with `<letters><n>` and has a member word (`MEMBER_WORDS`) before it."""
+    out: set[str] = set()
+    for e in entries:
+        if not is_printed(e):
+            continue
+        for line in e["display_text"].split("\n"):
+            text = " ".join(unicodedata.normalize("NFC", line).split())
+            m = _HEADING_END.search(text)
+            if m is not None and _MEMBER_WORD.search(text[: m.start()].casefold()):
+                out.add(m["prefix"].casefold())
+    return out
 
 
 def numbered_run_labels(entries: list[dict[str, Any]], sheet_of: dict[str, dict[str, Any]]) -> set[str]:
     """Ids of the printed texts that are a whole `<letters><n>`, claimed by a callout pattern, and in a run of
-    `MIN_RUN` consecutive numbers of one prefix, style and height on one sheet (see above)."""
+    `MIN_RUN` consecutive numbers of one prefix, style and height on one sheet, for a prefix a member-word
+    heading of the file names (see above)."""
+    named = member_heading_prefixes(entries)
     groups: dict[tuple[str | None, str, str | None, float | None], dict[int, list[str]]] = {}
     for e in entries:
         text = e["display_text"].strip()
         m = _RUN_TEXT.match(text)
         if (
             m is None
+            or m["prefix"].casefold() not in named
             or not is_printed(e)
             or not scan_line(text, e.get("decode", {}).get("case_uncertain", False))
         ):

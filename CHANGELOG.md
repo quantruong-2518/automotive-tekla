@@ -788,6 +788,10 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
       id is listed in the table's `blocked_cell_entries`; `blocked_marks` keeps the id. M2 on the marks
       test fixtures (gate: 1, inferred: 2) is 0. A cell of a header-blocked table with allowed text keeps
       its id (only ids the text index blocks are moved).
+    - `marks` and `callouts` (review M3): a numbered run (`bm-1` .. `bm-7`) is a mark family only when a
+      printed text of the file names its prefix in a member-word heading (`bẢn mÓng bm-3`: a line that ends
+      with the mark and has a `MEMBER_WORDS` word before it); plate tags numbered in a connection detail
+      (`BM1 BM2 BM3`, `PL1`..`PL4`) stay plates. `MEMBER_WORDS` now lives in `callouts` (`marks` imports it).
   - Tool wave 4, package T (text), visibility: `harness extract-text` fills `printed`,
     `not_printed_reasons` and `print_uncertain_reasons` on every entry. Not printed: group 60 on the entity
     (TEXT, MTEXT, ATTRIB, MULTILEADER, DIMENSION, also on block content), ATTRIB flag bit 1 (`invisible`
