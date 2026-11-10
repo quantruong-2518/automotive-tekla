@@ -52,6 +52,7 @@ from typing import Any
 from tekla_harness.questions import LEGACY_ASCII_CODE
 from tekla_harness.schemas import validate
 from tekla_harness.text_gate import BLOCK_REASONS, meaning_block_reason
+from tekla_harness.visibility import is_printed
 
 SCHEMA_VERSION = "0.1"
 STRUCTURE_DIR = "structure"
@@ -319,6 +320,8 @@ def _compact(row: int | None, e: dict[str, Any]) -> dict[str, Any]:
     }
     if e["decode"]["case_uncertain"]:
         out["case_uncertain"] = True
+    if not is_printed(e):
+        out["printed"] = False
     out.update(
         layer=e["layer"],
         style=e["style"],
@@ -331,6 +334,12 @@ def _compact(row: int | None, e: dict[str, Any]) -> dict[str, Any]:
     if e["entity_type"] == "ATTRIB":
         out.update(tag=e["tag"], block_name=e["block_name"])
     return out
+
+
+def _printed_scope(entries: list[dict[str, Any]], include_hidden: bool) -> tuple[list[dict[str, Any]], int]:
+    """(the entries to read, how many do not print): the printed ones, or all with `include_hidden`."""
+    not_printed = sum(not is_printed(e) for e in entries)
+    return (entries if include_hidden else [e for e in entries if is_printed(e)]), not_printed
 
 
 def _id_order(qid: str) -> tuple[int, str]:
@@ -573,7 +582,9 @@ def sheet_text(
 ) -> dict[str, Any]:
     """The text of one sheet in reading order. Raises ReaderError. See `load_file`.
 
-    `include_hidden` (tool wave 4, package T fills it in): also return the entries that do not print, marked.
+    `include_hidden` (tool wave 4): by default the entries that do not print (text index `printed: false`) are
+    left out of `entries` and of every count but `counts.not_printed_in_scope`; with it they are returned,
+    marked `printed: false`, and counted like any other.
 
     `max_entries` None: DEFAULT_MAX_ENTRIES, or unbounded when `contains` filters (query.max_entries is the
     effective value, null = unbounded). `legacy_font_gate` covers ALL entries assigned to the sheet.
@@ -582,8 +593,6 @@ def sheet_text(
     first, then layouts by name, ', '-separated; 'none' when there is no such entry), and they are read in
     `unassigned_order`. This is how the text of a file without a detected sheet is reached.
     `region` (with a sheet id only): see `sheet_region`."""
-    if include_hidden:
-        raise NotImplementedError("tool wave 4 package T")
     if (sheet_id is None) == (not unassigned):
         raise ReaderError(EXIT_USAGE, "give either a sheet id or --unassigned, not both and not neither")
     if region is not None and unassigned:
@@ -600,7 +609,7 @@ def sheet_text(
         raise ReaderError(EXIT_USAGE, f"{file_rel}: " + "; ".join(loaded.warnings))
     tol = 0.0  # the sheet's row tolerance; a region read needs it (never with --unassigned)
     if unassigned:
-        entries = _unassigned_entries(loaded)
+        entries, not_printed = _printed_scope(_unassigned_entries(loaded), include_hidden)
         ordered = unassigned_order(entries)
         spaces = sorted({e["space"] for e in entries}, key=_space_key)
         sheet = {
@@ -622,7 +631,7 @@ def sheet_text(
                 "--unassigned reads the text on no sheet)",
             )
         sh = found[0]
-        entries = _sheet_entries(loaded, sh)
+        entries, not_printed = _printed_scope(_sheet_entries(loaded, sh), include_hidden)
         tol = row_tolerance(entries)
         if region is None:
             ordered = reading_order(entries, tol)
@@ -665,6 +674,7 @@ def sheet_text(
             "returned": len(shown),
             "omitted": len(matched) - len(shown),
             "truncated": len(shown) < len(matched),
+            "not_printed_in_scope": not_printed,
         },
         "legacy_font_gate": _gate(entries, question_ids, legacy_ids),
         "entries": [_compact(r, e) for r, e in shown],
@@ -705,8 +715,6 @@ def find_text(
     them. Entries on no sheet or on several sheets are not searched (counted separately).
     `unassigned` (tool wave 2, fix 4): search only those entries instead, in `unassigned_order`; hits carry
     sheet_id 'unassigned' and a null sheet_number, `counts.unassigned_entries_searched` says how many."""
-    if include_hidden:
-        raise NotImplementedError("tool wave 4 package T")
     if not contains:
         raise ReaderError(EXIT_USAGE, "find-text needs a non-empty --contains")
     if max_hits is not None and max_hits < 1:
@@ -726,6 +734,7 @@ def find_text(
     encoding_ids: set[str] = set()  # questions whose answer can unblock an encoding reason (W3)
     legacy_ids: set[str] = set()  # legacy_ascii_text questions: they record a reading and unblock nothing
     blocked_encoding = blocked_legacy = 0
+    not_printed_total = 0
     for row in rows:
         loaded = load_file(inv, row, check_inputs=check_inputs)
         warnings.extend(f"{loaded.rel}: {w}" for w in loaded.warnings)
@@ -746,7 +755,8 @@ def find_text(
         if loaded.sheets is None:
             summary.update(status="skipped", reason="no sheets document (run `harness read-structure`)")
             continue
-        off_sheet = _unassigned_entries(loaded)
+        off_sheet_all = _unassigned_entries(loaded)
+        off_sheet, _ = _printed_scope(off_sheet_all, include_hidden)
         summary["unassigned_entries"] = len(off_sheet)
         if unassigned:
             groups = [(UNASSIGNED, None, [e for _, e in unassigned_order(off_sheet)])]
@@ -755,11 +765,24 @@ def find_text(
                 (
                     sh["sheet_id"],
                     printed_number(sh),
-                    [e for _, e in reading_order(_sheet_entries(loaded, sh))],
+                    [
+                        e
+                        for _, e in reading_order(
+                            _printed_scope(_sheet_entries(loaded, sh), include_hidden)[0]
+                        )
+                    ],
                 )
                 for sh in loaded.sheets["sheets"]
             ]
             summary["sheets_searched"] = len(groups)
+        not_printed_total += (
+            sum(not is_printed(e) for e in off_sheet_all)
+            if unassigned
+            else sum(
+                _printed_scope(_sheet_entries(loaded, sh), include_hidden)[1]
+                for sh in loaded.sheets["sheets"]
+            )
+        )
         reasons: list[str] = []
         for sheet_id, number, entries in groups:
             for e in entries:
@@ -781,6 +804,7 @@ def find_text(
                         "display_text": e["display_text"],
                         "meaning": "allowed",
                         "blocked_reason": None,
+                        **({} if is_printed(e) else {"printed": False}),
                     }
                 )
         if reasons:
@@ -832,6 +856,7 @@ def find_text(
             "omitted": len(hits) - len(shown),
             "truncated": len(shown) < len(hits),
             "blocked_in_scope": blocked,
+            "not_printed_in_scope": not_printed_total,
             "unassigned_entries_not_searched": 0 if unassigned else off_sheet_total,
             **({"unassigned_entries_searched": off_sheet_total} if unassigned else {}),
         },
@@ -852,6 +877,7 @@ def sheet_region(
     contains: str | None = None,
     max_entries: int | None = None,
     check_inputs: bool = False,
+    include_hidden: bool = False,
 ) -> dict[str, Any]:
     """The entries of one sheet inside `region`, as `harness sheet-text W FILE SHEET --region x0,y0,x1,y1`
     prints them (tool wave 3, a5: a notes-table cell becomes a tool claim, not an eyeball one).
@@ -884,6 +910,7 @@ def sheet_region(
         max_entries=max_entries,
         check_inputs=check_inputs,
         region=(float(x0), float(y0), float(x1), float(y1)),
+        include_hidden=include_hidden,
     )
 
 

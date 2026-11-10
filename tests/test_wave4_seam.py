@@ -24,30 +24,9 @@ def work(tmp_path_factory) -> Path:
     return build_work(tmp_path_factory.mktemp("wave4-seam"))
 
 
-def test_include_hidden_is_stubbed_for_package_t(work):
-    with pytest.raises(NotImplementedError, match="tool wave 4 package T"):
-        sheet_text(work, REL, "model#01", include_hidden=True)
-    with pytest.raises(NotImplementedError, match="tool wave 4 package T"):
-        find_text(work, "S", include_hidden=True)
-
-
 def test_default_calls_are_unchanged_by_the_new_keyword(work):
     assert sheet_text(work, REL, "model#01", include_hidden=False)["kind"] == "sheet_text"
     assert find_text(work, "S-101", include_hidden=False)["counts"]["hits"] >= 1
-
-
-@pytest.mark.parametrize(
-    "argv",
-    [
-        ["sheet-text", "{w}", REL, "model#01", "--include-hidden"],
-        ["sheet-text", "{w}", REL, "model#01", "--include-hidden", "--region=0,0,10,10"],
-        ["find-text", "{w}", "--contains", "S", "--include-hidden"],
-    ],
-)
-def test_cli_flag_reaches_the_stub_and_exits_3(work, argv, capsys):
-    code = main([a.replace("{w}", str(work)) for a in argv])
-    assert code == 3
-    assert "tool wave 4 package T" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize("command", ["sheet-text", "find-text"])

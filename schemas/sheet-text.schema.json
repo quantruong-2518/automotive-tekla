@@ -183,7 +183,8 @@
             "matched": { "type": "integer", "minimum": 0, "description": "Assigned entries passing the filter." },
             "returned": { "type": "integer", "minimum": 0 },
             "omitted": { "type": "integer", "minimum": 0, "description": "matched - returned." },
-            "truncated": { "type": "boolean" }
+            "truncated": { "type": "boolean" },
+            "not_printed_in_scope": { "type": "integer", "minimum": 0, "description": "Tool wave 4: entries assigned to the sheet that do not print (text index `printed: false`). Without --include-hidden they are left out of every other count and of `entries`; with it they are in all of them." }
           }
         },
         "entries": { "type": "array", "items": { "$ref": "#/$defs/entry" } },
@@ -228,6 +229,7 @@
         "confidence": { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/confidence" },
         "flags": { "type": "array", "items": { "type": "string" } },
         "case_uncertain": { "const": true, "description": "Present only when true: the case of some letters is a guess." },
+        "printed": { "const": false, "description": "Tool wave 4: present only on an entry that does not print (text index `printed: false`); such entries are returned only with --include-hidden." },
         "layer": { "type": "string" },
         "style": { "type": ["string", "null"] },
         "x": { "type": ["number", "null"] },
@@ -288,7 +290,8 @@
               "description": "Tool wave 3 (W4): blocked entries in the searched files or sheets, whatever the query (the same number for every --contains). find-text never matches a blocked entry, on its raw or any decoded or normalised text, so a count that depended on the query would leak what the blocked text says; read blocked entries by entry id or sheet listing only."
             },
             "unassigned_entries_not_searched": { "type": "integer", "minimum": 0, "description": "Entries on no sheet or on several sheets (sheets document); not searched." },
-            "unassigned_entries_searched": { "type": "integer", "minimum": 0, "description": "With --unassigned: the entries on no sheet or on several that were searched." }
+            "unassigned_entries_searched": { "type": "integer", "minimum": 0, "description": "With --unassigned: the entries on no sheet or on several that were searched." },
+            "not_printed_in_scope": { "type": "integer", "minimum": 0, "description": "Tool wave 4: entries of the searched files or sheets that do not print (text index `printed: false`). Without --include-hidden they are not searched and not counted in `entries_searched`; with it they are searched and their hits carry `printed: false`." }
           }
         },
         "files": {
@@ -324,7 +327,8 @@
               "entry_id": { "type": "string", "pattern": "^T[0-9]{6,}$" },
               "display_text": { "type": "string" },
               "meaning": { "$ref": "#/$defs/meaning" },
-              "blocked_reason": { "$ref": "#/$defs/blocked_reason" }
+              "blocked_reason": { "$ref": "#/$defs/blocked_reason" },
+              "printed": { "const": false, "description": "Tool wave 4: present only on a hit that does not print (--include-hidden)." }
             }
           }
         },

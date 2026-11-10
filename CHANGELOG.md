@@ -770,6 +770,13 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
     (one per file with printed entries that have `print_uncertain_reasons`, built by
     `read_dxf.text_visibility_questions`); it comes after `legacy_ascii_text` in `questions.json` and
     `ask.py` leaves its ownership to intake. The intake schema's question-order description lists it.
+  - Tool wave 4, seam 2: `harness sheet-text` and `harness find-text` hide entries that do not print by default;
+    `--include-hidden` lists them marked `printed: false` (the exit-3 stub is gone). `sheet-text.schema.json`
+    (`$id` still `0.1`): entry and hit `printed` (const false, only on a hidden entry) and
+    `counts.not_printed_in_scope`. Meaning change: by default `counts.assigned`, `matched`, `legacy_font_gate`
+    and the find-text `entries_searched`, `unassigned_entries` and `blocked_in_scope` cover PRINTED entries
+    only; `not_printed_in_scope` counts the rest, and with `--include-hidden` all entries are in. The
+    `list-sheets` `text_count` and `blocked_text_count` still count every entry.
 
 ### Changed
 - Question lifecycle (tool wave 2, EVAL-2 fix 5):
