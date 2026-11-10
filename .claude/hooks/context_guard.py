@@ -17,6 +17,7 @@ Stdlib only.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import re
 import sys
@@ -161,6 +162,13 @@ def on_stop(tokens: int, session_id: object) -> None:
     _emit({"decision": "block", "reason": HANDOFF_TEXT.format(n=tokens, limit=HANDOFF_TOKENS)})
 
 
+def _use_utf8_streams() -> None:
+    """Claude Code speaks UTF-8 on stdin/stdout; a Windows console defaults to a legacy code page."""
+    for stream in (sys.stdin, sys.stdout, sys.stderr):
+        with contextlib.suppress(Exception):  # not a reconfigurable text stream: leave it as it is
+            stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
+
+
 def main() -> None:
     payload = json.load(sys.stdin)
     if not isinstance(payload, dict) or payload.get("agent_id"):
@@ -182,6 +190,7 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    _use_utf8_streams()
     try:
         main()
     except Exception as exc:  # a hook must never break the session
