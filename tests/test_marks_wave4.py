@@ -697,3 +697,58 @@ def test_pile_cap_labels_and_section_cuts_in_a_plan(tmp_path):
     assert sets["DM"]["members"] == ["dm 1", "dm 2"] and sets["DM"]["source"] == ["detail_heading"]
     (said,) = [w for w in doc["warnings"] if "section_label" in w]
     assert "section_label 2" in said
+
+
+# --- item 5 (R-c): a one-row schedule drawn with lines (161 crane beam CB-01) ----------------------------
+
+
+def build_one_row_work(base: Path, plan_texts: tuple[str, ...] = ("CB-01", "CB-02")) -> Path:
+    """Tables with a keyword header and ONE data row: line grids (NAME | D (mm); CB-01 | 250; a person's name
+    | a town; CB-07 | nothing; DẦM D5 | 250) and a text-aligned one with no lines (CB-09 | 300)."""
+    root = base / "input"
+    (root / "plans").mkdir(parents=True)
+    doc = readfile(str(build_set(base, "src.dxf")))
+    msp = doc.modelspace()
+    head = (("NAME", None), ("D (mm)", None))
+    cols = (3000.0, 2000.0)
+    _styled_table(msp, 2000.0, cols, head, ((("CB-01", None), ("250", None)),))
+    _styled_table(msp, 14000.0, cols, head, ((("Nguyen", None), ("Hanoi", None)),))
+    _styled_table(msp, 38000.0, cols, head, ((("CB-07", None), ("", None)),))
+    _styled_table(msp, 50000.0, cols, head, ((("DẦM D5", None), ("250", None)),))
+    for i, text in enumerate(("NAME", "D (mm)")):  # text alignment, no lines
+        msp.add_text(text, height=TH, dxfattribs={"insert": (26000.0 + i * 2000.0, 56000.0)})
+    for i, text in enumerate(("CB-09", "300")):
+        msp.add_text(text, height=TH, dxfattribs={"insert": (26000.0 + i * 2000.0, 56000.0 - 700.0)})
+    for i, text in enumerate(plan_texts):
+        msp.add_text(text, height=TH, dxfattribs={"insert": (PLAN_X, PLAN_TOP - i * PLAN_STEP)})
+    doc.saveas(root / FIXTURE_REL)
+    work = base / "work"
+    run_intake(root, work, "demo-marks", knowledge=PROPOSED_FONT_TABLE)
+    write_structure(root, work)
+    return work
+
+
+def test_a_one_row_line_grid_schedule_with_a_mark_shaped_cell_is_a_table(tmp_path):
+    work = build_one_row_work(tmp_path)
+    doc = extract_marks(work, tmp_path / "input", check_inputs=True)
+    assert validate("marks", doc) == []
+    first, second = doc["tables"]
+    assert (first["detection"], second["detection"]) == ("line_grid", "line_grid")
+    assert [len(t["rows"]) for t in doc["tables"]] == [1, 1]
+    assert [[m["text"] for m in t["rows"][0]["marks"]] for t in doc["tables"]] == [["CB-01"], ["D5"]]
+    (match,) = doc["matching"]
+    assert {m["key"] for m in match["matched"]} == {"cb-01"}
+    assert {m["key"] for m in match["schedule_only"]} == {"d5"}
+    assert {m["key"] for m in match["plan_only"]} == {"cb-02", "cb-09"}  # CB-09: its table has no rows read
+    # a name under NAME, a row with one cell only, and the one-row table with no lines stay unparsed
+    reasons = sorted((u["anchor_text"], u["detection"], u["reason"]) for u in doc["unparsed_tables"])
+    one = "fewer than two data rows with a cell in the mark column"
+    assert reasons == [
+        ("NAME", "line_grid", one),
+        ("NAME", "line_grid", one),
+        ("NAME", "text_alignment", "fewer than two data rows aligned under the header columns"),
+    ]
+    assert sorted(u["bbox"][0] for u in doc["unparsed_tables"] if u["detection"] == "line_grid") == [
+        14000.0,
+        38000.0,
+    ]

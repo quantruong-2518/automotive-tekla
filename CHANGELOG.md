@@ -770,6 +770,10 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
       twice: `mc 1-1`, 355 on 286) is not a mark (`section_label` in the per-file warning); a heading may be
       glued to a bracket (`dẦm d2-7(sl= 01)`, 286) and may start with the pile-cap word `đài` (`ĐÀi dm 1`,
       285: the DM family appears in the mark sets).
+    - `marks` (EVAL-4 R-c): a schedule drawn with lines may have ONE data row: when its mark cell is allowed
+      text with a mark's shape (or a member-word title) and the row has a second cell, it is a table, not an
+      `unparsed_tables` entry (161's crane-beam table: CB-01 is matched, not plan-only). Without lines two
+      rows are still needed.
 
 ### Changed
 - Question lifecycle (tool wave 2, EVAL-2 fix 5):

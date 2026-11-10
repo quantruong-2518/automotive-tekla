@@ -87,7 +87,9 @@ viewports: the table is in the texts' own coordinates, `space` says which):
     lines.
   * a keyword whose table has fewer than two data rows with a mark cell is listed in `unparsed_tables`
     and asked as a non-blocking `schedule_table_unparsed` question; texts inside the part of it that was
-    found (line grid) are not plan marks.
+    found (line grid) are not plan marks. Tool wave 4 (R-c): a line-grid table with ONE data row is a table
+    when that row's mark cell is allowed text with a mark's shape and the row has a second cell (161's
+    crane-beam table); without lines two rows are still needed.
 
 Matching, per file, only between allowed plan marks and allowed mark-column cells of tables whose header
 is not blocked, and (tool wave 3, a4) RC detail headings as a second source: a title-form plan mark
@@ -985,8 +987,8 @@ def _tables_of_group(
         if isinstance(result, str):
             unparsed.append((anchor, detection, result, None))
             continue
-        marked = sum(1 for _, cells in result.rows if any(c == result.mark_column for c, _ in cells))
-        if marked < 2:
+        marked = [cells for _, cells in result.rows if any(c == result.mark_column for c, _ in cells)]
+        if len(marked) < 2 and not _single_row_table(result, marked):
             unparsed.append(
                 (anchor, detection, "fewer than two data rows with a cell in the mark column", result.bbox)
             )
@@ -1026,6 +1028,24 @@ def _tables_of_group(
             tables.append(result)
         # otherwise not a schedule: a plan region between drawn lines, or a table with no keyword (a miss)
     return tables, unparsed
+
+
+def _single_row_table(table: _Table, marked_rows: list[list[tuple[int | None, _Text]]]) -> bool:
+    """A schedule drawn with lines may have ONE data row (161's crane-beam table, CB-01): the grid fixes its
+    structure, so the row counts when its mark cell is allowed, has a mark's shape and the row has a second
+    cell. Without lines (text alignment) two rows are still needed: `_aligned_table` never returns a table
+    with fewer than two rows, so only line grids reach this check."""
+    if len(marked_rows) != 1 or len(marked_rows[0]) < 2:
+        return False
+    cells = [t for c, t in marked_rows[0] if c == table.mark_column]
+    return any(
+        t.block is None
+        and (
+            parse_mark(t.entry["display_text"], t.entry["decode"]["case_uncertain"]) is not None
+            or parse_title(t.entry["display_text"], t.entry["decode"]["case_uncertain"]) is not None
+        )
+        for t in cells
+    )
 
 
 def _plausible_blocked_header(table: _Table) -> bool:
