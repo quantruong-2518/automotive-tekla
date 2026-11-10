@@ -178,6 +178,14 @@ CODES: dict[str, tuple[str, str, str]] = {
         "ghi lại cách bạn đọc kiểu chữ đó; không chuyển mã gì.",
         "Mọi chữ của kiểu này vẫn bị chặn (không được dùng làm giá trị) cho đến khi có cách đọc được duyệt.",
     ),
+    "text_visibility_uncertain": (
+        "other",
+        "Một số chữ trong file này chưa chắc có in ra giấy hay không (ví dụ chữ trong khối bị ẩn, lớp "
+        "không in, chữ trên layer Defpoints, hay lớp bị đóng băng trong khung nhìn). Số lượng theo từng "
+        "lý do và vài chữ ví dụ ở mục Đã thấy. Mở bản vẽ và cho biết những chữ này có in không.",
+        "Hiện các chữ này vẫn được tính như chữ có in; nếu thực ra không in thì tên tờ, cao độ, lưới trục "
+        "và ký hiệu đọc từ chúng có thể sai.",
+    ),
     # --- sheets ---
     "sheets_not_detected": (
         "sheets",

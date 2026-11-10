@@ -57,7 +57,7 @@ PRODUCER_CODES = (  # noqa: SIM905
     "level_single_occurrence "
     "callout_ambiguous grade_legacy_mapping member_mark_prefix_meaning "
     "grid_system_select grid_system_conflict grid_system_units_unconfirmed grid_system_axis_unassigned "
-    "file_set_relation "
+    "file_set_relation text_visibility_uncertain "
     # tool wave 3 (raised once packages S, M, T and G land)
     "sheet_number_gap callout_unparsed legacy_ascii_text grid_system_missing grid_answer_contradicts_drawing"
 ).split()

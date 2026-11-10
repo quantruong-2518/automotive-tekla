@@ -108,6 +108,8 @@ GRID_CONTRADICTS_CODE = "grid_answer_contradicts_drawing"  # grid-system, blocki
 # direction, both directions required; GRID_ANSWER_SHEET_KEY is optional
 GRID_ANSWER_KEYS = ("dir1_labels", "dir1_spacings", "dir2_labels", "dir2_spacings")
 GRID_ANSWER_SHEET_KEY = "sheet"
+# tool wave 4 code (V1; package T raises it): texts that may not print, which the file does not settle
+TEXT_VISIBILITY_CODE = "text_visibility_uncertain"  # intake (extract-text), not blocking: one per file
 # who gave an answer (answers.json answered_by_role): gate 1 counts the engineer's answers only
 ROLES = ("engineer", "simulated")
 # why a question is closed without an answer of its own (intake schema closed_by.reason; lifecycle.py)

@@ -738,6 +738,11 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
     - `marks`: per table `blocked_header_entries` (entry ids of blocked header cells; `header[]` keeps a
       placeholder only) and a header `cell` may have `entry_id` null for that placeholder.
     - `sheets`: `title_block.job_number` (shaped like `sheet_number`) and candidate field `job_number`.
+  - Tool wave 4, seam: `tekla_harness.visibility` (`is_printed`, `not_printed_reasons`; a missing `printed`
+    counts as printed); question code `text_visibility_uncertain` (constant in `questions`, Vietnamese
+    row in `harness questions-md`, raised by package T); flag `--include-hidden` on `harness sheet-text`
+    and `harness find-text` (also show entries that do not print, marked), exit 3 with nothing run until
+    package T lands. A synthetic R2018 (AC1032) DXF is tested through intake and read-structure.
 
 ### Changed
 - Question lifecycle (tool wave 2, EVAL-2 fix 5):

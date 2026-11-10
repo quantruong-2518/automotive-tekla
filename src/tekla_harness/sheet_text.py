@@ -569,8 +569,11 @@ def sheet_text(
     check_inputs: bool = False,
     unassigned: bool = False,
     region: tuple[float, float, float, float] | None = None,
+    include_hidden: bool = False,
 ) -> dict[str, Any]:
     """The text of one sheet in reading order. Raises ReaderError. See `load_file`.
+
+    `include_hidden` (tool wave 4, package T fills it in): also return the entries that do not print, marked.
 
     `max_entries` None: DEFAULT_MAX_ENTRIES, or unbounded when `contains` filters (query.max_entries is the
     effective value, null = unbounded). `legacy_font_gate` covers ALL entries assigned to the sheet.
@@ -579,6 +582,8 @@ def sheet_text(
     first, then layouts by name, ', '-separated; 'none' when there is no such entry), and they are read in
     `unassigned_order`. This is how the text of a file without a detected sheet is reached.
     `region` (with a sheet id only): see `sheet_region`."""
+    if include_hidden:
+        raise NotImplementedError("tool wave 4 package T")
     if (sheet_id is None) == (not unassigned):
         raise ReaderError(EXIT_USAGE, "give either a sheet id or --unassigned, not both and not neither")
     if region is not None and unassigned:
@@ -685,6 +690,7 @@ def find_text(
     max_hits: int | None = None,
     check_inputs: bool = False,
     unassigned: bool = False,
+    include_hidden: bool = False,
 ) -> dict[str, Any]:
     """Every entry of every sheet of every file (or of `file_rel`) whose text contains `contains`.
 
@@ -695,6 +701,8 @@ def find_text(
     them. Entries on no sheet or on several sheets are not searched (counted separately).
     `unassigned` (tool wave 2, fix 4): search only those entries instead, in `unassigned_order`; hits carry
     sheet_id 'unassigned' and a null sheet_number, `counts.unassigned_entries_searched` says how many."""
+    if include_hidden:
+        raise NotImplementedError("tool wave 4 package T")
     if not contains:
         raise ReaderError(EXIT_USAGE, "find-text needs a non-empty --contains")
     if max_hits is not None and max_hits < 1:

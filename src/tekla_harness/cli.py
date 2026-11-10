@@ -381,6 +381,8 @@ def _cmd_sheet_text(args: argparse.Namespace) -> int:
     try:
         if args.region is not None:
             try:
+                if args.include_hidden:  # the seam stub only (package T)
+                    raise NotImplementedError("tool wave 4 package T")
                 doc = sheet_region(
                     Path(args.work_dir),
                     args.file,
@@ -399,7 +401,10 @@ def _cmd_sheet_text(args: argparse.Namespace) -> int:
                 contains=args.contains,
                 max_entries=args.max,
                 unassigned=args.unassigned,
+                include_hidden=args.include_hidden,
             )
+    except NotImplementedError as exc:  # the seam stub only (package T)
+        return _not_implemented(exc)
     except ReaderError as exc:
         print(str(exc), file=sys.stderr)
         return exc.exit_code
@@ -418,7 +423,10 @@ def _cmd_find_text(args: argparse.Namespace) -> int:
             file_rel=args.file,
             max_hits=args.max,
             unassigned=args.unassigned,
+            include_hidden=args.include_hidden,
         )
+    except NotImplementedError as exc:  # the seam stub only (package T)
+        return _not_implemented(exc)
     except ReaderError as exc:
         print(str(exc), file=sys.stderr)
         return exc.exit_code
@@ -718,6 +726,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help=f"entries returned at most (default {DEFAULT_MAX_ENTRIES}; unbounded with --contains)",
     )
+    p_st.add_argument(
+        "--include-hidden",
+        action="store_true",
+        help="also show entries that do not print (marked)",
+    )
     p_st.set_defaults(func=_cmd_sheet_text)
 
     p_ft = sub.add_parser(
@@ -736,6 +749,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--unassigned",
         action="store_true",
         help="search only the entries on no sheet or on several (hits carry sheet_id 'unassigned')",
+    )
+    p_ft.add_argument(
+        "--include-hidden",
+        action="store_true",
+        help="also show entries that do not print (marked)",
     )
     p_ft.set_defaults(func=_cmd_find_text)
 
