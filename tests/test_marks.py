@@ -463,9 +463,10 @@ def test_a_blocked_header_cell_outside_the_mark_column_goes_to_blocked_columns(g
     kinh = header_entry(t, KINH)
     assert kinh["meaning"] == "blocked"
     assert t["header_blocked"] is False and t["mark_column"] == 0 and t["header_block_reasons"] == []
-    assert t["blocked_columns"] == [
-        {"column": 3, "entry_id": kinh["entry_id"], "reason": kinh["block_reason"]}
-    ]
+    (column,) = t["blocked_columns"]
+    assert kinh["entry_id"] is None  # tool wave 4: the id lives in blocked_header_entries
+    assert column == {"column": 3, "entry_id": column["entry_id"], "reason": kinh["block_reason"]}
+    assert column["entry_id"] in t["blocked_header_entries"]
     # a blocked text under the keyword, in the mark column's own header cell: the keyword names the
     # column, so it neither blocks the table nor is a blocked column
     assert header_entry(t, BLOCKED_SUB)["meaning"] == "blocked"
@@ -513,9 +514,9 @@ def test_legacy_ascii_suspect_header_cells_gate_like_any_other_block_reason(tmp_
     suspect = header_entry(e, "haFn")
     assert suspect["block_reason"] == "legacy_ascii_suspect"
     assert e["header_blocked"] is False
-    assert e["blocked_columns"] == [
-        {"column": 3, "entry_id": suspect["entry_id"], "reason": "legacy_ascii_suspect"}
-    ]
+    (column,) = e["blocked_columns"]
+    assert suspect["entry_id"] is None and column["entry_id"] in e["blocked_header_entries"]
+    assert (column["column"], column["reason"]) == (3, "legacy_ascii_suspect")
     assert "e1" in {m["key"] for m in matching(out)["matched"]}
     blocked = [t for t in out["tables"] if t["header_blocked"]]
     assert len(blocked) == 2  # G (its mark-column header) and F (its mark column has no keyword)
@@ -552,9 +553,9 @@ def test_a_keywordless_grid_with_an_empty_mark_header_cell_is_read_on_its_mark_c
     t = table_with(inferred, "b")
     kinh = header_entry(t, KINH)
     assert t["header_blocked"] is False and t["mark_column"] == 0 and t["confidence"] == "low"
-    assert t["blocked_columns"] == [
-        {"column": 1, "entry_id": kinh["entry_id"], "reason": kinh["block_reason"]}
-    ]
+    (column,) = t["blocked_columns"]
+    assert kinh["entry_id"] is None and column["entry_id"] in t["blocked_header_entries"]
+    assert (column["column"], column["reason"]) == (1, kinh["block_reason"])
     assert [c["role"] for c in t["columns"]] == ["mark", None, "b"]
     assert K_NOTE in {c["display_text"] for r in t["rows"] for c in r["cells"]}
     assert [[m["text"] for m in r["marks"]] for r in t["rows"]] == [["K1"], ["K2"]]

@@ -25,6 +25,17 @@ here. It extends the mark grammar (`in_callouts` says when callouts also lists t
 A mark is never taken from a line that a callouts pattern claims (`I300`, `M20`, `BM12`...), from a
 sheet code (`KC-01`), from texts the title block, grid or level extractors claimed, from a dimension, or
 from a sheet that duplicates an earlier one.
+Tool wave 4 (F4a): nor from the ATTRIBs of a rebar-callout block (an INSERT one of whose ATTRIBs is a spacing
+value `a150` / `A200` or carries a bar tag `THEP` / `KHOANGCACH`: `callouts.callout_part_ids`), nor from a
+strength class (`RB 500`) or a signed level (`cos -300`, `callouts.token_reason`). A text with a mark's shape
+that is left out for such a reason is not dropped silently: one warning per file gives the count per
+reason and the first examples.
+Tool wave 4 (F4c): nor from a steel profile (`HEB-650`, `IPE 300`, `UC 254`: series letters and a section
+depth of 50 or more), a detail label (`DET-2`, or the bubble `A1` of a `DETAIL - A1` heading of the same sheet
+when every mark-shaped text of its prefix on that sheet is such an id: `callouts.detail_label_ids`), or a
+title-block value (the claim by the sheets document also covers a `job_number` found by shape alone), nor
+from a section-cut label (letters, a blank, `n-n` with the same number twice: `mc 1-1`). A heading may be
+glued to a bracket (`dẦm d2-7(sl= 01)`) and may start with the pile-cap word `đài` (`ĐÀi dm 1`).
 
 Legacy-font gate (`text_gate.meaning_block_reason`). Only an entry whose meaning is allowed can be a plan
 mark, a header keyword or a matchable schedule mark. The gate works per column (tool wave 2, fix 8): only
@@ -36,6 +47,10 @@ variant. Any other blocked
 header cell is listed in the table's `blocked_columns`: its column gets no role, the rest of the table is
 read (cells keep their own meaning). A blocked cell in the mark column of an allowed table is listed in
 `blocked_marks` the same way. No question paraphrases blocked text.
+Tool wave 4 (EVAL-4 M2): every blocked header cell keeps only a placeholder in `header[]` (`entry_id` null,
+the verbatim text and the reason stay); its id is listed in the table's `blocked_header_entries`, so no
+blocked id is cited outside a `blocked*` list. A table whose header cells are all blocked is still
+reported, with `header_blocked`.
 
 Schedule tables, per sheet and per space of the texts (a paper sheet shows model-space texts through its
 viewports: the table is in the texts' own coordinates, `space` says which):
@@ -72,7 +87,9 @@ viewports: the table is in the texts' own coordinates, `space` says which):
     lines.
   * a keyword whose table has fewer than two data rows with a mark cell is listed in `unparsed_tables`
     and asked as a non-blocking `schedule_table_unparsed` question; texts inside the part of it that was
-    found (line grid) are not plan marks.
+    found (line grid) are not plan marks. Tool wave 4 (R-c): a line-grid table with ONE data row is a table
+    when that row's mark cell is allowed text with a mark's shape and the row has a second cell (161's
+    crane-beam table); without lines two rows are still needed.
 
 Matching, per file, only between allowed plan marks and allowed mark-column cells of tables whose header
 is not blocked, and (tool wave 3, a4) RC detail headings as a second source: a title-form plan mark
@@ -128,14 +145,21 @@ from ezdxf.lldxf.const import DXFError
 
 from tekla_harness.callouts import (
     _SHEET_CODE,
+    CALLOUT_PART,
+    DETAIL_LABEL,
+    MEMBER_WORDS,
     _check_input_dir,
     _claimed_text_ids,
     _confidence,
     _num,
     _provenance,
+    callout_part_ids,
+    detail_label_ids,
     footing_m_labels,
     member_mark,
+    not_printed_warning,
     scan_line,
+    token_reason,
 )
 from tekla_harness.questions import (
     QuestionsError,
@@ -162,6 +186,7 @@ from tekla_harness.sheet_text import (
 )
 from tekla_harness.sheets import Walker, layout_spaces, open_checked, text_box
 from tekla_harness.text_gate import meaning_block_reason
+from tekla_harness.visibility import is_printed
 
 COMMAND = "marks"
 HELP = "member marks and schedule tables, plan-to-schedule matching: marks.json, marks-questions.json"
@@ -194,35 +219,9 @@ _BODY = (
 # a length in brackets after a lintel mark, `LT1(L=4700)` (267): kept only in display_text, never a size
 _LENGTH = r"\s*\(\s*L\s*=\s*\d+(?:[.,]\d+)?\s*\)"
 _MARK = re.compile("^" + _BODY + "(?:" + _SIZE + "|(?P<length>" + _LENGTH + "))$")
-_MARK_HEAD = re.compile("^" + _BODY + _SIZE + r"(?=$|[\s,;:])")
+_MARK_HEAD = re.compile("^" + _BODY + _SIZE + r"(?=$|[\s,;:(])")
 _SPACING_LETTERS = frozenset({"a", "s"})  # Ø8a150: a lone lower-case a / s is a spacing, not a mark
 
-# member-type words of a detail title (matched case-insensitively on NFC text), longest first
-MEMBER_WORDS = (
-    "giằng móng",
-    "dầm móng",
-    "đài cọc",
-    "đài móng",
-    "lanh tô",
-    "dầm",
-    "cột",
-    "giằng",
-    "móng",
-    "sàn",
-    "vách",
-    "cọc",
-    "tie beam",
-    "pile cap",
-    "footing",
-    "column",
-    "purlin",
-    "rafter",
-    "girder",
-    "brace",
-    "beam",
-    "slab",
-    "wall",
-)
 _TITLE = re.compile(
     r"^(?:(?:chi tiết|mặt cắt|detail of|detail|section)\s+)?(?P<word>"
     + "|".join(re.escape(w) for w in sorted(MEMBER_WORDS, key=len, reverse=True))
@@ -298,9 +297,24 @@ def mark_key(text: str) -> str:
     return "".join(normalize(text).split())
 
 
+SECTION_LABEL = "section_label"
+
+
+def _shape_reason(m: re.Match[str]) -> str | None:
+    """Why a text of a mark's shape is no member: a strength class, a signed level, a steel profile or a
+    detail label (`callouts.token_reason`), or a section-cut label (letters, a blank, then `n-n` with the same
+    number twice: `mc 1-1`, `MC 2-2`, R-k); else None."""
+    why = token_reason(m["prefix"], m["sep1"], m["n1"], bool(m["n2"]))
+    if why is None and m["sep1"] == " " and m["sep2"] == "-" and int(m["n1"]) == int(m["n2"]):
+        return SECTION_LABEL
+    return why
+
+
 def _mark_from(m: re.Match[str], text: str) -> Mark | None:
     if m["prefix"] in _SPACING_LETTERS:
         return None
+    if _shape_reason(m) is not None:
+        return None  # not a member: see `_shape_reason` (F4a, F4c, R-k)
     mark_text = text[: m.end("suffix")].strip()
     code = _SHEET_CODE.match(mark_text.upper())
     if code and (code["disc"] in ("KT", "KC", "TCXD") or "-" in mark_text or "/" in mark_text):
@@ -324,6 +338,13 @@ def parse_mark(text: str, case_uncertain: bool = False, *, footing_m: bool = Fal
     if m is None or (not footing_m and scan_line(scanned, case_uncertain)):
         return None
     return _mark_from(m, t)
+
+
+def not_mark_reason(line: str) -> str | None:
+    """Why a whole line that has a member mark's shape is no mark (callouts.token_reason: `grade_token`,
+    `level_token`), else None; the reason a left-out line is reported with."""
+    m = _MARK.match(unicodedata.normalize("NFC", line).strip())
+    return None if m is None else _shape_reason(m)
 
 
 # review C1: a heading may name several marks, 'DẦM D1, D2', 'dẦm ct-1,ct-2', 'DETAIL OF CP1 & CP2'
@@ -804,6 +825,26 @@ def _cell_doc(col: int | None, t: _Text) -> dict[str, Any]:
     }
 
 
+def _data_cell_doc(col: int | None, t: _Text) -> dict[str, Any]:
+    """A data cell. When the legacy-font gate blocks its own text, `entry_id` is null and the id is listed in
+    the table's `blocked_cell_entries` (tool wave 4, SEAM-2), so no blocked id is cited outside a `blocked*`
+    list. The working key `_id` keeps the id for the blocked-marks listing; it is removed before output."""
+    doc = _cell_doc(col, t)
+    doc["_id"] = t.id
+    if t.block is not None:
+        doc["entry_id"] = None
+    return doc
+
+
+def _header_cell_doc(col: int | None, t: _Text) -> dict[str, Any]:
+    """A header cell. A blocked one keeps a placeholder: its entry id is null here and listed in the table's
+    `blocked_header_entries`, so no blocked id is cited outside a `blocked*` list (EVAL-4 M2)."""
+    doc = _cell_doc(col, t)
+    if t.block is not None:
+        doc["entry_id"] = None
+    return doc
+
+
 def _round_box(box: Box) -> list[float]:
     return [round(v, 3) for v in box]
 
@@ -822,12 +863,14 @@ class _FileOut:
     # internal (review C1): heading lists in shorthand, (entry id, line, families it may name)
     shorthand: list[tuple[str, str, set[str]]] = field(default_factory=list)
     blocked_text: bool = False  # internal (review C1): a plain text (no table cell) the gate blocks
+    # texts with a mark's shape that are no mark: (reason, entry id, text); told in a warning
+    not_marks: list[tuple[str, str, str]] = field(default_factory=list)
 
 
 def _space_tolerances(entries: list[dict[str, Any]]) -> dict[str, float]:
     heights: dict[str, list[float]] = {}
     for e in entries:
-        if e["height"] is not None and e["height"] > 0:
+        if is_printed(e) and e["height"] is not None and e["height"] > 0:
             heights.setdefault(e["space"], []).append(e["height"])
     return {space: LINE_TOL * statistics.median(hs) for space, hs in heights.items()}
 
@@ -883,6 +926,8 @@ def _load_lines(
 def _texts(entries: list[dict[str, Any]], claimed: set[str]) -> list[_Text]:
     out = []
     for e in entries:
+        if not is_printed(e):
+            continue  # tool wave 4 (V1): text that does not print is no mark, header or cell
         if e["id"] in claimed or e["entity_type"] == "DIMENSION" or not e["display_text"].strip():
             continue
         if e["height"] is None or e["height"] <= 0:
@@ -927,8 +972,8 @@ def _tables_of_group(
         if isinstance(result, str):
             unparsed.append((anchor, detection, result, None))
             continue
-        marked = sum(1 for _, cells in result.rows if any(c == result.mark_column for c, _ in cells))
-        if marked < 2:
+        marked = [cells for _, cells in result.rows if any(c == result.mark_column for c, _ in cells)]
+        if len(marked) < 2 and not _single_row_table(result, marked):
             unparsed.append(
                 (anchor, detection, "fewer than two data rows with a cell in the mark column", result.bbox)
             )
@@ -968,6 +1013,24 @@ def _tables_of_group(
             tables.append(result)
         # otherwise not a schedule: a plan region between drawn lines, or a table with no keyword (a miss)
     return tables, unparsed
+
+
+def _single_row_table(table: _Table, marked_rows: list[list[tuple[int | None, _Text]]]) -> bool:
+    """A schedule drawn with lines may have ONE data row (161's crane-beam table, CB-01): the grid fixes its
+    structure, so the row counts when its mark cell is allowed, has a mark's shape and the row has a second
+    cell. Without lines (text alignment) two rows are still needed: `_aligned_table` never returns a table
+    with fewer than two rows, so only line grids reach this check."""
+    if len(marked_rows) != 1 or len(marked_rows[0]) < 2:
+        return False
+    cells = [t for c, t in marked_rows[0] if c == table.mark_column]
+    return any(
+        t.block is None
+        and (
+            parse_mark(t.entry["display_text"], t.entry["decode"]["case_uncertain"]) is not None
+            or parse_title(t.entry["display_text"], t.entry["decode"]["case_uncertain"]) is not None
+        )
+        for t in cells
+    )
 
 
 def _plausible_blocked_header(table: _Table) -> bool:
@@ -1013,7 +1076,12 @@ def _scan_file(
                 sheet_of.update({tid: sh for tid in sh["text_ids"]})
                 order.append(sh)
     order.append(None)
-    claimed = set(_claimed_text_ids(inv_work, loaded, warnings)) | duplicate_ids
+    live = [e for e in entries if e["id"] not in duplicate_ids]
+    left_out = {e_id: DETAIL_LABEL for e_id in detail_label_ids(live, sheet_of)}  # F4c
+    left_out.update(dict.fromkeys(callout_part_ids(entries), CALLOUT_PART))  # F4a: parts of a callout
+    claimed = set(_claimed_text_ids(inv_work, loaded, warnings)) | duplicate_ids | set(left_out)
+    if (warning := not_printed_warning(loaded.rel, entries)) is not None:
+        warnings.append(warning)
     lines_by_space, grid_info = _load_lines(inv_work, loaded, input_dir, warnings)
     texts = _texts(entries, claimed)
     groups: dict[tuple[str | None, str], list[_Text]] = {}
@@ -1054,7 +1122,7 @@ def _scan_file(
             for cell in row["cells"]:
                 in_mark_col = cell["column"] is not None and cell["column"] == tdoc["mark_column"]
                 if tdoc["header_blocked"]:
-                    entry = by_id[cell["entry_id"]]
+                    entry = by_id[cell["_id"]]
                     if meaning_block_reason(entry) is not None:
                         continue  # blocked by its own text: shape unknown
                     if parse_mark(entry["display_text"], entry["decode"]["case_uncertain"]) is None:
@@ -1071,12 +1139,17 @@ def _scan_file(
                         "table": "",
                         "_t": t_index,
                         "row": row["index"],
-                        "entry_id": cell["entry_id"],
+                        "entry_id": cell["_id"],
                         "display_text": cell["display_text"],
                         "reason": reason,
                     }
                 )
     footing = footing_m_labels([t.entry for t in texts], sheet_of)
+    for e in entries:
+        if e["id"] in left_out and is_printed(e) and e["id"] not in duplicate_ids and _has_mark_shape(e):
+            out.not_marks.append(
+                (left_out[e["id"]], e["id"], " ".join(e["display_text"].split())[:LINE_CHARS])
+            )
     for t in texts:
         if t.id in in_table:
             continue
@@ -1084,12 +1157,78 @@ def _scan_file(
             out.blocked_text = True  # may be a heading naming members of any family (`_mark_sets`)
             continue
         sh = sheet_of.get(t.id)
-        found = _plan_marks(loaded.rel, sh, t.entry, t.id in footing, out.shorthand)
+        found = _plan_marks(loaded.rel, sh, t.entry, t.id in footing, out.shorthand, out.not_marks)
         out.plan.extend(found)
         out.headings.extend(
             _detail_of_headings(sh, t.entry, {p["display_text"] for p in found}, out.shorthand)
         )
+    if out.not_marks:
+        warnings.append(_not_marks_warning(loaded.rel, out.not_marks))
+    _read_repeated_titles_as_plan_labels(loaded.rel, out.plan, warnings)
     return out, grid_info
+
+
+MAX_NOT_MARK_EXAMPLES = 5
+# one mark as a title-form text this often on a sheet: the sheet's labels, not headings
+MIN_PLAN_LABEL_REPEATS = 3
+# a detail heading carries the number of members it stands for: `(sl= 02)`, `SL: 2`, `số lượng 5 cái`
+_QUANTITY_TAIL = re.compile(r"\bsl\s*[=:]|số\s*lượng")
+
+
+def _read_repeated_titles_as_plan_labels(rel: str, plan: list[dict[str, Any]], warnings: list[str]) -> None:
+    """R-f (290 `dẦm d-n`): a framing plan may label its beams with the member word. A detail title stands
+    once on its sheet (twice for two views), a plan label repeats (`dẦm d-1` six times): when one mark of a
+    family (prefix) appears as a title-form text `MIN_PLAN_LABEL_REPEATS` times on a sheet and no title of
+    that family on the sheet carries a quantity tail (`_QUANTITY_TAIL`: a detail sheet heads one beam with its
+    count and labels its cross-sections with bare titles, 285 KC-17), every title-form text of that family
+    on the sheet is a plan label, so it loses its title form (and the member-word
+    evidence) and is no detail heading. One warning per file counts them per sheet."""
+    groups: dict[tuple[str | None, str], list[dict[str, Any]]] = {}
+    for p in plan:
+        if p["form"] == "title":
+            groups.setdefault((p["sheet"], p["lexical"]["prefix"].casefold()), []).append(p)
+    per_sheet: Counter[str] = Counter()
+    for (sheet, _), docs in groups.items():
+        if max(Counter(d["key"] for d in docs).values()) < MIN_PLAN_LABEL_REPEATS:
+            continue
+        if any(
+            _QUANTITY_TAIL.search(unicodedata.normalize("NFC", d["display_text"]).casefold()) for d in docs
+        ):
+            continue  # a count tail (`(sl= 02)`) makes the family's titles detail headings (285 KC-17)
+        for d in docs:
+            d["form"] = (
+                "with_size" if d["size"] else ("sub_number" if len(d["lexical"]["numbers"]) > 1 else "plain")
+            )
+            d["title_member_word"] = None
+        per_sheet[sheet or "no sheet"] += len(docs)
+    if per_sheet:
+        counts = ", ".join(f"{sheet}: {n} title-form labels" for sheet, n in sorted(per_sheet.items()))
+        warnings.append(
+            f"{rel}: texts with a member word read as plan labels, not detail headings, because a mark of "
+            f"their family repeats on the sheet ({counts})"
+        )
+
+
+def _has_mark_shape(entry: dict[str, Any]) -> bool:
+    """Some line of the entry would be a plan mark (or a member-word title with a mark) but for its source."""
+    cu = entry["decode"]["case_uncertain"]
+    return any(
+        parse_mark(line, cu) is not None or parse_title_marks(line, cu) not in (None, ("", []))
+        for line in entry["display_text"].split("\n")
+        if line.strip()
+    )
+
+
+def _not_marks_warning(rel: str, items: list[tuple[str, str, str]]) -> str:
+    """One warning per file for the texts with a mark's shape that are left out of the plan marks, so none
+    is dropped silently: the count per reason and the first examples with their entry ids."""
+    per_reason = Counter(reason for reason, _, _ in items)
+    counts = ", ".join(f"{reason} {n}" for reason, n in sorted(per_reason.items()))
+    shown = sorted(items, key=lambda item: item[1])[:MAX_NOT_MARK_EXAMPLES]
+    examples = ", ".join(f"'{text}' ({entry_id})" for _, entry_id, text in shown)
+    n = len(items)
+    noun = "text" if n == 1 else "texts"
+    return f"{rel}: {n} {noun} with a mark's shape left out of the plan marks ({counts}); e.g. {examples}"
 
 
 def _detail_of_headings(
@@ -1133,6 +1272,7 @@ def _plan_marks(
     entry: dict[str, Any],
     footing_m: bool = False,
     shorthand: list[tuple[str, str, set[str]]] | None = None,
+    not_marks: list[tuple[str, str, str]] | None = None,
 ) -> list[dict[str, Any]]:
     """Plan marks of an entry, one per line, and one per mark of a title list ('DẦM D1, D2'); a title list
     in shorthand names no mark and goes to `shorthand`."""
@@ -1147,6 +1287,8 @@ def _plan_marks(
         if mark is None:
             found = parse_title_marks(line, cu)
             if found is None:
+                if not_marks is not None and (why := not_mark_reason(line)) is not None:
+                    not_marks.append((why, entry["id"], " ".join(line.split())[:LINE_CHARS]))
                 continue
             title, found_marks = found
             if not found_marks and shorthand is not None:
@@ -1217,7 +1359,7 @@ def _table_doc(rel: str, sheet: dict[str, Any] | None, space: str, tb: _Table) -
     size_header_blocked = _blocked_may_name_size(tb, roles, {b["column"] for b in blocked_columns})
     rows = []
     for index, (box, cells) in enumerate(tb.rows, start=1):
-        cell_docs = [_cell_doc(c, t) for c, t in cells]
+        cell_docs = [_data_cell_doc(c, t) for c, t in cells]
         if tb.header_blocked:
             for cd in cell_docs:
                 cd["meaning"] = "blocked"
@@ -1260,7 +1402,7 @@ def _table_doc(rel: str, sheet: dict[str, Any] | None, space: str, tb: _Table) -
         }
         for i, (x0, x1) in enumerate(tb.columns)
     ]
-    header = [_cell_doc(c, t) for c, t in ordered_header]
+    header = [_header_cell_doc(c, t) for c, t in ordered_header]
     prov: dict[str, Any] = {
         "file": rel,
         "sheet": sheet_label(sheet),
@@ -1282,6 +1424,8 @@ def _table_doc(rel: str, sheet: dict[str, Any] | None, space: str, tb: _Table) -
         "header_blocked": tb.header_blocked,
         "header_block_reasons": header_reasons if tb.header_blocked else [],
         "blocked_columns": blocked_columns,
+        "blocked_header_entries": sorted(t.id for _, t in ordered_header if t.block is not None),
+        "blocked_cell_entries": sorted(t.id for _, cells in tb.rows for _, t in cells if t.block is not None),
         "header": header,
         "columns": columns,
         "mark_column": None if tb.header_blocked else tb.mark_column,
@@ -1785,6 +1929,8 @@ def extract_marks(
     for t in tables:
         for row in t["rows"]:
             row.pop("_size_reason", None)
+            for cell in row["cells"]:
+                cell.pop("_id", None)
             for m in row["marks"]:
                 m.pop("_structure", None)
     doc: dict[str, Any] = {

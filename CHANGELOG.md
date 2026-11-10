@@ -743,6 +743,55 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
     row in `harness questions-md`, raised by package T); flag `--include-hidden` on `harness sheet-text`
     and `harness find-text` (also show entries that do not print, marked), exit 3 with nothing run until
     package T lands. A synthetic R2018 (AC1032) DXF is tested through intake and read-structure.
+  - Tool wave 4, package M (marks + callouts):
+    - `marks`: a blocked schedule header cell keeps only a placeholder in `tables[].header[]` (`entry_id`
+      null, verbatim text and reason kept); its id is listed in the table's `blocked_header_entries`, so no
+      blocked id is cited outside a `blocked*` list (EVAL-4 criterion 2, M2).
+    - `marks` and `callouts` leave out every text entry that says `printed: false` (a hidden ATTRIB is no
+      plan mark, header keyword, table cell, callout or footing-family evidence, and does not set the line
+      tolerance); a file with such entries gets one warning with the count per `not_printed_reasons`
+      (the documents have no counter field). An index without `printed` reads as printed. Repro: 271
+      phantom `dẦm d2-1` on 12 sheets.
+    - `marks` and `callouts` (EVAL-4 A4a): the ATTRIBs of a rebar-callout block (an INSERT with a spacing
+      value `a150` / `A200` among its ATTRIBs, or a `THEP` / `KHOANGCACH` tag) are parts of a callout, not
+      member marks; a strength class (`RB 500`, `CB 400`: grade prefix and verified yield class) and a signed
+      level (`cos -300`) are not marks. `callouts.json` lists them in `rejected` (`callout_part`,
+      `grade_token`, `level_token`); `marks.json` has no such list, so one warning per file gives the count
+      per reason and five examples. Repro 278 (D6..D25, A150, `RB 500`, `cos -300`); second files 285, 286
+      (`SH thep` blocks).
+    - `marks` and `callouts` (EVAL-4 A4c): a steel profile (`HEB-650`, `IPE 300`, `UC 254`: series letters
+      and a depth of 50 or more) and a detail label (`DET-2`; the bubble `A1` of a `DETAIL - A1` heading on
+      the same sheet, when every mark-shaped text of its prefix on that sheet is such an id; English
+      `DETAIL` headings only) are not marks
+      (`steel_profile`, `detail_label` in `callouts.json` `rejected`; a warning in `marks.json`). A
+      `job_number` title-block candidate is claimed by the title block even when found by shape alone, so
+      `J-01` is never a mark next to J-02, J-03. Repro 180 (`HEB-650`, `A1` x16, `DET-2`).
+    - `marks` (EVAL-4 R-e, R-g, R-k): a section-cut label (letters, a blank, `n-n` with the same number
+      twice: `mc 1-1`, 355 on 286) is not a mark (`section_label` in the per-file warning); a heading may be
+      glued to a bracket (`dẦm d2-7(sl= 01)`, 286) and may start with the pile-cap word `đài` (`ĐÀi dm 1`,
+      285: the DM family appears in the mark sets).
+    - `marks` (EVAL-4 R-c): a schedule drawn with lines may have ONE data row: when its mark cell is allowed
+      text with a mark's shape (or a member-word title) and the row has a second cell, it is a table, not an
+      `unparsed_tables` entry (161's crane-beam table: CB-01 is matched, not plan-only). Without lines two
+      rows are still needed.
+    - `marks` and `callouts` (EVAL-4 271): a whole text `<letters><n>` that a callout pattern claims (`bm-1`
+      read as a plate tag) is a mark when it stands in a run of three consecutive numbers of one prefix,
+      text style and height on one sheet (271 `bm-1` .. `bm-7`: the BM footing family, 16 plan marks); a
+      plate number alone (`BM12`) stays a plate. Texts that do not print take no part.
+    - `marks` (EVAL-4 R-f): when one mark of a family appears three times or more as a title-form text
+      (`dẦm d-1`) on a sheet, every title-form text of that family on the sheet is a plan label, not a detail
+      heading (form `plain` / `with_size` / `sub_number`, no `title_member_word`); one warning per file counts
+      them per sheet. 290 `dẦm d-n`: matched 5 -> 16, schedule_only 17 -> 5. Review fix C1: a family
+      with a quantity tail (`(sl= 02)`, `SL: 2`, `số lượng 5`) on the sheet is never demoted: a detail
+      sheet heads one beam with its count and labels its cross-sections with bare titles (285 KC-17).
+    - `marks` (review M1, SEAM-2): a data cell whose text the font gate blocks has `entry_id` null and its
+      id is listed in the table's `blocked_cell_entries`; `blocked_marks` keeps the id. M2 on the marks
+      test fixtures (gate: 1, inferred: 2) is 0. A cell of a header-blocked table with allowed text keeps
+      its id (only ids the text index blocks are moved).
+    - `marks` and `callouts` (review M3): a numbered run (`bm-1` .. `bm-7`) is a mark family only when a
+      printed text of the file names its prefix in a member-word heading (`bẢn mÓng bm-3`: a line that ends
+      with the mark and has a `MEMBER_WORDS` word before it); plate tags numbered in a connection detail
+      (`BM1 BM2 BM3`, `PL1`..`PL4`) stay plates. `MEMBER_WORDS` now lives in `callouts` (`marks` imports it).
   - Tool wave 4, package T (text), visibility: `harness extract-text` fills `printed`,
     `not_printed_reasons` and `print_uncertain_reasons` on every entry. Not printed: group 60 on the entity
     (TEXT, MTEXT, ATTRIB, MULTILEADER, DIMENSION, also on block content), ATTRIB flag bit 1 (`invisible`
