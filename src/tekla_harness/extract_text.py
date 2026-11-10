@@ -42,6 +42,7 @@ from typing import Any
 from ezdxf import const as dxf_const
 from ezdxf.document import Drawing
 from ezdxf.entities.dxfentity import DXFEntity
+from ezdxf.entities.viewport import Viewport
 from ezdxf.enums import MTextEntityAlignment
 from ezdxf.filemanagement import readfile
 from ezdxf.fonts.font_face import FontFace
@@ -224,6 +225,11 @@ class _Context:
     cap: str
     handles_ok: bool
     layer_state: dict[str, str]
+    layer_no_plot: frozenset[str] = (
+        frozenset()
+    )  # case-folded names of layers with the plot flag off (group 290)
+    viewport_frozen: frozenset[str] = frozenset()  # case-folded names of layers frozen in some viewport
+    attmode_normal: bool = True  # header $ATTMODE is 1 (or absent): each attribute shows by its own flag
     knowledge: FontEncodingTable = field(default_factory=FontEncodingTable)
     style_cache: dict[str, tuple[str | None, bool]] = field(default_factory=dict)
     family_cache: dict[str, str | None] = field(default_factory=dict)
@@ -595,6 +601,9 @@ class _Frame:
     block_path: tuple[str, ...] = ()
     insert_handles: tuple[str | None, ...] = ()
     container_layer: str | None = None  # effective layer of the INSERT whose definition we are reading
+    insert_invisible: bool = (
+        False  # an INSERT on the way down has group 60 = 1 (print_uncertain: insert_invisible)
+    )
 
 
 def _point(entity: Any, point: Vec3) -> tuple[float | None, float | None]:
@@ -613,6 +622,53 @@ def _layer_fields(ctx: _Context, frame: _Frame, layer: str) -> tuple[str, str | 
     if frame.container_layer is not None and layer == "0":
         effective, definition = frame.container_layer, layer
     return effective, definition, ctx.layer_state.get(effective.casefold(), "unknown")
+
+
+def _visibility(
+    ctx: _Context,
+    frame: _Frame,
+    *,
+    entity: Any,
+    entity_type: str,
+    layer: str,
+    state: str,
+    attribute_flag: bool,
+    own_insert_invisible: bool,
+) -> tuple[list[str], list[str]]:
+    """(not_printed_reasons, print_uncertain_reasons) of one entry, `layer` being its effective layer.
+
+    A hard reason is a setting Autodesk documents as keeping the object off the printed sheet: group 60 on the
+    entity, ATTRIB flag bit 1 (unless `$ATTMODE` overrides it), the layer off, frozen or plot 0. With any, the
+    entry is not printed and nothing uncertain is listed. Otherwise the entry stays printed and lists what
+    the file does not settle: an INSERT with group 60 above it, `$ATTMODE` != 1 on an attribute, a layer
+    frozen in some viewport (model space text only) and the Defpoints layer.
+    """
+    attribute = entity_type == "ATTRIB"
+    attmode_overrides = attribute and not ctx.attmode_normal
+    key = layer.casefold()
+    hard: list[str] = []
+    if entity.dxf.get("invisible", 0):
+        hard.append("entity_invisible")
+    if attribute_flag and not attmode_overrides:
+        hard.append("attribute_invisible")
+    if state == "off":
+        hard.append("layer_off")
+    if state == "frozen":
+        hard.append("layer_frozen")
+    if key in ctx.layer_no_plot:
+        hard.append("layer_no_plot")
+    if hard:
+        return hard, []
+    uncertain: list[str] = []
+    if frame.insert_invisible or own_insert_invisible:
+        uncertain.append("insert_invisible")
+    if attmode_overrides:
+        uncertain.append("attmode_not_normal")
+    if frame.space == "model" and key in ctx.viewport_frozen:
+        uncertain.append("viewport_frozen")
+    if key == "defpoints":
+        uncertain.append("defpoints_layer")
+    return hard, uncertain
 
 
 def _handle_of(ctx: _Context, entity: DXFEntity) -> str | None:
@@ -644,6 +700,7 @@ def _add_entry(
     text_rule: str | None = None,
     extra_flags: tuple[str, ...] = (),
     dimension: bool = False,
+    insert_invisible: bool = False,
 ) -> None:
     if raw.strip() == "":
         ctx.empty_skipped += 1
@@ -664,6 +721,16 @@ def _add_entry(
         flags.append("layer_from_insert")
     if invisible:
         flags.append("attribute_invisible")
+    not_printed, uncertain = _visibility(
+        ctx,
+        frame,
+        entity=entity,
+        entity_type=entity_type,
+        layer=effective,
+        state=state,
+        attribute_flag=bool(invisible),
+        own_insert_invisible=insert_invisible,
+    )
     extrusion = entity.dxf.get("extrusion") if entity.dxf.is_supported("extrusion") else None
     if extrusion is not None and tuple(extrusion) != (0.0, 0.0, 1.0):
         flags.append("non_default_extrusion")
@@ -700,6 +767,9 @@ def _add_entry(
         },
     }
     entry["flags"] = flags
+    entry["printed"] = not not_printed
+    entry["not_printed_reasons"] = not_printed
+    entry["print_uncertain_reasons"] = uncertain
     ctx.entries.append(entry)
     if suspect_runs and raw.isascii():
         ctx.ascii_suspects.append((entry, suspect_runs))
@@ -933,6 +1003,7 @@ def _visit_insert(ctx: _Context, frame: _Frame, ins: Any) -> None:
                 block_name=name,
                 insert_handle=insert_handle,
                 invisible=bool(attrib.dxf.get("flags", 0) & 1),
+                insert_invisible=bool(ins.dxf.get("invisible", 0)),
             )
         except Exception as exc:
             _record_error(ctx, frame, attrib, "ATTRIB", exc)
@@ -956,6 +1027,7 @@ def _visit_insert(ctx: _Context, frame: _Frame, ins: Any) -> None:
         block_path=(*frame.block_path, name),
         insert_handles=(*frame.insert_handles, insert_handle),
         container_layer=own_layer,
+        insert_invisible=frame.insert_invisible or bool(ins.dxf.get("invisible", 0)),
     )
     instances = list(ins.multi_insert()) if getattr(ins, "mcount", 1) > 1 else [ins]
     for instance in instances:
@@ -1091,6 +1163,27 @@ def _layer_states(doc: Drawing) -> dict[str, str]:
     return states
 
 
+def _layer_no_plot(doc: Drawing) -> frozenset[str]:
+    """Case-folded names of the layers whose plot flag (group 290) is 0. Defpoints is left out: ezdxf sets its
+    flag to 0 on every load, so the file's own value is unknown there (it is `defpoints_layer`, uncertain)."""
+    return frozenset(
+        str(layer.dxf.name).casefold()
+        for layer in doc.layers
+        if int(layer.dxf.get("plot", 1)) == 0 and str(layer.dxf.name).casefold() != "defpoints"
+    )
+
+
+def _viewport_frozen(doc: Drawing) -> frozenset[str]:
+    """Layers frozen in at least one viewport of any layout (VIEWPORT group 331), case-folded."""
+    return frozenset(
+        name.casefold()
+        for layout in doc.layouts
+        for viewport in layout.query("VIEWPORT")
+        if isinstance(viewport, Viewport)
+        for name in viewport.frozen_layers
+    )
+
+
 def extract_text(
     path: str | Path,
     converter: str = "none",
@@ -1180,6 +1273,9 @@ def _extract_text(
         cap,
         handles_ok,
         _layer_states(doc),
+        layer_no_plot=_layer_no_plot(doc),
+        viewport_frozen=_viewport_frozen(doc),
+        attmode_normal=int(doc.header.get("$ATTMODE", 1)) == 1,
         knowledge=table,
         codepage=codepage,
         source=source or str(path),

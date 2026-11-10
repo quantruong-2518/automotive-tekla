@@ -743,6 +743,17 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
     row in `harness questions-md`, raised by package T); flag `--include-hidden` on `harness sheet-text`
     and `harness find-text` (also show entries that do not print, marked), exit 3 with nothing run until
     package T lands. A synthetic R2018 (AC1032) DXF is tested through intake and read-structure.
+  - Tool wave 4, package T (text), visibility: `harness extract-text` fills `printed`,
+    `not_printed_reasons` and `print_uncertain_reasons` on every entry. Not printed: group 60 on the entity
+    (TEXT, MTEXT, ATTRIB, MULTILEADER, DIMENSION, also on block content), ATTRIB flag bit 1 (`invisible`
+    stays that flag only), the effective layer off, frozen or with the plot flag 0. Kept printed but
+    uncertain: an INSERT with group 60 above the entry, `$ATTMODE` other than 1 on an attribute (it then
+    overrides the flag), a layer frozen in some viewport (model space text only) and the `Defpoints` layer
+    (ezdxf rewrites its plot flag to 0 on every load, so only its name counts). Entries stay in the index;
+    the flags `layer_off`, `layer_frozen`, `attribute_invisible` and `text_gate` are unchanged. Known
+    drawings, not printed: 271 305 (232 on real entities, the exact set of the EVAL-4 hidden list, plus 73
+    rebar callout TEXT copies inside anonymous blocks), 278 46, 285 6 (dimension texts on a layer with plot
+    0), the other seven 0.
 
 ### Changed
 - Question lifecycle (tool wave 2, EVAL-2 fix 5):
