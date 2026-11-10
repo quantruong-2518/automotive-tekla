@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
@@ -817,3 +818,69 @@ def test_a_run_needs_three_consecutive_numbers_of_one_prefix_style_and_height(tm
     assert numbered_run_labels(entries, sheet_of) == {"T000004", "T000005", "T000006"}
     sheet_of["T000005"] = {"sheet_id": "s2"}  # a run is per sheet
     assert numbered_run_labels(entries, sheet_of) == set()
+
+
+# --- item 5 (R-f, 290): `dẦm d-n` labels repeated on one sheet are plan labels, not detail headings --------
+
+
+def test_title_form_labels_that_repeat_on_a_sheet_are_plan_marks(tmp_path):
+    work = build_work(
+        tmp_path,
+        s1=["dẦm d-1", "dẦm d-1", "dẦm d-2", "dẦm d-1", "C5"],  # a framing plan labelled with member words
+        s2=["dẦm d-3"],  # one heading on another sheet: a detail title
+        styled=[],
+        paper=[],
+    )
+    marks = extract_marks(work, tmp_path / "input", check_inputs=True)
+    assert validate("marks", marks) == []
+    forms = sorted(
+        (p["sheet"], p["mark"], p["form"]) for p in marks["plan_marks"] if p["mark"].startswith("d-")
+    )
+    assert forms == [
+        ("model#01", "d-1", "plain"),
+        ("model#01", "d-1", "plain"),
+        ("model#01", "d-1", "plain"),
+        ("model#01", "d-2", "plain"),  # d-2 stands once, but the sheet labels its beams with member words
+        ("model#02", "d-3", "title"),
+    ]
+    assert all(p["title_member_word"] is None for p in marks["plan_marks"] if p["form"] == "plain")
+    (match,) = marks["matching"]
+    assert {m["key"] for m in match["plan_only"]} >= {"d-1", "d-2"}
+    assert {m["key"] for m in match["schedule_only"]} == {"d-3"}
+    (said,) = [w for w in marks["warnings"] if "plan labels" in w]
+    assert "4 title-form" in said and "model#01" in said
+
+
+def test_a_family_whose_titles_repeat_less_than_three_times_stays_headings(tmp_path):
+    work = build_work(
+        tmp_path,
+        s1=["dẦm d-1", "dẦm d-1", "dẦm d-2", "dẦm d-3", "dẦm c-1", "dẦm c-1", "dẦm c-1"],
+        styled=[],
+        s2=[],
+        paper=[],
+    )
+    marks = extract_marks(work, tmp_path / "input")
+    forms = {(p["mark"], p["form"]) for p in marks["plan_marks"] if p["mark"][0] in "dc"}
+    # c-1 stands three times (plan labels); d-1 twice is two views of one detail: headings
+    assert forms == {("d-1", "title"), ("d-2", "title"), ("d-3", "title"), ("c-1", "plain")}
+    (said,) = [w for w in marks["warnings"] if "plan labels" in w]
+    assert "3 title-form" in said
+
+
+def test_a_demoted_title_keeps_the_form_of_its_mark(tmp_path):
+    work = build_work(
+        tmp_path,
+        s1=["dẦm d-4 (220x400)"] * 3 + ["dẦm d-5.1"] * 3 + ["dẦm d-6", "dẦm d-6", "dẦm D-6"],
+        styled=[],
+        s2=[],
+        paper=[],
+    )
+    marks = extract_marks(work, tmp_path / "input", check_inputs=True)
+    forms = Counter((p["mark"], p["form"]) for p in marks["plan_marks"] if p["mark"].lower().startswith("d-"))
+    assert forms == {
+        ("d-4", "with_size"): 3,
+        ("d-5.1", "sub_number"): 3,
+        ("d-6", "plain"): 2,
+        ("D-6", "plain"): 1,
+    }
+    assert {p["size"]["text"] for p in marks["plan_marks"] if p["mark"] == "d-4"} == {"220x400"}

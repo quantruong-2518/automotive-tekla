@@ -778,6 +778,10 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
       read as a plate tag) is a mark when it stands in a run of three consecutive numbers of one prefix,
       text style and height on one sheet (271 `bm-1` .. `bm-7`: the BM footing family, 16 plan marks); a
       plate number alone (`BM12`) stays a plate. Texts that do not print take no part.
+    - `marks` (EVAL-4 R-f): when one mark of a family appears three times or more as a title-form text
+      (`dẦm d-1`) on a sheet, every title-form text of that family on the sheet is a plan label, not a detail
+      heading (form `plain` / `with_size` / `sub_number`, no `title_member_word`); one warning per file counts
+      them per sheet. 290 `dẦm d-n`: matched 5 -> 16, schedule_only 17 -> 5.
 
 ### Changed
 - Question lifecycle (tool wave 2, EVAL-2 fix 5):

@@ -1179,10 +1179,41 @@ def _scan_file(
         )
     if out.not_marks:
         warnings.append(_not_marks_warning(loaded.rel, out.not_marks))
+    _read_repeated_titles_as_plan_labels(loaded.rel, out.plan, warnings)
     return out, grid_info
 
 
 MAX_NOT_MARK_EXAMPLES = 5
+# one mark as a title-form text this often on a sheet: the sheet's labels, not headings
+MIN_PLAN_LABEL_REPEATS = 3
+
+
+def _read_repeated_titles_as_plan_labels(rel: str, plan: list[dict[str, Any]], warnings: list[str]) -> None:
+    """R-f (290 `dẦm d-n`): a framing plan may label its beams with the member word. A detail title stands
+    once on its sheet (twice for two views), a plan label repeats (`dẦm d-1` six times): when one mark of a
+    family (prefix) appears as a title-form text `MIN_PLAN_LABEL_REPEATS` times on a sheet, every title-form
+    text of that family on the sheet is a plan label, so it loses its title form (and the member-word
+    evidence) and is no detail heading. One warning per file counts them per sheet."""
+    groups: dict[tuple[str | None, str], list[dict[str, Any]]] = {}
+    for p in plan:
+        if p["form"] == "title":
+            groups.setdefault((p["sheet"], p["lexical"]["prefix"].casefold()), []).append(p)
+    per_sheet: Counter[str] = Counter()
+    for (sheet, _), docs in groups.items():
+        if max(Counter(d["key"] for d in docs).values()) < MIN_PLAN_LABEL_REPEATS:
+            continue
+        for d in docs:
+            d["form"] = (
+                "with_size" if d["size"] else ("sub_number" if len(d["lexical"]["numbers"]) > 1 else "plain")
+            )
+            d["title_member_word"] = None
+        per_sheet[sheet or "no sheet"] += len(docs)
+    if per_sheet:
+        counts = ", ".join(f"{sheet}: {n} title-form labels" for sheet, n in sorted(per_sheet.items()))
+        warnings.append(
+            f"{rel}: texts with a member word read as plan labels, not detail headings, because a mark of "
+            f"their family repeats on the sheet ({counts})"
+        )
 
 
 def _has_mark_shape(entry: dict[str, Any]) -> bool:
