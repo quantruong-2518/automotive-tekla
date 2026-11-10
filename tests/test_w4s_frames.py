@@ -188,3 +188,91 @@ def test_a_header_alone_is_not_taken_as_the_sheet_number(tmp_path):
     result = extract_sheets(path, extract_text(path))
     assert result["sheets"][0]["title_block"]["sheet_number"] is None
     assert "sheet_number_missing" in [q["code"] for q in result["questions"]]
+
+
+# --- the column must be a table: evenly spaced rows directly under the value (review M2) ------------------
+
+
+def _strip_number(tmp_path: Path, marks: list[tuple[str, float, float, float]]) -> dict[str, Any]:
+    """A title-block cell in the right strip (DRAWING NO.: with S-101 to its right) and further texts
+    (text, x, y, height)."""
+    doc, msp = _doc()
+    msp.add_lwpolyline([(0, 0), (FW, 0), (FW, FH), (0, FH)], close=True)
+    _notes(msp, 0.0)
+    msp.add_text("DRAWING NO.:", height=250, dxfattribs={"insert": (76000.0, 30000.0)})
+    msp.add_text("S-101", height=400, dxfattribs={"insert": (79000.0, 30000.0)})
+    for text, x, y, h in marks:
+        msp.add_text(text, height=h, dxfattribs={"insert": (x, y)})
+    path = tmp_path / "strip.dxf"
+    doc.saveas(path)
+    result = extract_sheets(path, extract_text(path))
+    assert validate("sheets", result) == []
+    return result
+
+
+def _is_table(result: dict[str, Any]) -> bool:
+    return any("column" in w for w in result["warnings"])
+
+
+def _rows(first_y: float, pitch: float, heights: tuple[float, ...] = (400.0, 400.0, 400.0)):
+    return [(f"C-{i + 1}", 79000.0, first_y - i * pitch, h) for i, h in enumerate(heights)]
+
+
+def test_ordinary_marks_far_below_a_title_block_number_do_not_drop_it(tmp_path):
+    result = _strip_number(tmp_path, [("C-1", 79100.0, 9000.0, 300.0), ("C-2", 79300.0, 4000.0, 300.0)])
+    assert result["sheets"][0]["title_block"]["sheet_number"]["value"] == "S-101"
+    assert not _is_table(result)
+    assert "sheet_number_missing" not in [q["code"] for q in result["questions"]]
+
+
+@pytest.mark.parametrize(
+    ("pitch", "table"),
+    [(1000.0, True), (1500.0, True), (1700.0, False), (2400.0, False)],
+    ids=["tight", "gap_2.75_heights", "gap_3.25_heights", "wide"],
+)
+def test_rows_must_follow_each_other_within_three_heights(tmp_path, pitch, table):
+    # S-101 (h 400) heads three rows; the gap between consecutive boxes is pitch - 400
+    result = _strip_number(tmp_path, _rows(30000.0 - pitch, pitch))
+    assert _is_table(result) is table
+
+
+def test_a_row_of_another_height_breaks_the_column(tmp_path):
+    assert not _is_table(_strip_number(tmp_path, _rows(29000.0, 1000.0, (400.0, 700.0, 400.0))))
+    assert _is_table(_strip_number(tmp_path, _rows(29000.0, 1000.0, (450.0, 450.0, 450.0))))  # 12 % taller
+
+
+def test_the_chain_ends_at_a_row_of_another_height_even_when_a_later_row_is_near(tmp_path):
+    rows = _rows(29000.0, 700.0, (400.0, 600.0, 400.0))  # row 3 is 2.5 heights below row 1
+    assert not _is_table(_strip_number(tmp_path, rows))
+
+
+def test_the_gap_limit_is_three_heights_of_the_taller_of_two_rows(tmp_path):
+    # C-2 (h 450) is 1300 below C-1 (h 400): over 3 x 400, within 3 x 450
+    marks = [
+        ("C-1", 79000.0, 29000.0, 400.0),
+        ("C-2", 79000.0, 27250.0, 450.0),
+        ("C-3", 79000.0, 26200.0, 450.0),
+    ]
+    assert _is_table(_strip_number(tmp_path, marks))
+
+
+def test_a_text_beside_a_row_is_not_the_next_row(tmp_path):
+    marks = [("C-1", 79000.0, 29000.0, 400.0), ("C-2", 79300.0, 29000.0, 400.0)]
+    assert not _is_table(_strip_number(tmp_path, marks))
+
+
+def test_a_row_in_another_column_is_not_a_row(tmp_path):
+    # C-2 overlaps the value in x but not C-1; C-3 is back in C-1's column, 4 heights below it
+    marks = [
+        ("C-1", 79000.0, 29000.0, 400.0),
+        ("C-2", 80000.0, 28000.0, 400.0),
+        ("C-3", 79000.0, 27000.0, 400.0),
+    ]
+    assert not _is_table(_strip_number(tmp_path, marks))
+
+
+def test_a_column_needs_the_first_row_right_under_the_value(tmp_path):
+    near = [("C-2", 79000.0, 29000.0, 400.0), ("C-3", 79000.0, 28000.0, 400.0)]
+    assert _is_table(_strip_number(tmp_path, near))
+    far = [("C-2", 79000.0, 20000.0, 400.0), ("C-3", 79000.0, 19000.0, 400.0)]
+    assert not _is_table(_strip_number(tmp_path, far))  # tidy rows, but not under the value

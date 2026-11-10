@@ -123,7 +123,12 @@ CELL_MAX_VERTICES = 12  # polylines with more vertices are not cell outlines
 # degrees.
 FRAME_AXIS_TOL = 1e-3
 # A sheet-number label over a column of this many further sheet codes heads a drawing list, not a title block.
+# The column is a chain of rows: the first directly under the value and each next one within TABLE_ROW_GAP
+# row heights of the previous one, of about the same height (TABLE_ROW_HEIGHT_TOL, relative).
+# Sheet-code-shaped marks scattered further down the sheet are not rows.
 TABLE_COLUMN_MIN_ROWS = 2
+TABLE_ROW_GAP = 3.0
+TABLE_ROW_HEIGHT_TOL = 0.25
 
 _CONF_ORDER = {"low": 0, "medium": 1, "high": 2}
 _BUILDING_UNITS = {"mm", "cm", "m", "in", "ft"}
@@ -950,16 +955,36 @@ def _candidate(
 
 
 def _heads_code_column(value: dict[str, Any], vbox: Box, values: list[tuple[dict[str, Any], Box]]) -> int:
-    """How many further sheet-code texts are stacked below this value in its column (overlapping it in x)?"""
-    return sum(
-        1
-        for other, obox in values
-        if other is not value
-        and _SHEET_CODE_RE.match(other["display_text"].strip())
-        and obox[3] <= vbox[1]
-        and obox[0] < vbox[2]
-        and obox[2] > vbox[0]
+    """Length of the table column under this value: sheet-code texts overlapping it in x, stacked as a
+    chain of rows (the first directly under the value, each next one within TABLE_ROW_GAP row heights of
+    the previous one and of about its height). Codes elsewhere below the value are not rows."""
+    below = sorted(
+        (
+            (obox, other)
+            for other, obox in values
+            if other is not value
+            and _SHEET_CODE_RE.match(other["display_text"].strip())
+            and obox[3] <= vbox[1]
+            and obox[0] < vbox[2]
+            and obox[2] > vbox[0]
+        ),
+        key=lambda t: (-t[0][3], t[1]["id"]),
     )
+    rows = 0
+    prev = vbox
+    for obox, _other in below:
+        prev_h, h = prev[3] - prev[1], obox[3] - obox[1]
+        if obox[3] > prev[1]:
+            continue  # beside or above the previous row
+        if obox[0] >= prev[2] or obox[2] <= prev[0]:
+            continue  # not in the previous row's column
+        if prev[1] - obox[3] > TABLE_ROW_GAP * max(prev_h, h):
+            break  # too far below: the chain ends here
+        if abs(h - prev_h) > TABLE_ROW_HEIGHT_TOL * prev_h:
+            break  # another size: not the same table
+        rows += 1
+        prev = obox
+    return rows
 
 
 def _title_candidates(

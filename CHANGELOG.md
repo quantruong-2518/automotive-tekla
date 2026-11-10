@@ -783,6 +783,10 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
       +28.650 MÁI, all named); 285 names TẦNG 1-3 on +0.450, +4.350, +7.950; 290 gains -0.050, +1.140,
       +2.430, +3.850 (written `+  1.140` on one sheet); 271 names +7.660 MÁI; 264, 180, 286, 161, 267, 433,
       Steel_01: no change.
+    - Review fixes (package S): the drawing-list header rule counts only a table column, a chain of rows with
+      the first directly under the value, each next one within 3 row heights of the previous and of about its
+      height; sheet-code-shaped marks further down the sheet no longer drop a real sheet number (a title block
+      in the right strip with `C-1`, `C-2` 21 000 below it lost its number). 271 `kc - 01` / `dm-00` is unchanged.
 
 ### Changed
 - Question lifecycle (tool wave 2, EVAL-2 fix 5):
