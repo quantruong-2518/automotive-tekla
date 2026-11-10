@@ -14,6 +14,7 @@ from _callout_fixtures import PROPOSED_FONT_TABLE, build_work, write_structure
 from _callout_fixtures import REL as FIXTURE_REL
 from _dxf_fixtures import build_set
 from _marks_fixtures import (
+    BLOCKED_H,
     BLOCKED_STYLE,
     KINH,
     PLAN_STEP,
@@ -48,10 +49,10 @@ def blocked_ids(work: Path) -> set[str]:
 
 
 def cited_ids(node: Any, out: list[str]) -> None:
-    """Entry ids cited outside every key that starts with 'blocked' (the EVAL-4 M2 rule), rows left out."""
+    """Entry ids cited outside every key that starts with 'blocked' (the EVAL-4 M2 rule)."""
     if isinstance(node, dict):
         for key, value in node.items():
-            if key.startswith("blocked") or key == "rows":
+            if key.startswith("blocked"):
                 continue
             if isinstance(value, str) and value.startswith("T") and value[1:].isdigit():
                 out.append(value)
@@ -924,3 +925,90 @@ def test_a_word_that_merely_ends_in_sl_is_no_quantity_tail(tmp_path):
     work = build_work(tmp_path, s1=["dẦm d1 wsl= 2", "DẦM D1", "DẦM D1"], styled=[], s2=[], paper=[])
     marks = extract_marks(work, tmp_path / "input")
     assert {p["form"] for p in marks["plan_marks"] if p["mark"].lower() == "d1"} == {"plain"}
+
+
+# --- review M1 (SEAM-2): a data cell whose text the font gate blocks keeps no entry id ------------------
+
+
+def assert_no_blocked_id_cited(doc: dict[str, Any], work: Path) -> None:
+    seen: list[str] = []
+    cited_ids(doc, seen)
+    assert not set(seen) & blocked_ids(work)
+
+
+def test_a_blocked_data_cell_is_null_and_listed_in_blocked_cell_entries(gate_world):
+    work, doc = gate_world
+    assert validate("marks", doc) == []
+    assert_no_blocked_id_cited(doc, work)  # the walk of the EVAL-4 M2 metric, rows included
+    t = table_with(doc, "KÝ HIỆU")
+    (cell,) = [c for r in t["rows"] for c in r["cells"] if c["display_text"] == BLOCKED_H]
+    assert cell["entry_id"] is None and cell["meaning"] == "blocked" and cell["block_reason"]
+    assert (
+        t["blocked_cell_entries"] == sorted(t["blocked_cell_entries"]) and len(t["blocked_cell_entries"]) == 1
+    )
+    assert t["blocked_cell_entries"][0] in blocked_ids(work)
+    for other in doc["tables"]:
+        assert set(other["blocked_cell_entries"]) <= blocked_ids(work)
+        nulls = sum(1 for r in other["rows"] for c in r["cells"] if c["entry_id"] is None)
+        assert nulls == len(other["blocked_cell_entries"])
+
+
+def test_a_blocked_data_cell_in_a_keywordless_table_is_null_too(tmp_path):
+    from _marks_fixtures import build_inferred_work
+
+    work = build_inferred_work(tmp_path)
+    doc = extract_marks(work, tmp_path / "input", check_inputs=True)
+    assert validate("marks", doc) == []
+    assert_no_blocked_id_cited(doc, work)
+    listed = {i for t in doc["tables"] for i in t["blocked_cell_entries"]}
+    assert listed and listed <= blocked_ids(work)
+    nulls = [c for t in doc["tables"] for r in t["rows"] for c in r["cells"] if c["entry_id"] is None]
+    assert len(nulls) == len(listed) and all(c["meaning"] == "blocked" for c in nulls)
+
+
+def test_a_header_blocked_table_keeps_the_ids_of_its_allowed_cells(gate_world):
+    """`meaning: blocked` by the header is not the gate blocking the text: M2 counts only blocked ids."""
+    _, doc = gate_world
+    t = table_with(doc, "Abçd")
+    assert t["header_blocked"] is True
+    assert all(c["entry_id"] is not None for r in t["rows"] for c in r["cells"])
+    assert t["blocked_cell_entries"] == []
+    assert [b["display_text"] for b in doc["blocked_marks"] if b["table"] == t["id"]] == ["G1", "G2"]
+    assert all(b["entry_id"] for b in doc["blocked_marks"])
+
+
+def test_a_blocked_mark_cell_of_an_allowed_table_is_in_blocked_marks_with_its_id(tmp_path):
+    """The blocked-marks list is a `blocked*` list: it keeps the id while the row cell is null. The loop that
+    fills it reads the row texts, not the cell ids."""
+    work = build_gate_work(tmp_path)
+    index_path = work / "text" / f"{REL}.json"
+    index = load(index_path)
+    (donor,) = [e for e in index["entries"] if e["display_text"] == BLOCKED_H]
+    target = next(
+        e for e in index["entries"] if e["display_text"] == "E3"
+    )  # the table cell, not the plan text
+    for key in (
+        "display_text",
+        "raw_text",
+        "plain_text",
+        "decoded_text",
+        "style",
+        "font_file",
+        "decode",
+        "flags",
+    ):
+        target[key] = donor[key]
+    index_path.write_text(json.dumps(index, ensure_ascii=False), encoding="utf-8")
+    assert meaning_block_reason(target) is not None
+    doc = extract_marks(work, tmp_path / "input", check_inputs=True)
+    (mine,) = [b for b in doc["blocked_marks"] if b["entry_id"] == target["id"]]
+    assert mine["reason"] == meaning_block_reason(target) and mine["display_text"] == BLOCKED_H
+    (cell,) = [
+        c
+        for t in doc["tables"]
+        for r in t["rows"]
+        for c in r["cells"]
+        if c["entry_id"] is None and c["column"] == 0
+    ]
+    assert cell["meaning"] == "blocked"
+    assert_no_blocked_id_cited(doc, work)

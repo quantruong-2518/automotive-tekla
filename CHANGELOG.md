@@ -784,6 +784,10 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
       them per sheet. 290 `dẦm d-n`: matched 5 -> 16, schedule_only 17 -> 5. Review fix C1: a family
       with a quantity tail (`(sl= 02)`, `SL: 2`, `số lượng 5`) on the sheet is never demoted: a detail
       sheet heads one beam with its count and labels its cross-sections with bare titles (285 KC-17).
+    - `marks` (review M1, SEAM-2): a data cell whose text the font gate blocks has `entry_id` null and its
+      id is listed in the table's `blocked_cell_entries`; `blocked_marks` keeps the id. M2 on the marks
+      test fixtures (gate: 1, inferred: 2) is 0. A cell of a header-blocked table with allowed text keeps
+      its id (only ids the text index blocks are moved).
   - Tool wave 4, package T (text), visibility: `harness extract-text` fills `printed`,
     `not_printed_reasons` and `print_uncertain_reasons` on every entry. Not printed: group 60 on the entity
     (TEXT, MTEXT, ATTRIB, MULTILEADER, DIMENSION, also on block content), ATTRIB flag bit 1 (`invisible`

@@ -851,6 +851,17 @@ def _cell_doc(col: int | None, t: _Text) -> dict[str, Any]:
     }
 
 
+def _data_cell_doc(col: int | None, t: _Text) -> dict[str, Any]:
+    """A data cell. When the legacy-font gate blocks its own text, `entry_id` is null and the id is listed in
+    the table's `blocked_cell_entries` (tool wave 4, SEAM-2), so no blocked id is cited outside a `blocked*`
+    list. The working key `_id` keeps the id for the blocked-marks listing; it is removed before output."""
+    doc = _cell_doc(col, t)
+    doc["_id"] = t.id
+    if t.block is not None:
+        doc["entry_id"] = None
+    return doc
+
+
 def _header_cell_doc(col: int | None, t: _Text) -> dict[str, Any]:
     """A header cell. A blocked one keeps a placeholder: its entry id is null here and listed in the table's
     `blocked_header_entries`, so no blocked id is cited outside a `blocked*` list (EVAL-4 M2)."""
@@ -1137,7 +1148,7 @@ def _scan_file(
             for cell in row["cells"]:
                 in_mark_col = cell["column"] is not None and cell["column"] == tdoc["mark_column"]
                 if tdoc["header_blocked"]:
-                    entry = by_id[cell["entry_id"]]
+                    entry = by_id[cell["_id"]]
                     if meaning_block_reason(entry) is not None:
                         continue  # blocked by its own text: shape unknown
                     if parse_mark(entry["display_text"], entry["decode"]["case_uncertain"]) is None:
@@ -1154,7 +1165,7 @@ def _scan_file(
                         "table": "",
                         "_t": t_index,
                         "row": row["index"],
-                        "entry_id": cell["entry_id"],
+                        "entry_id": cell["_id"],
                         "display_text": cell["display_text"],
                         "reason": reason,
                     }
@@ -1374,7 +1385,7 @@ def _table_doc(rel: str, sheet: dict[str, Any] | None, space: str, tb: _Table) -
     size_header_blocked = _blocked_may_name_size(tb, roles, {b["column"] for b in blocked_columns})
     rows = []
     for index, (box, cells) in enumerate(tb.rows, start=1):
-        cell_docs = [_cell_doc(c, t) for c, t in cells]
+        cell_docs = [_data_cell_doc(c, t) for c, t in cells]
         if tb.header_blocked:
             for cd in cell_docs:
                 cd["meaning"] = "blocked"
@@ -1440,6 +1451,7 @@ def _table_doc(rel: str, sheet: dict[str, Any] | None, space: str, tb: _Table) -
         "header_block_reasons": header_reasons if tb.header_blocked else [],
         "blocked_columns": blocked_columns,
         "blocked_header_entries": sorted(t.id for _, t in ordered_header if t.block is not None),
+        "blocked_cell_entries": sorted(t.id for _, cells in tb.rows for _, t in cells if t.block is not None),
         "header": header,
         "columns": columns,
         "mark_column": None if tb.header_blocked else tb.mark_column,
@@ -1943,6 +1955,8 @@ def extract_marks(
     for t in tables:
         for row in t["rows"]:
             row.pop("_size_reason", None)
+            for cell in row["cells"]:
+                cell.pop("_id", None)
             for m in row["marks"]:
                 m.pop("_structure", None)
     doc: dict[str, Any] = {
