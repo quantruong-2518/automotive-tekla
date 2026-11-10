@@ -65,6 +65,7 @@ extractors), 15 weld symbols, 17 laps and hooks; welds and electrodes are not de
 from __future__ import annotations
 
 import re
+import unicodedata
 from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -636,15 +637,26 @@ LEVEL_TOKEN = "level_token"
 GRADE_PREFIXES = frozenset({"rb", "cb", "sd", "sr", "gr"})
 YIELD_CLASSES = frozenset({"240", "300", "400", "500", "600"})
 _LEVEL_SEP = re.compile(r"\s-")
+# F4c: a steel profile (series letters and a section depth: `HEB-650`, `IPE 300`, `UC 254`; no section depth
+# below 50 exists in the catalogues, so `UC1` stays a member) and a detail label (`DET-2`)
+STEEL_PROFILE = "steel_profile"
+DETAIL_LABEL = "detail_label"
+PROFILE_PREFIXES = frozenset({"hea", "heb", "hem", "ipe", "ipea", "ipn", "upn", "ub", "uc"})
+MIN_PROFILE_DEPTH = 50
+DETAIL_PREFIXES = frozenset({"det"})
 
 
 def token_reason(prefix: str, sep: str, number: str, has_second_number: bool = False) -> str | None:
-    """`grade_token` or `level_token` when a mark-shaped text (prefix, separator, first number) is one of
-    those, else None."""
+    """`grade_token`, `level_token`, `steel_profile` or `detail_label` when a mark-shaped text (prefix,
+    separator, first number) is one of those, else None."""
+    if prefix.casefold() in DETAIL_PREFIXES:
+        return DETAIL_LABEL
     if has_second_number:
         return None
     if prefix.casefold() in GRADE_PREFIXES and number in YIELD_CLASSES:
         return GRADE_TOKEN
+    if prefix.casefold() in PROFILE_PREFIXES and int(number) >= MIN_PROFILE_DEPTH:
+        return STEEL_PROFILE
     if _LEVEL_SEP.fullmatch(sep):
         return LEVEL_TOKEN
     return None
@@ -681,6 +693,46 @@ def callout_part_ids(entries: list[dict[str, Any]]) -> set[str]:
             for e in group
         ):
             out.update(e["id"] for e in group)
+    return out
+
+
+# F4c: a detail names itself with a heading (`DETAIL - A1`) and a bubble with the same id on its sheet. A
+# mark-shaped text equal to the id of a detail heading of its sheet is that bubble, not a member, when every
+# mark-shaped text of its prefix on the sheet is such an id (a family with other members, C1 C2 C3 next to a
+# heading `DETAIL - C1`, stays).
+_DETAIL_HEADING = re.compile(
+    r"^(?:detail|chi\s+ti\u1ebft|section|m\u1eb7t\s+c\u1eaft)\s*[-:]?\s*(?P<id>[A-Za-z]{1,2}\s?\d{1,2})$",
+    re.IGNORECASE,
+)
+
+
+def _label_key(text: str) -> str:
+    return "".join(unicodedata.normalize("NFC", text).split()).casefold()
+
+
+def detail_label_ids(entries: list[dict[str, Any]], sheet_of: dict[str, dict[str, Any]]) -> set[str]:
+    """Ids of the printed texts that are the reference bubble of a detail heading of their sheet (see
+    `DETAIL_LABEL`)."""
+    heading_ids: dict[str | None, set[str]] = {}
+    labels: dict[tuple[str | None, str], list[tuple[str, str]]] = {}
+    for e in entries:
+        if not is_printed(e):
+            continue
+        sheet = sheet_of.get(e["id"])
+        sheet_id = None if sheet is None else sheet["sheet_id"]
+        for line in e["display_text"].split("\n"):
+            heading = _DETAIL_HEADING.match(" ".join(line.split()))
+            if heading is not None:
+                heading_ids.setdefault(sheet_id, set()).add(_label_key(heading["id"]))
+        family = _FAMILY.match(e["display_text"].strip())
+        if family is not None:
+            key = (sheet_id, family["prefix"].casefold())
+            labels.setdefault(key, []).append((e["id"], _label_key(e["display_text"])))
+    out: set[str] = set()
+    for (sheet_id, _), items in labels.items():
+        ids = heading_ids.get(sheet_id)
+        if ids and all(key in ids for _, key in items):
+            out.update(entry_id for entry_id, _ in items)
     return out
 
 
@@ -725,6 +777,9 @@ REJECT_REASONS = {
     "claimed_by_levels": "the level extractor took this text (a level value)",
     CALLOUT_PART: "an ATTRIB of a rebar-callout block (the block carries a spacing value or a bar tag): a "
     "part of a callout, not a member mark",
+    STEEL_PROFILE: "a steel profile (series letters and a section depth, e.g. HEB-650), not a member mark",
+    DETAIL_LABEL: "a detail label (DET-2, or the bubble of a 'DETAIL - A1' heading of its sheet), not a "
+    "member mark",
     GRADE_TOKEN: "a rebar strength class (grade prefix and yield class, e.g. RB 500), not a member mark",
     LEVEL_TOKEN: "a signed level (letters, a blank, a minus glued to the digits, e.g. cos -300), not a "
     "member mark",
@@ -821,13 +876,13 @@ def footing_m_labels(entries: list[dict[str, Any]], sheet_of: dict[str, dict[str
 
 
 def _entry_hits(
-    entry: dict[str, Any], claimed_by: str | None, as_mark: bool = False, callout_part: bool = False
+    entry: dict[str, Any], claimed_by: str | None, as_mark: bool = False, left_out: str | None = None
 ) -> tuple[list[tuple[str, _Hit]], list[tuple[str, str, str]]]:
     """(line, hit) for every candidate of the entry, lines in order, and what matched but is no candidate:
     (text, kind, reason code). `claimed_by`: the extractor that took the text (title_block, grids, levels);
     such a text is never a member mark. `as_mark`: a bolt-size `M<n>` of a footing family
-    (`footing_m_labels`), read as a member mark only. `callout_part`: an ATTRIB of a rebar-callout block
-    (`callout_part_ids`), never a member mark."""
+    (`footing_m_labels`), read as a member mark only. `left_out`: the reason code (`CALLOUT_PART`,
+    `DETAIL_LABEL`) for which a text of this entry is never a member mark."""
     out: list[tuple[str, _Hit]] = []
     rejects: list[tuple[str, str, str]] = []
     dec = entry["decode"]
@@ -839,8 +894,8 @@ def _entry_hits(
             mark = member_mark(line, cu)
             if mark is not None and claimed_by is not None:
                 rejects.append((line.strip(), "member_mark", f"claimed_by_{claimed_by}"))
-            elif mark is not None and callout_part:
-                rejects.append((line.strip(), "member_mark", CALLOUT_PART))
+            elif mark is not None and left_out is not None:
+                rejects.append((line.strip(), "member_mark", left_out))
             elif mark is not None:
                 hits = [mark]
             elif is_sheet_code(line, cu):
@@ -897,8 +952,8 @@ def _released_pattern_values(loaded: LoadedFile) -> set[str]:
         tied = {fld for fld, vs in values.items() if len(vs) > 1}
         for c in cands:
             value = entries.get(c["evidence"]["value_text_id"])
-            if c["evidence"]["kind"] != "pattern" or value is None:
-                continue
+            if c["evidence"]["kind"] != "pattern" or value is None or c["field"] == "job_number":
+                continue  # a job number is never a member mark, whatever stands next to it (F4c)
             if c["field"] in tied or _family_key(value) in families:
                 out.add(value["id"])
     return out
@@ -1117,14 +1172,16 @@ def extract_callouts(work_dir: Path | str, *, check_inputs: bool = False) -> dic
         as_marks = footing_m_labels(
             [e for e in entries if e["id"] not in duplicate_ids and is_printed(e)], sheet_of
         )
-        parts = callout_part_ids(entries)
+        live = [e for e in entries if e["id"] not in duplicate_ids]
+        left_out = {e_id: DETAIL_LABEL for e_id in detail_label_ids(live, sheet_of)}
+        left_out.update(dict.fromkeys(callout_part_ids(entries), CALLOUT_PART))
         for entry in entries:
             if entry["id"] in duplicate_ids or not is_printed(entry):
                 continue
             info["scanned"] += 1
             sheet = sheet_of.get(entry["id"])
             hits, rejects = _entry_hits(
-                entry, claimed_ids.get(entry["id"]), entry["id"] in as_marks, entry["id"] in parts
+                entry, claimed_ids.get(entry["id"]), entry["id"] in as_marks, left_out.get(entry["id"])
             )
             reason = meaning_block_reason(entry)
             if reason is not None:  # legacy-font gate: no meaning from this text, only a verbatim listing

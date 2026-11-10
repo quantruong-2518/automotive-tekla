@@ -30,6 +30,10 @@ value `a150` / `A200` or carries a bar tag `THEP` / `KHOANGCACH`: `callouts.call
 strength class (`RB 500`) or a signed level (`cos -300`, `callouts.token_reason`). A text with a mark's shape
 that is left out for such a reason is not dropped silently: one warning per file gives the count per
 reason and the first examples.
+Tool wave 4 (F4c): nor from a steel profile (`HEB-650`, `IPE 300`, `UC 254`: series letters and a section
+depth of 50 or more), a detail label (`DET-2`, or the bubble `A1` of a `DETAIL - A1` heading of the same sheet
+when every mark-shaped text of its prefix on that sheet is such an id: `callouts.detail_label_ids`), or a
+title-block value (the claim by the sheets document also covers a `job_number` found by shape alone).
 
 Legacy-font gate (`text_gate.meaning_block_reason`). Only an entry whose meaning is allowed can be a plan
 mark, a header keyword or a matchable schedule mark. The gate works per column (tool wave 2, fix 8): only
@@ -138,12 +142,14 @@ from ezdxf.lldxf.const import DXFError
 from tekla_harness.callouts import (
     _SHEET_CODE,
     CALLOUT_PART,
+    DETAIL_LABEL,
     _check_input_dir,
     _claimed_text_ids,
     _confidence,
     _num,
     _provenance,
     callout_part_ids,
+    detail_label_ids,
     footing_m_labels,
     member_mark,
     not_printed_warning,
@@ -1051,8 +1057,10 @@ def _scan_file(
                 sheet_of.update({tid: sh for tid in sh["text_ids"]})
                 order.append(sh)
     order.append(None)
-    parts = callout_part_ids(entries)  # ATTRIBs of rebar-callout blocks: parts of a callout (F4a)
-    claimed = set(_claimed_text_ids(inv_work, loaded, warnings)) | duplicate_ids | parts
+    live = [e for e in entries if e["id"] not in duplicate_ids]
+    left_out = {e_id: DETAIL_LABEL for e_id in detail_label_ids(live, sheet_of)}  # F4c
+    left_out.update(dict.fromkeys(callout_part_ids(entries), CALLOUT_PART))  # F4a: parts of a callout
+    claimed = set(_claimed_text_ids(inv_work, loaded, warnings)) | duplicate_ids | set(left_out)
     if (warning := not_printed_warning(loaded.rel, entries)) is not None:
         warnings.append(warning)
     lines_by_space, grid_info = _load_lines(inv_work, loaded, input_dir, warnings)
@@ -1119,8 +1127,10 @@ def _scan_file(
                 )
     footing = footing_m_labels([t.entry for t in texts], sheet_of)
     for e in entries:
-        if e["id"] in parts and is_printed(e) and e["id"] not in duplicate_ids and _has_mark_shape(e):
-            out.not_marks.append((CALLOUT_PART, e["id"], " ".join(e["display_text"].split())[:LINE_CHARS]))
+        if e["id"] in left_out and is_printed(e) and e["id"] not in duplicate_ids and _has_mark_shape(e):
+            out.not_marks.append(
+                (left_out[e["id"]], e["id"], " ".join(e["display_text"].split())[:LINE_CHARS])
+            )
     for t in texts:
         if t.id in in_table:
             continue

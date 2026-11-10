@@ -23,7 +23,7 @@ from _marks_fixtures import (
     build_gate_work,
     build_marks_work,
 )
-from tekla_harness.callouts import callout_part_ids, extract_callouts, member_mark
+from tekla_harness.callouts import callout_part_ids, detail_label_ids, extract_callouts, member_mark
 from tekla_harness.intake import run_intake
 from tekla_harness.marks import extract_marks, parse_mark
 from tekla_harness.schemas import validate
@@ -411,3 +411,220 @@ def test_a_grade_token_in_a_plan_is_listed_with_its_reason(tmp_path):
     callouts = extract_callouts(work)
     tokens = {r["reason_code"]: r["display_text"] for r in callouts["rejected"] if r["kind"] == "member_mark"}
     assert (tokens["grade_token"], tokens["level_token"]) == ("RB 500", "COS -300")
+
+
+# --- item 4 (F4c): steel profiles, detail labels and title-block cells are no marks ------------------------
+
+PROFILES = [
+    ("HEB-650", False),
+    ("HEB 650", False),
+    ("HEB700", False),
+    ("IPE-300", False),
+    ("ipe 200", False),
+    ("IPEA-300", False),  # four letters
+    ("HEA 100", False),
+    ("UB-305", False),
+    ("UC 254", False),
+    ("UPN 80", False),
+    ("UB-50", False),  # the smallest depth counted
+    ("UB-49", True),
+    ("UC1", True),  # a small number is a member, not a depth
+    ("UB-5", True),
+    ("HEB-1", True),
+    ("HE-650", True),  # not a series
+    ("IPE-49", True),  # below the smallest catalogue depth
+    ("DET-2", False),
+    ("DET2", False),
+    ("det-12", False),
+    ("DT-2", True),
+    ("D1", True),
+]
+
+
+@pytest.mark.parametrize(("text", "is_mark"), PROFILES)
+def test_steel_profiles_and_detail_labels_are_no_marks(text, is_mark):
+    assert (parse_mark(text, case_uncertain=True) is not None) is is_mark
+
+
+@pytest.mark.parametrize(("text", "is_mark"), [p for p in PROFILES if not p[0].upper().startswith("IPEA")])
+def test_steel_profiles_and_detail_labels_are_no_member_mark_candidates(text, is_mark):
+    # callouts' grammar takes at most three letters: IPEA-300 is never a candidate in the first place
+    assert (member_mark(text, True) is not None) is is_mark
+
+
+def test_profiles_are_listed_with_their_reason(tmp_path):
+    work = build_marks_work(tmp_path, plan_texts=("D1", "HEB-650", "IPEA-300", "DET-2", "UC1"))
+    marks = extract_marks(work, tmp_path / "input")
+    assert {"D1", "UC1"} <= {p["mark"] for p in marks["plan_marks"]}
+    assert not {"HEB-650", "IPEA-300", "DET-2"} & {p["mark"] for p in marks["plan_marks"]}
+    (said,) = [w for w in marks["warnings"] if "steel_profile" in w]
+    assert "steel_profile 2" in said and "detail_label 1" in said
+    callouts = extract_callouts(work)
+    codes = {r["reason_code"] for r in callouts["rejected"] if r["kind"] == "member_mark"}
+    assert {"steel_profile", "detail_label"} <= codes
+
+
+def test_a_detail_bubble_label_is_no_mark_but_a_member_next_to_a_detail_heading_is(tmp_path):
+    """`DETAIL - A1` names a detail; the bubbles 'A1' on that sheet are its reference, not members. A
+    family with other members (C1 C2 C3 and a heading `DETAIL - C1`) stays, and so does an A1 on a sheet with
+    no such heading."""
+    work = build_work(
+        tmp_path,
+        s1=["DETAIL - A1", "A1", "A1", "DETAIL - C1", "C1", "C2", "C3"],
+        s2=["A1", "D4"],
+        styled=[],
+        paper=[],
+    )
+    marks = extract_marks(work, tmp_path / "input")
+    by_sheet: dict[str, list[str]] = {}
+    for p in marks["plan_marks"]:
+        by_sheet.setdefault(p["sheet"], []).append(p["mark"])
+    assert sorted(by_sheet["model#01"]) == ["C1", "C2", "C3"]
+    assert sorted(by_sheet["model#02"]) == ["A1", "D4"]
+    (said,) = [w for w in marks["warnings"] if "detail_label" in w]
+    assert "detail_label 2" in said
+    callouts = extract_callouts(work)
+    marked = [(c["sheet"], c["display_text"]) for c in callouts["candidates"] if c["kind"] == "member_mark"]
+    assert ("model#02", "A1") in marked and ("model#01", "A1") not in marked
+    assert {("model#01", "C1"), ("model#01", "C2")} <= set(marked)
+    assert sum(1 for r in callouts["rejected"] if r["reason_code"] == "detail_label") == 2
+
+
+def add_title_block_candidates(work: Path, values: dict[str, tuple[str, str, str]]) -> None:
+    """Add to sheet model#01 of a synthetic sheets.json one candidate per entry of `values`
+    ({text: (field, evidence kind, label)}) on the text of that value, and a `job_number` sourced string."""
+    sheets_path = work / "structure" / f"{REL}.sheets.json"
+    sheets = load(sheets_path)
+    index = load(work / "text" / f"{REL}.json")
+    ids = {e["display_text"]: e for e in index["entries"]}
+    block = sheets["sheets"][0]["title_block"]
+    for text, (field, kind, label) in values.items():
+        e = ids[text]
+        label_id = None
+        if kind == "adjacent_label":
+            label_id = ids[label]["id"]
+        block["candidates"].append(
+            {
+                "field": field,
+                "value": text,
+                "evidence": {
+                    "kind": kind,
+                    "key": label if kind == "adjacent_label" else "sheet_code_lower_right",
+                    "value_text_id": e["id"],
+                    "label_text_id": label_id,
+                    "position": [e["position"]["x"], e["position"]["y"]],
+                },
+                "confidence": "low",
+                "provenance": {"file": REL, "sheet": "model#01", "method": "dxf_entity"},
+            }
+        )
+        if field == "job_number":
+            block["job_number"] = {
+                "value": text,
+                "confidence": "low",
+                "provenance": {"file": REL, "sheet": "model#01", "method": "dxf_entity"},
+            }
+    assert validate("sheets", sheets) == []
+    sheets_path.write_text(json.dumps(sheets, ensure_ascii=False), encoding="utf-8")
+
+
+def test_job_and_sheet_numbers_of_the_title_block_are_no_marks(tmp_path):
+    """Package S fills `title_block.job_number` and the sheet-number candidates: their value texts are claimed
+    by the title block, whatever mark family stands next to them (J-02, J-03 / P-02). A job number is claimed
+    even when it was found by shape alone (the release for shape-only sheet codes does not apply to it)."""
+    texts = ("DRAWING NO.:", "P-01", "P-02", "J-01", "J-02", "J-03", "D1")
+    work = build_marks_work(tmp_path, plan_texts=texts)
+    add_title_block_candidates(
+        work,
+        {
+            "P-01": ("sheet_number", "adjacent_label", "DRAWING NO.:"),
+            "J-01": ("job_number", "pattern", ""),
+        },
+    )
+    marks = extract_marks(work, tmp_path / "input", check_inputs=True)
+    plan = {p["mark"] for p in marks["plan_marks"]}
+    assert "J-01" not in plan and "P-01" not in plan
+    assert {"J-02", "J-03", "P-02", "D1"} <= plan
+    callouts = extract_callouts(work, check_inputs=True)
+    candidates = {c["display_text"] for c in callouts["candidates"] if c["kind"] == "member_mark"}
+    assert "J-01" not in candidates and "P-01" not in candidates
+    claimed = {
+        r["display_text"] for r in callouts["rejected"] if r["reason_code"] == "claimed_by_title_block"
+    }
+    assert {"J-01", "P-01"} <= claimed
+
+
+def _detail_entries(*items: tuple[str, str, str, bool]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """(entries, sheet_of) from (id, text, sheet id, printed)."""
+    entries, sheet_of = [], {}
+    for eid, text, sheet, printed in items:
+        e: dict[str, Any] = {"id": eid, "display_text": text}
+        if not printed:
+            e["printed"] = False
+        entries.append(e)
+        if sheet:
+            sheet_of[eid] = {"sheet_id": sheet}
+    return entries, sheet_of
+
+
+@pytest.mark.parametrize(
+    "heading",
+    ["DETAIL - A1", "detail A1", "Detail: a1", "CHI TIẾT A1", "chi tiết - A 1", "MẶT CẮT A1", "SECTION A1"],
+)
+def test_detail_heading_forms(heading):
+    entries, sheet_of = _detail_entries(("T000001", heading, "s1", True), ("T000002", "A1", "s1", True))
+    assert detail_label_ids(entries, sheet_of) == {"T000002"}
+
+
+def test_detail_labels_need_a_printed_heading_of_their_own_sheet():
+
+    entries, sheet_of = _detail_entries(
+        ("T000001", "DETAIL - A1", "s1", False),  # does not print: names nothing
+        ("T000002", "A1", "s1", True),
+        ("T000003", "DETAIL - B2", "s1", True),
+        ("T000004", "B2", "s2", True),  # another sheet
+        ("T000005", "B2", "s1", True),
+        ("T000006", "B2", "", True),  # on no sheet: its own group
+        ("T000007", "DETAIL - A1", "", True),
+        ("T000008", "A1", "", True),
+        ("T000009", "A1", "s1", False),  # does not print: not a label (and not a mark)
+    )
+    assert detail_label_ids(entries, sheet_of) == {"T000005", "T000008"}
+    # a prefix family with a member that is not a detail id is not a label family
+    entries, sheet_of = _detail_entries(
+        ("T000001", "DETAIL - A1", "s1", True),
+        ("T000002", "A1", "s1", True),
+        ("T000003", "A2", "s1", True),
+    )
+    assert detail_label_ids(entries, sheet_of) == set()
+    # other prefixes on the same sheet do not matter
+    entries, sheet_of = _detail_entries(
+        ("T000001", "DETAIL - A1", "s1", True),
+        ("T000002", "A1", "s1", True),
+        ("T000003", "C2", "s1", True),
+    )
+    assert detail_label_ids(entries, sheet_of) == {"T000002"}
+
+
+def test_a_hidden_detail_heading_leaves_its_bubbles_as_marks(tmp_path):
+    work = build_work(tmp_path, s1=["DETAIL - A1", "A1", "A1", "C1"], s2=[], styled=[], paper=[])
+    hide(work, {"DETAIL - A1"})
+    marks = extract_marks(work, tmp_path / "input")
+    assert sorted(p["mark"] for p in marks["plan_marks"]) == ["A1", "A1", "C1"]
+
+
+def test_a_heading_on_a_duplicate_sheet_names_no_detail_of_the_texts_on_no_sheet(tmp_path):
+    """The texts of a duplicate sheet are not scanned, so its heading must not turn up in the group of the
+    texts that lie on no sheet."""
+    work = build_work(tmp_path, s1=["DETAIL - A1"], s2=["A1"], styled=[], paper=[])
+    path = work / "structure" / f"{REL}.sheets.json"
+    sheets = load(path)
+    first, second = sheets["sheets"][0], sheets["sheets"][1]
+    first["duplicate_of"] = second["sheet_id"]
+    a1 = entry_id(work, "A1")
+    second["text_ids"] = [t for t in second["text_ids"] if t != a1]  # A1 lies on no sheet
+    path.write_text(json.dumps(sheets, ensure_ascii=False), encoding="utf-8")
+    marks = extract_marks(work, tmp_path / "input")
+    assert "A1" in [p["mark"] for p in marks["plan_marks"]]
+    callouts = extract_callouts(work)
+    assert [c["display_text"] for c in callouts["candidates"] if c["kind"] == "member_mark"].count("A1") == 1
