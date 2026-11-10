@@ -775,6 +775,11 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
       labels in alike runs of at least two axes (`a b a b`, never `1 2 2` or `1 2 1 3`), the view is cut into
       one view per run and every other axis of it belongs to each (EVAL-4 278 KC-01). `bubbles_paired` counts
       each bubble once.
+    - `harness grid-system`: a system of one direction with exactly two axes seen in one view is not proposed
+      as a grid system when its file also has a two-direction system read in two or more independent views
+      (rebar or pile marks drawn like bubbles: EVAL-3 286 `b bt`, 290 `8 1` / `6 1` / `3 16`). It is listed in
+      `unassigned_families` with the reason, counted in `summary.families_unassigned`, and raises no
+      `grid_system_axis_unassigned` question.
 
 ### Changed
 - Question lifecycle (tool wave 2, EVAL-2 fix 5):

@@ -1009,6 +1009,35 @@ def _system_axis_values(answer: dict[str, Any], n_dirs: int, sid: str, warnings:
     return {AXIS_DIRECTIONS.index(k): str(v) for k, v in values.items()}
 
 
+def _independent(s: _System, ctx: dict[str, _FileCtx]) -> int:
+    return len(set(_components([m.view for m in s.full()], ctx)))
+
+
+def _drop_strays(
+    systems: list[_System], ctx: dict[str, _FileCtx]
+) -> tuple[list[_System], list[tuple[_System, _System]]]:
+    """(systems without the strays, [(stray, the system of its file that makes it one)]).
+
+    A stray is a system of ONE direction and exactly two axes seen in ONE view (rebar or pile marks drawn
+    like grid bubbles: EVAL-3 286 `b bt`, 290 `8 1` / `6 1` / `3 16`), in a file that also has a two-direction
+    system read in two or more independent views. A Tekla grid needs two directions, and the file's grid is
+    already a system; the stray is reported in `unassigned_families`, never silently dropped. A file without
+    such a system keeps its small systems: they may be all it has."""
+    strong = [s for s in systems if len(s.rep.fams) == 2 and _independent(s, ctx) >= 2]
+    kept: list[_System] = []
+    dropped: list[tuple[_System, _System]] = []
+    for s in systems:
+        stray = len(s.rep.fams) == 1 and len(s.rep.fams[0].labels) == 2 and _independent(s, ctx) < 2
+        main = next(
+            (m for m in strong if m is not s and any(x.view.file == s.rep.file for x in m.members)), None
+        )
+        if stray and main is not None:
+            dropped.append((s, main))
+        else:
+            kept.append(s)
+    return kept, dropped
+
+
 def _plan_spacing_medians(systems: list[_System], ctx: dict[str, _FileCtx]) -> dict[str, dict[str, Any]]:
     """file -> {"value", "count"}: the median positive spacing (drawing units) of the file's PLAN systems.
 
@@ -1668,9 +1697,8 @@ def build_grid_systems(
     effective = {p: by_engineer[p] if by_engineer[p][0] != "not_answered" else by_others[p] for p in probed}
     # the grid-spacing units evidence is the median of the file's plan systems (a single-source key plan never
     # decides it), so systems are built once in drawing units before any answered unit converts anything
-    plan_medians = _plan_spacing_medians(
-        _systems(_clusters(inputs.views, set_of), inputs.ctx, set_of), inputs.ctx
-    )
+    kept, _ = _drop_strays(_systems(_clusters(inputs.views, set_of), inputs.ctx, set_of), inputs.ctx)
+    plan_medians = _plan_spacing_medians(kept, inputs.ctx)
     for f in inputs.files:
         if f["status"] == "read":
             f["grid_spacing_median"] = plan_medians.get(f["path"])
@@ -1690,8 +1718,22 @@ def build_grid_systems(
     for v in inputs.views:  # an agreeing units answer lets the matching compare this file in millimetres
         for f in v.fams:
             f.factor = _factor(units, f.file)
-    systems = _systems(_clusters(inputs.views, set_of), inputs.ctx, set_of)
+    systems, strays = _drop_strays(_systems(_clusters(inputs.views, set_of), inputs.ctx, set_of), inputs.ctx)
     ids = [f"S{k:03d}" for k in range(1, len(systems) + 1)]
+    for stray, main in strays:
+        rf = stray.rep.fams[0]
+        inputs.totals["families_unassigned"] += 1
+        inputs.unassigned.append(
+            {
+                "file": rf.file,
+                "sheet": rf.sheet,
+                "group_id": rf.group_id,
+                "family_id": rf.family_id,
+                "labels": rf.label_text(),
+                "reason": "a two-axis family of one direction seen in one view, beside the file's grid "
+                f"system {ids[systems.index(main)]}: not proposed as a grid system (rebar or pile marks?)",
+            }
+        )
     place: dict[str, tuple[str, str | None]] = {}  # system -> (file, sheet) its questions are filed under
     sys_files: dict[str, list[str]] = {}  # system -> the drawing files it comes from
 

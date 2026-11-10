@@ -617,6 +617,35 @@ def test_the_other_end_of_a_style_line_is_not_left_on_a_wall_line(tmp_path):
     assert result["unpaired_bubbles"]["count"] == 0
 
 
+def test_a_tie_between_styles_is_no_style_majority(tmp_path):
+    """Two axes on each of three layers: no style leads, so a bubble keeps the nearer line it ends even
+    though a line of another style also passes through its centre."""
+
+    def fn(msp):
+        for name in "ABC":
+            msp.doc.layers.add(name)
+        for x, label, layer in (
+            (0.0, "1", "A"),
+            (6000.0, "2", "A"),
+            (12000.0, "3", "B"),
+            (18000.0, "4", "B"),
+        ):
+            msp.add_line((x, 0), (x, 8000), dxfattribs={"layer": layer})
+            msp.add_circle((x, -340), 340)
+            msp.add_text(label, height=300).set_placement((x, -340), align=TextEntityAlignment.MIDDLE_CENTER)
+        msp.add_line((12050, 300), (12050, 8000), dxfattribs={"layer": "A"})  # farther end, passes 50 off
+        for y, label in ((2000.0, "a"), (6000.0, "b")):
+            msp.add_line((-1500, y), (19500, y), dxfattribs={"layer": "C"})
+            msp.add_circle((-1500 - 340, y), 340)
+            msp.add_text(label, height=300).set_placement(
+                (-1500 - 340, y), align=TextEntityAlignment.MIDDLE_CENTER
+            )
+
+    result = run_with(_plain(tmp_path, fn))
+    numbers = family(result, "unknown", "1 2 3 4")
+    assert [a["line"]["layer"] for a in numbers["axes"]] == ["A", "A", "B", "B"]
+
+
 def test_the_wall_line_under_the_bubble_stays_when_the_axis_is_off_its_centre(tmp_path):
     """The family-style axis passes 200 from the end bubbles' centres (> 0.35 radius): not through them, so
     the wall line they sit on stays their pair."""
@@ -959,3 +988,80 @@ def test_two_repeating_families_are_not_split(tmp_path):
 def test_two_axes_with_one_label_are_not_two_stacked_views(tmp_path):
     result = run_with(_plain(tmp_path, lambda m: _simple_grid(m, xs=(0.0, 6000.0), labels=("1", "1"))))
     assert len(result["groups"]) == 1 and questions(result, "grid_label_duplicate")
+
+
+# --- item 5 (F2d): a stray two-axis family is not a grid system ----------------------------------------
+
+
+def _plans_work(
+    tmp_path, example, extra: list[dict[str, Any]], *, second_file: list[dict[str, Any]] | None = None
+):
+    w = Work(tmp_path, example)
+    w.add_file("plans.dxf", [*_plan_views(6000.0, sheets=("model#03", "model#04")), *extra])
+    if second_file is not None:
+        w.add_file("other.dxf", second_file)
+    return w.finish()
+
+
+def _stray(gid="V009", sheet="model#09", labels=("x", "y"), spacing=250.0, fid="F009"):
+    return view(gid, sheet, fam(fid, list(labels), [spacing] * (len(labels) - 1)))
+
+
+def test_a_two_axis_family_seen_once_beside_the_plans_is_not_a_system(tmp_path, example):
+    """EVAL-3 286 `b bt` and 290 `8 1` / `17 10` / `6 1` / `3 16`: two labels 250 apart seen on one sheet
+    beside a plan grid read on many sheets: rebar or pile marks drawn like bubbles."""
+    doc = build_grid_systems(_plans_work(tmp_path, example, [_stray()]), answers=[])
+    assert [len(s["directions"]) for s in doc["systems"]] == [2]
+    (row,) = doc["unassigned_families"]
+    assert (row["file"], row["sheet"], row["group_id"], row["family_id"], row["labels"]) == (
+        "plans.dxf",
+        "model#09",
+        "V009",
+        "F009",
+        "x y",
+    )
+    assert "two-axis" in row["reason"] and "S001" in row["reason"]
+    assert doc["summary"]["families_unassigned"] == 1
+    assert codes(doc).count("grid_system_axis_unassigned") == 1  # the plan system only
+
+
+def test_without_a_main_system_the_two_axis_family_is_kept(tmp_path, example):
+    w = Work(tmp_path, example)
+    w.add_file("plans.dxf", [_stray()])
+    doc = build_grid_systems(w.finish(), answers=[])
+    assert len(doc["systems"]) == 1 and not doc["unassigned_families"]
+
+
+def test_a_main_system_seen_in_one_view_does_not_make_a_stray(tmp_path, example):
+    """The file's two-direction system is itself seen once: nothing says the two-axis family is odd."""
+    w = Work(tmp_path, example)
+    w.add_file("plans.dxf", [*_plan_views(6000.0, sheets=("model#03",)), _stray()])
+    doc = build_grid_systems(w.finish(), answers=[])
+    assert len(doc["systems"]) == 2 and not doc["unassigned_families"]
+
+
+def test_a_three_axis_family_is_kept(tmp_path, example):
+    stray = _stray(labels=("x", "y", "z"))
+    doc = build_grid_systems(_plans_work(tmp_path, example, [stray]), answers=[])
+    assert len(doc["systems"]) == 2 and not doc["unassigned_families"]
+
+
+def test_a_two_axis_family_seen_on_two_sheets_is_kept(tmp_path, example):
+    extra = [_stray(), _stray("V010", "model#10", fid="F010")]
+    doc = build_grid_systems(_plans_work(tmp_path, example, extra), answers=[])
+    assert len(doc["systems"]) == 2 and not doc["unassigned_families"]
+
+
+def test_a_two_axis_family_of_another_file_is_kept(tmp_path, example):
+    work = _plans_work(tmp_path, example, [], second_file=[_stray()])
+    doc = build_grid_systems(work, answers=[])
+    assert len(doc["systems"]) == 2 and not doc["unassigned_families"]
+
+
+def test_a_two_direction_stray_is_kept(tmp_path, example):
+    """Only one-direction families are dropped: a second direction makes a grid the engineer may want."""
+    both = view(
+        "V009", "model#09", fam("F009", ["x", "y"], [250.0], angle=0.0), fam("F010", ["p", "q"], [250.0])
+    )
+    doc = build_grid_systems(_plans_work(tmp_path, example, [both]), answers=[])
+    assert len(doc["systems"]) == 2 and not doc["unassigned_families"]
