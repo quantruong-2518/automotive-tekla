@@ -33,7 +33,7 @@ from ezdxf.version import __version__ as EZDXF_VERSION
 from tekla_harness.detect import sha256_file
 from tekla_harness.encoding import font_hint, guess_encoding_from_font, scrub_surrogates
 from tekla_harness.knowledge import FontEncodingRow, FontEncodingTable, default_font_encodings
-from tekla_harness.questions import LEGACY_ASCII_CODE, question_group
+from tekla_harness.questions import LEGACY_ASCII_CODE, TEXT_VISIBILITY_CODE, question_group
 from tekla_harness.readlog import timed_attempt
 
 SCHEMA_VERSION = "0.1"
@@ -82,6 +82,10 @@ _PLAIN_NUMBER = re.compile(r"^[+-]?(\d+(\.\d+)?|\.\d+)$")
 _GROUP_5 = re.compile(rb"(?m)^[ \t]*5[ \t]*\r?\n[ \t]*[0-9A-Fa-f]+[ \t]*\r?$")
 MAX_STYLES_LISTED = 10  # style names named in one knowledge question
 MAX_LEGACY_EXAMPLES = 5  # example entries listed in one legacy_ascii_text question (count stays the total)
+MAX_VISIBILITY_EXAMPLES = 5  # example entries listed in one text_visibility_uncertain question
+MAX_VISIBILITY_TEXT = 60  # characters of an example's text kept in the question
+# print_uncertain_reasons of a text-index entry (text-index schema), in the order a question lists them
+PRINT_UNCERTAIN_REASONS = ("insert_invisible", "attmode_not_normal", "viewport_frozen", "defpoints_layer")
 NO_STYLE = "(no style)"
 
 TOLERANCE_RULE = (
@@ -784,6 +788,54 @@ def legacy_ascii_questions(
         refs = [{"file": rel, "where": where, "found": f"{e['id']}: {e['display_text']}"} for e in entries]
         out.append(question_group(LEGACY_ASCII_CODE, False, message, refs, MAX_LEGACY_EXAMPLES, file=rel))
     return out
+
+
+def text_visibility_questions(text_index: dict[str, Any], rel: str) -> list[dict[str, Any]]:
+    """The text_visibility_uncertain question of one file (tool wave 4, V1): none unless a printed entry lists
+    `print_uncertain_reasons`, else one non-blocking question.
+
+    Refs: first one per reason with the number of entries it covers (an entry with two reasons counts under
+    both), then the first MAX_VISIBILITY_EXAMPLES entries in id order, each quoted with its entry id. `count`
+    is the number of entries with any reason. Those entries stay printed; the engineer says whether they
+    print.
+    An entry that is not printed is never counted (its hard reason settles it), and an index written before
+    the field existed raises nothing.
+    """
+    uncertain = [
+        e
+        for e in sorted(text_index["entries"], key=lambda e: (len(e["id"]), e["id"]))
+        if e.get("printed") is not False and e.get("print_uncertain_reasons")
+    ]
+    if not uncertain:
+        return []
+    per_reason = {
+        r: [e for e in uncertain if r in e["print_uncertain_reasons"]] for r in PRINT_UNCERTAIN_REASONS
+    }
+    refs = [
+        {
+            "file": rel,
+            "where": f"reason {reason}",
+            "found": f"{len(rows)} {'entry' if len(rows) == 1 else 'entries'}",
+        }
+        for reason, rows in per_reason.items()
+        if rows
+    ]
+    for e in uncertain[:MAX_VISIBILITY_EXAMPLES]:
+        text = " ".join(str(e["display_text"]).split())
+        text = text[:MAX_VISIBILITY_TEXT] + ("..." if len(text) > MAX_VISIBILITY_TEXT else "")
+        where = f"layer {e['layer']}; {', '.join(e['print_uncertain_reasons'])}"
+        refs.append({"file": rel, "where": where, "found": f"{e['id']}: {text}"})
+    counts = ", ".join(f"{r} {len(rows)}" for r, rows in per_reason.items() if rows)
+    message = (
+        f"{len(uncertain)} text entr{'y' if len(uncertain) == 1 else 'ies'} may not print, which the file "
+        f"does not settle ({counts}): an INSERT hidden over its content, $ATTMODE other than 1, a layer "
+        "frozen in a viewport or the Defpoints layer. They are read as printed. Open the drawing at the "
+        "example entries and say whether they print."
+    )
+    question = question_group(TEXT_VISIBILITY_CODE, False, message, refs, file=rel)
+    question["count"] = len(uncertain)
+    question["truncated"] = len(uncertain) > MAX_VISIBILITY_EXAMPLES
+    return [question]
 
 
 def _unreadable(scan: _Scan, handles_ok: bool) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:

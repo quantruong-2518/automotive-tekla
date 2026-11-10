@@ -754,6 +754,10 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
     drawings, not printed: 271 305 (232 on real entities, the exact set of the EVAL-4 hidden list, plus 73
     rebar callout TEXT copies inside anonymous blocks), 278 46, 285 6 (dimension texts on a layer with plot
     0), the other seven 0.
+  - Tool wave 4, package T (text), question: `read_dxf.text_visibility_questions(text_index, rel)` builds the
+    one non-blocking `text_visibility_uncertain` question of a file that has printed entries with
+    `print_uncertain_reasons` (a ref per reason with its entry count, then five example entry ids; `count` is
+    the number of entries). Intake does not call it yet: that hook-up is in a file outside package T.
 
 ### Changed
 - Question lifecycle (tool wave 2, EVAL-2 fix 5):
