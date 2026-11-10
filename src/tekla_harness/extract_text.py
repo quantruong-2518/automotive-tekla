@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import math
 import re
+import unicodedata
 from collections import Counter
 from collections.abc import Iterator
 from dataclasses import dataclass, field, replace
@@ -91,6 +92,10 @@ _SPECIAL_EXPANSION = {
     "o": "",
     "k": "",
 }
+# Tool wave 4 (V2): plain Unicode text in a TrueType file that has shown itself to be Unicode.
+UNICODE_FONT_FLAG = "unicode_by_font_evidence"
+_TRUETYPE_SUFFIXES = (".ttf", ".ttc", ".otf")
+_VIETNAMESE_MARKS = frozenset("\u0300\u0301\u0302\u0303")  # grave, acute, circumflex, tilde
 _ASCII_LOWER = re.compile(r"[a-z]")
 _SOURCE_ORDER = (
     "codepoint_evidence",
@@ -242,6 +247,11 @@ class _Context:
     # unknown encoding, and the pure-ASCII entries with a legacy-looking run, judged once all are read
     unknown_non_ascii_fonts: set[tuple[str, str]] = field(default_factory=set)
     ascii_suspects: list[tuple[dict[str, Any], list[_SuspectRun]]] = field(default_factory=list)
+    # unicode_by_font_evidence: font keys with a style run proved Unicode by its code points, font keys with a
+    # style run read as TCVN3 / VNI or contradicting its font, and the entries whose unknown runs may lift
+    unicode_proven_fonts: set[tuple[str, str]] = field(default_factory=set)
+    legacy_fonts: set[tuple[str, str]] = field(default_factory=set)
+    lift_candidates: list[tuple[dict[str, Any], tuple[str, str]]] = field(default_factory=list)
     errors: list[dict[str, Any]] = field(default_factory=list)
     errors_total: int = 0
     empty_skipped: int = 0
@@ -432,6 +442,11 @@ def _decode_text(ctx: _Context, raw: str, style: str | None, *, mtext: bool) -> 
     suspect: list[_SuspectRun] = []  # the runs that look legacy
     for run, r in zip(runs, results, strict=True):
         key = ctx.font_key(style) if run.font is None else ("font", run.font.casefold())
+        if run.font is None:
+            if r.encoding in ("tcvn3", "vni") or r.contradicts_font:
+                ctx.legacy_fonts.add(key)
+            elif r.encoding == "unicode" and r.font_source == "codepoint_evidence":
+                ctx.unicode_proven_fonts.add(key)
         if r.unknown_non_ascii:
             ctx.unknown_non_ascii_fonts.add(key)
         if r.encoding in ("tcvn3", "vni", "unknown") and any(
@@ -524,7 +539,36 @@ def _decode_text(ctx: _Context, raw: str, style: str | None, *, mtext: bool) -> 
         "flags": flags,
         "confidence": confidence,
         "_suspect_runs": suspect,
+        "_lift_font": _lift_font(ctx, style, runs, results),
     }
+
+
+def _latin_1_vietnamese_letter(char: str) -> bool:
+    """A Vietnamese vowel with grave, acute, circumflex or tilde that Latin-1 holds (À Á Â Ã È É Ê Ì Í Ò Ó Ô Õ
+    Ù Ú Ý and lowercase). Ä Ö Ü Ç Ñ Å, symbols and legacy toned-letter byte values are not."""
+    base, *marks = unicodedata.normalize("NFD", char)
+    return base in "AEIOUYaeiouy" and bool(marks) and all(m in _VIETNAMESE_MARKS for m in marks)
+
+
+def _lift_font(
+    ctx: _Context, style: str | None, runs: list[_Run], results: list[_RunResult]
+) -> tuple[str, str] | None:
+    """The font key whose evidence may lift this entry's unknown encoding (V2), else None.
+
+    Candidates: a non-ASCII entry with at least one run of unknown encoding, every such run on the entity's
+    text style (an inline font of unknown encoding is never lifted), whose non-ASCII characters in those runs
+    are all Latin-1 Vietnamese letters, and that no knowledge row, conflict or contradiction already decides.
+    The font file must also have proved itself: see `_lift_unicode_font_entries`."""
+    unknown = [run for run, r in zip(runs, results, strict=True) if r.encoding == "unknown"]
+    if not unknown or any(run.font is not None for run in unknown):
+        return None
+    if all(run.text.isascii() for run in runs):
+        return None
+    if any(r.conflict or r.proposed or r.contradicts_font for r in results):
+        return None
+    if not all(ch.isascii() or _latin_1_vietnamese_letter(ch) for run in unknown for ch in run.text):
+        return None
+    return ctx.font_key(style)
 
 
 def _min_conf(a: str, b: str) -> str:
@@ -588,6 +632,25 @@ def _flag_legacy_ascii(ctx: _Context) -> None:
         ):
             entry["flags"].append("legacy_ascii_suspect")
             entry["confidence"] = "low"
+
+
+def _lift_unicode_font_entries(ctx: _Context) -> None:
+    """Flag `unicode_by_font_evidence` on each candidate whose font is a TrueType file that holds a style run
+    proved Unicode by code points and no style run read as TCVN3 / VNI (tool wave 4, V2).
+
+    A legacy single-byte font cannot hold a Vietnamese letter above U+00FF, so such a run shows the file is
+    drawn as Unicode; its other strings, written in the same file, are Unicode too even when their own letters
+    (KÍNH) are also legacy byte values. The decode stays what the string alone supports (`unknown`); only the
+    flag carries the file-level evidence, `text_gate` lets it past `encoding_unknown`, and the entry's
+    `encoding_unknown_non_ascii` flag (the question trigger) is dropped. Confidence stays as it was."""
+    for entry, key in ctx.lift_candidates:
+        kind, name = key
+        if kind != "file" or not name.endswith(_TRUETYPE_SUFFIXES):
+            continue
+        if key not in ctx.unicode_proven_fonts or key in ctx.legacy_fonts:
+            continue
+        entry["flags"] = [f for f in entry["flags"] if f != "encoding_unknown_non_ascii"]
+        entry["flags"].append(UNICODE_FONT_FLAG)
 
 
 # --- entities ------------------------------------------------------------------------
@@ -708,6 +771,7 @@ def _add_entry(
     font_file, style_exists = ctx.style_font(style)
     decoded = _decode_text(ctx, raw, style, mtext=mtext)
     suspect_runs = decoded.pop("_suspect_runs")
+    lift_font = decoded.pop("_lift_font")
     flags = list(extra_flags) + decoded.pop("flags")
     if has_lone_surrogate(raw):  # undecodable bytes: scrubbed on output, so say it here
         flags.append("invalid_utf8_bytes")
@@ -773,6 +837,8 @@ def _add_entry(
     ctx.entries.append(entry)
     if suspect_runs and raw.isascii():
         ctx.ascii_suspects.append((entry, suspect_runs))
+    if lift_font is not None:
+        ctx.lift_candidates.append((entry, lift_font))
 
 
 def _definition_handle(ctx: _Context, entity: Any) -> str | None:
@@ -1287,6 +1353,7 @@ def _extract_text(
         for entity in layout:
             _visit_entity(ctx, frame, entity)
     _flag_legacy_ascii(ctx)
+    _lift_unicode_font_entries(ctx)
     attdefs: list[dict[str, Any]] = []
     try:
         attdefs = _attdefs(ctx)
