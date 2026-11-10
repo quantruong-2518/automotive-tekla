@@ -49,6 +49,7 @@ from tekla_harness.questions import (
     KEY_LENGTH,
     LEGACY_ASCII_CODE,
     PRODUCER_COMMANDS,
+    TEXT_VISIBILITY_CODE,
     Ledger,
     QuestionsError,
     dump_json,
@@ -82,6 +83,7 @@ OTHER_OWNERS: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
             "no_reader_implemented",
             "file_set_relation",
             LEGACY_ASCII_CODE,  # tool wave 3: read-dxf, one per file and text style
+            TEXT_VISIBILITY_CODE,  # tool wave 4: extract-text, one per file
         ),
         ("units_",),
     ),

@@ -758,7 +758,7 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
   - Tool wave 4, package T (text), question: `read_dxf.text_visibility_questions(text_index, rel)` builds the
     one non-blocking `text_visibility_uncertain` question of a file that has printed entries with
     `print_uncertain_reasons` (a ref per reason with its entry count, then five example entry ids; `count` is
-    the number of entries). Intake does not call it yet: that hook-up is in a file outside package T.
+    the number of entries). Intake calls it from seam 2.
   - Tool wave 4, package T (text), wording: the `harness find-text` note no longer tells the engineer to
     approve the font row for `legacy_ascii_suspect` entries. It names the `legacy_ascii_text` questions as
     recording a reading that unblocks nothing, and mentions the font row (with its questions) only for
@@ -766,6 +766,10 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
   - Tool wave 4, package T (text), gate: unchanged. A font-evidence lift for plain Unicode text in a TrueType
     file (271 `KÍNH`) was built and reverted after review: it let TCVN3 / VNI strings past the gate. Such text
     stays blocked `encoding_unknown`; `tests/test_legacy_text_stays_blocked.py` keeps it so.
+  - Tool wave 4, seam 2: `harness intake` now raises the non-blocking `text_visibility_uncertain` question
+    (one per file with printed entries that have `print_uncertain_reasons`, built by
+    `read_dxf.text_visibility_questions`); it comes after `legacy_ascii_text` in `questions.json` and
+    `ask.py` leaves its ownership to intake. The intake schema's question-order description lists it.
 
 ### Changed
 - Question lifecycle (tool wave 2, EVAL-2 fix 5):

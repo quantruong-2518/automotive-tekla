@@ -12,7 +12,7 @@ import textwrap
 from pathlib import Path
 
 import pytest
-from ezdxf.filemanagement import new
+from ezdxf.filemanagement import new, readfile
 
 from conftest import EXAMPLES
 from tekla_harness import intake as intake_mod
@@ -836,3 +836,28 @@ def test_dwg2dxf_cli_prints_stderr_fields(tmp_path, template, capsys, monkeypatc
     out = json.loads(capsys.readouterr().out)
     assert out["stderr_error_lines"] == 2 and out["stderr_warning_lines"] == 0
     assert "overflow" in out["stderr_tail"]
+
+
+def test_intake_asks_text_visibility_uncertain_once_per_file_with_uncertain_text(tmp_path):
+    """Tool wave 4 (V1): a.dxf has an attribute under $ATTMODE 2, b.dxf has nothing uncertain."""
+    root = tmp_path / "input"
+    make_text_dxf(root / "b.dxf", [("D1", "Simplex", "simplex.shx")])
+    path = make_text_dxf(root / "a.dxf", [("D1", "Simplex", "simplex.shx")])
+    doc = readfile(str(path))
+    doc.header["$ATTMODE"] = 2
+    doc.blocks.new("B").add_attdef("T", (0, 0), text="d", dxfattribs={"height": 1})
+    doc.modelspace().add_blockref("B", (50, 0)).add_auto_attribs({"T": "attr"})
+    doc.saveas(path)
+    out = tmp_path / "work"
+    run_intake(root, out, "demo-intake", knowledge=EMPTY_TABLE)
+    questions = load(out, "questions.json")
+    assert validate("intake", questions) == []
+    visibility = [q for q in questions["questions"] if q["code"] == "text_visibility_uncertain"]
+    assert [(q["file"], q["blocking"], q["count"]) for q in visibility] == [("a.dxf", False, 1)]
+    assert visibility[0]["refs"][0] == {
+        "file": "a.dxf",
+        "where": "reason attmode_not_normal",
+        "found": "1 entry",
+    }
+    registry = load(out, "question-registry.json")["questions"]
+    assert [v["file"] for v in registry.values() if v["code"] == "text_visibility_uncertain"] == ["a.dxf"]
