@@ -1037,7 +1037,7 @@ def test_a_two_axis_family_seen_once_beside_the_plans_is_not_a_system(tmp_path, 
         "F009",
         "x y",
     )
-    assert "two-axis" in row["reason"] and "S001" in row["reason"]
+    assert "one direction" in row["reason"] and "S001" in row["reason"]
     assert doc["summary"]["families_unassigned"] == 1
     assert codes(doc).count("grid_system_axis_unassigned") == 1  # the plan system only
 
@@ -1049,17 +1049,38 @@ def test_without_a_main_system_the_two_axis_family_is_kept(tmp_path, example):
     assert len(doc["systems"]) == 1 and not doc["unassigned_families"]
 
 
-def test_a_main_system_seen_in_one_view_does_not_make_a_stray(tmp_path, example):
-    """The file's two-direction system is itself seen once: nothing says the two-axis family is odd."""
+def test_a_main_system_seen_in_one_view_makes_a_stray(tmp_path, example):
+    """EVAL-4 180: every plan is seen once (halves of one grid), so no system has two independent views, but a
+    two-direction system with three or more axes in each direction is still the file's grid."""
     w = Work(tmp_path, example)
     w.add_file("plans.dxf", [*_plan_views(6000.0, sheets=("model#03",)), _stray()])
+    doc = build_grid_systems(w.finish(), answers=[])
+    assert [len(s["directions"]) for s in doc["systems"]] == [2]
+    assert [u["labels"] for u in doc["unassigned_families"]] == ["x y"]
+
+
+def test_a_longer_one_direction_family_seen_once_is_a_stray_too(tmp_path, example):
+    """EVAL-4 180 model#05/06 (3D views) and 278-like details: any number of axes, one direction, one view."""
+    stray = _stray(labels=("x", "y", "z", "w"))
+    doc = build_grid_systems(_plans_work(tmp_path, example, [stray]), answers=[])
+    assert len(doc["systems"]) == 1
+    assert [u["labels"] for u in doc["unassigned_families"]] == ["x y z w"]
+
+
+def test_a_two_direction_system_of_two_axes_is_no_main_system(tmp_path, example):
+    """Two axes per direction is too little to be the file's grid: the one-direction family stays."""
+    w = Work(tmp_path, example)
+    small = view(
+        "V002", "model#03", fam("F003", ["A", "B"], [6000.0], angle=0.0), fam("F004", ["1", "2"], [6000.0])
+    )
+    w.add_file("plans.dxf", [small, _stray(labels=("x", "y", "z"))])
     doc = build_grid_systems(w.finish(), answers=[])
     assert len(doc["systems"]) == 2 and not doc["unassigned_families"]
 
 
-def test_a_three_axis_family_is_kept(tmp_path, example):
-    stray = _stray(labels=("x", "y", "z"))
-    doc = build_grid_systems(_plans_work(tmp_path, example, [stray]), answers=[])
+def test_a_three_axis_family_seen_on_two_sheets_is_kept(tmp_path, example):
+    extra = [_stray(labels=("x", "y", "z")), _stray("V010", "model#10", labels=("x", "y", "z"), fid="F010")]
+    doc = build_grid_systems(_plans_work(tmp_path, example, extra), answers=[])
     assert len(doc["systems"]) == 2 and not doc["unassigned_families"]
 
 

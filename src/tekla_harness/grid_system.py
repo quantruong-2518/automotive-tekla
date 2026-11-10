@@ -1018,16 +1018,17 @@ def _drop_strays(
 ) -> tuple[list[_System], list[tuple[_System, _System]]]:
     """(systems without the strays, [(stray, the system of its file that makes it one)]).
 
-    A stray is a system of ONE direction and exactly two axes seen in ONE view (rebar or pile marks drawn
-    like grid bubbles: EVAL-3 286 `b bt`, 290 `8 1` / `6 1` / `3 16`), in a file that also has a two-direction
-    system read in two or more independent views. A Tekla grid needs two directions, and the file's grid is
-    already a system; the stray is reported in `unassigned_families`, never silently dropped. A file without
-    such a system keeps its small systems: they may be all it has."""
-    strong = [s for s in systems if len(s.rep.fams) == 2 and _independent(s, ctx) >= 2]
+    The file's MAIN system is a two-direction system with three or more axes in each direction, from any
+    number of views (EVAL-4 180: every plan is seen once, as a half of one grid). A STRAY is a system of ONE
+    direction seen in ONE independent view (rebar or pile marks drawn like bubbles: EVAL-3 286 `b bt`, 290
+    `8 1` / `6 1` / `3 16`; 3D views and details), in a file that has a main system. A Tekla grid needs two
+    directions, and the file's grid is already a system; the stray is reported in `unassigned_families`,
+    never silently dropped. A file without a main system keeps its small systems: they may be all it has."""
+    strong = [s for s in systems if len(s.rep.fams) == 2 and min(len(f.labels) for f in s.rep.fams) >= 3]
     kept: list[_System] = []
     dropped: list[tuple[_System, _System]] = []
     for s in systems:
-        stray = len(s.rep.fams) == 1 and len(s.rep.fams[0].labels) == 2 and _independent(s, ctx) < 2
+        stray = len(s.rep.fams) == 1 and _independent(s, ctx) < 2
         main = next(
             (m for m in strong if m is not s and any(x.view.file == s.rep.file for x in m.members)), None
         )
@@ -1730,8 +1731,9 @@ def build_grid_systems(
                 "group_id": rf.group_id,
                 "family_id": rf.family_id,
                 "labels": rf.label_text(),
-                "reason": "a two-axis family of one direction seen in one view, beside the file's grid "
-                f"system {ids[systems.index(main)]}: not proposed as a grid system (rebar or pile marks?)",
+                "reason": "a family of one direction seen in one view, beside the file's grid "
+                f"system {ids[systems.index(main)]}: not proposed as a grid system (rebar or pile marks, a "
+                "3D view, a detail?)",
             }
         )
     place: dict[str, tuple[str, str | None]] = {}  # system -> (file, sheet) its questions are filed under

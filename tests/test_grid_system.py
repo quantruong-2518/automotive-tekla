@@ -533,10 +533,12 @@ def test_single_direction_view_and_subset_of_two_direction_system(tmp_path, exam
     w.add_file("plans.dxf", [plan("V001", "model#01", 1), plan("V002", "model#02", 3), lone, other])
     doc = build_grid_systems(w.finish())
     check_invariants(doc)
-    assert len(doc["systems"]) == 2
-    s1, s2 = doc["systems"]
+    # the lettered view joins the two-direction system as a partial contributor; the unrelated one-direction
+    # family seen once is a stray beside the file's grid (tool wave 4), listed with its reason
+    (s1,) = doc["systems"]
     assert s1["evidence"]["partial_views"] == 1 and len(s1["directions"]) == 2
-    assert len(s2["directions"]) == 1 and "single_direction" in s2["flags"]
+    (row,) = doc["unassigned_families"]
+    assert row["labels"] == "P Q R" and "one direction" in row["reason"]
 
 
 def test_subset_of_two_conflicting_systems_stays_apart(tmp_path, example):

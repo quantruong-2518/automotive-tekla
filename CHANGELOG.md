@@ -775,11 +775,13 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
       labels in alike runs of at least two axes (`a b a b`, never `1 2 2` or `1 2 1 3`), the view is cut into
       one view per run and every other axis of it belongs to each (EVAL-4 278 KC-01). `bubbles_paired` counts
       each bubble once.
-    - `harness grid-system`: a system of one direction with exactly two axes seen in one view is not proposed
-      as a grid system when its file also has a two-direction system read in two or more independent views
-      (rebar or pile marks drawn like bubbles: EVAL-3 286 `b bt`, 290 `8 1` / `6 1` / `3 16`). It is listed in
-      `unassigned_families` with the reason, counted in `summary.families_unassigned`, and raises no
-      `grid_system_axis_unassigned` question.
+    - `harness grid-system`: a system of one direction seen in one view (any number of axes: rebar or pile
+      marks, 3D views, details: EVAL-3 286 `b bt`, 290 `8 1` / `6 1` / `3 16`, 180 model#05 / #06) is not
+      proposed as a grid system when its file has a main system, a two-direction system with three or more
+      axes in each direction from any number of views (180: every plan is seen once, as half of one grid).
+      It is listed in `unassigned_families` with the reason, counted in `summary.families_unassigned`, and
+      raises no `grid_system_axis_unassigned` question. 180: 8 systems / 31 blocking grid questions become
+      5 / 17; the other ten known drawings are unchanged.
     - A view of one direction (one family of two or more axes, nothing across it) whose shared labels contradict
       every other family that shares two or more of them, while two or more of those families agree with each
       other, is set aside as an elevation or section: no grid system, no cross-check partner (EVAL-4 278
