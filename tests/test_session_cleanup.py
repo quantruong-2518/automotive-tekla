@@ -80,7 +80,24 @@ def clean(mod, repo: Path, tmp_path: Path, **kw):
     elsewhere.mkdir(exist_ok=True)
     kw.setdefault("current", elsewhere)
     kw.setdefault("now", time.time() + FAR_FUTURE)
+    kw.setdefault("sessions_dir", tmp_path / "no-sessions")
     return mod.cleanup(repo, **kw)
+
+
+def use_real_ignore_rules(repo: Path) -> None:
+    """The ignore lines of this repository that matter here: `projects/*` and the regenerable ones."""
+    (repo / ".gitignore").write_text(
+        "projects/*\n!projects/README.md\n__pycache__/\n*.py[cod]\n.venv/\nbin/\nobj/\n", encoding="utf-8"
+    )
+    git(repo, "add", ".gitignore")
+    git(repo, "commit", "-q", "-m", "real ignore rules")
+
+
+def backdate(wt: Path, names: tuple[str, ...] = ("HEAD", "logs/HEAD"), hours: float = 48) -> None:
+    admin = Path(git(wt, "rev-parse", "--absolute-git-dir"))
+    stamp = time.time() - hours * 3600
+    for name in names:
+        os.utime(admin / name, (stamp, stamp))
 
 
 def removed_names(report) -> list[str]:
@@ -294,8 +311,7 @@ def test_worktree_directory_deleted_by_hand_does_not_crash(cleanup_mod, repo, tm
     report = clean(cleanup_mod, repo, tmp_path)
     assert removed_names(report) == ["other"]
     assert not other.exists()
-    assert str(gone) not in worktree_paths(repo)  # `git worktree prune` ran
-    assert report["removed_worktrees"][0]["target"] != str(gone)
+    assert str(gone) in worktree_paths(repo)  # kept for review: no `git worktree prune`
 
 
 def test_git_refusal_keeps_the_worktree_and_never_forces(cleanup_mod, repo, tmp_path, monkeypatch):
@@ -484,6 +500,189 @@ def test_dry_run_output_carries_the_flag(cleanup_mod):
     }
     out = cleanup_mod.build_output(report, dry_run=True)
     assert out is not None and out["dry_run"] is True
+
+
+# --- review fixes: ignored files, prune, protected dirs, handoff names, live sessions, order --
+
+
+def test_ignored_file_in_a_subdirectory_of_projects_keeps_the_worktree(cleanup_mod, repo, tmp_path):
+    """`projects/*` ignores `projects/p1/`; its `bin/` child must not make it look regenerable."""
+    use_real_ignore_rules(repo)
+    wt = add_worktree(repo, tmp_path, "w1")
+    (wt / "projects" / "p1" / "bin").mkdir(parents=True)
+    (wt / "projects" / "p1" / "bin" / "x.json").write_text("{}", encoding="utf-8")
+    report = clean(cleanup_mod, repo, tmp_path)
+    assert report["removed_worktrees"] == []
+    assert (wt / "projects" / "p1" / "bin" / "x.json").exists()
+    assert "projects/p1" in kept_for(report, "w1")["reason"]
+
+
+def test_regenerable_files_deep_in_the_tree_are_removable_with_the_real_ignore_rules(
+    cleanup_mod, repo, tmp_path
+):
+    use_real_ignore_rules(repo)
+    wt = add_worktree(repo, tmp_path, "w1")
+    (wt / "src" / "pkg" / "__pycache__").mkdir(parents=True)
+    (wt / "src" / "pkg" / "__pycache__" / "a.pyc").write_bytes(b"\0")
+    report = clean(cleanup_mod, repo, tmp_path)
+    assert removed_names(report) == ["w1"]
+
+
+def test_prunable_worktree_is_kept_for_review_and_its_branch_survives(cleanup_mod, repo, tmp_path):
+    gone = add_worktree(repo, tmp_path, "gone")
+    subprocess.run(["rm", "-rf", str(gone)], check=True)
+    report = clean(cleanup_mod, repo, tmp_path)
+    item = kept_for(report, "gone")
+    assert item["reason"] == "prunable: directory missing"
+    assert item["review"] is True and item["idle"] is True
+    assert str(gone) in worktree_paths(repo)  # nothing was pruned
+    assert report["deleted_branches"] == []
+    assert "fix/gone" in git(repo, "branch", "--list", "fix/*")
+
+
+def test_protected_directory_inside_a_worktree_keeps_it(cleanup_mod, repo, tmp_path):
+    wt = add_worktree(repo, tmp_path, "w1")
+    report = clean(cleanup_mod, repo, tmp_path, current=repo, protected=[wt / "sub"])
+    assert wt.exists()
+    assert "current" in kept_for(report, "w1")["reason"]
+
+
+def somewhere_else(tmp_path: Path) -> Path:
+    """A process cwd that neither contains nor sits in any worktree (tmp_path itself contains them)."""
+    folder = tmp_path / "elsewhere"
+    folder.mkdir(exist_ok=True)
+    return folder
+
+
+def run_hook_in(cwd: Path, project: Path, stdin: str, *args: str) -> subprocess.CompletedProcess[str]:
+    env = {**os.environ, "CLAUDE_PROJECT_DIR": str(project), "HOME": str(cwd / "no-home")}
+    return subprocess.run(
+        [sys.executable, str(HOOKS / "session_cleanup.py"), *args],
+        input=stdin,
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=cwd,
+        check=False,
+    )
+
+
+def test_hook_keeps_the_worktree_named_by_the_stdin_cwd(repo, tmp_path):
+    wt = add_worktree(repo, tmp_path, "w1")
+    backdate(wt)
+    proc = run_hook_in(somewhere_else(tmp_path), repo, json.dumps({"cwd": str(wt)}), "--repo", str(repo))
+    assert proc.returncode == 0
+    assert wt.exists()
+
+
+def test_hook_keeps_the_worktree_it_runs_in_even_when_the_project_dir_is_main(repo, tmp_path):
+    wt = add_worktree(repo, tmp_path, "w1")
+    backdate(wt)
+    proc = run_hook_in(wt, repo, "{}", "--repo", str(repo))
+    assert proc.returncode == 0
+    assert wt.exists()
+
+
+@pytest.mark.parametrize("stdin", ["", "not json", "[1]", '{"cwd": 5}'])
+def test_hook_tolerates_empty_or_invalid_stdin(repo, tmp_path, stdin):
+    wt = add_worktree(repo, tmp_path, "w1")
+    backdate(wt)
+    proc = run_hook_in(somewhere_else(tmp_path), repo, stdin, "--repo", str(repo))
+    assert proc.returncode == 0
+    assert not wt.exists()  # nothing protected it: removed as before
+
+
+def test_bare_agent_id_in_a_handoff_file_keeps_the_worktree(cleanup_mod, repo, tmp_path):
+    wt = add_worktree(repo, tmp_path, "agent-ab12cd34", branch="worktree-agent-ab12cd34")
+    (repo / ".handoff").mkdir()
+    (repo / ".handoff" / "topic.md").write_text("subagent ab12cd34 still has notes", encoding="utf-8")
+    report = clean(cleanup_mod, repo, tmp_path)
+    assert wt.exists()
+    assert "handoff" in kept_for(report, "agent-ab12cd34")["reason"]
+
+
+def write_session(folder: Path, name: str, data: object) -> None:
+    folder.mkdir(exist_ok=True)
+    (folder / name).write_text(data if isinstance(data, str) else json.dumps(data), encoding="utf-8")
+
+
+def test_live_session_cwd_inside_a_worktree_keeps_it(cleanup_mod, repo, tmp_path):
+    wt = add_worktree(repo, tmp_path, "w1")
+    sessions = tmp_path / "sessions"
+    write_session(sessions, "a.json", {"pid": os.getpid(), "cwd": str(wt / "sub")})
+    report = clean(cleanup_mod, repo, tmp_path, sessions_dir=sessions)
+    assert wt.exists()
+    assert kept_for(report, "w1")["reason"] == "live session"
+
+
+def test_dead_or_malformed_session_files_do_not_keep_a_worktree(cleanup_mod, repo, tmp_path):
+    wt = add_worktree(repo, tmp_path, "w1")
+    dead = subprocess.Popen([sys.executable, "-c", "pass"])
+    dead.wait()
+    sessions = tmp_path / "sessions"
+    write_session(sessions, "dead.json", {"pid": dead.pid, "cwd": str(wt)})
+    write_session(sessions, "bad.json", "{not json")
+    write_session(sessions, "nopid.json", {"cwd": str(wt)})
+    write_session(sessions, "strpid.json", {"pid": str(os.getpid()), "cwd": str(wt)})
+    write_session(sessions, "zero.json", {"pid": 0, "cwd": str(wt)})
+    report = clean(cleanup_mod, repo, tmp_path, sessions_dir=sessions)
+    assert removed_names(report) == ["w1"]
+
+
+def test_unreadable_handoff_file_keeps_the_worktree_and_the_branch(cleanup_mod, repo, tmp_path):
+    wt = add_worktree(repo, tmp_path, "w1")
+    git(repo, "branch", "fix/old")
+    (repo / ".handoff").mkdir()
+    (repo / ".handoff" / "broken.md").mkdir()  # reading a directory raises OSError
+    report = clean(cleanup_mod, repo, tmp_path)
+    assert wt.exists()
+    assert "handoff unreadable" in kept_for(report, "w1")["reason"]
+    assert "handoff unreadable" in kept_for(report, "fix/old")["reason"]
+    assert report["deleted_branches"] == []
+
+
+def test_checks_run_cheapest_first(cleanup_mod, repo, tmp_path):
+    """A recent dirty worktree is 'not idle', not 'untracked'; a handoff mention beats a dirty tree."""
+    fresh = add_worktree(repo, tmp_path, "fresh")
+    (fresh / "x.txt").write_text("x", encoding="utf-8")
+    noted = add_worktree(repo, tmp_path, "noted")
+    (noted / "x.txt").write_text("x", encoding="utf-8")
+    (repo / ".handoff").mkdir()
+    (repo / ".handoff" / "t.md").write_text("see noted", encoding="utf-8")
+    report = clean(cleanup_mod, repo, tmp_path, now=time.time())
+    assert kept_for(report, "fresh")["reason"].startswith("not idle")
+    assert kept_for(report, "noted")["reason"].startswith("not idle")
+    report = clean(cleanup_mod, repo, tmp_path)  # idle now
+    assert "handoff" in kept_for(report, "noted")["reason"]
+    assert "untracked" in kept_for(report, "fresh")["reason"]
+
+
+def test_only_head_and_reflog_decide_idleness_not_the_index(cleanup_mod, repo, tmp_path):
+    wt = add_worktree(repo, tmp_path, "w1")
+    backdate(wt)
+    admin = Path(git(wt, "rev-parse", "--absolute-git-dir"))
+    now = time.time()
+    os.utime(admin / "index", (now, now))
+    report = clean(cleanup_mod, repo, tmp_path, now=now)
+    assert removed_names(report) == ["w1"]
+
+
+def test_each_action_is_logged_as_soon_as_it_succeeds(cleanup_mod, repo, tmp_path, monkeypatch):
+    add_worktree(repo, tmp_path, "w1")
+    git(repo, "branch", "fix/old")
+    real = cleanup_mod.run_git
+
+    def boom(args, cwd, *a, **k):
+        if args[:2] == ["branch", "-d"]:
+            raise RuntimeError("interrupted")
+        return real(args, cwd, *a, **k)
+
+    monkeypatch.setattr(cleanup_mod, "run_git", boom)
+    with pytest.raises(RuntimeError):
+        clean(cleanup_mod, repo, tmp_path)
+    log = repo / ".git" / "claude-session-cleanup.jsonl"
+    rows = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
+    assert [r["action"] for r in rows] == ["removed_worktree"]
 
 
 # --- the hook as Claude Code runs it -------------------------------------------------------

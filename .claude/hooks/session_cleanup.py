@@ -6,23 +6,31 @@ ones that cannot lose work, and lists everything else for the engineer to decide
 to reverse, so every rule errs toward keeping.
 
 A worktree is removed only if ALL of these hold (otherwise it is kept, with the first failing reason):
-  a. it is not the main worktree, and not the session directory (the current directory is not in it;
-     it does not contain the current directory unless that is the main checkout);
-  b. it is neither locked nor prunable;
-  c. `git status --porcelain --ignored` lists nothing except regenerable ignored paths (`.venv/`,
-     `__pycache__/`, ...): no modified, untracked, or other ignored file (a `projects/` output stays);
-  d. its HEAD is an ancestor of an integration ref other than its own branch (`origin/master`,
-     `master`, any local `feat/*`): a `feat/*` worktree is never "merged into itself";
-  e. it is idle: the newest mtime of its admin files `HEAD`, `index`, `logs/HEAD` is older than
+  a. it is not the main worktree and not in use: none of the session's directories (the hook's stdin
+     `cwd`, the process cwd, `CLAUDE_PROJECT_DIR`) is the worktree or inside it, no live session listed
+     in `~/.claude/sessions/*.json` (undocumented; best effort) runs inside it, and it does not
+     contain such a directory unless that is inside the main checkout;
+  b. it is neither locked nor prunable (a prunable worktree, whose directory is gone, is only
+     reported: this hook never runs `git worktree prune`);
+  c. it is idle: the newest mtime of its admin files `HEAD` and `logs/HEAD` is older than
      `MIN_IDLE_HOURS`;
-  f. neither its branch name nor its directory name appears in `.handoff/*.md` of the main checkout.
-Removal is `git worktree remove` without `--force`; if git refuses, the worktree is kept.
+  d. neither its branch name, nor its directory name, nor either without the `worktree-` / `agent-`
+     prefix appears in `.handoff/*.md` of the main checkout, and every such file is readable;
+  e. `git status --porcelain --ignored=matching` lists nothing except entries that are themselves
+     regenerable (`.venv/`, `__pycache__/`, `*.pyc`, `bin/`, ...): no modified, untracked or other
+     ignored entry. Ignored directories are reported whole, so `projects/p1/` (ignored by
+     `projects/*`) is kept even if it only holds a `bin/` folder;
+  f. its HEAD is an ancestor of an integration ref other than its own branch (`origin/master`,
+     `master`, any local `feat/*`): a `feat/*` worktree is never "merged into itself".
+Checks run in that order, cheapest first. Removal is `git worktree remove` without `--force`; if
+git refuses, the worktree is kept.
 
 A local branch is deleted only with `git branch -d` (never `-D`) and only if it is not checked out in
-a worktree, is not `master` or `feat/*`, is an ancestor of `origin/master` or `master`, and is not
-mentioned in `.handoff/*.md`.
+a worktree (a prunable one still counts), is not `master` or `feat/*`, is an ancestor of
+`origin/master` or `master`, and is not mentioned in `.handoff/*.md` (an unreadable file keeps it).
 
-Every action is appended as one JSON line to `<git-common-dir>/claude-session-cleanup.jsonl`.
+Every action is appended as one JSON line to `<git-common-dir>/claude-session-cleanup.jsonl` right
+after it succeeds.
 `--dry-run` decides and reports but changes nothing and writes no log. `--repo <path>` selects the
 repository (default `CLAUDE_PROJECT_DIR` or the current directory).
 
@@ -38,6 +46,7 @@ import os
 import subprocess
 import sys
 import time
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -55,6 +64,7 @@ REGENERABLE = [
     "obj/",
 ]
 LOG_NAME = "claude-session-cleanup.jsonl"
+SESSIONS_DIR = Path.home() / ".claude" / "sessions"  # undocumented; only ever adds keeps
 GIT_TIMEOUT = 15
 MAX_LINES = 20
 
@@ -135,29 +145,9 @@ def is_regenerable(entry: str) -> bool:
     return False
 
 
-def first_non_regenerable(directory: Path, rel: str) -> str | None:
-    """First path under a collapsed ignored directory that is not regenerable (symlinks are not followed)."""
-    try:
-        children = sorted(os.scandir(directory), key=lambda e: e.name)
-    except OSError:
-        return rel  # cannot look inside: keep
-    for child in children:
-        child_rel = f"{rel}{child.name}"
-        if child.is_dir(follow_symlinks=False):
-            child_rel += "/"
-            if is_regenerable(child_rel):
-                continue
-            found = first_non_regenerable(Path(child.path), child_rel)
-            if found is not None:
-                return found
-        elif not is_regenerable(child_rel):
-            return child_rel
-    return None
-
-
 def unclean_reason(wt_path: str) -> str | None:
-    """None when the worktree holds nothing but regenerable ignored paths, else why it is not clean."""
-    rc, out, err = run_git(["status", "--porcelain", "-z", "--ignored"], wt_path)
+    """None when the worktree holds nothing but regenerable ignored entries, else why it is not clean."""
+    rc, out, err = run_git(["status", "--porcelain", "-z", "--ignored=matching"], wt_path)
     if rc != 0:
         return f"git status failed: {first_line(err)}"
     entries = out.split("\0")
@@ -171,14 +161,10 @@ def unclean_reason(wt_path: str) -> str | None:
         if code == "!!":
             if is_regenerable(path):
                 continue
-            # git collapses a directory holding only ignored files into one entry: look inside it
-            inner = first_non_regenerable(Path(wt_path) / path, path) if path.endswith("/") else path
-            if inner is None:
-                continue
-            return f"ignored file: {inner}"
+            return f"ignored file: {path}"
         if "R" in code or "C" in code:
             index += 1  # a rename or copy carries its source as the next field
-        kind = "ignored file" if code == "!!" else "untracked file" if code == "??" else "uncommitted change"
+        kind = "untracked file" if code == "??" else "uncommitted change"
         return f"{kind}: {path}"
     return None
 
@@ -189,7 +175,7 @@ def newest_admin_mtime(wt_path: str) -> float | None:
         return None
     admin = Path(out.strip())
     times: list[float] = []
-    for name in ("HEAD", "index", "logs/HEAD"):
+    for name in ("HEAD", "logs/HEAD"):
         try:
             times.append((admin / name).stat().st_mtime)
         except OSError:
@@ -201,29 +187,75 @@ def within(child: Path, parent: Path) -> bool:
     return child == parent or parent in child.parents
 
 
-def in_use(wt_path: str, current: Path, main_path: str) -> bool:
-    """The session runs in this worktree, or (not in the main checkout) it sits inside the session dir."""
-    wt, cur, main = Path(wt_path).resolve(), current.resolve(), Path(main_path).resolve()
-    if within(cur, wt):
-        return True
-    return within(wt, cur) and not within(cur, main)
+def in_use(wt_path: str, session_dirs: Sequence[Path], main_path: str) -> bool:
+    """A session directory is in this worktree, or (not in the main checkout) the worktree sits inside it."""
+    wt, main = Path(wt_path).resolve(), Path(main_path).resolve()
+    for directory in session_dirs:
+        cur = directory.resolve()
+        if within(cur, wt) or (within(wt, cur) and not within(cur, main)):
+            return True
+    return False
 
 
-def handoff_files_mentioning(main_path: str, needles: list[str]) -> str | None:
-    """Name of the first `.handoff/*.md` file containing any needle, else None."""
+def pid_alive(pid: int) -> bool:
+    """Whether a process with this pid exists; when unsure, True (an extra keep is harmless)."""
+    if sys.platform == "win32":  # os.kill(pid, 0) would terminate the process on Windows
+        import ctypes
+
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+        if handle:
+            kernel32.CloseHandle(handle)
+            return True
+        return kernel32.GetLastError() == 5  # access denied: the process exists
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except OSError:
+        return True  # PermissionError: it exists
+    return True
+
+
+def live_session_dirs(folder: Path) -> list[Path]:
+    """`cwd` of each `<folder>/*.json` session file whose `pid` is alive; any unreadable file is ignored."""
+    dirs: list[Path] = []
+    try:
+        files = sorted(folder.glob("*.json"))
+    except OSError:
+        return dirs
+    for file in files:
+        try:
+            data = json.loads(file.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if not isinstance(data, dict):
+            continue
+        pid, cwd = data.get("pid"), data.get("cwd")
+        if isinstance(pid, bool) or not isinstance(pid, int) or pid <= 0:
+            continue
+        if isinstance(cwd, str) and cwd and pid_alive(pid):
+            dirs.append(Path(cwd))
+    return dirs
+
+
+def handoff_reason(main_path: str, needles: list[str]) -> str | None:
+    """Why `.handoff/*.md` keeps the target: a file mentions a needle, or a file cannot be read."""
     folder = Path(main_path) / ".handoff"
     try:
         files = sorted(folder.glob("*.md"))
     except OSError:
-        return None
+        return "handoff unreadable: .handoff"
+    unreadable: str | None = None
     for file in files:
         try:
             text = file.read_text(encoding="utf-8", errors="replace")
         except OSError:
+            unreadable = unreadable or file.name
             continue
         if any(needle and needle in text for needle in needles):
-            return file.name
-    return None
+            return f"mentioned in handoff .handoff/{file.name}"
+    return f"handoff unreadable: .handoff/{unreadable}" if unreadable else None
 
 
 def integration_refs(main_path: str) -> list[str]:
@@ -248,16 +280,45 @@ def short_ref(ref: str) -> str:
     return ref.removeprefix("refs/heads/")
 
 
+class ActionLog:
+    """Appends one JSON line per action to `<git-common-dir>/claude-session-cleanup.jsonl`, at once."""
+
+    def __init__(self, main_path: str, now: float, enabled: bool) -> None:
+        self.main_path = main_path
+        self.stamp = time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(now))
+        self.enabled = enabled
+        self.path: Path | None = None
+
+    def row(self, action: str, target: str, reason: str, head: str) -> None:
+        if not self.enabled:
+            return
+        if self.path is None:
+            rc, out, _ = run_git(["rev-parse", "--path-format=absolute", "--git-common-dir"], self.main_path)
+            if rc != 0 or not out.strip():
+                self.enabled = False
+                return
+            self.path = Path(out.strip()) / LOG_NAME
+        entry = {"ts": self.stamp, "action": action, "target": target, "reason": reason, "head": head}
+        try:
+            with self.path.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        except OSError:
+            pass  # a log that cannot be written must not stop session start
+
+
 def cleanup(
     repo: str | Path,
     current: Path | None = None,
     now: float | None = None,
     min_idle_hours: float = MIN_IDLE_HOURS,
     dry_run: bool = False,
+    protected: Sequence[Path] = (),
+    sessions_dir: Path | None = None,
 ) -> dict[str, list[dict[str, Any]]]:
     """Remove (or, in dry-run, report) the safe worktrees and branches; return what happened."""
     now = time.time() if now is None else now
     current = Path.cwd() if current is None else current
+    session_dirs = [current, *protected]
     report: dict[str, list[dict[str, Any]]] = {"removed_worktrees": [], "deleted_branches": [], "kept": []}
     worktrees = list_worktrees(repo)
     if not worktrees:
@@ -265,81 +326,79 @@ def cleanup(
     main = worktrees[0]
     refs = integration_refs(main.path)
     idle_limit = min_idle_hours * 3600
+    live = live_session_dirs(SESSIONS_DIR if sessions_dir is None else sessions_dir)
+    log = ActionLog(main.path, now, enabled=not dry_run)
 
     def keep(kind: str, target: str, reason: str, head: str, review: bool, idle: bool) -> None:
         report["kept"].append(
             {"kind": kind, "target": target, "reason": reason, "head": head, "review": review, "idle": idle}
         )
+        if review:
+            log.row("kept", target, reason, head)
 
-    gone: set[str] = set()  # paths of worktrees removed, or pruned because their directory is gone
+    gone: set[str] = set()  # paths of worktrees removed (or, in dry-run, that would be)
     for wt in worktrees[1:]:
         if wt.bare:
             continue
-        if wt.prunable:
-            gone.add(wt.path)  # `git worktree prune` below drops its metadata; nothing to review
-            continue
-        if in_use(wt.path, current, main.path):
+        if in_use(wt.path, session_dirs, main.path):
             keep("worktree", wt.path, "current session directory", wt.head, review=False, idle=False)
             continue
-        mtime = newest_admin_mtime(wt.path)  # read before `git status` can touch the index
+        wt_root = Path(wt.path).resolve()
+        if any(within(directory.resolve(), wt_root) for directory in live):
+            keep("worktree", wt.path, "live session", wt.head, review=False, idle=False)
+            continue
+        if wt.locked:
+            keep("worktree", wt.path, "locked", wt.head, review=False, idle=False)
+            continue
+        if wt.prunable:  # never pruned here: the engineer decides (`git worktree prune`)
+            keep("worktree", wt.path, "prunable: directory missing", wt.head, review=True, idle=True)
+            continue
+        mtime = newest_admin_mtime(wt.path)
         idle = mtime is not None and now - mtime > idle_limit
         reason = worktree_keep_reason(wt, main.path, refs, idle, mtime is None, min_idle_hours)
         if reason is None:
+            removed = {
+                "target": wt.path,
+                "reason": "clean, merged, idle",
+                "head": wt.head,
+                "branch": short_ref(wt.branch),
+            }
             if dry_run:
                 gone.add(wt.path)
-                report["removed_worktrees"].append(
-                    {
-                        "target": wt.path,
-                        "reason": "clean, merged, idle",
-                        "head": wt.head,
-                        "branch": short_ref(wt.branch),
-                    }
-                )
+                report["removed_worktrees"].append(removed)
                 continue
             rc, _, err = run_git(["worktree", "remove", wt.path], main.path)
             if rc == 0:
                 gone.add(wt.path)
-                report["removed_worktrees"].append(
-                    {
-                        "target": wt.path,
-                        "reason": "clean, merged, idle",
-                        "head": wt.head,
-                        "branch": short_ref(wt.branch),
-                    }
-                )
+                report["removed_worktrees"].append(removed)
+                log.row("removed_worktree", wt.path, removed["reason"], wt.head)
                 continue
             reason = f"git refused: {first_line(err)}"
-        keep("worktree", wt.path, reason, wt.head, review=not wt.locked, idle=idle)
+        keep("worktree", wt.path, reason, wt.head, review=True, idle=idle)
 
-    if not dry_run:
-        run_git(["worktree", "prune"], main.path)
-
-    delete_branches(report, worktrees, gone, main.path, refs, now, idle_limit, dry_run)
-
-    if not dry_run:
-        write_log(report, main.path, now)
+    delete_branches(report, worktrees, gone, main.path, refs, now, idle_limit, dry_run, log)
     return report
 
 
 def worktree_keep_reason(
     wt: Worktree, main_path: str, refs: list[str], idle: bool, no_mtime: bool, min_idle_hours: float
 ) -> str | None:
-    """First failing rule among b, c, d, e, f (rule a is checked by the caller), else None."""
-    if wt.locked:
-        return "locked"
+    """First failing check among idle, handoff, status, merge (the caller checked the rest), else None."""
+    if no_mtime:
+        return "idle time unknown"
+    if not idle:
+        return f"not idle for {min_idle_hours:g}h yet"
+    branch, name = short_ref(wt.branch), Path(wt.path).name
+    needles = [branch, name, branch.removeprefix("worktree-"), name.removeprefix("agent-")]
+    mention = handoff_reason(main_path, needles)
+    if mention:
+        return mention
     dirty = unclean_reason(wt.path)
     if dirty is not None:
         return dirty
     candidates = [r for r in refs if r != wt.branch]
     if not wt.head or not any(is_ancestor(wt.head, r, main_path) for r in candidates):
         return "HEAD not merged into origin/master, master or another feat/* branch"
-    if no_mtime:
-        return "idle time unknown"
-    if not idle:
-        return f"not idle for {min_idle_hours:g}h yet"
-    mention = handoff_files_mentioning(main_path, [short_ref(wt.branch), Path(wt.path).name])
-    if mention:
-        return f"mentioned in handoff .handoff/{mention}"
     return None
 
 
@@ -352,6 +411,7 @@ def delete_branches(
     now: float,
     idle_limit: float,
     dry_run: bool,
+    log: ActionLog,
 ) -> None:
     rc, out, _ = run_git(
         ["for-each-ref", "--format=%(refname)%09%(objectname)%09%(committerdate:unix)", "refs/heads/"],
@@ -361,6 +421,13 @@ def delete_branches(
         return
     checked_out = {wt.branch for wt in worktrees if wt.path not in gone and wt.branch}
     masters = [r for r in refs if r in ("refs/remotes/origin/master", "refs/heads/master")]
+
+    def keep(name: str, reason: str, sha: str, idle: bool) -> None:
+        report["kept"].append(
+            {"kind": "branch", "target": name, "reason": reason, "head": sha, "review": True, "idle": idle}
+        )
+        log.row("kept", name, reason, sha)
+
     for line in out.splitlines():
         ref, _, rest = line.partition("\t")
         sha, _, stamp = rest.partition("\t")
@@ -372,91 +439,19 @@ def delete_branches(
         except ValueError:
             idle = False
         if not any(is_ancestor(sha, m, main_path) for m in masters):
-            report["kept"].append(
-                {
-                    "kind": "branch",
-                    "target": name,
-                    "reason": "not merged into origin/master or master",
-                    "head": sha,
-                    "review": True,
-                    "idle": idle,
-                }
-            )
+            keep(name, "not merged into origin/master or master", sha, idle)
             continue
-        mention = handoff_files_mentioning(main_path, [name])
+        mention = handoff_reason(main_path, [name])
         if mention:
-            report["kept"].append(
-                {
-                    "kind": "branch",
-                    "target": name,
-                    "reason": f"mentioned in handoff .handoff/{mention}",
-                    "head": sha,
-                    "review": True,
-                    "idle": idle,
-                }
-            )
+            keep(name, mention, sha, idle)
             continue
         if not dry_run:
             rc, _, err = run_git(["branch", "-d", name], main_path)
             if rc != 0:
-                report["kept"].append(
-                    {
-                        "kind": "branch",
-                        "target": name,
-                        "reason": f"git refused: {first_line(err)}",
-                        "head": sha,
-                        "review": True,
-                        "idle": idle,
-                    }
-                )
+                keep(name, f"git refused: {first_line(err)}", sha, idle)
                 continue
         report["deleted_branches"].append({"target": name, "reason": "merged into master", "head": sha})
-
-
-def write_log(report: dict[str, list[dict[str, Any]]], main_path: str, now: float) -> None:
-    rows: list[dict[str, str]] = []
-    stamp = time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(now))
-    for item in report["removed_worktrees"]:
-        rows.append(
-            {
-                "ts": stamp,
-                "action": "removed_worktree",
-                "target": item["target"],
-                "reason": item["reason"],
-                "head": item["head"],
-            }
-        )
-    for item in report["deleted_branches"]:
-        rows.append(
-            {
-                "ts": stamp,
-                "action": "deleted_branch",
-                "target": item["target"],
-                "reason": item["reason"],
-                "head": item["head"],
-            }
-        )
-    for item in report["kept"]:
-        if item["review"]:
-            rows.append(
-                {
-                    "ts": stamp,
-                    "action": "kept",
-                    "target": item["target"],
-                    "reason": item["reason"],
-                    "head": item["head"],
-                }
-            )
-    if not rows:
-        return
-    rc, out, _ = run_git(["rev-parse", "--path-format=absolute", "--git-common-dir"], main_path)
-    if rc != 0 or not out.strip():
-        return
-    try:
-        with (Path(out.strip()) / LOG_NAME).open("a", encoding="utf-8") as handle:
-            handle.writelines(json.dumps(row, ensure_ascii=False) + "\n" for row in rows)
-    except OSError:
-        pass  # a log that cannot be written must not stop session start
+        log.row("deleted_branch", name, "merged into master", sha)
 
 
 def shorten(lines: list[str], limit: int) -> list[str]:
@@ -503,13 +498,31 @@ def parse_args(argv: list[str]) -> tuple[bool, str | None]:
     return dry_run, repo
 
 
+def stdin_cwd() -> Path | None:
+    """`cwd` from the hook's JSON on stdin; None when stdin is a terminal, empty, invalid or has no `cwd`."""
+    try:
+        if sys.stdin is None or sys.stdin.isatty():
+            return None
+        data = json.loads(sys.stdin.read())
+    except (OSError, ValueError):
+        return None
+    cwd = data.get("cwd") if isinstance(data, dict) else None
+    return Path(cwd) if isinstance(cwd, str) and cwd else None
+
+
 def main(argv: list[str]) -> int:
     dry_run, repo_arg = parse_args(argv)
-    project = Path(os.environ.get("CLAUDE_PROJECT_DIR") or Path.cwd())
+    try:
+        process_cwd: Path | None = Path.cwd()
+    except OSError:
+        process_cwd = None
+    project_env = os.environ.get("CLAUDE_PROJECT_DIR")
+    project = Path(project_env) if project_env else process_cwd
     repo = Path(repo_arg) if repo_arg else project
-    if not repo.is_dir():
+    if project is None or repo is None or not repo.is_dir():
         return 0
-    out = build_output(cleanup(repo, current=project, dry_run=dry_run), dry_run)
+    protected = [d for d in (stdin_cwd(), process_cwd) if d is not None]
+    out = build_output(cleanup(repo, current=project, protected=protected, dry_run=dry_run), dry_run)
     if out is not None:
         sys.stdout.write(json.dumps(out, ensure_ascii=False))
     return 0
