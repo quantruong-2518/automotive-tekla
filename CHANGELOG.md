@@ -743,6 +743,29 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
     row in `harness questions-md`, raised by package T); flag `--include-hidden` on `harness sheet-text`
     and `harness find-text` (also show entries that do not print, marked), exit 3 with nothing run until
     package T lands. A synthetic R2018 (AC1032) DXF is tested through intake and read-structure.
+  - Tool wave 4, package T (text), visibility: `harness extract-text` fills `printed`,
+    `not_printed_reasons` and `print_uncertain_reasons` on every entry. Not printed: group 60 on the entity
+    (TEXT, MTEXT, ATTRIB, MULTILEADER, DIMENSION, also on block content), ATTRIB flag bit 1 (`invisible`
+    stays that flag only), the effective layer off, frozen or with the plot flag 0. Kept printed but
+    uncertain: an INSERT with group 60 above the entry, `$ATTMODE` other than 1 on an attribute (mode 2 shows even
+    a flag-1 attribute, so that one is uncertain; mode 0 hides every attribute, so a flag-1 attribute is not
+    printed), a layer frozen in some viewport (model space text only) and the `Defpoints` layer
+    (ezdxf rewrites its plot flag to 0 on every load, so only its name counts). Entries stay in the index;
+    the flags `layer_off`, `layer_frozen`, `attribute_invisible` and `text_gate` are unchanged. Known
+    drawings, not printed: 271 305 (232 on real entities, the exact set of the EVAL-4 hidden list, plus 73
+    rebar callout TEXT copies inside anonymous blocks), 278 46, 285 6 (dimension texts on a layer with plot
+    0), the other seven 0.
+  - Tool wave 4, package T (text), question: `read_dxf.text_visibility_questions(text_index, rel)` builds the
+    one non-blocking `text_visibility_uncertain` question of a file that has printed entries with
+    `print_uncertain_reasons` (a ref per reason with its entry count, then five example entry ids; `count` is
+    the number of entries). Intake does not call it yet: that hook-up is in a file outside package T.
+  - Tool wave 4, package T (text), wording: the `harness find-text` note no longer tells the engineer to
+    approve the font row for `legacy_ascii_suspect` entries. It names the `legacy_ascii_text` questions as
+    recording a reading that unblocks nothing, and mentions the font row (with its questions) only for
+    entries blocked by an encoding reason.
+  - Tool wave 4, package T (text), gate: unchanged. A font-evidence lift for plain Unicode text in a TrueType
+    file (271 `KÍNH`) was built and reverted after review: it let TCVN3 / VNI strings past the gate. Such text
+    stays blocked `encoding_unknown`; `tests/test_legacy_text_stays_blocked.py` keeps it so.
 
 ### Changed
 - Question lifecycle (tool wave 2, EVAL-2 fix 5):

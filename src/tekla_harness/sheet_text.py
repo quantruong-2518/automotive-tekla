@@ -682,6 +682,10 @@ def sheet_text(
     return _check_output(doc)
 
 
+def _ids(question_ids: set[str]) -> str:
+    return ", ".join(sorted(question_ids, key=_id_order))
+
+
 def find_text(
     work_dir: Path | str,
     contains: str,
@@ -719,7 +723,9 @@ def find_text(
     needle = normalize(contains)
     files: list[dict[str, Any]] = []
     hits: list[dict[str, Any]] = []
-    font_ids: set[str] = set()  # the questions covering the blocked entries in scope (W3)
+    encoding_ids: set[str] = set()  # questions whose answer can unblock an encoding reason (W3)
+    legacy_ids: set[str] = set()  # legacy_ascii_text questions: they record a reading and unblock nothing
+    blocked_encoding = blocked_legacy = 0
     for row in rows:
         loaded = load_file(inv, row, check_inputs=check_inputs)
         warnings.extend(f"{loaded.rel}: {w}" for w in loaded.warnings)
@@ -778,21 +784,38 @@ def find_text(
                     }
                 )
         if reasons:
-            encoding_ids, legacy_ids, id_warnings = _encoding_question_ids(inv, loaded.rel)
-            font_ids.update(_font_question_ids(reasons, encoding_ids, legacy_ids))
+            file_encoding_ids, file_legacy_ids, id_warnings = _encoding_question_ids(inv, loaded.rel)
+            by_legacy = [r == LEGACY_ASCII_REASON for r in reasons]
+            blocked_legacy += sum(by_legacy)
+            blocked_encoding += len(reasons) - sum(by_legacy)
+            if not all(by_legacy):
+                encoding_ids.update(file_encoding_ids)
+            if any(by_legacy):
+                legacy_ids.update(file_legacy_ids)
             warnings.extend(f"{loaded.rel}: {w}" for w in id_warnings)
     blocked = sum(f["blocked_entries"] for f in files)
     off_sheet_total = sum(f["unassigned_entries"] or 0 for f in files)
     shown = hits if max_hits is None else hits[:max_hits]
     notes = []
     if blocked:
-        notes.append(
+        note = (
             f"{blocked} blocked entries (unknown, proposed or contradicted font encoding, or legacy-looking "
             "ASCII) in the searched scope are never matched, on any form of their text: this search is "
-            "incomplete over them; read them by entry id or with sheet-text, and ask the engineer to approve "
-            "the font row"
-            + (f" (font questions: {', '.join(sorted(font_ids, key=_id_order))})" if font_ids else "")
+            "incomplete over them; read them by entry id or with sheet-text"
         )
+        if blocked_encoding:
+            note += (
+                f"; for the {blocked_encoding} with an encoding reason, ask the engineer to approve the font "
+                "row" + (f" (font questions: {_ids(encoding_ids)})" if encoding_ids else "")
+            )
+        if blocked_legacy:
+            note += (
+                f"; the {blocked_legacy} legacy-looking ASCII entries stay blocked whatever the answer, the "
+                "legacy_ascii_text question "
+                + (f"({_ids(legacy_ids)}) " if legacy_ids else "")
+                + "only records the engineer's reading of the style and would unblock nothing"
+            )
+        notes.append(note)
     doc = {
         "schema_version": SCHEMA_VERSION,
         "kind": "find_text",
