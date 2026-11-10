@@ -1292,6 +1292,59 @@ def _split_stacked(view: list[_Axis]) -> list[list[_Axis]]:
     return parts
 
 
+def _agree(fa: _Family, fb: _Family) -> bool | None:
+    """Whether two families give the labels they share the same order and spacings (None: fewer than two
+    shared labels, or a repeated label, so nothing to compare). The test of `_cross_checks`, without its
+    scale and drafting-tolerance statuses: anything but equal spacings is 'no'."""
+    la, lb = fa.labels(), fb.labels()
+    if len(set(la)) != len(la) or len(set(lb)) != len(lb):
+        return None
+    pa, pb = dict(zip(la, fa.rel_offsets, strict=True)), dict(zip(lb, fb.rel_offsets, strict=True))
+    common = [lbl for lbl in la if lbl and lbl in pb]
+    if len(common) < 2:
+        return None
+    seq = [pb[lbl] for lbl in common]
+    if not (all(q > p for p, q in pairwise(seq)) or all(q < p for p, q in pairwise(seq))):
+        return False
+    step = max(rounding_step(fa.spacings), rounding_step(fb.spacings))
+    return all(
+        abs(abs(pa[q] - pa[p]) - abs(pb[q] - pb[p])) <= max(step / 2, DRAFTING_TOL * abs(pa[q] - pa[p]))
+        for p, q in pairwise(common)
+    )
+
+
+def _set_aside_elevations(groups: list[_Group], ctx: _Ctx) -> tuple[list[_Group], list[_Bubble]]:
+    """(the groups that stay, the bubbles of the ones set aside).
+
+    A view of ONE direction (one family of two or more axes, nothing across it) whose shared labels contradict
+    every other family that shares at least two of them, while two or more of those families agree with each
+    other, shows the file's grid at another scale or in another place: a column elevation, a section (EVAL-4
+    278 KT-08: 1 2 4 at 10107 / 5192 against 1 2 2* 3 4 at 5850 / 2060 / 2940 / 4150 on 25 plans). It is no
+    grid system of its own and no cross-check partner; its bubbles are listed as unpaired and the warnings say
+    why. A plan (two directions) is never set aside: its disagreement is a question for the engineer."""
+    wide = [(g, f) for g in groups for f in g.families if len(f.axes) >= 2]
+    keep, bubbles = [], []
+    for g in groups:
+        big = [f for f in g.families if len(f.axes) >= 2]
+        if len(big) != 1:
+            keep.append(g)
+            continue
+        fam = big[0]
+        verdicts = [(o, _agree(fam, o)) for og, o in wide if og is not g]
+        others = [o for o, v in verdicts if v is not None]
+        mutual = any(_agree(a, b) for i, a in enumerate(others) for b in others[i + 1 :])
+        if len(others) >= 2 and mutual and all(v is False for _, v in verdicts if v is not None):
+            bubbles.extend(b for a in fam.axes for b in a.bubbles)
+            ctx.warnings.append(
+                f"{g.gid} on {g.sheet}: set aside, its axes {' '.join(lbl or '?' for lbl in fam.labels())} "
+                f"contradict {len(others)} other views of the same labels that agree with each other "
+                "(an elevation or a section?); listed as unpaired bubbles."
+            )
+        else:
+            keep.append(g)
+    return keep, bubbles
+
+
 def _check_family(fam: _Family, group: _Group, ctx: _Ctx) -> None:
     sheet = group.sheet
     labels = fam.labels()
@@ -1849,13 +1902,17 @@ def extract_grids(
         aside.extend(_set_aside(g, ctx))
         g.families = [f for f in g.families if f.axes]
     unpaired = unpaired + aside
+    for g in groups:
+        for fam in g.families:
+            fam.spacings = [b.offset - a.offset for a, b in zip(fam.axes, fam.axes[1:], strict=False)]
+    groups, elevation_bubbles = _set_aside_elevations(groups, ctx)
+    unpaired = unpaired + elevation_bubbles
     axis_no = 0
     for g in groups:
         for fam in g.families:
             for a in fam.axes:
                 axis_no += 1
                 a.aid = f"G{axis_no:04d}"
-            fam.spacings = [b.offset - a.offset for a, b in zip(fam.axes, fam.axes[1:], strict=False)]
             _check_family(fam, g, ctx)
         _check_view(g, ctx)
     _unlabelled(groups, segs, empty + unreadable, ctx)  # a blocked label is a missing label for the line

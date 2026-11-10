@@ -780,6 +780,11 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
       (rebar or pile marks drawn like bubbles: EVAL-3 286 `b bt`, 290 `8 1` / `6 1` / `3 16`). It is listed in
       `unassigned_families` with the reason, counted in `summary.families_unassigned`, and raises no
       `grid_system_axis_unassigned` question.
+    - A view of one direction (one family of two or more axes, nothing across it) whose shared labels contradict
+      every other family that shares two or more of them, while two or more of those families agree with each
+      other, is set aside as an elevation or section: no grid system, no cross-check partner (EVAL-4 278
+      KT-08: `1 2 4` at 10107 / 5192 against 25 plans of `1 2 2* 3 4`). The bubbles are listed as unpaired and
+      a `grids.json` warning says why; a plan (two directions) is never set aside.
 
 ### Changed
 - Question lifecycle (tool wave 2, EVAL-2 fix 5):

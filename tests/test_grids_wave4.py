@@ -1065,3 +1065,145 @@ def test_a_two_direction_stray_is_kept(tmp_path, example):
     )
     doc = build_grid_systems(_plans_work(tmp_path, example, [both]), answers=[])
     assert len(doc["systems"]) == 2 and not doc["unassigned_families"]
+
+
+# --- item 7 (F2f): a one-direction view that contradicts the file's plans is no grid ---------------
+
+
+def _plan(msp, ox: float, xs=(0.0, 5850.0, 10850.0, 15000.0), labels="1234") -> None:
+    """A two-direction plan at x offset `ox`: vertical axes `labels` at `ox + xs`, horizontal axes a, b."""
+    for x, label in zip(xs, labels, strict=True):
+        msp.add_line((ox + x, 0), (ox + x, 12000))
+        _bubble(msp, (ox + x, -R), label)
+    for y, label in ((2000.0, "a"), (6180.0, "b")):
+        msp.add_line((ox - 2000, y), (ox + xs[-1] + 2000, y))
+        _bubble(msp, (ox - 2000 - R, y), label)
+
+
+def _elevation(msp, ox: float, xs=(0.0, 10107.0, 15299.0), labels="124") -> None:
+    """Vertical axes only (a column elevation): no second direction, tall lines."""
+    for x, label in zip(xs, labels, strict=True):
+        msp.add_line((ox + x, 0), (ox + x, 30000))
+        _bubble(msp, (ox + x, 30000 + R), label)
+
+
+def _plans_and_elevation(msp, plans: int = 3, **kw) -> None:
+    for k in range(plans):
+        _plan(msp, 40000.0 * k)
+    _elevation(msp, 200000.0, **kw)
+
+
+def test_an_elevation_that_contradicts_the_plans_is_set_aside(tmp_path):
+    """EVAL-4 278 KT-08: a column elevation shows axes 1 2 4 at 10107 / 5192, while every plan has 1 2 2* 3 4
+    at 5850 / 5000 / 4150; it became its own system and raised order and spacing mismatches."""
+    result = run_with(_plain(tmp_path, _plans_and_elevation))
+    assert len(result["groups"]) == 3
+    assert not questions(result, "grid_spacing_cross_sheet_mismatch")
+    assert not questions(result, "grid_label_order_mismatch")
+    assert sorted(b["label"] for b in result["unpaired_bubbles"]["listed"]) == ["1", "2", "4"]
+    assert "contradict" in _warnings(result) and "set aside" in _warnings(result)
+
+
+def test_an_elevation_that_agrees_with_the_plans_stays(tmp_path):
+    result = run_with(
+        _plain(tmp_path, lambda m: _plans_and_elevation(m, xs=(0.0, 5850.0, 10850.0), labels="123"))
+    )
+    assert len(result["groups"]) == 4
+    assert not result["unpaired_bubbles"]["listed"]
+
+
+def test_one_other_view_is_not_enough_to_set_a_view_aside(tmp_path):
+    result = run_with(_plain(tmp_path, lambda m: _plans_and_elevation(m, plans=1)))
+    assert len(result["groups"]) == 2
+    assert questions(result, "grid_spacing_cross_sheet_mismatch")
+
+
+def test_a_two_direction_plan_is_never_set_aside(tmp_path):
+    """A fourth plan with another spacing is a real conflict for the engineer, not an elevation."""
+
+    def fn(msp):
+        for k in range(3):
+            _plan(msp, 40000.0 * k)
+        _plan(msp, 200000.0, xs=(0.0, 6000.0, 10850.0, 15000.0))
+
+    result = run_with(_plain(tmp_path, fn))
+    assert len(result["groups"]) == 4
+    assert questions(result, "grid_spacing_cross_sheet_mismatch")
+
+
+def test_views_that_disagree_among_themselves_do_not_outvote_a_view(tmp_path):
+    """Two plans that do not agree with each other give no main grid to measure the elevation against."""
+
+    def fn(msp):
+        _plan(msp, 0.0)
+        _plan(msp, 40000.0, xs=(0.0, 6000.0, 10850.0, 15000.0))
+        _elevation(msp, 200000.0)
+
+    result = run_with(_plain(tmp_path, fn))
+    assert len(result["groups"]) == 3
+
+
+def test_an_elevation_that_agrees_with_one_plan_is_not_set_aside(tmp_path):
+    """Two plans give 1 2 4 at 5850 / 9150, a third at 6000 / 9000; the elevation follows the third: it does
+    not contradict every plan."""
+
+    def fn(msp):
+        _plan(msp, 0.0)
+        _plan(msp, 40000.0)
+        _plan(msp, 80000.0, xs=(0.0, 6000.0, 10850.0, 15000.0))
+        _elevation(msp, 200000.0, xs=(0.0, 6000.0, 15000.0))
+
+    assert len(run_with(_plain(tmp_path, fn))["groups"]) == 4
+
+
+def test_a_view_that_shares_one_label_with_a_plan_is_not_compared_with_it(tmp_path):
+    """A fourth plan sharing only axis 4 with the elevation says nothing about it."""
+
+    def fn(msp):
+        _plans_and_elevation(msp)
+        _plan(msp, 120000.0, xs=(0.0, 6000.0, 12000.0, 18000.0), labels="4567")
+
+    result = run_with(_plain(tmp_path, fn))
+    assert len(result["groups"]) == 4  # the three plans and the fourth; the elevation is set aside
+    assert sorted(b["label"] for b in result["unpaired_bubbles"]["listed"]) == ["1", "2", "4"]
+
+
+def test_a_different_order_is_a_contradiction_even_with_equal_spacings(tmp_path):
+    """1 3 2 at 0 / 12000 / 18000 has the distances of 1 2 3 on a grid of 6000 but not its order."""
+
+    def fn(msp):
+        for k in range(3):
+            _plan(msp, 40000.0 * k, xs=(0.0, 6000.0, 12000.0, 18000.0))
+        _elevation(msp, 200000.0, xs=(0.0, 12000.0, 18000.0), labels="132")
+
+    result = run_with(_plain(tmp_path, fn))
+    assert len(result["groups"]) == 3 and "set aside" in _warnings(result)
+
+
+@pytest.mark.parametrize(("shift", "set_aside"), [(0.3, False), (1.0, False), (4.0, True)])
+def test_an_elevation_within_the_drafting_tolerance_agrees(tmp_path, shift, set_aside):
+    """Spacings 0.3 apart are inside half the rounding step, 1.0 inside 2e-4 of 5850, 4.0 neither."""
+
+    def fn(msp):
+        for k in range(3):
+            _plan(msp, 40000.0 * k, xs=(0.0, 5850.0, 10850.0, 15000.0))
+        _elevation(msp, 200000.0, xs=(0.0, 5850.0 + shift, 15000.0 + shift), labels="124")
+
+    groups = len(run_with(_plain(tmp_path, fn))["groups"])
+    assert (groups == 3) is set_aside
+
+
+def test_an_elevation_with_smaller_spacings_is_set_aside_too(tmp_path):
+    result = run_with(_plain(tmp_path, lambda m: _plans_and_elevation(m, xs=(0.0, 3000.0, 4500.0))))
+    assert len(result["groups"]) == 3
+
+
+def test_half_the_rounding_step_is_agreement_on_small_spacings(tmp_path):
+    """On spacings of 1000 the drafting tolerance is 0.2; half the rounding step (0.5) is the wider bound."""
+
+    def fn(msp):
+        for k in range(3):
+            _plan(msp, 40000.0 * k, xs=(0.0, 1000.0, 2000.0, 3000.0))
+        _elevation(msp, 200000.0, xs=(0.0, 1000.4, 3000.4), labels="124")
+
+    assert len(run_with(_plain(tmp_path, fn))["groups"]) == 4
