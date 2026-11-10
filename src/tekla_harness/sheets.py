@@ -281,6 +281,7 @@ class Placed:
     top_handle: str | None  # handle of the top-level entity it came through (itself at top level)
     owner: int  # serial of the INSERT occurrence that holds it (0 at top level)
     serial: int  # this occurrence's serial (an INSERT's children carry it as owner)
+    outer_layer: str | None = None  # effective layer of the INSERT that holds it (None at top level)
 
 
 @dataclass
@@ -315,10 +316,11 @@ class Walker:
         owner: int,
         serial: int,
         types: frozenset[str] | None,
+        outer_layer: str | None = None,
     ) -> Iterator[Placed]:
         kind = entity.dxftype()
         if types is None or kind in types:
-            yield Placed(entity, space, path, top, owner, serial)
+            yield Placed(entity, space, path, top, owner, serial, outer_layer)
         if kind != "INSERT":
             return
         name = str(entity.dxf.get("name", ""))
@@ -349,9 +351,11 @@ class Walker:
         except Exception as exc:
             self.skipped[f"expand_error:{type(exc).__name__}"] += 1
             return
+        own = str(entity.dxf.get("layer", "0"))
+        inner_layer = outer_layer if own == "0" and outer_layer else own  # layer 0 follows the INSERT
         for child in children:
             self._serial += 1
-            yield from self._visit(child, space, (*path, name), top, serial, self._serial, types)
+            yield from self._visit(child, space, (*path, name), top, serial, self._serial, types, inner_layer)
 
 
 def layout_spaces(doc: Drawing) -> list[tuple[str, Any, bool]]:
@@ -435,6 +439,22 @@ def rect_of(entity: Any) -> tuple[float, float, float, float] | None:
             return None
         return _axis_aligned_rect(pts)
     return None
+
+
+def _prints_geometry(placed: Placed, doc: Drawing) -> bool:
+    """Does this line or polyline print? Not when its own invisible flag (group 60) is set, or when its layer
+    is off, frozen or set not to plot. A block entity on layer 0 takes the layer of the INSERT that holds it
+    (`Placed.outer_layer`; ezdxf keeps layer 0 on the virtual copy)."""
+    entity = placed.entity
+    if entity.dxf.get("invisible", 0) == 1:
+        return False
+    name = str(entity.dxf.get("layer", "0"))
+    if name == "0" and placed.outer_layer:
+        name = placed.outer_layer
+    if name not in doc.layers:
+        return True
+    row = doc.layers.get(name)
+    return not (row.is_off() or row.is_frozen() or row.dxf.get("plot", 1) == 0)
 
 
 def _collect_segments(entity: Any, lines: _CellLines) -> None:
@@ -1456,7 +1476,8 @@ def extract_sheets(dxf_path: str | Path, text_index: dict[str, Any], *, doc: Dra
         lines = cell_lines[space]
         for p in walker.walk(layout, space, frozenset({"LINE", "LWPOLYLINE", "POLYLINE"})):
             try:
-                _collect_segments(p.entity, lines)
+                if _prints_geometry(p, doc):  # a cell is closed by lines that print
+                    _collect_segments(p.entity, lines)
                 box = rect_of(p.entity)
             except Exception:
                 walker.skipped[f"rect_error:{p.entity.dxftype()}"] += 1

@@ -794,6 +794,10 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
       by the box rule of c09581a; the box rule only adds pairs (it had dropped a small name centred below the
       value). Its 0.1 limit: named candidates on the 11 known files are the same for 0.05 and 0.1 (285 needs
       more than 0), and 0.2 adds two names on 271.
+      Title-block cell lines come from printed geometry only: a line or polyline edge on a layer that is off,
+      frozen or set not to plot, or with its own invisible flag (group 60), no longer closes a cell; a block
+      entity on layer 0 takes the layer of the INSERT that holds it (`Placed.outer_layer`). Known drawings:
+      no change.
 
 ### Changed
 - Question lifecycle (tool wave 2, EVAL-2 fix 5):

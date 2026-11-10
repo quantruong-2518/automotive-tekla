@@ -294,6 +294,99 @@ def test_the_far_value_is_paired_inside_a_closed_cell(tmp_path):
     assert _paired(_sheet_with(tmp_path, build)) == [("KC-9", "adjacent_label")]
 
 
+def _hidden_cell(layer_attribs: dict[str, Any], entity_attribs: dict[str, Any] | None = None):
+    """A closed cell around the far value, drawn on a layer set up by `layer_attribs`."""
+
+    def build(msp):
+        doc = msp.doc
+        layer = doc.layers.add("CELL")
+        if layer_attribs.get("off"):
+            layer.off()
+        if layer_attribs.get("freeze"):
+            layer.freeze()
+        if layer_attribs.get("plot") is False:
+            layer.dxf.plot = 0
+        attribs = {"layer": "CELL", **(entity_attribs or {})}
+        for a, b in (
+            ((60000, 1000), (75000, 1000)),
+            ((75000, 1000), (75000, 3000)),
+            ((75000, 3000), (60000, 3000)),
+            ((60000, 3000), (60000, 1000)),
+        ):
+            msp.add_line(a, b, dxfattribs=attribs)
+        _far_value(msp)
+
+    return build
+
+
+@pytest.mark.parametrize(
+    ("layer_attribs", "entity_attribs", "closes"),
+    [
+        ({}, None, True),  # control: a normal layer closes the cell
+        ({"off": True}, None, False),
+        ({"freeze": True}, None, False),
+        ({"plot": False}, None, False),
+        ({}, {"invisible": 1}, False),  # group 60 on the line itself
+    ],
+    ids=["printed", "layer_off", "layer_frozen", "layer_no_plot", "entity_invisible"],
+)
+def test_cell_lines_come_from_printed_geometry_only(tmp_path, layer_attribs, entity_attribs, closes):
+    result = _sheet_with(tmp_path, _hidden_cell(layer_attribs, entity_attribs))
+    assert _paired(result) == ([("KC-9", "adjacent_label")] if closes else [])
+
+
+def test_cell_lines_in_a_block_take_the_insert_layer_when_drawn_on_layer_0(tmp_path):
+    def build(msp):
+        doc = msp.doc
+        doc.layers.add("OFFCELL").off()
+        blk = doc.blocks.new("CELL_BOX")
+        for a, b in (
+            ((0, 0), (15000, 0)),
+            ((15000, 0), (15000, 2000)),
+            ((15000, 2000), (0, 2000)),
+            ((0, 2000), (0, 0)),
+        ):
+            blk.add_line(a, b)  # layer 0: takes the layer of the INSERT
+        msp.add_blockref("CELL_BOX", (60000, 1000), dxfattribs={"layer": "OFFCELL"})
+        _far_value(msp)
+
+    assert _paired(_sheet_with(tmp_path, build)) == []
+
+
+def test_layer_0_follows_the_chain_of_inserts(tmp_path):
+    def build(msp):
+        doc = msp.doc
+        doc.layers.add("OFFCELL").off()
+        inner = doc.blocks.new("INNER_BOX")
+        for a, b in (
+            ((0, 0), (15000, 0)),
+            ((15000, 0), (15000, 2000)),
+            ((15000, 2000), (0, 2000)),
+            ((0, 2000), (0, 0)),
+        ):
+            inner.add_line(a, b)
+        outer = doc.blocks.new("OUTER_BOX")
+        outer.add_blockref("INNER_BOX", (0, 0))  # layer 0 inside layer 0
+        msp.add_blockref("OUTER_BOX", (60000, 1000), dxfattribs={"layer": "OFFCELL"})
+        _far_value(msp)
+
+    assert _paired(_sheet_with(tmp_path, build)) == []
+
+
+def test_lines_on_a_layer_without_a_table_row_print(tmp_path):
+    def build(msp):
+        for a, b in (
+            ((60000, 1000), (75000, 1000)),
+            ((75000, 1000), (75000, 3000)),
+            ((75000, 3000), (60000, 3000)),
+            ((60000, 3000), (60000, 1000)),
+        ):
+            msp.add_line(a, b, dxfattribs={"layer": "NOT_IN_THE_TABLE"})
+        _far_value(msp)
+
+    assert _paired(_sheet_with(tmp_path, build)) == [("KC-9", "adjacent_label")]
+
+
 def test_a_slanted_line_is_no_cell_wall(tmp_path):
     def build(msp):
         msp.add_line((60000, 1000), (75000, 1000))
