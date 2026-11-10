@@ -752,6 +752,13 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
       tolerance); a file with such entries gets one warning with the count per `not_printed_reasons`
       (the documents have no counter field). An index without `printed` reads as printed. Repro: 271
       phantom `dẦm d2-1` on 12 sheets.
+    - `marks` and `callouts` (EVAL-4 A4a): the ATTRIBs of a rebar-callout block (an INSERT with a spacing
+      value `a150` / `A200` among its ATTRIBs, or a `THEP` / `KHOANGCACH` tag) are parts of a callout, not
+      member marks; a strength class (`RB 500`, `CB 400`: grade prefix and verified yield class) and a signed
+      level (`cos -300`) are not marks. `callouts.json` lists them in `rejected` (`callout_part`,
+      `grade_token`, `level_token`); `marks.json` has no such list, so one warning per file gives the count
+      per reason and five examples. Repro 278 (D6..D25, A150, `RB 500`, `cos -300`); second files 285, 286
+      (`SH thep` blocks).
 
 ### Changed
 - Question lifecycle (tool wave 2, EVAL-2 fix 5):

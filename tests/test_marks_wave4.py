@@ -23,9 +23,9 @@ from _marks_fixtures import (
     build_gate_work,
     build_marks_work,
 )
-from tekla_harness.callouts import extract_callouts
+from tekla_harness.callouts import callout_part_ids, extract_callouts, member_mark
 from tekla_harness.intake import run_intake
-from tekla_harness.marks import extract_marks
+from tekla_harness.marks import extract_marks, parse_mark
 from tekla_harness.schemas import validate
 from tekla_harness.text_gate import meaning_block_reason
 
@@ -274,3 +274,140 @@ def test_hidden_text_does_not_set_the_line_tolerance_of_a_space():
     entries = [entry(350.0), entry(350.0), entry(350.0)] + [entry(9000.0, printed=False)] * 5
     assert _space_tolerances(entries) == {"model": LINE_TOL * 350.0}
     assert _space_tolerances(entries[3:]) == {}  # a space whose texts all stay hidden has no tolerance
+
+
+# --- item 3 (F4a): rebar-callout ATTRIBs, strength classes and signed levels are no member marks ----------
+
+
+def build_attrib_work(
+    base: Path, blocks: dict[str, tuple[str, ...]], inserts: list[tuple[str, dict[str, str]]]
+):
+    """Synthetic drawing: `blocks` maps a block name to its ATTDEF tags; `inserts` lists (block, {tag: value})
+    placed in a column at x 46000 on sheet S-101 (so the texts sit on the model-space frame)."""
+    from _marks_fixtures import PLAN_STEP, PLAN_TOP, PLAN_X, TH
+
+    root = base / "input"
+    (root / "plans").mkdir(parents=True)
+    doc = readfile(str(build_set(base, "src.dxf")))
+    for name, tags in blocks.items():
+        block = doc.blocks.new(name)
+        for i, tag in enumerate(tags):
+            block.add_attdef(tag, (0.0, -i * 450.0), text="?", height=TH)
+    msp = doc.modelspace()
+    for i, (name, values) in enumerate(inserts):
+        ref = msp.add_blockref(name, (PLAN_X, PLAN_TOP - i * 3 * PLAN_STEP))
+        ref.add_auto_attribs(values)
+    doc.saveas(root / FIXTURE_REL)
+    work = base / "work"
+    run_intake(root, work, "demo-marks", knowledge=PROPOSED_FONT_TABLE)
+    write_structure(root, work)
+    return work
+
+
+REBAR_BLOCKS = {
+    "REBAR": ("THEP", "KHOANGCACH", "SH"),  # 278-like tags
+    "BARTAG": ("SH", "DK", "KC"),  # 285-like: no bar tag among THEP / KHOANGCACH, a spacing value instead
+    "TITLE": ("NAME", "NO"),  # a block that is not a callout
+}
+REBAR_INSERTS: list[tuple[str, dict[str, str]]] = [
+    ("REBAR", {"THEP": "D10", "KHOANGCACH": "a150", "SH": "2"}),
+    ("REBAR", {"THEP": "D12", "KHOANGCACH": "A200", "SH": "D"}),
+    ("BARTAG", {"SH": "t1", "DK": "D6", "KC": "a200"}),
+    ("BARTAG", {"SH": "t2", "DK": "D6", "KC": "a600x600"}),
+    ("TITLE", {"NAME": "D3", "NO": "7"}),
+]
+
+
+@pytest.fixture(scope="module")
+def attrib_world(tmp_path_factory) -> tuple[Path, Path]:
+    root = tmp_path_factory.mktemp("w4attrib")
+    return build_attrib_work(root, REBAR_BLOCKS, REBAR_INSERTS), root
+
+
+def test_attribs_of_a_rebar_callout_block_are_no_plan_marks(attrib_world):
+    work, root = attrib_world
+    doc = extract_marks(work, root / "input", check_inputs=True)
+    assert validate("marks", doc) == []
+    assert sorted(p["mark"] for p in doc["plan_marks"]) == ["D3"]  # only the title block's NAME stays
+    (said,) = [w for w in doc["warnings"] if "callout_part" in w]
+    assert "callout_part 7" in said and "'D10' (T0" in said  # the count per reason, examples with entry ids
+    assert said.count("(T0") == 5  # at most five examples
+
+
+def test_attribs_of_a_rebar_callout_block_are_no_member_mark_candidate(attrib_world):
+    work, _ = attrib_world
+    doc = extract_callouts(work, check_inputs=True)
+    assert validate("callouts", doc) == []
+    assert [c["display_text"] for c in doc["candidates"] if c["kind"] == "member_mark"] == ["D3"]
+    parts = [r for r in doc["rejected"] if r["reason_code"] == "callout_part"]
+    assert sorted(r["display_text"] for r in parts) == ["A200", "D10", "D12", "D6", "D6"]  # upper case only
+    assert doc["summary"]["rejected_by_reason"]["callout_part"] == 5
+
+
+def test_callout_part_ids_group_by_insert_not_by_block_name():
+    def attrib(eid: str, tag: str, text: str, handle: str, outer: tuple[str, ...] = ()) -> dict[str, Any]:
+        return {
+            "id": eid, "entity_type": "ATTRIB", "space": "model", "layout": "Model", "tag": tag,
+            "display_text": text, "insert_handle": handle, "insert_handles": list(outer),
+        }  # fmt: skip
+
+    entries = [
+        attrib("T000001", "NAME", "D1", "A1"),  # same block name elsewhere, no spacing: stays a mark
+        attrib("T000002", "NAME", "D2", "A2"),
+        attrib("T000003", "X", "a100", "A2"),  # A2 carries a spacing value: both its ATTRIBs are parts
+        attrib("T000004", "THEP", "D8", "A3"),  # a bar tag alone
+        attrib("T000005", "NAME", "D9", "A4", ("OUT",)),  # nested under another insert chain ...
+        attrib("T000006", "X", "A150", "A4", ("OTHER",)),  # ... with the same own handle: not the same insert
+        {**attrib("T000007", "NAME", "a150", ""), "insert_handle": None},  # no insert handle: not grouped
+        attrib("T000008", "NAME", "A1", "A5"),  # a letter and one digit is a mark or a label, no spacing
+        attrib("T000009", "NO", "A1234", "A5"),  # nor four digits
+        attrib("T000010", "NAME", "thep", "A6"),  # a bar tag as a VALUE is not a tag
+    ]
+    assert callout_part_ids(entries) == {"T000002", "T000003", "T000004", "T000006"}
+
+
+GRADE_AND_LEVEL = [
+    ("RB 500", False),
+    ("RB500", False),
+    ("RB-500", False),
+    ("CB 400", False),
+    ("cb 300", False),
+    ("SD 500", False),
+    ("RB 5", True),  # a grade prefix but no yield class
+    ("RB 501", True),
+    ("D 500", True),  # not a grade prefix
+    ("cos -300", False),
+    ("COS -300", False),
+    ("cos-300", True),  # no blank before the minus: a hyphenated mark
+    ("cos - 300", True),
+    ("C - 1", True),
+    ("D1", True),
+]
+
+
+def test_a_sub_numbered_text_is_no_strength_class():
+    """A strength class is one number; `RB 500.1` has a second number and stays a (sub-numbered) mark."""
+    assert parse_mark("RB 500.1") is not None
+    assert parse_mark("RB 500") is None
+
+
+@pytest.mark.parametrize(("text", "is_mark"), GRADE_AND_LEVEL)
+def test_grade_and_level_tokens_are_no_marks(text, is_mark):
+    assert (parse_mark(text, case_uncertain=True) is not None) is is_mark
+
+
+@pytest.mark.parametrize(("text", "is_mark"), GRADE_AND_LEVEL)
+def test_grade_and_level_tokens_are_no_member_mark_candidates(text, is_mark):
+    assert (member_mark(text, True) is not None) is is_mark
+
+
+def test_a_grade_token_in_a_plan_is_listed_with_its_reason(tmp_path):
+    work = build_marks_work(tmp_path, plan_texts=("D1", "RB 500", "COS -300", "C2"))
+    marks = extract_marks(work, tmp_path / "input")
+    assert {"C2", "D1"} <= {p["mark"] for p in marks["plan_marks"]}
+    assert not {"RB 500", "COS -300"} & {p["mark"] for p in marks["plan_marks"]}
+    (said,) = [w for w in marks["warnings"] if "grade_token" in w]
+    assert "grade_token 1" in said and "level_token 1" in said
+    callouts = extract_callouts(work)
+    tokens = {r["reason_code"]: r["display_text"] for r in callouts["rejected"] if r["kind"] == "member_mark"}
+    assert (tokens["grade_token"], tokens["level_token"]) == ("RB 500", "COS -300")

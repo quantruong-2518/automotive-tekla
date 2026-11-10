@@ -25,6 +25,11 @@ here. It extends the mark grammar (`in_callouts` says when callouts also lists t
 A mark is never taken from a line that a callouts pattern claims (`I300`, `M20`, `BM12`...), from a
 sheet code (`KC-01`), from texts the title block, grid or level extractors claimed, from a dimension, or
 from a sheet that duplicates an earlier one.
+Tool wave 4 (F4a): nor from the ATTRIBs of a rebar-callout block (an INSERT one of whose ATTRIBs is a spacing
+value `a150` / `A200` or carries a bar tag `THEP` / `KHOANGCACH`: `callouts.callout_part_ids`), nor from a
+strength class (`RB 500`) or a signed level (`cos -300`, `callouts.token_reason`). A text with a mark's shape
+that is left out for such a reason is not dropped silently: one warning per file gives the count per
+reason and the first examples.
 
 Legacy-font gate (`text_gate.meaning_block_reason`). Only an entry whose meaning is allowed can be a plan
 mark, a header keyword or a matchable schedule mark. The gate works per column (tool wave 2, fix 8): only
@@ -132,15 +137,18 @@ from ezdxf.lldxf.const import DXFError
 
 from tekla_harness.callouts import (
     _SHEET_CODE,
+    CALLOUT_PART,
     _check_input_dir,
     _claimed_text_ids,
     _confidence,
     _num,
     _provenance,
+    callout_part_ids,
     footing_m_labels,
     member_mark,
     not_printed_warning,
     scan_line,
+    token_reason,
 )
 from tekla_harness.questions import (
     QuestionsError,
@@ -307,6 +315,8 @@ def mark_key(text: str) -> str:
 def _mark_from(m: re.Match[str], text: str) -> Mark | None:
     if m["prefix"] in _SPACING_LETTERS:
         return None
+    if token_reason(m["prefix"], m["sep1"], m["n1"], bool(m["n2"])) is not None:
+        return None  # a strength class (`RB 500`) or a signed level (`cos -300`), not a member (F4a)
     mark_text = text[: m.end("suffix")].strip()
     code = _SHEET_CODE.match(mark_text.upper())
     if code and (code["disc"] in ("KT", "KC", "TCXD") or "-" in mark_text or "/" in mark_text):
@@ -330,6 +340,15 @@ def parse_mark(text: str, case_uncertain: bool = False, *, footing_m: bool = Fal
     if m is None or (not footing_m and scan_line(scanned, case_uncertain)):
         return None
     return _mark_from(m, t)
+
+
+def not_mark_reason(line: str) -> str | None:
+    """Why a whole line that has a member mark's shape is no mark (callouts.token_reason: `grade_token`,
+    `level_token`), else None; the reason a left-out line is reported with."""
+    m = _MARK.match(unicodedata.normalize("NFC", line).strip())
+    if m is None:
+        return None
+    return token_reason(m["prefix"], m["sep1"], m["n1"], bool(m["n2"]))
 
 
 # review C1: a heading may name several marks, 'DẦM D1, D2', 'dẦm ct-1,ct-2', 'DETAIL OF CP1 & CP2'
@@ -837,6 +856,8 @@ class _FileOut:
     # internal (review C1): heading lists in shorthand, (entry id, line, families it may name)
     shorthand: list[tuple[str, str, set[str]]] = field(default_factory=list)
     blocked_text: bool = False  # internal (review C1): a plain text (no table cell) the gate blocks
+    # texts with a mark's shape that are no mark: (reason, entry id, text); told in a warning
+    not_marks: list[tuple[str, str, str]] = field(default_factory=list)
 
 
 def _space_tolerances(entries: list[dict[str, Any]]) -> dict[str, float]:
@@ -1030,7 +1051,8 @@ def _scan_file(
                 sheet_of.update({tid: sh for tid in sh["text_ids"]})
                 order.append(sh)
     order.append(None)
-    claimed = set(_claimed_text_ids(inv_work, loaded, warnings)) | duplicate_ids
+    parts = callout_part_ids(entries)  # ATTRIBs of rebar-callout blocks: parts of a callout (F4a)
+    claimed = set(_claimed_text_ids(inv_work, loaded, warnings)) | duplicate_ids | parts
     if (warning := not_printed_warning(loaded.rel, entries)) is not None:
         warnings.append(warning)
     lines_by_space, grid_info = _load_lines(inv_work, loaded, input_dir, warnings)
@@ -1096,6 +1118,9 @@ def _scan_file(
                     }
                 )
     footing = footing_m_labels([t.entry for t in texts], sheet_of)
+    for e in entries:
+        if e["id"] in parts and is_printed(e) and e["id"] not in duplicate_ids and _has_mark_shape(e):
+            out.not_marks.append((CALLOUT_PART, e["id"], " ".join(e["display_text"].split())[:LINE_CHARS]))
     for t in texts:
         if t.id in in_table:
             continue
@@ -1103,12 +1128,39 @@ def _scan_file(
             out.blocked_text = True  # may be a heading naming members of any family (`_mark_sets`)
             continue
         sh = sheet_of.get(t.id)
-        found = _plan_marks(loaded.rel, sh, t.entry, t.id in footing, out.shorthand)
+        found = _plan_marks(loaded.rel, sh, t.entry, t.id in footing, out.shorthand, out.not_marks)
         out.plan.extend(found)
         out.headings.extend(
             _detail_of_headings(sh, t.entry, {p["display_text"] for p in found}, out.shorthand)
         )
+    if out.not_marks:
+        warnings.append(_not_marks_warning(loaded.rel, out.not_marks))
     return out, grid_info
+
+
+MAX_NOT_MARK_EXAMPLES = 5
+
+
+def _has_mark_shape(entry: dict[str, Any]) -> bool:
+    """Some line of the entry would be a plan mark (or a member-word title with a mark) but for its source."""
+    cu = entry["decode"]["case_uncertain"]
+    return any(
+        parse_mark(line, cu) is not None or parse_title_marks(line, cu) not in (None, ("", []))
+        for line in entry["display_text"].split("\n")
+        if line.strip()
+    )
+
+
+def _not_marks_warning(rel: str, items: list[tuple[str, str, str]]) -> str:
+    """One warning per file for the texts with a mark's shape that are left out of the plan marks, so none
+    is dropped silently: the count per reason and the first examples with their entry ids."""
+    per_reason = Counter(reason for reason, _, _ in items)
+    counts = ", ".join(f"{reason} {n}" for reason, n in sorted(per_reason.items()))
+    shown = sorted(items, key=lambda item: item[1])[:MAX_NOT_MARK_EXAMPLES]
+    examples = ", ".join(f"'{text}' ({entry_id})" for _, entry_id, text in shown)
+    n = len(items)
+    noun = "text" if n == 1 else "texts"
+    return f"{rel}: {n} {noun} with a mark's shape left out of the plan marks ({counts}); e.g. {examples}"
 
 
 def _detail_of_headings(
@@ -1152,6 +1204,7 @@ def _plan_marks(
     entry: dict[str, Any],
     footing_m: bool = False,
     shorthand: list[tuple[str, str, set[str]]] | None = None,
+    not_marks: list[tuple[str, str, str]] | None = None,
 ) -> list[dict[str, Any]]:
     """Plan marks of an entry, one per line, and one per mark of a title list ('DẦM D1, D2'); a title list
     in shorthand names no mark and goes to `shorthand`."""
@@ -1166,6 +1219,8 @@ def _plan_marks(
         if mark is None:
             found = parse_title_marks(line, cu)
             if found is None:
+                if not_marks is not None and (why := not_mark_reason(line)) is not None:
+                    not_marks.append((why, entry["id"], " ".join(line.split())[:LINE_CHARS]))
                 continue
             title, found_marks = found
             if not found_marks and shorthand is not None:

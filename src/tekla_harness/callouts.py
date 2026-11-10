@@ -228,7 +228,7 @@ _BOLT_CLASS = re.compile(r"(?<![\d.])(?:4\.6|5\.6|5\.8|8\.8|10\.9|12\.9)(?![\d.]
 _BOLT_WORD = re.compile(r"(?i:\bbolts?\b|\bbu\s*-?\s*l[o\u00f4]ng\b|\bbulong\b)")
 _HOLE = re.compile(r"(?<!\w)(?i:l[o\u1ed7])\s*" + DIA + r"\s*\d{2}(?!\w)")
 
-_MARK = re.compile(r"^(?P<prefix>[A-Z\u0110]{1,3})\s?-?\s?(?P<number>\d{1,3})(?P<suffix>[a-z']?)$")
+_MARK = re.compile(r"^(?P<prefix>[A-Z\u0110]{1,3})(?P<sep>\s?-?\s?)(?P<number>\d{1,3})(?P<suffix>[a-z']?)$")
 _MARK_CI = re.compile(_MARK.pattern, re.IGNORECASE)
 _SHEET_CODE = re.compile(r"^(?P<disc>KT|KC|\u0110|N|TCXD)\s*-?\s*\d{1,3}(?:\s*/\s*\d{1,3})?$")
 
@@ -628,11 +628,69 @@ def scan_line(line: str, case_uncertain: bool = False) -> list[_Hit]:
     return sorted(acc.hits, key=lambda h: (h.start, h.end))
 
 
+# Tool wave 4 (F4a): texts with a mark's shape that are not marks. A strength class (`RB 500`, `CB 400`):
+# a rebar-grade prefix and a three-digit yield class of the verified grade list (`_REBAR_GRADE`). A signed
+# level (`cos -300`): letters, a blank, then a minus glued to the digits.
+GRADE_TOKEN = "grade_token"
+LEVEL_TOKEN = "level_token"
+GRADE_PREFIXES = frozenset({"rb", "cb", "sd", "sr", "gr"})
+YIELD_CLASSES = frozenset({"240", "300", "400", "500", "600"})
+_LEVEL_SEP = re.compile(r"\s-")
+
+
+def token_reason(prefix: str, sep: str, number: str, has_second_number: bool = False) -> str | None:
+    """`grade_token` or `level_token` when a mark-shaped text (prefix, separator, first number) is one of
+    those, else None."""
+    if has_second_number:
+        return None
+    if prefix.casefold() in GRADE_PREFIXES and number in YIELD_CLASSES:
+        return GRADE_TOKEN
+    if _LEVEL_SEP.fullmatch(sep):
+        return LEVEL_TOKEN
+    return None
+
+
+def not_member_token(line: str, case_uncertain: bool) -> str | None:
+    """The `token_reason` of a whole line that has a member mark's shape, else None."""
+    m = (_MARK_CI if case_uncertain else _MARK).match(line.strip())
+    return None if m is None else token_reason(m["prefix"], m["sep"], m["number"])
+
+
+# Tool wave 4 (F4a): the ATTRIBs of one INSERT are parts of a rebar callout when the block carries a spacing
+# value (a whole `a150`, `A200`, `a100/200`, `a600x600`) or a bar tag (`THEP` steel, `KHOANGCACH` spacing).
+# The tag names are knowledge; the spacing value is the structural rule that makes the block a callout.
+CALLOUT_PART = "callout_part"
+CALLOUT_BLOCK_TAGS = frozenset({"thep", "khoangcach"})
+_SPACING_VALUE = re.compile(r"^[aA]\s?\d{2,3}(?:\s?[/xX]\s?\d{2,3})?$")
+
+
+def callout_part_ids(entries: list[dict[str, Any]]) -> set[str]:
+    """Ids of the ATTRIB entries that belong to a rebar-callout block (see `CALLOUT_PART`): every ATTRIB of
+    an INSERT (told apart by space, layout, outer insert chain and its own handle) one of whose ATTRIBs has
+    a spacing value or a bar tag. ATTRIBs without an insert handle are not grouped."""
+    groups: dict[tuple[Any, ...], list[dict[str, Any]]] = {}
+    for e in entries:
+        if e["entity_type"] == "ATTRIB" and e.get("insert_handle"):
+            key = (e["space"], e["layout"], tuple(e.get("insert_handles") or ()), e["insert_handle"])
+            groups.setdefault(key, []).append(e)
+    out: set[str] = set()
+    for group in groups.values():
+        if any(
+            (e.get("tag") or "").casefold() in CALLOUT_BLOCK_TAGS
+            or _SPACING_VALUE.match(" ".join(e["display_text"].split()))
+            for e in group
+        ):
+            out.update(e["id"] for e in group)
+    return out
+
+
 def member_mark(line: str, case_uncertain: bool) -> _Hit | None:
     text = line.strip()
     m = (_MARK_CI if case_uncertain else _MARK).match(text)
     if m is None or is_sheet_code(text, case_uncertain):
         return None  # a sheet code (research parsing pattern 3) is not a member
+    if token_reason(m["prefix"], m["sep"], m["number"]) is not None:
+        return None  # a strength class or a signed level, not a member (F4a)
     lexical = {"prefix": m["prefix"].upper(), "number": m["number"], "suffix": m["suffix"]}
     rule = _cite("MEMBER_MARK_SHAPE", "section 4: practice only, no standard defines the letters")
     why = "member mark letters are not defined by any standard or by this drawing's legend yet (section 4)"
@@ -665,6 +723,11 @@ REJECT_REASONS = {
     "claimed_by_title_block": "the title-block extractor took this text as a field value or label",
     "claimed_by_grids": "the grid extractor took this text (a grid bubble label)",
     "claimed_by_levels": "the level extractor took this text (a level value)",
+    CALLOUT_PART: "an ATTRIB of a rebar-callout block (the block carries a spacing value or a bar tag): a "
+    "part of a callout, not a member mark",
+    GRADE_TOKEN: "a rebar strength class (grade prefix and yield class, e.g. RB 500), not a member mark",
+    LEVEL_TOKEN: "a signed level (letters, a blank, a minus glued to the digits, e.g. cos -300), not a "
+    "member mark",
 }
 _DIA_SIGN = re.compile("[" + DIA_CHARS + "]")
 _TOKEN = re.compile(r"\S+")
@@ -758,12 +821,13 @@ def footing_m_labels(entries: list[dict[str, Any]], sheet_of: dict[str, dict[str
 
 
 def _entry_hits(
-    entry: dict[str, Any], claimed_by: str | None, as_mark: bool = False
+    entry: dict[str, Any], claimed_by: str | None, as_mark: bool = False, callout_part: bool = False
 ) -> tuple[list[tuple[str, _Hit]], list[tuple[str, str, str]]]:
     """(line, hit) for every candidate of the entry, lines in order, and what matched but is no candidate:
     (text, kind, reason code). `claimed_by`: the extractor that took the text (title_block, grids, levels);
     such a text is never a member mark. `as_mark`: a bolt-size `M<n>` of a footing family
-    (`footing_m_labels`), read as a member mark only."""
+    (`footing_m_labels`), read as a member mark only. `callout_part`: an ATTRIB of a rebar-callout block
+    (`callout_part_ids`), never a member mark."""
     out: list[tuple[str, _Hit]] = []
     rejects: list[tuple[str, str, str]] = []
     dec = entry["decode"]
@@ -775,10 +839,14 @@ def _entry_hits(
             mark = member_mark(line, cu)
             if mark is not None and claimed_by is not None:
                 rejects.append((line.strip(), "member_mark", f"claimed_by_{claimed_by}"))
+            elif mark is not None and callout_part:
+                rejects.append((line.strip(), "member_mark", CALLOUT_PART))
             elif mark is not None:
                 hits = [mark]
             elif is_sheet_code(line, cu):
                 rejects.append((line.strip(), "member_mark", SHEET_CODE))
+            elif (token := not_member_token(line, cu)) is not None:
+                rejects.append((line.strip(), "member_mark", token))
         rejects.extend((tok, "rebar_callout", NO_NOTATION) for tok in _uncovered_signs(line, hits))
         rejects.extend((tok, "rebar_callout", GLYPH_NO_NOTATION) for tok in _uncovered_glyphs(line, hits))
         for hit in hits:
@@ -1049,12 +1117,15 @@ def extract_callouts(work_dir: Path | str, *, check_inputs: bool = False) -> dic
         as_marks = footing_m_labels(
             [e for e in entries if e["id"] not in duplicate_ids and is_printed(e)], sheet_of
         )
+        parts = callout_part_ids(entries)
         for entry in entries:
             if entry["id"] in duplicate_ids or not is_printed(entry):
                 continue
             info["scanned"] += 1
             sheet = sheet_of.get(entry["id"])
-            hits, rejects = _entry_hits(entry, claimed_ids.get(entry["id"]), entry["id"] in as_marks)
+            hits, rejects = _entry_hits(
+                entry, claimed_ids.get(entry["id"]), entry["id"] in as_marks, entry["id"] in parts
+            )
             reason = meaning_block_reason(entry)
             if reason is not None:  # legacy-font gate: no meaning from this text, only a verbatim listing
                 if hits:
