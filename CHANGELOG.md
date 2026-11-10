@@ -747,6 +747,11 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
     - `marks`: a blocked schedule header cell keeps only a placeholder in `tables[].header[]` (`entry_id`
       null, verbatim text and reason kept); its id is listed in the table's `blocked_header_entries`, so no
       blocked id is cited outside a `blocked*` list (EVAL-4 criterion 2, M2).
+    - `marks` and `callouts` leave out every text entry that says `printed: false` (a hidden ATTRIB is no
+      plan mark, header keyword, table cell, callout or footing-family evidence, and does not set the line
+      tolerance); a file with such entries gets one warning with the count per `not_printed_reasons`
+      (the documents have no counter field). An index without `printed` reads as printed. Repro: 271
+      phantom `dẦm d2-1` on 12 sheets.
 
 ### Changed
 - Question lifecycle (tool wave 2, EVAL-2 fix 5):

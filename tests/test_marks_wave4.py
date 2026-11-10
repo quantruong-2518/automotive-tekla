@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 from ezdxf.filemanagement import readfile
 
-from _callout_fixtures import PROPOSED_FONT_TABLE, write_structure
+from _callout_fixtures import PROPOSED_FONT_TABLE, build_work, write_structure
 from _callout_fixtures import REL as FIXTURE_REL
 from _dxf_fixtures import build_set
 from _marks_fixtures import (
@@ -21,7 +21,9 @@ from _marks_fixtures import (
     TH,
     _styled_table,
     build_gate_work,
+    build_marks_work,
 )
+from tekla_harness.callouts import extract_callouts
 from tekla_harness.intake import run_intake
 from tekla_harness.marks import extract_marks
 from tekla_harness.schemas import validate
@@ -141,3 +143,134 @@ def test_a_table_whose_header_cells_are_all_blocked_is_still_reported(tmp_path):
     seen: list[str] = []
     cited_ids({k: v for k, v in doc.items() if k != "plan_marks"}, seen)
     assert not set(seen) & blocked_ids(work)
+
+
+# --- item 1: text that does not print is no mark and no callout ------------------------------------------
+
+
+def hide(work: Path, texts: set[str], reasons: tuple[str, ...] = ("entity_invisible",)) -> int:
+    """Mark every text-index entry whose display_text is in `texts` as not printed (what package T writes)."""
+    path = work / "text" / f"{REL}.json"
+    index = load(path)
+    n = 0
+    for entry in index["entries"]:
+        if entry["display_text"] in texts:
+            entry["printed"] = False
+            entry["not_printed_reasons"] = list(reasons)
+            n += 1
+    path.write_text(json.dumps(index, ensure_ascii=False), encoding="utf-8")
+    return n
+
+
+def entry_id(work: Path, text: str) -> str:
+    (e,) = [e for e in load(work / "text" / f"{REL}.json")["entries"] if e["display_text"] == text]
+    return e["id"]
+
+
+def test_a_mark_that_does_not_print_is_no_plan_mark(tmp_path):
+    work = build_marks_work(tmp_path, plan_texts=("D1", "D5", "D5", "C7", "gm3"))
+    assert hide(work, {"D5"}) == 2
+    doc = extract_marks(work, tmp_path / "input", check_inputs=True)
+    assert validate("marks", doc) == []
+    plan = [p["mark"] for p in doc["plan_marks"]]
+    assert "D5" not in plan and {"D1", "C7", "gm3"} <= set(plan)
+    said = "2 text entries that do not print (not_printed_reasons: entity_invisible 2)"
+    assert any(said in w for w in doc["warnings"])
+    assert "d5" not in {k["key"] for m in doc["matching"] for k in m["plan_only"] + m["matched"]}
+
+
+def test_a_text_index_without_the_printed_field_reads_as_printed(tmp_path):
+    work = build_marks_work(tmp_path, plan_texts=("D1", "D5"))
+    doc = extract_marks(work, tmp_path / "input")
+    assert "D5" in [p["mark"] for p in doc["plan_marks"]]
+    assert not any("do not print" in w for w in doc["warnings"])
+
+
+def test_uncertain_visibility_alone_keeps_the_entry(tmp_path):
+    """`print_uncertain_reasons` and `printed: true` keep the entry: only `printed: false` excludes."""
+    work = build_marks_work(tmp_path, plan_texts=("D1", "D5"))
+    path = work / "text" / f"{REL}.json"
+    index = load(path)
+    for entry in index["entries"]:
+        if entry["display_text"] == "D5":
+            entry["print_uncertain_reasons"] = ["attmode_not_normal"]
+        if entry["display_text"] == "D1":
+            entry["printed"] = True
+    path.write_text(json.dumps(index, ensure_ascii=False), encoding="utf-8")
+    doc = extract_marks(work, tmp_path / "input")
+    assert {"D1", "D5"} <= {p["mark"] for p in doc["plan_marks"]}
+
+
+def test_a_header_keyword_that_does_not_print_anchors_no_table(tmp_path):
+    work = build_marks_work(tmp_path)
+    visible = extract_marks(work, tmp_path / "input")
+    assert any(h["display_text"] == "KÝ HIỆU" for t in visible["tables"] for h in t["header"])
+    hide(work, {"KÝ HIỆU"})
+    doc = extract_marks(work, tmp_path / "input")
+    assert not any(h["display_text"] == "KÝ HIỆU" for t in doc["tables"] for h in t["header"])
+
+
+def test_callouts_skip_text_that_does_not_print(tmp_path):
+    work = build_work(tmp_path, s1=["4%%c16", "C1", "C9", "%%c8a150"], styled=[], s2=[], paper=[])
+    visible = extract_callouts(work)
+    assert {c["display_text"] for c in visible["candidates"]} >= {"C9", "C1"}
+    assert hide(work, {"C9", "4Ø16"}) == 2
+    doc = extract_callouts(work, check_inputs=True)
+    assert validate("callouts", doc) == []
+    shown = {c["display_text"] for c in doc["candidates"]}
+    assert "C9" not in shown and "4Ø16" not in shown and "C1" in shown
+    assert any("2 text entries that do not print" in w for w in doc["warnings"])
+    assert doc["files"][0]["scanned"] == visible["files"][0]["scanned"] - 2
+
+
+def test_a_hidden_footing_label_is_no_family_evidence(tmp_path):
+    """footing_m_labels: M8 is a bolt size, a member mark only next to a printed M7 (a footing family)."""
+    work = build_work(tmp_path, s1=["M6", "M7", "M8"], styled=[], s2=[], paper=[])
+    m8 = entry_id(work, "M8")
+    doc = extract_callouts(work)
+    assert [c["kind"] for c in doc["candidates"] if c["text_ref"]["entry_id"] == m8] == ["member_mark"]
+    hide(work, {"M7"})
+    doc = extract_callouts(work)
+    assert [c["kind"] for c in doc["candidates"] if c["text_ref"]["entry_id"] == m8] == ["bolt"]
+
+
+def _released(neighbour_printed: bool) -> set[str]:
+    """A shape-only title-block candidate `P-01` and another text `P-02` of the same prefix, style and
+    height that no candidate took: the candidate is released (a mark) only while `P-02` prints."""
+    from tekla_harness.callouts import _released_pattern_values
+    from tekla_harness.sheet_text import LoadedFile
+
+    def entry(eid: str, text: str, printed: bool = True) -> dict[str, Any]:
+        e: dict[str, Any] = {"id": eid, "display_text": text, "style": "S", "height": 3.5}
+        if not printed:
+            e["printed"] = False
+        return e
+
+    index = {"entries": [entry("T000001", "P-01"), entry("T000002", "P-02", neighbour_printed)]}
+    cand = {
+        "field": "sheet_number",
+        "value": "P-01",
+        "evidence": {"kind": "pattern", "value_text_id": "T000001", "label_text_id": None},
+    }
+    sheets = {"sheets": [{"text_ids": ["T000001", "T000002"], "title_block": {"candidates": [cand]}}]}
+    loaded = LoadedFile("a.dxf", {}, None, index, sheets)
+    return _released_pattern_values(loaded)
+
+
+def test_a_hidden_neighbour_is_no_mark_family_for_a_title_block_value():
+    assert _released(True) == {"T000001"}
+    assert _released(False) == set()
+
+
+def test_hidden_text_does_not_set_the_line_tolerance_of_a_space():
+    from tekla_harness.marks import LINE_TOL, _space_tolerances
+
+    def entry(height: float, printed: bool = True) -> dict[str, Any]:
+        e: dict[str, Any] = {"space": "model", "height": height}
+        if not printed:
+            e["printed"] = False
+        return e
+
+    entries = [entry(350.0), entry(350.0), entry(350.0)] + [entry(9000.0, printed=False)] * 5
+    assert _space_tolerances(entries) == {"model": LINE_TOL * 350.0}
+    assert _space_tolerances(entries[3:]) == {}  # a space whose texts all stay hidden has no tolerance

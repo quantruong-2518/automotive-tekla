@@ -139,6 +139,7 @@ from tekla_harness.callouts import (
     _provenance,
     footing_m_labels,
     member_mark,
+    not_printed_warning,
     scan_line,
 )
 from tekla_harness.questions import (
@@ -166,6 +167,7 @@ from tekla_harness.sheet_text import (
 )
 from tekla_harness.sheets import Walker, layout_spaces, open_checked, text_box
 from tekla_harness.text_gate import meaning_block_reason
+from tekla_harness.visibility import is_printed
 
 COMMAND = "marks"
 HELP = "member marks and schedule tables, plan-to-schedule matching: marks.json, marks-questions.json"
@@ -840,7 +842,7 @@ class _FileOut:
 def _space_tolerances(entries: list[dict[str, Any]]) -> dict[str, float]:
     heights: dict[str, list[float]] = {}
     for e in entries:
-        if e["height"] is not None and e["height"] > 0:
+        if is_printed(e) and e["height"] is not None and e["height"] > 0:
             heights.setdefault(e["space"], []).append(e["height"])
     return {space: LINE_TOL * statistics.median(hs) for space, hs in heights.items()}
 
@@ -896,6 +898,8 @@ def _load_lines(
 def _texts(entries: list[dict[str, Any]], claimed: set[str]) -> list[_Text]:
     out = []
     for e in entries:
+        if not is_printed(e):
+            continue  # tool wave 4 (V1): text that does not print is no mark, header or cell
         if e["id"] in claimed or e["entity_type"] == "DIMENSION" or not e["display_text"].strip():
             continue
         if e["height"] is None or e["height"] <= 0:
@@ -1027,6 +1031,8 @@ def _scan_file(
                 order.append(sh)
     order.append(None)
     claimed = set(_claimed_text_ids(inv_work, loaded, warnings)) | duplicate_ids
+    if (warning := not_printed_warning(loaded.rel, entries)) is not None:
+        warnings.append(warning)
     lines_by_space, grid_info = _load_lines(inv_work, loaded, input_dir, warnings)
     texts = _texts(entries, claimed)
     groups: dict[tuple[str | None, str], list[_Text]] = {}

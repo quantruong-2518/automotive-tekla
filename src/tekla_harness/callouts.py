@@ -100,6 +100,7 @@ from tekla_harness.sheet_text import (
 )
 from tekla_harness.sheets import text_box
 from tekla_harness.text_gate import meaning_block_reason
+from tekla_harness.visibility import is_printed, not_printed_reasons
 
 MAX_REFS = 50  # refs listed per question; `count` is always the true total
 MAX_PREFIX_REFS = 10
@@ -715,6 +716,20 @@ def _confidence(cap: str, entry: dict[str, Any], extra_flags: tuple[str, ...]) -
     return "low" if low else conf
 
 
+def not_printed_warning(rel: str, entries: list[dict[str, Any]]) -> str | None:
+    """Tool wave 4 (V1): the warning that says how many text entries of a file do not print and are left
+    out of every mark and callout, with the count per reason (`visibility`); None when all print. The
+    documents have no counter field, so the count is told here."""
+    hidden = [e for e in entries if not is_printed(e)]
+    if not hidden:
+        return None
+    reasons = Counter(r for e in hidden for r in not_printed_reasons(e))
+    n = len(hidden)
+    noun = "text entry that does not print" if n == 1 else "text entries that do not print"
+    detail = ", ".join(f"{r} {k}" for r, k in sorted(reasons.items())) or "no reason recorded"
+    return f"{rel}: {n} {noun} (not_printed_reasons: {detail}) left out of marks and callouts"
+
+
 _BARE_M = re.compile(r"^M(?P<n>\d{1,2})$")
 
 
@@ -801,7 +816,11 @@ def _released_pattern_values(loaded: LoadedFile) -> set[str]:
         taken = {c["evidence"]["value_text_id"] for c in cands} | {
             c["evidence"]["label_text_id"] for c in cands if c["evidence"]["label_text_id"]
         }
-        families = {_family_key(entries[t]) for t in sh["text_ids"] if t in entries and t not in taken}
+        families = {
+            _family_key(entries[t])
+            for t in sh["text_ids"]
+            if t in entries and t not in taken and is_printed(entries[t])
+        }
         families.discard(None)
         values: dict[str, set[str]] = {}
         for c in cands:
@@ -1025,9 +1044,13 @@ def extract_callouts(work_dir: Path | str, *, check_inputs: bool = False) -> dic
                 else:
                     sheet_of.update({tid: sh for tid in sh["text_ids"]})
         claimed_ids = _claimed_text_ids(inv.work, loaded, warnings)
-        as_marks = footing_m_labels([e for e in entries if e["id"] not in duplicate_ids], sheet_of)
+        if (warning := not_printed_warning(loaded.rel, entries)) is not None:
+            warnings.append(warning)
+        as_marks = footing_m_labels(
+            [e for e in entries if e["id"] not in duplicate_ids and is_printed(e)], sheet_of
+        )
         for entry in entries:
-            if entry["id"] in duplicate_ids:
+            if entry["id"] in duplicate_ids or not is_printed(entry):
                 continue
             info["scanned"] += 1
             sheet = sheet_of.get(entry["id"])
