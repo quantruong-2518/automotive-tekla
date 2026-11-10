@@ -1155,3 +1155,21 @@ def test_the_note_says_both_when_both_kinds_are_blocked(damaged):
     path.write_text(json.dumps(index, ensure_ascii=False), encoding="utf-8")
     (note,) = find_text(damaged, "zzz-no-such-text")["notes"]
     assert "approve the font row" in note and "Q-095" in note and "unblock nothing" in note
+
+
+def test_the_note_lists_each_files_own_questions_for_its_own_kind_of_block(work, tmp_path):
+    """REL holds only legacy-looking ASCII, plans/zz.dxf only an encoding block: the note must not list REL's
+    encoding questions or zz's legacy_ascii_text question."""
+    target = two_file_work(work, tmp_path / "two")
+    _only_legacy_blocked(target)
+    registry_path = target / "question-registry.json"
+    registry = load(registry_path)
+    for key, qid, code in (("b", "Q-200", "font_encoding_proposed"), ("c", "Q-201", "legacy_ascii_text")):
+        registry["questions"][key * 16] = {
+            "id": qid, "code": code, "file": "plans/zz.dxf", "producer": "intake", "status": "open",
+            "first_seen_run": 1, "last_seen_run": 1,
+        }  # fmt: skip
+    registry_path.write_text(json.dumps(registry), encoding="utf-8")
+    (note,) = find_text(target, "zzz-no-such-text")["notes"]
+    assert "Q-200" in note and "Q-095" in note
+    assert "Q-003" not in note and "Q-201" not in note

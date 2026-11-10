@@ -167,6 +167,7 @@ def test_a_proposed_row_still_blocks_first(tmp_path):
     table = table_of(tmp_path, row(pattern="arial_3.ttf"))  # proposed, never applied
     e = only(index(build(tmp_path, fixture()), knowledge=table), raw_text=KINH)
     assert "proposed_knowledge_row" in e["flags"] and meaning_block_reason(e) == "encoding_proposed"
+    assert FLAG not in e["flags"]
 
 
 def test_an_approved_row_that_decides_the_style_is_untouched(tmp_path):
@@ -199,3 +200,23 @@ def test_a_tcvn3_family_style_keeps_its_own_decision(tmp_path):
 
     e = only(index(build(tmp_path, fn)), entity_type="TEXT")
     assert (e["decode"]["encoding_used"], FLAG in e["flags"]) == ("tcvn3", False)
+
+
+def test_a_known_unicode_style_name_without_code_point_evidence_proves_nothing(tmp_path):
+    # style "Arial" is Unicode by its name only; sharing its font file proves no string of another style
+    def fn(doc):
+        doc.styles.add("Arial", font="face_x.ttf")
+        doc.styles.add("KCS", font="face_x.ttf")
+        text_at(doc.modelspace(), "plain", "Arial", insert=(0, 9))
+        text_at(doc.modelspace(), KINH, "KCS", insert=(0, 0))
+
+    e = only(index(build(tmp_path, fn)), raw_text=KINH)
+    assert meaning_block_reason(e) == "encoding_unknown" and FLAG not in e["flags"]
+
+
+def test_ascii_only_text_in_the_proven_file_gets_no_flag(tmp_path):
+    def fn(doc):
+        fixture()(doc)
+        text_at(doc.modelspace(), "D1 SAN", "KCS", insert=(0, 20))
+
+    assert FLAG not in only(index(build(tmp_path, fn)), raw_text="D1 SAN")["flags"]

@@ -75,3 +75,27 @@ def test_a_not_printed_entry_with_uncertain_leftovers_is_not_counted(tmp_path):
 def test_an_index_without_the_fields_raises_no_question():
     old = {"entries": [{"id": "T000001", "display_text": "x", "flags": []}]}
     assert text_visibility_questions(old, "a.dxf") == []
+
+
+def test_an_entry_that_says_it_is_not_printed_is_never_counted():
+    # a hand-written index: the extractor never lists uncertain reasons on a not-printed entry, but a reader
+    # of any index must still leave it out
+    uncertain = ["defpoints_layer"]
+    entries = [
+        {
+            "id": "T000001",
+            "display_text": "a",
+            "layer": "L",
+            "printed": False,
+            "print_uncertain_reasons": uncertain,
+        },
+        {
+            "id": "T000002",
+            "display_text": "b",
+            "layer": "L",
+            "printed": True,
+            "print_uncertain_reasons": uncertain,
+        },
+    ]
+    (q,) = text_visibility_questions({"entries": entries}, "a.dxf")
+    assert q["count"] == 1 and q["refs"][-1]["found"] == "T000002: b"
