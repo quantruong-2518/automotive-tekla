@@ -762,17 +762,9 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
     approve the font row for `legacy_ascii_suspect` entries. It names the `legacy_ascii_text` questions as
     recording a reading that unblocks nothing, and mentions the font row (with its questions) only for
     entries blocked by an encoding reason.
-  - Tool wave 4, package T (text), gate: plain Unicode text in a TrueType style is no longer blocked
-    `encoding_unknown` when its font file has shown itself to be Unicode (EVAL-4 criterion 2, 271 `KÍNH`).
-    `extract-text` flags `unicode_by_font_evidence` on an entry whose unknown-encoding runs all sit on the text
-    style, in a `.ttf`/`.ttc`/`.otf` file that holds a style run proved Unicode by letters no legacy font can
-    hold, never a run read as TCVN3 / VNI or contradicting its font, and whose non-ASCII letters there are all
-    Latin-1 Vietnamese vowels (not `Ä Ö Ü Ç Ñ`, `¶ § ² Ø` or the toned-letter byte values). The entry's
-    `encoding_unknown_non_ascii` flag is dropped, its decode stays `unknown`, and `text_gate` lets the flag past
-    `encoding_unknown` only (proposed, conflicting, contradicting and `legacy_ascii_suspect` still block first).
-    Known drawings, newly allowed: 271 16 (`KÍNH`), 264 8 (`SÂN SAU`, `BAN CÔNG`, six `CỬA HÀNG` /
-    `P. LÀM VIỆC` runs of two fonts); 267, 286, 290, 278, 180, 285, 161, 433 none. TCVN3 / VNI entry counts and
-    `legacy_ascii_suspect` counts are identical on all ten drawings.
+  - Tool wave 4, package T (text), gate: unchanged. A font-evidence lift for plain Unicode text in a TrueType
+    file (271 `KÍNH`) was built and reverted after review: it let TCVN3 / VNI strings past the gate. Such text
+    stays blocked `encoding_unknown`; `tests/test_legacy_text_stays_blocked.py` keeps it so.
 
 ### Changed
 - Question lifecycle (tool wave 2, EVAL-2 fix 5):

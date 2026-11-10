@@ -43,14 +43,9 @@ def test_271_title_attribs_with_group_60_do_not_print(index_271):
 
 
 @needs_eval4
-def test_271_kinh_is_allowed_by_the_font_evidence(index_271):
+def test_271_kinh_stays_blocked(index_271):
+    # no font-evidence lift in this wave (review C1): the marks table lists the header ids as blocked
     kinh = [e for e in index_271["entries"] if e["raw_text"] == "K\xcdNH"]
-    assert len(kinh) == 16 and all(meaning_block_reason(e) is None for e in kinh)
+    assert len(kinh) == 16 and all(meaning_block_reason(e) == "encoding_unknown" for e in kinh)
     assert all(e["font_file"] == "arial_3.ttf" for e in kinh)
-
-
-@needs_eval4
-def test_264_unicode_in_arialbd_is_allowed():
-    assert CORPUS_DIR is not None
-    result = extract_text(CORPUS_DIR / "264_6-story_house_6x16.5m.dxf", converter="libredwg")
-    assert not [e for e in result["entries"] if meaning_block_reason(e) == "encoding_unknown"]
+    assert not any("unicode_by_font_evidence" in e["flags"] for e in index_271["entries"])

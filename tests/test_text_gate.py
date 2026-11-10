@@ -50,35 +50,3 @@ def test_ascii_text_flagged_as_legacy_looking_is_blocked(encoding):
 def test_non_ascii_text_of_a_decided_encoding_is_allowed(encoding):
     assert meaning_allowed(entry("bản vẽ", encoding))
     assert meaning_allowed(entry("bản vẽ", "mixed", runs=("unicode", encoding)))
-
-
-# --- tool wave 4, V2: the font-evidence flag lifts only encoding_unknown ---------------------------------
-
-
-@pytest.mark.parametrize(
-    ("e", "reason"),
-    [
-        (entry("K\xcdNH", "unknown", ("unicode_by_font_evidence",)), None),
-        (entry("K\xcdNH", "mixed", ("unicode_by_font_evidence",), runs=("unicode", "unknown")), None),
-        (
-            entry("K\xcdNH", "unknown", ("unicode_by_font_evidence", "proposed_knowledge_row")),
-            "encoding_proposed",
-        ),
-        (
-            entry("K\xcdNH", "unknown", ("unicode_by_font_evidence", "knowledge_conflict")),
-            "knowledge_conflict",
-        ),
-        (
-            entry("K\xcdNH", "unknown", ("unicode_by_font_evidence", "unicode_evidence_contradicts_font")),
-            "encoding_contradiction",
-        ),
-        (
-            entry("4/g14", "unknown", ("unicode_by_font_evidence", "legacy_ascii_suspect")),
-            "legacy_ascii_suspect",
-        ),
-        (entry("K\xcdNH", "unknown"), "encoding_unknown"),
-        (entry("K\xcdNH", "mixed", runs=("unicode", "unknown")), "encoding_unknown"),
-    ],
-)
-def test_the_font_evidence_flag_lifts_encoding_unknown_and_nothing_else(e, reason):
-    assert meaning_block_reason(e) == reason

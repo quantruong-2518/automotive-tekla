@@ -17,10 +17,7 @@ Rule, on one full text-index entry (schemas/text-index.schema.json `entry`):
       - flag `knowledge_conflict`            -> "knowledge_conflict"
       - flag `proposed_knowledge_row`        -> "encoding_proposed"
       - flag `unicode_evidence_contradicts_font` -> "encoding_contradiction"
-      - `decode.encoding_used` is `unknown`, or `mixed` with an `unknown` run -> "encoding_unknown", unless
-        the flag `unicode_by_font_evidence` is set (tool wave 4, V2): extract_text sets it when every
-        unknown run sits in a TrueType file that another entry proved Unicode by its code points, and the
-        unknown runs hold only ASCII and Latin-1 Vietnamese letters; the font, not the string, is the evidence
+      - `decode.encoding_used` is `unknown`, or `mixed` with an `unknown` run -> "encoding_unknown"
   * else allowed (Unicode, or TCVN3/VNI decided by font name, code-point evidence or an approved row).
 
 The reason strings are part of the reader tools' output contract (sheet-text, reader-findings, marks).
@@ -56,10 +53,9 @@ def meaning_block_reason(entry: dict[str, Any]) -> str | None:
             return reason
     decode = entry.get("decode") or {}
     encoding = decode.get("encoding_used")
-    unknown = encoding == "unknown" or (
-        encoding == "mixed" and any(r.get("encoding") == "unknown" for r in decode.get("run_details") or ())
-    )
-    if unknown and "unicode_by_font_evidence" not in flags:
+    if encoding == "unknown":
+        return "encoding_unknown"
+    if encoding == "mixed" and any(r.get("encoding") == "unknown" for r in decode.get("run_details") or ()):
         return "encoding_unknown"
     return None
 
