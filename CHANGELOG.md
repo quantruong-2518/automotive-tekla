@@ -743,6 +743,12 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
     row in `harness questions-md`, raised by package T); flag `--include-hidden` on `harness sheet-text`
     and `harness find-text` (also show entries that do not print, marked), exit 3 with nothing run until
     package T lands. A synthetic R2018 (AC1032) DXF is tested through intake and read-structure.
+  - Tool wave 4, package G (grids, `grids.py` and `grid_system.py`; no schema change):
+    - Text, lines, circles and dimensions that do not print are left out of bubbles, labels, axes and
+      dimension evidence (not-printed text entries via `visibility.is_printed`; geometry by its own group 60
+      and its layer off / frozen / plot 0, read from the DXF). An entity on layer 0 inside a block and the
+      contents of an invisible INSERT stay (Autodesk does not settle them). What was left out is counted
+      in `warnings` (the grids schema has no counter field).
 
 ### Changed
 - Question lifecycle (tool wave 2, EVAL-2 fix 5):

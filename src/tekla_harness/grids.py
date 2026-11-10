@@ -79,6 +79,7 @@ from tekla_harness.sheets import (
     text_center,
 )
 from tekla_harness.text_gate import meaning_block_reason
+from tekla_harness.visibility import is_printed
 
 SCHEMA_VERSION = "0.1"
 BUBBLE_TEXT_RADIUS = 0.9  # label centre within this x r of the circle centre
@@ -179,6 +180,7 @@ _LABEL_RE = re.compile(
 _LABEL_TOKEN_RE = re.compile(r"\d+|[A-Za-z]+|['\u2032]+|/")
 _NUMBER_RE = re.compile(r"^\s*[-+]?\d+(?:\.\d+)?\s*$")
 _GEOMETRY = frozenset({"LINE", "LWPOLYLINE", "POLYLINE", "CIRCLE", "ARC", "ELLIPSE", "DIMENSION"})
+_GEOMETRY_NAME = {"CIRCLE": "circle", "ARC": "circle", "ELLIPSE": "circle", "DIMENSION": "dimension"}
 
 
 # --- primitives --------------------------------------------------------------------------------
@@ -337,6 +339,34 @@ def _effective_linetype(doc: Drawing, entity: Any) -> str:
         layer = doc.layers.get(str(entity.dxf.get("layer", "0")))
         return str(layer.dxf.get("linetype", "CONTINUOUS")) if layer is not None else "BYLAYER"
     return lt
+
+
+def _geometry_not_printed(
+    doc: Drawing, entity: Any, in_block: bool, layers: dict[str, str | None]
+) -> str | None:
+    """Why a line, circle or dimension does not print, else None (docs/research/dxf-invisible-text.md).
+
+    Its own group 60, or its layer off (colour < 0), frozen, or with the plot flag 0. An entity on layer '0'
+    inside a block takes the INSERT's layer, and whether AutoCAD then hides it is not settled (research
+    note, section 7), so only its own group 60 counts. An INSERT's own group 60 over its contents is not
+    settled either (section 2): the contents are kept."""
+    if int(entity.dxf.get("invisible", 0) or 0) == 1:
+        return "entity_invisible"
+    name = str(entity.dxf.get("layer", "0"))
+    if in_block and name == "0":
+        return None
+    if name not in layers:
+        layer = doc.layers.get(name)
+        reason = None
+        if layer is not None:
+            if layer.is_off():
+                reason = "layer_off"
+            elif layer.is_frozen():
+                reason = "layer_frozen"
+            elif int(layer.dxf.get("plot", 1)) == 0:
+                reason = "layer_no_plot"
+        layers[name] = reason
+    return layers[name]
 
 
 def _segments_of(entity: Any) -> list[tuple[tuple[float, float], tuple[float, float]]]:
@@ -502,6 +532,8 @@ class _Ctx:
     questions: list[dict[str, Any]] = field(default_factory=list)
     q_counts: Counter[str] = field(default_factory=Counter)
     warnings: list[str] = field(default_factory=list)
+    not_printed_text: int = 0  # text entries the index marks printed: false, left out of every bubble
+    not_printed_geometry: Counter[str] = field(default_factory=Counter)  # "<kind>:<reason>" -> count
 
     def ask(self, code: str, blocking: bool, message: str, where: str, found: str, sheet: str | None = None):
         self.q_counts[code] += 1
@@ -523,12 +555,17 @@ def _collect(doc: Drawing, walker: Walker, ctx: _Ctx):
     segs: list[_Seg] = []
     circles: list[_Circle] = []
     dims: list[_Dim] = []
+    layers: dict[str, str | None] = {}
     for space, layout, _ in layout_spaces(doc):
         for p in walker.walk(layout, space, _GEOMETRY):
             e = p.entity
             kind = e.dxftype()
             handle = walker.handle(e) if not p.block_path else p.top_handle
             try:
+                hidden = _geometry_not_printed(doc, e, bool(p.block_path), layers)
+                if hidden is not None:
+                    ctx.not_printed_geometry[f"{_GEOMETRY_NAME.get(kind, 'line')}:{hidden}"] += 1
+                    continue
                 if kind == "CIRCLE":
                     c = e.dxf.center
                     if e.dxf.get("extrusion", (0, 0, 1))[2] < 0:
@@ -620,6 +657,9 @@ def _find_bubbles(circles: list[_Circle], entries: list[dict[str, Any]], ctx: _C
     for e in entries:
         text = e["display_text"].strip()
         if not text:
+            continue
+        if not is_printed(e):  # tool wave 4: text that does not print is no label and no other text
+            ctx.not_printed_text += 1
             continue
         c = text_center(e)
         if c is None:
@@ -1600,6 +1640,7 @@ def extract_grids(
             )
     for reason, n in sorted(walker.skipped.items()):
         ctx.warnings.append(f"{n} entit(ies)/insert(s) not read while walking the drawing: {reason}.")
+    ctx.warnings.extend(_not_printed_warnings(ctx))
 
     unpaired_sorted = sorted(unpaired, key=lambda b: (b.circle.space, b.sheet, b.circle.c))
     return {
@@ -1636,6 +1677,27 @@ def extract_grids(
         "question_counts": dict(sorted(ctx.q_counts.items())),
         "warnings": ctx.warnings,
     }
+
+
+def _not_printed_warnings(ctx: _Ctx) -> list[str]:
+    """What was left out because it does not print (counted apart; the grids schema has no counter field)."""
+    out = []
+    if ctx.not_printed_text:
+        out.append(
+            f"{ctx.not_printed_text} text(s) not printed (text index printed: false): left out of every "
+            "bubble label."
+        )
+    for kind in ("line", "circle", "dimension"):
+        parts = {
+            k.split(":", 1)[1]: n for k, n in ctx.not_printed_geometry.items() if k.startswith(f"{kind}:")
+        }
+        if parts:
+            detail = ", ".join(f"{r} {n}" for r, n in sorted(parts.items()))
+            out.append(
+                f"{sum(parts.values())} {kind}(s) not printed ({detail}): left out of bubbles, axes and "
+                "dimension evidence."
+            )
+    return out
 
 
 def _label_json(a: _Axis, ctx: _Ctx) -> dict[str, Any] | None:
