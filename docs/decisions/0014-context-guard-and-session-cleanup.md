@@ -9,8 +9,11 @@
 
 Long sessions cost more and work worse. Every turn re-reads the whole context, so a session's cost
 grows roughly with the square of its length. The EVAL-4 orchestrator session reached 856k tokens.
-Opus 5.5 and Sonnet 5.5 run a native 1M window in Claude Code and auto-compact only near 967k by
-default, so nothing stops a session before that point.
+Opus 5.5 and Sonnet 5.5 run a native 1M window in Claude Code. The docs put the default
+auto-compact near 967k. Observed behaviour differs: the main chain of one 2.1.319 session
+auto-compacted at 242k, 353k and 489k with `autoCompactWindow` unset in both the user and the
+project settings. So the real trigger is undocumented, and compaction can land before any
+threshold below.
 
 Quality also drops with length. Anthropic states it in words ("context rot"; "response quality
 degrades as a conversation grows"), but no primary source gives a threshold for any 5.x model. The
@@ -60,8 +63,10 @@ The repository also gathers stale state. On 2026-11-10 it held 25 worktrees and 
 4. **`session_cleanup.py`** is registered for `SessionStart` with the `startup|clear` matcher.
    - **Worktrees:** a worktree is removed (`git worktree remove`, never `--force`) only when every
      condition below holds:
-     - it is not the main worktree or the session's own directory;
-     - it is not locked or prunable;
+     - it is not the main worktree, the session's own directory (stdin `cwd`, process cwd or
+       `CLAUDE_PROJECT_DIR`) or the cwd of a live Claude session (best effort, from the
+       undocumented `~/.claude/sessions/*.json`; this check can only add keeps);
+     - it is not locked or prunable, and `git worktree prune` is never run;
      - `git status --porcelain --ignored` shows only regenerable caches;
      - its HEAD is merged into `master`, `origin/master` or a `feat/*` branch other than its own;
      - it has been idle for 24 hours;
@@ -88,8 +93,12 @@ The repository also gathers stale state. On 2026-11-10 it held 25 worktrees and 
 
 ## Consequences
 
-- A session stops growing past about 250k tokens unless the engineer ignores the prompt. Cost per
-  turn stays bounded.
+- At 250k and above, every prompt carries "start no new work". The session then idles until the
+  engineer types `/clear`, so cost per turn stays bounded. Background agents still running at
+  that point are recorded in the handoff, and Claude waits for them before asking for `/clear`.
+- Compaction can still happen earlier on Claude Code's own trigger (see Context). After a
+  compaction the guard counts from the `compact_boundary` line, which gives the post-compaction
+  size. A re-injection of the handoff file after compaction is not part of this decision.
 - **Undocumented dependency:** the transcript JSONL format (`type`, `isSidechain`,
   `message.usage`) is not documented. A format change makes the guard fall silent, not wrong: no
   count means no warning. It is checked against Claude Code 2.1.322. Re-check after upgrades with
