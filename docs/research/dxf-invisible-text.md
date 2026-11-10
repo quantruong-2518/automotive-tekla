@@ -16,6 +16,17 @@ This note reports facts and one proposed rule; nothing in the repo was changed.
   below were returned by that tool, not read by me raw: re-check before quoting in an ADR.
   ezdxf source lines were read directly. Paths below are relative to
   `.venv/lib/python3.12/site-packages/ezdxf/` (abbreviated `ezdxf/`).
+- **Raw re-check (2026-11-10, tool wave 4).** The following were fetched with `curl` (raw HTML, no
+  summarizer) from the 2016 cloudhelp pages and agree with the quotes below, so they are `verified`
+  raw, not relayed: common group 60 row ("Object visibility (optional): 0 = Visible; 1 = Invisible",
+  default 0) and the intro sentence "apply to virtually all graphical objects" (GUID-3610039E); ATTRIB
+  and ATTDEF group 70 "Attribute flags: 1 = Attribute is invisible (does not appear) / 2 = ... constant /
+  4 = Verification ... / 8 = ... preset" (GUID-7DD8B495, GUID-F0EA099B); LAYER group 62 "Color number
+  (if negative, layer is off)", group 70 "1 = Layer is frozen; otherwise layer is thawed / 2 = Layer is
+  frozen by default in new viewports / 4 = Layer is locked", group 290 "Plotting flag. If set to 0, do
+  not plot this layer" (GUID-D94802B0); `$ATTMODE` "Attribute visibility: 0 = None 1 = Normal 2 = All"
+  (GUID-A85E8E67). The 2024 edition of GUID-3610039E also serves the group 60 row. Every other quote in
+  this note (Layer Properties Manager, ATTDISP, VIEWPORT, VPORT, BLOCKS pages) stays `relayed`.
 - **Introspection** (`DXFATTRIBS`, `dir()`) was run on classes only. No drawing under
   `dwg-lab/samples/` was opened.
 - **Could not run the ezdxf renderer.** `ezdxf.addons.drawing` imports `PIL`, which is not installed

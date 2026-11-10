@@ -63,7 +63,7 @@ from tekla_harness.questions import (
     questions_document,
     questions_per_file,
 )
-from tekla_harness.read_dxf import legacy_ascii_questions, probe_dxf
+from tekla_harness.read_dxf import legacy_ascii_questions, probe_dxf, text_visibility_questions
 from tekla_harness.readlog import Attempt, ReadLog, ReadLogError, timed_attempt
 from tekla_harness.schemas import validate
 from tekla_harness.worklock import WorkLockError, work_lock
@@ -156,6 +156,7 @@ class _Entry:
     text_summary: dict[str, Any] | None = None
     unknown_by_style: dict[str, tuple[int, str | None]] = field(default_factory=dict)
     legacy_ascii: list[dict[str, Any]] = field(default_factory=list)  # legacy_ascii_text questions
+    visibility: list[dict[str, Any]] = field(default_factory=list)  # text_visibility_uncertain (tool wave 4)
     read_failure: str | None = None  # supported format that could not be read: why
     failure_stage: str = ""
     no_reader: bool = False
@@ -266,6 +267,7 @@ def _run_text(entry: _Entry, dxf: Path, converter: str, text_dir: Path, knowledg
     entry.text_summary = _text_summary(text)
     entry.unknown_by_style = _unknown_by_style(text)
     entry.legacy_ascii = legacy_ascii_questions(text, entry.rel, (entry.probe or {}).get("text_styles"))
+    entry.visibility = text_visibility_questions(text, entry.rel)
     if text["status"] == "partial":
         entry.warnings.append(
             f"text index status partial: {text['summary']['errors_total']} entity error(s), "
@@ -498,6 +500,12 @@ def _legacy_groups(entries: list[_Entry]) -> list[dict[str, Any]]:
     return [q for e in entries for q in e.legacy_ascii]
 
 
+def _visibility_groups(entries: list[_Entry]) -> list[dict[str, Any]]:
+    """text_visibility_uncertain (tool wave 4, V1): one non-blocking question per file with printed text that
+    may not print (read_dxf.text_visibility_questions); none for a file whose text index is unreadable."""
+    return [q for e in entries for q in e.visibility]
+
+
 def _conversion_groups(entries: list[_Entry]) -> list[dict[str, Any]]:
     empty, errors = [], []
     for e in entries:
@@ -549,7 +557,13 @@ def _file_set_group(entries: list[_Entry]) -> list[dict[str, Any]]:
 def _questions(entries: list[_Entry]) -> list[dict[str, Any]]:
     """Raw questions (no id, key or answer yet), one per code, blocking flag and file, in document order;
     the project-level file_set_relation last, so it never shifts a file question's new id."""
-    groups = _units_group(entries) + _probe_groups(entries) + _text_groups(entries) + _legacy_groups(entries)
+    groups = (
+        _units_group(entries)
+        + _probe_groups(entries)
+        + _text_groups(entries)
+        + _legacy_groups(entries)
+        + _visibility_groups(entries)
+    )
     return groups + _conversion_groups(entries) + _failure_groups(entries) + _file_set_group(entries)
 
 

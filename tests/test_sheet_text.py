@@ -193,6 +193,7 @@ def test_sheet_text_entries_are_compact_and_in_reading_order(work):
         "returned": len(sheet["text_ids"]),
         "omitted": 0,
         "truncated": False,
+        "not_printed_in_scope": 0,
     }
     by_id = {e["id"]: e for e in index["entries"]}
     for out in doc["entries"]:
@@ -259,7 +260,14 @@ def test_truncation_keeps_true_counts(work):
     doc = sheet_text(work, REL, "model#01", max_entries=5)
     assert [e["entry_id"] for e in doc["entries"]] == [e["entry_id"] for e in full["entries"][:5]]
     n = full["counts"]["assigned"]
-    assert doc["counts"] == {"assigned": n, "matched": n, "returned": 5, "omitted": n - 5, "truncated": True}
+    assert doc["counts"] == {
+        "assigned": n,
+        "matched": n,
+        "returned": 5,
+        "omitted": n - 5,
+        "truncated": True,
+        "not_printed_in_scope": 0,
+    }
     # the filter is applied before the cut
     filtered = sheet_text(work, REL, "model#01", contains="C", max_entries=2)
     all_c = sheet_text(work, REL, "model#01", contains="C")["counts"]["matched"]
@@ -1099,3 +1107,158 @@ def test_list_sheets_counts_the_blocked_text_of_the_whole_file(work, loose, dama
     (damaged / STRUCTURE_DIR / f"{REL}.sheets.json").unlink()
     skipped = list_sheets(damaged)["files"][0]
     assert skipped["status"] == "skipped" and skipped["blocked_text_count"] is None
+
+
+# --- V7 (tool wave 4): the find-text note tells the truth about what an answer unblocks -------------------
+
+
+def _only_legacy_blocked(damaged: Path) -> None:
+    """Every blocked entry becomes plain Unicode, then two ASCII entries are flagged legacy_ascii_suspect, and
+    the file gets a live legacy_ascii_text question (Q-095) next to its encoding questions."""
+    path = damaged / "text" / f"{REL}.json"
+    index = load(path)
+    for e in index["entries"]:
+        if meaning_block_reason(e) is not None:
+            e["flags"] = []
+            e["decode"]["encoding_used"] = "unicode"
+    ascii_entries = [e for e in index["entries"] if e["raw_text"].isascii()][:2]
+    for e in ascii_entries:
+        e["flags"] = ["legacy_ascii_suspect"]
+    assert len(ascii_entries) == 2
+    path.write_text(json.dumps(index, ensure_ascii=False), encoding="utf-8")
+    registry_path = damaged / "question-registry.json"
+    registry = load(registry_path)
+    registry["questions"]["a" * 16] = {
+        "id": "Q-095", "code": "legacy_ascii_text", "file": REL, "producer": "intake", "status": "open",
+        "first_seen_run": 1, "last_seen_run": 1,
+    }  # fmt: skip
+    registry_path.write_text(json.dumps(registry), encoding="utf-8")
+
+
+def test_the_note_does_not_ask_for_a_font_row_when_only_legacy_ascii_text_is_blocked(damaged):
+    _only_legacy_blocked(damaged)
+    doc = find_text(damaged, "zzz-no-such-text")
+    assert doc["counts"]["blocked_in_scope"] == 2
+    (note,) = doc["notes"]
+    assert "approve the font row" not in note and "Q-003" not in note
+    assert "Q-095" in note and "legacy_ascii_text" in note and "unblock nothing" in note
+    assert "incomplete" in note and "never matched" in note
+
+
+def test_the_note_asks_for_a_font_row_when_an_encoding_reason_is_blocked(work):
+    (note,) = find_text(work, "zzz-no-such-text")["notes"]
+    assert (
+        "approve the font row" in note and "legacy_ascii_text" not in note and "unblock nothing" not in note
+    )
+
+
+def test_the_note_says_both_when_both_kinds_are_blocked(damaged):
+    _only_legacy_blocked(damaged)
+    path = damaged / "text" / f"{REL}.json"
+    index = load(path)
+    victim = next(e for e in index["entries"] if e["raw_text"].isascii() and not e["flags"])
+    victim["decode"]["encoding_used"] = "unknown"
+    victim["raw_text"] = "b\xb6n"  # non-ASCII of unknown encoding: blocked as encoding_unknown
+    victim["flags"] = ["encoding_unknown_non_ascii"]
+    path.write_text(json.dumps(index, ensure_ascii=False), encoding="utf-8")
+    (note,) = find_text(damaged, "zzz-no-such-text")["notes"]
+    assert "approve the font row" in note and "Q-095" in note and "unblock nothing" in note
+
+
+def test_the_note_lists_each_files_own_questions_for_its_own_kind_of_block(work, tmp_path):
+    """REL holds only legacy-looking ASCII, plans/zz.dxf only an encoding block: the note must not list REL's
+    encoding questions or zz's legacy_ascii_text question."""
+    target = two_file_work(work, tmp_path / "two")
+    _only_legacy_blocked(target)
+    registry_path = target / "question-registry.json"
+    registry = load(registry_path)
+    for key, qid, code in (("b", "Q-200", "font_encoding_proposed"), ("c", "Q-201", "legacy_ascii_text")):
+        registry["questions"][key * 16] = {
+            "id": qid, "code": code, "file": "plans/zz.dxf", "producer": "intake", "status": "open",
+            "first_seen_run": 1, "last_seen_run": 1,
+        }  # fmt: skip
+    registry_path.write_text(json.dumps(registry), encoding="utf-8")
+    (note,) = find_text(target, "zzz-no-such-text")["notes"]
+    assert "Q-200" in note and "Q-095" in note
+    assert "Q-003" not in note and "Q-201" not in note
+
+
+# --- tool wave 4: --include-hidden ----------------------------------------------------------------------
+
+
+def _hide(damaged: Path, text: str) -> str:
+    """Mark the entry of model#01 whose display text is `text` as not printed; return its id."""
+    victim = by_text(sheet_text(damaged, REL, "model#01"))[text]["entry_id"]
+    patch_entries(damaged, {victim: {"printed": False, "not_printed_reasons": ["entity_invisible"]}})
+    return victim
+
+
+def test_sheet_text_leaves_out_what_does_not_print_and_counts_it(damaged):
+    full = sheet_text(damaged, REL, "model#01")
+    victim = _hide(damaged, "C1")
+    doc = sheet_text(damaged, REL, "model#01", check_inputs=True)
+    assert validate("sheet-text", doc) == []
+    assert victim not in {e["entry_id"] for e in doc["entries"]}
+    assert doc["counts"]["not_printed_in_scope"] == 1
+    assert doc["counts"]["assigned"] == full["counts"]["assigned"] - 1
+    assert doc["counts"]["matched"] == full["counts"]["matched"] - 1
+
+
+def test_sheet_text_include_hidden_lists_them_marked(damaged):
+    full = sheet_text(damaged, REL, "model#01")
+    victim = _hide(damaged, "C1")
+    doc = sheet_text(damaged, REL, "model#01", include_hidden=True, check_inputs=True)
+    assert validate("sheet-text", doc) == []
+    got = {e["entry_id"]: e for e in doc["entries"]}
+    assert got[victim]["printed"] is False
+    assert all("printed" not in e for e in doc["entries"] if e["entry_id"] != victim)
+    assert (
+        doc["counts"]["assigned"] == full["counts"]["assigned"] and doc["counts"]["not_printed_in_scope"] == 1
+    )
+
+
+def test_sheet_text_without_hidden_entries_reports_zero(work):
+    assert sheet_text(work, REL, "model#01")["counts"]["not_printed_in_scope"] == 0
+
+
+def test_the_gate_counts_only_what_is_in_scope(damaged):
+    blocked = next(e for e in sheet_text(damaged, REL, "model#01")["entries"] if e["meaning"] == "blocked")
+    before = sheet_text(damaged, REL, "model#01")["legacy_font_gate"]["blocked_entries"]
+    patch_entries(damaged, {blocked["entry_id"]: {"printed": False}})
+    assert sheet_text(damaged, REL, "model#01")["legacy_font_gate"]["blocked_entries"] == before - 1
+    assert (
+        sheet_text(damaged, REL, "model#01", include_hidden=True)["legacy_font_gate"]["blocked_entries"]
+        == before
+    )
+
+
+def test_find_text_skips_what_does_not_print_unless_asked(damaged):
+    full = find_text(damaged, "c1")
+    victim = _hide(damaged, "C1")
+    default = find_text(damaged, "c1", check_inputs=True)
+    assert validate("sheet-text", default) == []
+    assert victim not in {h["entry_id"] for h in default["hits"]}
+    assert (
+        default["counts"]["hits"] == full["counts"]["hits"] - 1
+        and default["counts"]["not_printed_in_scope"] == 1
+    )
+    shown = find_text(damaged, "c1", include_hidden=True, check_inputs=True)
+    assert validate("sheet-text", shown) == []
+    marked = [h for h in shown["hits"] if h["entry_id"] == victim]
+    assert len(marked) == 1 and marked[0]["printed"] is False
+    assert shown["counts"]["hits"] == full["counts"]["hits"]
+    assert all("printed" not in h for h in shown["hits"] if h["entry_id"] != victim)
+
+
+def test_cli_include_hidden_runs_with_and_without_a_region(damaged, capsys):
+    _hide(damaged, "C1")
+    x = by_text(sheet_text(damaged, REL, "model#01", include_hidden=True))["C1"]
+    box = f"{x['x'] - 1},{x['y'] - 1},{x['x'] + 1},{x['y'] + 1}"
+    plain = main(["sheet-text", str(damaged), REL, "model#01", "--region", box])
+    assert plain == 0 and json.loads(capsys.readouterr().out)["entries"] == []
+    shown = main(["sheet-text", str(damaged), REL, "model#01", "--region", box, "--include-hidden"])
+    out = json.loads(capsys.readouterr().out)
+    assert shown == 0 and [e["printed"] for e in out["entries"]] == [False]
+    assert main(["sheet-text", str(damaged), REL, "model#01", "--include-hidden"]) == 0
+    capsys.readouterr()
+    assert main(["find-text", str(damaged), "--contains", "c1", "--include-hidden"]) == 0

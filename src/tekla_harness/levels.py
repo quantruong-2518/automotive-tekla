@@ -29,7 +29,9 @@ on a structural sheet is finished or structural. So:
    SYMBOL_DISTANCE text heights of the text extents.
 4. Confidence: medium only for a bare value next to a level symbol; low otherwise (the three-decimal
    convention is NOT verified, so three decimals alone are low); never above the text entry or the file
-   cap; low for text on an off/frozen layer or an invisible attribute.
+   cap; low for text on an off/frozen layer or an invisible attribute (an index written before `printed`
+   existed). A text that does not print (`printed: false`, tool wave 4) gives no candidate, no storey name
+   and no safety-net hint; one warning counts such texts and the level-shaped values in them.
 5. Equal values are grouped. A group's `occurrences` counts its candidates on original sheets only (a
    sheet that is a copy, sheets.json duplicate_of, adds nothing). Storey heights are differences of
    consecutive levels whose candidates name a storey; when fewer than two levels are named, the
@@ -79,6 +81,7 @@ from tekla_harness.sheets import (
     text_box,
 )
 from tekla_harness.text_gate import meaning_block_reason
+from tekla_harness.visibility import is_printed
 
 SCHEMA_VERSION = "0.1"
 _MINUS = "\u2212"  # MINUS SIGN, also accepted as a sign
@@ -86,10 +89,15 @@ LEVEL_RANGE_M = (-50.0, 300.0)
 SYMBOL_DISTANCE = 6.0  # text heights
 NAME_SAME_LINE = 15.0  # text heights, left or right of the value
 NAME_ABOVE = 2.5  # text heights
+# A name beside the value is on the value's row when its centre is within 0.75 of the value's height of the
+# value's (tool wave 3), or when the two text boxes overlap vertically or lie within this share of the taller
+# text's height of each other (extents are estimates; 285 sets a taller name 5 % below the value). The second
+# test only adds pairs.
+NAME_ROW_GAP = 0.1
 MAX_QUESTIONS_PER_CODE = 50
 
 _VALUE_RE = re.compile(
-    r"(?<![\d,])(?<!\d\.)(?P<sign>\+/-|\+-|[±+\-\u2212])(?P<gap>\s?)(?P<int>\d{1,3})(?P<sep>[.,])"
+    r"(?<![\d,])(?<!\d\.)(?P<sign>\+/-|\+-|[±+\-\u2212])(?P<gap>\s*)(?P<int>\d{1,3})(?P<sep>[.,])"
     r"(?P<dec>\d{1,3})(?P<unit>\s?[mM](?![A-Za-z]))?(?![\d.,]|\w)"
 )
 _NOT_LEVEL_AFTER_RE = re.compile(r"\s?(?:mm(?![A-Za-z])|%)", re.IGNORECASE)  # '+3.600 mm', 'i=-2.5%'
@@ -268,6 +276,8 @@ def _parse(line: str):
     for m in _VALUE_RE.finditer(line):
         before, after = line[: m.start()].strip(), line[m.end() :].strip()
         raw_before = line[: m.start()]
+        if len(m.group("gap")) > 1 and (before or after.strip(" )]}")):
+            continue  # a sign set apart by more than one space: only a bare value at the start of the text
         if raw_before and raw_before[-1].isalpha() and not _PREFIX_RE.search(_fold_keep(raw_before)):
             continue  # a letter glued to the sign ('A-1.200') is not a level unless it ends a level word
         if (
@@ -353,13 +363,20 @@ def extract_levels(
     entries = text_index["entries"]
     by_sheet_space: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
     for e in entries:
-        by_sheet_space[(locator.text_sheet(e["id"]), e["space"])].append(e)
+        if is_printed(e):  # a text that does not print names no storey
+            by_sheet_space[(locator.text_sheet(e["id"]), e["space"])].append(e)
 
     candidates: list[dict[str, Any]] = []
     storey_worded: set[str] = set()  # candidate ids: a storey word on the value's line or next to it
     blocked: list[dict[str, Any]] = []
+    not_printed_texts = 0
+    not_printed_values = 0
     for e in entries:
         lines = e["display_text"].split("\n")
+        if not is_printed(e):  # left out of every value, counted apart (tool wave 4)
+            not_printed_texts += 1
+            not_printed_values += sum(1 for line in lines for _ in _parse(line))
+            continue
         reason = meaning_block_reason(e)
         if reason is not None:  # legacy-font gate: listed, never a candidate
             blocked.extend(
@@ -617,6 +634,11 @@ def extract_levels(
     for code, n in sorted(q_counts.items()):
         if n > MAX_QUESTIONS_PER_CODE:
             warnings.append(f"{n} '{code}' questions; only the first {MAX_QUESTIONS_PER_CODE} are listed.")
+    if not_printed_texts:
+        warnings.append(
+            f"{not_printed_texts} text(s) are not printed (printed: false) and hold {not_printed_values} "
+            "level-shaped value(s); none is a candidate and none names a storey."
+        )
 
     return {
         "schema_version": SCHEMA_VERSION,
@@ -671,10 +693,10 @@ def _adjacent_name(
         if obox is None:
             continue
         ox, oy = (obox[0] + obox[2]) / 2, (obox[1] + obox[3]) / 2
-        same_line = (
-            abs(oy - cy) <= 0.75 * h
-            and min(abs(obox[2] - box[0]), abs(obox[0] - box[2])) <= NAME_SAME_LINE * h
+        same_row = abs(oy - cy) <= 0.75 * h or (
+            max(box[1] - obox[3], obox[1] - box[3]) <= NAME_ROW_GAP * max(h, obox[3] - obox[1])
         )
+        same_line = same_row and min(abs(obox[2] - box[0]), abs(obox[0] - box[2])) <= NAME_SAME_LINE * h
         above = (
             obox[1] >= box[3] - 0.25 * h
             and obox[1] - box[3] <= NAME_ABOVE * h

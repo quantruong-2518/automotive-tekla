@@ -782,6 +782,99 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
       (`dẦm d-1`) on a sheet, every title-form text of that family on the sheet is a plan label, not a detail
       heading (form `plain` / `with_size` / `sub_number`, no `title_member_word`); one warning per file counts
       them per sheet. 290 `dẦm d-n`: matched 5 -> 16, schedule_only 17 -> 5.
+  - Tool wave 4, package T (text), visibility: `harness extract-text` fills `printed`,
+    `not_printed_reasons` and `print_uncertain_reasons` on every entry. Not printed: group 60 on the entity
+    (TEXT, MTEXT, ATTRIB, MULTILEADER, DIMENSION, also on block content), ATTRIB flag bit 1 (`invisible`
+    stays that flag only), the effective layer off, frozen or with the plot flag 0. Kept printed but
+    uncertain: an INSERT with group 60 above the entry, `$ATTMODE` other than 1 on an attribute (mode 2 shows even
+    a flag-1 attribute, so that one is uncertain; mode 0 hides every attribute, so a flag-1 attribute is not
+    printed), a layer frozen in some viewport (model space text only) and the `Defpoints` layer
+    (ezdxf rewrites its plot flag to 0 on every load, so only its name counts). Entries stay in the index;
+    the flags `layer_off`, `layer_frozen`, `attribute_invisible` and `text_gate` are unchanged. Known
+    drawings, not printed: 271 305 (232 on real entities, the exact set of the EVAL-4 hidden list, plus 73
+    rebar callout TEXT copies inside anonymous blocks), 278 46, 285 6 (dimension texts on a layer with plot
+    0), the other seven 0.
+  - Tool wave 4, package T (text), question: `read_dxf.text_visibility_questions(text_index, rel)` builds the
+    one non-blocking `text_visibility_uncertain` question of a file that has printed entries with
+    `print_uncertain_reasons` (a ref per reason with its entry count, then five example entry ids; `count` is
+    the number of entries). Intake calls it from seam 2.
+  - Tool wave 4, package T (text), wording: the `harness find-text` note no longer tells the engineer to
+    approve the font row for `legacy_ascii_suspect` entries. It names the `legacy_ascii_text` questions as
+    recording a reading that unblocks nothing, and mentions the font row (with its questions) only for
+    entries blocked by an encoding reason.
+  - Tool wave 4, package T (text), gate: unchanged. A font-evidence lift for plain Unicode text in a TrueType
+    file (271 `KÍNH`) was built and reverted after review: it let TCVN3 / VNI strings past the gate. Such text
+    stays blocked `encoding_unknown`; `tests/test_legacy_text_stays_blocked.py` keeps it so.
+  - Tool wave 4, package S (sheets and levels):
+    - Texts that do not print (`printed: false`, written by package T) give no sheet number, title field
+      or level: `harness sheets` leaves them out of every label, value, title-block evidence, corner code
+      and mark count (they keep their sheet in `text_ids`); `harness levels` gives no candidate and no
+      storey name from them. Each file gets one warning counting them (and, for levels, the level-shaped
+      values in them). An index written before `printed` existed still lowers confidence by `flags`.
+      Measured with the 271 hidden set emulated from DXF group 60 (232 texts): the phantom levels
+      +3.850, +3.450 and +3.050 (86 candidates) leave `levels.json`; the real `printed` field shows only
+      once package T lands.
+    - Sheet numbers by label (V3): a title-field label pairs with its value inside its title-block cell
+      (the box between the nearest drawn lines; a label with no cell or an empty one keeps a reading-direction
+      test: on its row to the right, with the value's box overlapping the label's rows, or just below it),
+      one value per label and one label per value, nearest first. The old test (value centre within
+      0.6 label heights of the label centre) missed values set larger than their label. New title field
+      `job_number` (labels `JOB NO.`, `SỐ HĐ`, `MÃ CÔNG TRÌNH`, tags `JOBNO` ...): `title_block.job_number`
+      (null when absent), a non-blocking `title_field_conflict` when its candidates disagree; its value is
+      never a sheet number, not even as a corner code (180 `J-01` had become the number of 3D-1/3D-2).
+      Known drawings: 180 numbers 2/8 -> 8/8 detected (P-01, P-01A, P-01B, P-02A, P-02B, P-04, 3D-1, 3D-2),
+      its `sheet_number_duplicate` and six blocking sheet-number `title_field_conflict` questions leave; 264 gains
+      `job_number` 08/2008 VKH; 278 gains low `title` candidates; 271, 285, 286, 290, 161, 267, 433 and
+      Steel_01: no change. For marks, the entry ids of the number and job values are
+      `title_block.candidates[].evidence.value_text_id` (fields `sheet_number`, `job_number`).
+    - Title-block frame turned by a hair, drawing-list header (F6): a closed rectangle whose edges miss the
+      axes by up to 1e-3 of its length (0.06 degrees; was 1e-6) is a frame, so a title-block INSERT scaled and
+      turned by 0.002 degrees is a sheet (271 KC-00, bbox 164846 234376 215925 270497: 34 -> 35 sheets, the
+      sheet ids after it shift by one). A sheet-number label whose value heads a column of two or more
+      further sheet codes is the header of a drawing list: no candidate, one warning (271 `drawing no` over
+      `dm-00`, `kc-00` ...: the drawing-list sheet now reads `kc - 01` from its own title block, and the
+      blocking `title_field_conflict` becomes a blocking `sheet_number_duplicate` with the foundation plan,
+      which prints the same number). Other known drawings: no change.
+    - Levels (V4): a sign set apart from its digits by any number of spaces is a level sign when the sign
+      starts the text (`+  0.000`, written with two spaces on 278: its eight storey levels +0.000 ... +28.650
+      were missing and Q-067 said "no datum"); after a level word or `(` the one-space rule of tool wave 3
+      stays, and `TẦNG 2 -  3.600` is still a name, a dash and an unsigned number. A storey name set beside
+      the value counts as on its row when the text boxes overlap vertically or lie within 0.1 of the taller
+      text's height (was: centres within 0.75 of the value's height, which missed a taller name text: 285
+      `+0.450` with `tẦng 1`). Known drawings: 278 levels 4 -> 14 (the ten key levels ±0.000 TẦNG 1 ...
+      +28.650 MÁI, all named); 285 names TẦNG 1-3 on +0.450, +4.350, +7.950; 290 gains -0.050, +1.140,
+      +2.430, +3.850 (written `+  1.140` on one sheet); 271 names +7.660 MÁI; 264, 180, 286, 161, 267, 433,
+      Steel_01: no change.
+    - Review fixes (package S): the drawing-list header rule counts only a table column, a chain of rows with
+      the first directly under the value, each next one within 3 row heights of the previous and of about its
+      height; sheet-code-shaped marks further down the sheet no longer drop a real sheet number (a title block
+      in the right strip with `C-1`, `C-2` 21 000 below it lost its number). 271 `kc - 01` / `dm-00` is unchanged.
+      A level sign set apart from its digits by more than one space is read only for a bare value (nothing but
+      the number, a unit or a closing bracket after it): `-   2.500 kN/m2` is no level. Known drawings: no
+      change (the four 290 values are bare).
+      A storey name beside the value is on its row by the old rule (centres within 0.75 of the value's height) or
+      by the box rule of c09581a; the box rule only adds pairs (it had dropped a small name centred below the
+      value). Its 0.1 limit: named candidates on the 11 known files are the same for 0.05 and 0.1 (285 needs
+      more than 0), and 0.2 adds two names on 271.
+      Title-block cell lines come from printed geometry only: a line or polyline edge on a layer that is off,
+      frozen or set not to plot, or with its own invisible flag (group 60), no longer closes a cell; a block
+      entity on layer 0 takes the layer of the INSERT that holds it (`Placed.outer_layer`). Known drawings:
+      no change.
+  - Tool wave 4, seam 2: `harness intake` now raises the non-blocking `text_visibility_uncertain` question
+    (one per file with printed entries that have `print_uncertain_reasons`, built by
+    `read_dxf.text_visibility_questions`); it comes after `legacy_ascii_text` in `questions.json` and
+    `ask.py` leaves its ownership to intake. The intake schema's question-order description lists it.
+  - Tool wave 4, seam 2: `harness sheet-text` and `harness find-text` hide entries that do not print by default;
+    `--include-hidden` lists them marked `printed: false` (the exit-3 stub is gone). `sheet-text.schema.json`
+    (`$id` still `0.1`): entry and hit `printed` (const false, only on a hidden entry) and
+    `counts.not_printed_in_scope`. Meaning change: by default `counts.assigned`, `matched`, `legacy_font_gate`
+    and the find-text `entries_searched`, `unassigned_entries` and `blocked_in_scope` cover PRINTED entries
+    only; `not_printed_in_scope` counts the rest, and with `--include-hidden` all entries are in. The
+    `list-sheets` `text_count` and `blocked_text_count` still count every entry.
+  - Tool wave 4, seam 2: `marks.schema.json` (`$id` still `0.1`): per table optional `blocked_cell_entries` (entry
+    ids of DATA cells whose text the font gate blocks; such a cell keeps `entry_id` null). The cell `entry_id`
+    description now names both null cases (header placeholder, blocked data cell). Nothing writes it until
+    package M.
 
 ### Changed
 - Question lifecycle (tool wave 2, EVAL-2 fix 5):
