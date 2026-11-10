@@ -89,10 +89,14 @@ LEVEL_RANGE_M = (-50.0, 300.0)
 SYMBOL_DISTANCE = 6.0  # text heights
 NAME_SAME_LINE = 15.0  # text heights, left or right of the value
 NAME_ABOVE = 2.5  # text heights
+# A name beside the value counts as on the value's row when the two text boxes overlap vertically or lie
+# within this share of the taller text's height of each other (extents are estimates; 285 sets the name
+# 5 % below the value).
+NAME_ROW_GAP = 0.1
 MAX_QUESTIONS_PER_CODE = 50
 
 _VALUE_RE = re.compile(
-    r"(?<![\d,])(?<!\d\.)(?P<sign>\+/-|\+-|[±+\-\u2212])(?P<gap>\s?)(?P<int>\d{1,3})(?P<sep>[.,])"
+    r"(?<![\d,])(?<!\d\.)(?P<sign>\+/-|\+-|[±+\-\u2212])(?P<gap>\s*)(?P<int>\d{1,3})(?P<sep>[.,])"
     r"(?P<dec>\d{1,3})(?P<unit>\s?[mM](?![A-Za-z]))?(?![\d.,]|\w)"
 )
 _NOT_LEVEL_AFTER_RE = re.compile(r"\s?(?:mm(?![A-Za-z])|%)", re.IGNORECASE)  # '+3.600 mm', 'i=-2.5%'
@@ -271,6 +275,8 @@ def _parse(line: str):
     for m in _VALUE_RE.finditer(line):
         before, after = line[: m.start()].strip(), line[m.end() :].strip()
         raw_before = line[: m.start()]
+        if len(m.group("gap")) > 1 and before:
+            continue  # a sign set apart by more than one space is a sign only at the start of the text
         if raw_before and raw_before[-1].isalpha() and not _PREFIX_RE.search(_fold_keep(raw_before)):
             continue  # a letter glued to the sign ('A-1.200') is not a level unless it ends a level word
         if (
@@ -687,7 +693,7 @@ def _adjacent_name(
             continue
         ox, oy = (obox[0] + obox[2]) / 2, (obox[1] + obox[3]) / 2
         same_line = (
-            abs(oy - cy) <= 0.75 * h
+            max(box[1] - obox[3], obox[1] - box[3]) <= NAME_ROW_GAP * max(h, obox[3] - obox[1])
             and min(abs(obox[2] - box[0]), abs(obox[0] - box[2])) <= NAME_SAME_LINE * h
         )
         above = (

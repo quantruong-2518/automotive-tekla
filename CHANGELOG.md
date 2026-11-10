@@ -773,6 +773,16 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
       `dm-00`, `kc-00` ...: the drawing-list sheet now reads `kc - 01` from its own title block, and the
       blocking `title_field_conflict` becomes a blocking `sheet_number_duplicate` with the foundation plan,
       which prints the same number). Other known drawings: no change.
+    - Levels (V4): a sign set apart from its digits by any number of spaces is a level sign when the sign
+      starts the text (`+  0.000`, written with two spaces on 278: its eight storey levels +0.000 ... +28.650
+      were missing and Q-067 said "no datum"); after a level word or `(` the one-space rule of tool wave 3
+      stays, and `TẦNG 2 -  3.600` is still a name, a dash and an unsigned number. A storey name set beside
+      the value counts as on its row when the text boxes overlap vertically or lie within 0.1 of the taller
+      text's height (was: centres within 0.75 of the value's height, which missed a taller name text: 285
+      `+0.450` with `tẦng 1`). Known drawings: 278 levels 4 -> 14 (the ten key levels ±0.000 TẦNG 1 ...
+      +28.650 MÁI, all named); 285 names TẦNG 1-3 on +0.450, +4.350, +7.950; 290 gains -0.050, +1.140,
+      +2.430, +3.850 (written `+  1.140` on one sheet); 271 names +7.660 MÁI; 264, 180, 286, 161, 267, 433,
+      Steel_01: no change.
 
 ### Changed
 - Question lifecycle (tool wave 2, EVAL-2 fix 5):
