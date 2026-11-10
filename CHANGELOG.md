@@ -787,6 +787,9 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
       the first directly under the value, each next one within 3 row heights of the previous and of about its
       height; sheet-code-shaped marks further down the sheet no longer drop a real sheet number (a title block
       in the right strip with `C-1`, `C-2` 21 000 below it lost its number). 271 `kc - 01` / `dm-00` is unchanged.
+      A level sign set apart from its digits by more than one space is read only for a bare value (nothing but
+      the number, a unit or a closing bracket after it): `-   2.500 kN/m2` is no level. Known drawings: no
+      change (the four 290 values are bare).
 
 ### Changed
 - Question lifecycle (tool wave 2, EVAL-2 fix 5):

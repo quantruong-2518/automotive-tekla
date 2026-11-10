@@ -275,8 +275,8 @@ def _parse(line: str):
     for m in _VALUE_RE.finditer(line):
         before, after = line[: m.start()].strip(), line[m.end() :].strip()
         raw_before = line[: m.start()]
-        if len(m.group("gap")) > 1 and before:
-            continue  # a sign set apart by more than one space is a sign only at the start of the text
+        if len(m.group("gap")) > 1 and (before or after.strip(" )]}")):
+            continue  # a sign set apart by more than one space: only a bare value at the start of the text
         if raw_before and raw_before[-1].isalpha() and not _PREFIX_RE.search(_fold_keep(raw_before)):
             continue  # a letter glued to the sign ('A-1.200') is not a level unless it ends a level word
         if (

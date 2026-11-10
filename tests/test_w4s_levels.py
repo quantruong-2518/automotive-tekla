@@ -37,6 +37,13 @@ def run(path: Path) -> dict[str, Any]:
         ("A  +  1.200", []),  # wide gap away from the start of the text: still not a sign
         ("EL. +  3.600", []),  # after a level word only the one-space gap of tool wave 3 counts
         ("EL. + 3.600", [("3.600", "prefixed")]),
+        # review m4: the wide gap is for a bare value, not for a value with text after it
+        ("-   2.500 kN/m2", []),
+        ("+  3.600 (sàn tầng 2)", []),
+        ("+  3.600 mm", []),
+        ("+  1.140m", [("1.140", "bare")]),  # a trailing unit is part of the value
+        ("+  3.600)", [("3.600", "embedded")]),  # a trailing bracket is allowed
+        ("+ 3.600 kN/m2", [("3.600", "embedded")]),  # one space: as before
     ],
 )
 def test_wide_gap_after_a_sign_that_starts_the_text(text, expected):
