@@ -1,6 +1,6 @@
 # dwg-lab sample corpus - INDEX
 
-Built 2026-11-06. 38 sample files in 13 source directories (L1: 12, L2: 16, L3: 10), 23.0 MB total. Each directory has a `SOURCE.md` (URL, licence, sha256, header magic, contents, why useful). Total is slightly above the ~30-file target because the version matrix (L1) was kept as separate files.
+Built 2026-11-06; EVAL-3 held-out set added 2026-11-07. 42 sample files in 14 source directories (L1: 12, L2: 16, L3: 14), 32.9 MB total. Each directory has a `SOURCE.md` (URL, licence, sha256, header magic, contents, why useful). Total is slightly above the ~30-file target because the version matrix (L1) was kept as separate files.
 
 ## READ FIRST: licence and git safety
 
@@ -56,6 +56,10 @@ Built 2026-11-06. 38 sample files in 13 source directories (L1: 12, L2: 16, L3: 
 | L3 | `L3-complex/dwgshare-rc-projects/270_3-story_house_complete_project.dwg` | 2.5 MB | AC1021 | RC buildings (per page) | No per-file licence; ToS 1.5: no redistribution | grids, levels, column/beam marks, schedules, multi-sheet RC (unverified) |
 | L3 | `L3-complex/dwgshare-rc-projects/461_residential_building_structural.dwg` | 1.0 MB | AC1021 | RC buildings (per page) | No per-file licence; ToS 1.5: no redistribution | grids, levels, column/beam marks, schedules, multi-sheet RC (unverified) |
 | L3 | `L3-complex/dwgshare-rc-projects/433_townhouse_12m_x_20.6m.dwg` | 985 KB | AC1021 | RC buildings (per page) | No per-file licence; ToS 1.5: no redistribution | grids, levels, column/beam marks, schedules, multi-sheet RC (unverified) |
+| L3 | `L3-complex/eval3-heldout/285_3-story_house_8.2x15m.dwg` | 1.1 MB | AC1021 | RC buildings (per page) | No per-file licence; ToS 1.5: no redistribution | EVAL-3 held-out (never used for tuning); sheets/fonts unverified |
+| L3 | `L3-complex/eval3-heldout/286_7-story_house_9.2x7.6m.dwg` | 4.7 MB | AC1021 | RC buildings (per page) | No per-file licence; ToS 1.5: no redistribution | EVAL-3 held-out (never used for tuning); sheets/fonts unverified |
+| L3 | `L3-complex/eval3-heldout/290_4-story_house_9x12.3m.dwg` | 2.5 MB | AC1021 | RC buildings (per page) | No per-file licence; ToS 1.5: no redistribution | EVAL-3 held-out (never used for tuning); sheets/fonts unverified |
+| L3 | `L3-complex/eval3-heldout/161_complete_steel_building.dwg` | 1.6 MB | AC1032 | Steel building (per page) | No per-file licence; ToS 1.5: no redistribution | EVAL-3 held-out (never used for tuning); sheets/fonts unverified |
 | L3 | `L3-complex/aspose-curtainwall/SLS-CW-CD-CE001-R01_blockClip.dxf` | 5.0 MB | DXF (see SOURCE.md for $ACADVER) | Architectural / curtain wall | MIT repo; underlying drawing rights unclear | nested blocks, 99 layers, SHX styles, only 1 INSERT in modelspace |
 | L3 | `L3-complex/libredwg-dynblocks/Dynblocks.dwg` | 2.1 MB | AC1032 | none (feature test) | GPL-3.0 | dynamic blocks (*U instances) |
 | L3 | `L3-complex/acadsharp-aec/AecObjects.dwg` | 414 KB | AC1032 | Architectural (AEC objects) | MIT repo; file authorship unstated | AEC proxy objects |
