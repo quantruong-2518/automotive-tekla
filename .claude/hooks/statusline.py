@@ -126,7 +126,10 @@ def render_subagents(data: dict[str, Any]) -> list[str]:
             continue
         name = _text(item.get("agentType")) or _text(item.get("name")) or _text(item.get("type"))
         model = (_text(item.get("model")) or "-").removeprefix("claude-")
-        effort = _text(item.get("effort")) or "-"
+        raw_effort = item.get("effort")
+        if isinstance(raw_effort, (int, float)) and not isinstance(raw_effort, bool):
+            raw_effort = str(raw_effort)
+        effort = _text(raw_effort) or "-"
         tokens = _num(item.get("tokenCount"))
         badge = NO_DATA if tokens is None else _badge(tokens, None)
         parts = [name or "?", model, effort, badge]

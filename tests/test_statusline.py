@@ -195,3 +195,8 @@ def test_end_to_end_malformed():
 
 def test_file_is_where_expected():
     assert Path(HOOKS / "statusline.py").is_file()
+
+
+def test_subagent_numeric_effort_is_shown(sl):
+    (row,) = rows(sl, [task(effort=3)])
+    assert " · 3 · " in ANSI.sub("", row["content"])

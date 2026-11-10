@@ -305,3 +305,63 @@ def test_end_to_end_garbage_stdin_exits_zero(tmp_path):
         check=False,
     )
     assert proc.returncode == 0 and proc.stdout == ""
+
+
+# ---- compact boundary, synthetic lines, text constants ----
+
+
+def compact_line(post: Any = 25_583) -> dict[str, Any]:
+    return {
+        "type": "system",
+        "subtype": "compact_boundary",
+        "compactMetadata": {"trigger": "auto", "preTokens": 241_736, "postTokens": post},
+    }
+
+
+def synthetic_line() -> dict[str, Any]:
+    zero = {"input_tokens": 0, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}
+    return {"type": "assistant", "message": {"model": "<synthetic>", "usage": zero}}
+
+
+def test_compact_boundary_after_large_line_uses_post_tokens(cg, tmp_path):
+    tp = write_transcript(tmp_path / "t.jsonl", [assistant(300_000), compact_line()])
+    assert cg.token_count(str(tp)) == 25_583
+
+
+def test_compact_boundary_without_int_post_tokens_gives_none(cg, tmp_path):
+    tp = write_transcript(tmp_path / "t.jsonl", [assistant(300_000), compact_line("x")])
+    assert cg.token_count(str(tp)) is None
+
+
+def test_synthetic_line_is_skipped(cg, tmp_path):
+    tp = write_transcript(tmp_path / "t.jsonl", [assistant(300_000), synthetic_line()])
+    assert cg.token_count(str(tp)) == 300_000
+
+
+def test_unmetered_line_is_skipped(cg, tmp_path):
+    unmetered = {**assistant(5), "isUnmetered": True}
+    tp = write_transcript(tmp_path / "t.jsonl", [assistant(300_000), unmetered])
+    assert cg.token_count(str(tp)) == 300_000
+
+
+def test_synthetic_line_keeps_marker(cg, monkeypatch, capsys, tmp_path, tmp_marker_dir):
+    tp = write_transcript(tmp_path / "t.jsonl", [assistant(300_000)])
+    run_main(cg, monkeypatch, capsys, stop(tp))
+    assert marker(tmp_marker_dir).exists()
+    write_transcript(tp, [assistant(300_000), synthetic_line()])
+    run_main(cg, monkeypatch, capsys, stop(tp))
+    assert marker(tmp_marker_dir).exists()
+
+
+def test_texts_derive_from_constants(cg):
+    assert str(cg.HANDOFF_TOKENS) in cg.HANDOFF_TEXT.format(n=1, limit=cg.HANDOFF_TOKENS)
+    assert "wait for them to finish before asking for /clear" in cg.HANDOFF_TEXT
+
+
+def test_messages_use_constants(cg, monkeypatch, capsys, tmp_path):
+    monkeypatch.setattr(cg, "WARN_TOKENS", 100_000)
+    monkeypatch.setattr(cg, "HANDOFF_TOKENS", 150_000)
+    tp = write_transcript(tmp_path / "t.jsonl", [assistant(120_000)])
+    out, _ = run_main(cg, monkeypatch, capsys, ups(tp))
+    assert "100k" in out and "150k" in out and "200k" not in out and "250k" not in out
+    assert "100000" in out and "150000" in out

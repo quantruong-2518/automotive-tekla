@@ -157,12 +157,12 @@
   },
   "statusLine": {
     "type": "command",
-    "command": "python \"$(git rev-parse --show-toplevel)/.claude/hooks/statusline.py\"",
+    "command": "python \"$(git rev-parse --path-format=absolute --git-common-dir)/../.claude/hooks/statusline.py\"",
     "refreshInterval": 10
   },
   "subagentStatusLine": {
     "type": "command",
-    "command": "python \"$(git rev-parse --show-toplevel)/.claude/hooks/statusline.py\" --subagents"
+    "command": "python \"$(git rev-parse --path-format=absolute --git-common-dir)/../.claude/hooks/statusline.py\" --subagents"
   },
   "enabledPlugins": {
     "andrej-karpathy-skills@karpathy-skills": true,

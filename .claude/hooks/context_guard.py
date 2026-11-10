@@ -33,34 +33,54 @@ CHUNK_BYTES = 4 * 1024 * 1024
 SESSION_ID = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 
 HANDOFF_TEXT = (
-    "Context is {n} tokens, over the handoff limit of 250000 (ADR-0014). Finish only the step "
+    "Context is {n} tokens, over the handoff limit of {limit} (ADR-0014). Finish only the step "
     "in progress and start no new work. Update the active topic's `.handoff/<topic>.md` and its "
     "row in `.handoff/INDEX.md` of the main checkout: decisions taken, commit SHAs, live agents "
-    "and what each owns, the next steps. Then tell the engineer, in Vietnamese, that the "
-    "handoff is saved and to type /clear."
+    "and what each owns, the next steps. If background agents are still running, list them in "
+    "the handoff with what each owns, and wait for them to finish before asking for /clear. "
+    "Then tell the engineer, in Vietnamese, that the handoff is saved and to type /clear."
 )
 WARN_TEXT = (
-    "Context is {n} tokens (warn level 200000; handoff at 250000, ADR-0014). Do not start a "
+    "Context is {n} tokens (warn level {warn}; handoff at {limit}, ADR-0014). Do not start a "
     "large new package in this session; keep the active handoff file current."
 )
 
+# _usage_total result for a compact_boundary line without an integer postTokens: stop scanning.
+_COMPACT_NO_COUNT = -1
+
+
+def _is_int(value: object) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
 
 def _usage_total(line: bytes) -> int | None:
-    """Token total of one transcript line if it is a main-chain assistant message, else None."""
+    """Token total of one transcript line if it is a main-chain assistant message, else None.
+
+    A compact_boundary line yields its postTokens (the size right after compaction); synthetic
+    and unmetered assistant lines carry no real usage and are skipped.
+    """
     try:
         obj = json.loads(line)
     except ValueError:
         return None
-    if not isinstance(obj, dict) or obj.get("type") != "assistant" or obj.get("isSidechain"):
+    if not isinstance(obj, dict):
+        return None
+    if obj.get("type") == "system" and obj.get("subtype") == "compact_boundary":
+        meta = obj.get("compactMetadata")
+        post = meta.get("postTokens") if isinstance(meta, dict) else None
+        return _COMPACT_NO_COUNT if not _is_int(post) else post
+    if obj.get("type") != "assistant" or obj.get("isSidechain") or obj.get("isUnmetered"):
         return None
     message = obj.get("message")
+    if isinstance(message, dict) and message.get("model") == "<synthetic>":
+        return None
     usage = message.get("usage") if isinstance(message, dict) else None
     if not isinstance(usage, dict):
         return None
     total = 0
     for key in ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"):
         value = usage.get(key, 0)
-        if isinstance(value, int) and not isinstance(value, bool):
+        if _is_int(value):
             total += value
     return total
 
@@ -83,7 +103,7 @@ def token_count(transcript_path: str) -> int | None:
                         continue
                     total = _usage_total(line)
                     if total is not None:
-                        return total
+                        return None if total == _COMPACT_NO_COUNT else total
                 if start == 0:
                     return None
                 window *= 4
@@ -102,13 +122,16 @@ def _emit(data: dict[str, Any]) -> None:
 def on_user_prompt(tokens: int) -> None:
     if tokens >= HANDOFF_TOKENS:
         message = (
-            f"Context {tokens // 1000}k tokens ≥ 250k handoff limit: "
+            f"Context {tokens // 1000}k tokens ≥ {HANDOFF_TOKENS // 1000}k handoff limit: "
             "Claude updates the handoff file; then type /clear."
         )
-        text = HANDOFF_TEXT.format(n=tokens)
+        text = HANDOFF_TEXT.format(n=tokens, limit=HANDOFF_TOKENS)
     elif tokens >= WARN_TOKENS:
-        message = f"Context {tokens // 1000}k tokens ≥ 200k warn level (handoff at 250k)."
-        text = WARN_TEXT.format(n=tokens)
+        message = (
+            f"Context {tokens // 1000}k tokens ≥ {WARN_TOKENS // 1000}k warn level "
+            f"(handoff at {HANDOFF_TOKENS // 1000}k)."
+        )
+        text = WARN_TEXT.format(n=tokens, warn=WARN_TOKENS, limit=HANDOFF_TOKENS)
     else:
         return
     _emit(
@@ -135,7 +158,7 @@ def on_stop(tokens: int, session_id: object) -> None:
     except OSError as exc:
         print(f"context_guard: cannot create marker, not blocking: {exc}", file=sys.stderr)
         return
-    _emit({"decision": "block", "reason": HANDOFF_TEXT.format(n=tokens)})
+    _emit({"decision": "block", "reason": HANDOFF_TEXT.format(n=tokens, limit=HANDOFF_TOKENS)})
 
 
 def main() -> None:
