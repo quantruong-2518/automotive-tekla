@@ -36,6 +36,10 @@ variant. Any other blocked
 header cell is listed in the table's `blocked_columns`: its column gets no role, the rest of the table is
 read (cells keep their own meaning). A blocked cell in the mark column of an allowed table is listed in
 `blocked_marks` the same way. No question paraphrases blocked text.
+Tool wave 4 (EVAL-4 M2): every blocked header cell keeps only a placeholder in `header[]` (`entry_id` null,
+the verbatim text and the reason stay); its id is listed in the table's `blocked_header_entries`, so no
+blocked id is cited outside a `blocked*` list. A table whose header cells are all blocked is still
+reported, with `header_blocked`.
 
 Schedule tables, per sheet and per space of the texts (a paper sheet shows model-space texts through its
 viewports: the table is in the texts' own coordinates, `space` says which):
@@ -804,6 +808,15 @@ def _cell_doc(col: int | None, t: _Text) -> dict[str, Any]:
     }
 
 
+def _header_cell_doc(col: int | None, t: _Text) -> dict[str, Any]:
+    """A header cell. A blocked one keeps a placeholder: its entry id is null here and listed in the table's
+    `blocked_header_entries`, so no blocked id is cited outside a `blocked*` list (EVAL-4 M2)."""
+    doc = _cell_doc(col, t)
+    if t.block is not None:
+        doc["entry_id"] = None
+    return doc
+
+
 def _round_box(box: Box) -> list[float]:
     return [round(v, 3) for v in box]
 
@@ -1260,7 +1273,7 @@ def _table_doc(rel: str, sheet: dict[str, Any] | None, space: str, tb: _Table) -
         }
         for i, (x0, x1) in enumerate(tb.columns)
     ]
-    header = [_cell_doc(c, t) for c, t in ordered_header]
+    header = [_header_cell_doc(c, t) for c, t in ordered_header]
     prov: dict[str, Any] = {
         "file": rel,
         "sheet": sheet_label(sheet),
@@ -1282,6 +1295,7 @@ def _table_doc(rel: str, sheet: dict[str, Any] | None, space: str, tb: _Table) -
         "header_blocked": tb.header_blocked,
         "header_block_reasons": header_reasons if tb.header_blocked else [],
         "blocked_columns": blocked_columns,
+        "blocked_header_entries": sorted(t.id for _, t in ordered_header if t.block is not None),
         "header": header,
         "columns": columns,
         "mark_column": None if tb.header_blocked else tb.mark_column,

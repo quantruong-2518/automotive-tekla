@@ -743,6 +743,10 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
     row in `harness questions-md`, raised by package T); flag `--include-hidden` on `harness sheet-text`
     and `harness find-text` (also show entries that do not print, marked), exit 3 with nothing run until
     package T lands. A synthetic R2018 (AC1032) DXF is tested through intake and read-structure.
+  - Tool wave 4, package M (marks + callouts):
+    - `marks`: a blocked schedule header cell keeps only a placeholder in `tables[].header[]` (`entry_id`
+      null, verbatim text and reason kept); its id is listed in the table's `blocked_header_entries`, so no
+      blocked id is cited outside a `blocked*` list (EVAL-4 criterion 2, M2).
 
 ### Changed
 - Question lifecycle (tool wave 2, EVAL-2 fix 5):
