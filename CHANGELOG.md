@@ -762,6 +762,8 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
       sheet are on, when one clearly leads) before a nearer line of another style: another end candidate
       of the style, or a line of the style drawn through the bubbles at both of its ends (EVAL-3 285:
       the end bubbles took wall lines 110 outside their axes; spacings 3240 / 4700 become 3130 / 4590).
+      A bubble already on a line of the style counts as the other end of that line, so the left bubble of an
+      axis `a` no longer stays on a wall line 90 under it (285: `a a b c` becomes `a b c`).
     - An axis that differs from its family in two of three things is no axis: its size (bubble radius or
       label height more than 20 % from the family median), its block (the circle's outermost block name) or
       its line (layer + linetype); for block and line the family value is the one more than half of the

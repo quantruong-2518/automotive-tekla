@@ -916,7 +916,16 @@ def _pair(bubbles: list[_Bubble], segs: list[_Seg], ctx: _Ctx) -> tuple[list[_Ax
             and _style(s) == style
             and seg_sheet.setdefault(s.sid, ctx.locator.locate(s.space, *s.mid)) == sheet
         ]
-        for seg, ends in _pair_through(members, mine)[0]:
+        # a bubble already on a line of the style may be the other end of the line one of `members` lies on
+        own = {id(b) for b in members}
+        partners = [
+            a.bubbles[0]
+            for a in axes
+            if len(a.bubbles) == 1 and (a.space, a.sheet) == (space, sheet) and _style(a.seg) == style
+        ]
+        for seg, ends in _pair_through(members + partners, mine)[0]:
+            if not any(id(x) in own for x in ends):
+                continue
             gone = {id(x) for x in ends}
             axes = [a for a in axes if not any(id(x) in gone for x in a.bubbles)]
             unpaired = [x for x in unpaired if id(x) not in gone]
