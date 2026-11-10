@@ -758,7 +758,7 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
   - Tool wave 4, package T (text), question: `read_dxf.text_visibility_questions(text_index, rel)` builds the
     one non-blocking `text_visibility_uncertain` question of a file that has printed entries with
     `print_uncertain_reasons` (a ref per reason with its entry count, then five example entry ids; `count` is
-    the number of entries). Intake does not call it yet: that hook-up is in a file outside package T.
+    the number of entries). Intake calls it from seam 2.
   - Tool wave 4, package T (text), wording: the `harness find-text` note no longer tells the engineer to
     approve the font row for `legacy_ascii_suspect` entries. It names the `legacy_ascii_text` questions as
     recording a reading that unblocks nothing, and mentions the font row (with its questions) only for
@@ -821,6 +821,21 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
       frozen or set not to plot, or with its own invisible flag (group 60), no longer closes a cell; a block
       entity on layer 0 takes the layer of the INSERT that holds it (`Placed.outer_layer`). Known drawings:
       no change.
+  - Tool wave 4, seam 2: `harness intake` now raises the non-blocking `text_visibility_uncertain` question
+    (one per file with printed entries that have `print_uncertain_reasons`, built by
+    `read_dxf.text_visibility_questions`); it comes after `legacy_ascii_text` in `questions.json` and
+    `ask.py` leaves its ownership to intake. The intake schema's question-order description lists it.
+  - Tool wave 4, seam 2: `harness sheet-text` and `harness find-text` hide entries that do not print by default;
+    `--include-hidden` lists them marked `printed: false` (the exit-3 stub is gone). `sheet-text.schema.json`
+    (`$id` still `0.1`): entry and hit `printed` (const false, only on a hidden entry) and
+    `counts.not_printed_in_scope`. Meaning change: by default `counts.assigned`, `matched`, `legacy_font_gate`
+    and the find-text `entries_searched`, `unassigned_entries` and `blocked_in_scope` cover PRINTED entries
+    only; `not_printed_in_scope` counts the rest, and with `--include-hidden` all entries are in. The
+    `list-sheets` `text_count` and `blocked_text_count` still count every entry.
+  - Tool wave 4, seam 2: `marks.schema.json` (`$id` still `0.1`): per table optional `blocked_cell_entries` (entry
+    ids of DATA cells whose text the font gate blocks; such a cell keeps `entry_id` null). The cell `entry_id`
+    description now names both null cases (header placeholder, blocked data cell). Nothing writes it until
+    package M.
 
 ### Changed
 - Question lifecycle (tool wave 2, EVAL-2 fix 5):

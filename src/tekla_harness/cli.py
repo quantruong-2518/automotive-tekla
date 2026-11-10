@@ -380,19 +380,15 @@ def _cmd_sheet_text(args: argparse.Namespace) -> int:
         return EXIT_USAGE
     try:
         if args.region is not None:
-            try:
-                if args.include_hidden:  # the seam stub only (package T)
-                    raise NotImplementedError("tool wave 4 package T")
-                doc = sheet_region(
-                    Path(args.work_dir),
-                    args.file,
-                    args.sheet_id,
-                    args.region,
-                    contains=args.contains,
-                    max_entries=args.max,
-                )
-            except NotImplementedError as exc:  # the seam stub only (package T)
-                return _not_implemented(exc)
+            doc = sheet_region(
+                Path(args.work_dir),
+                args.file,
+                args.sheet_id,
+                args.region,
+                contains=args.contains,
+                max_entries=args.max,
+                include_hidden=args.include_hidden,
+            )
         else:
             doc = sheet_text(
                 Path(args.work_dir),
@@ -403,8 +399,6 @@ def _cmd_sheet_text(args: argparse.Namespace) -> int:
                 unassigned=args.unassigned,
                 include_hidden=args.include_hidden,
             )
-    except NotImplementedError as exc:  # the seam stub only (package T)
-        return _not_implemented(exc)
     except ReaderError as exc:
         print(str(exc), file=sys.stderr)
         return exc.exit_code
@@ -425,8 +419,6 @@ def _cmd_find_text(args: argparse.Namespace) -> int:
             unassigned=args.unassigned,
             include_hidden=args.include_hidden,
         )
-    except NotImplementedError as exc:  # the seam stub only (package T)
-        return _not_implemented(exc)
     except ReaderError as exc:
         print(str(exc), file=sys.stderr)
         return exc.exit_code
