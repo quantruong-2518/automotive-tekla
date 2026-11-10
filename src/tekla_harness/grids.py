@@ -51,6 +51,7 @@ Algorithm (deterministic; thresholds are the named constants below):
 
 from __future__ import annotations
 
+import copy
 import math
 import re
 import statistics
@@ -192,7 +193,7 @@ def question_families(question: dict[str, Any], doc: dict[str, Any]) -> list[str
 
 
 _LABEL_RE = re.compile(
-    r"^(?:[A-Za-z]{1,2}[a-z]?|\d{1,3}[A-Za-z]?|[A-Za-z]\d{1,2}[a-z]?)(?:'{1,2}|\u2032)?$"
+    r"^(?:[A-Za-z]{1,2}[a-z]?|\d{1,3}[A-Za-z]?|[A-Za-z]\d{1,2}[a-z]?)(?:'{1,2}|\u2032)?\*?$"
     r"|^[A-Za-z0-9]{1,3}/[A-Za-z0-9]{1,3}$"
 )
 _LABEL_TOKEN_RE = re.compile(r"\d+|[A-Za-z]+|['\u2032]+|/")
@@ -1247,6 +1248,41 @@ def _set_aside(group: _Group, ctx: _Ctx) -> list[_Bubble]:
     return aside
 
 
+def _runs(axes: list[_Axis]) -> list[list[_Axis]]:
+    """`axes` (in offset order) cut into runs without a repeated label: a b a b -> [a b] [a b]."""
+    runs: list[list[_Axis]] = []
+    for a in axes:
+        if not runs or a.label in {x.label for x in runs[-1]}:
+            runs.append([])
+        runs[-1].append(a)
+    return runs
+
+
+def _split_stacked(view: list[_Axis]) -> list[list[_Axis]]:
+    """Two or more plans stacked on one sheet share the axes drawn through all of them (their labels are
+    printed once): the other direction then reads as one family with repeated labels, 'a b a b' (EVAL-4 278
+    KC-01). When exactly one family of the view repeats its labels in runs of at least two axes, all alike
+    (a b | a b, never 1 2 2 or 1 2 | 1 3), the view is cut into one view per run; every other axis of the
+    view belongs to each of them (copies; the bubbles are shared). Otherwise the view stays whole."""
+    probe = _Group("", view[0].sheet, view[0].space, list(view))
+    _families(probe, [0])
+    repeating = [f for f in probe.families if len({a.label for a in f.axes}) < len(f.axes)]
+    if len(repeating) != 1:
+        return [view]
+    fam = repeating[0]
+    runs = _runs(fam.axes)
+    if len(runs) < 2 or any(len(run) < 2 for run in runs):
+        return [view]
+    if len({tuple(a.label for a in run) for run in runs}) != 1:  # two plans repeat the same labels
+        return [view]
+    fam_ids = {id(a) for a in fam.axes}
+    shared = [a for a in view if id(a) not in fam_ids]
+    parts = []
+    for k, run in enumerate(runs):
+        parts.append(run + [shared_axis if k == 0 else copy.copy(shared_axis) for shared_axis in shared])
+    return parts
+
+
 def _check_family(fam: _Family, group: _Group, ctx: _Ctx) -> None:
     sheet = group.sheet
     labels = fam.labels()
@@ -1791,6 +1827,7 @@ def extract_grids(
     bubbles, ambiguous, other_text, empty, unreadable, blocked = found
     axes, unpaired = _pair(bubbles, segs, ctx)
     views, isolated = _views(axes)
+    views = [part for view in views for part in _split_stacked(view)]
     groups: list[_Group] = []
     fam_counter = [0]
     aside: list[_Bubble] = []  # axes set aside as no member of their family: unpaired, never dropped silently
@@ -1916,7 +1953,9 @@ def extract_grids(
             "bubbles_labelled": len(bubbles),
             "bubbles_ambiguous_label": ambiguous,
             "bubbles_other_text": other_text,
-            "bubbles_paired": sum(len(a.bubbles) for g in groups for f in g.families for a in f.axes),
+            "bubbles_paired": len(
+                {id(b) for g in groups for f in g.families for a in f.axes for b in a.bubbles}
+            ),
             "axes": axis_no,
             "groups": len(groups),
             "families": len(all_fams),

@@ -768,6 +768,11 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
       axes share, and a family needs three axes (EVAL-4 264 `5` / `4` on a HIDDEN line, 278 section marker
       `T`, 271 rebar bubbles `12` / `14` / `20`). The bubbles are listed as unpaired bubbles and the
       warnings of `grids.json` name each axis and what differs.
+    - A `*` may end an axis label (`2*`, an intermediate axis; EVAL-4 278). Two plans stacked on one sheet,
+      whose shared axes are printed once, are two views: when exactly one family of a view repeats its
+      labels in alike runs of at least two axes (`a b a b`, never `1 2 2` or `1 2 1 3`), the view is cut into
+      one view per run and every other axis of it belongs to each (EVAL-4 278 KC-01). `bubbles_paired` counts
+      each bubble once.
 
 ### Changed
 - Question lifecycle (tool wave 2, EVAL-2 fix 5):

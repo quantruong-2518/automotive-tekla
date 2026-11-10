@@ -17,7 +17,7 @@ from ezdxf.enums import TextEntityAlignment
 from _dxf_fixtures import TH, R
 from tekla_harness.extract_text import extract_text
 from tekla_harness.grid_system import build_grid_systems
-from tekla_harness.grids import extract_grids
+from tekla_harness.grids import _LABEL_RE, extract_grids
 from tekla_harness.schemas import validate
 from tekla_harness.sheets import extract_sheets
 from test_grid_system import Work, ans, codes, fam, view
@@ -826,3 +826,121 @@ def test_an_axis_without_a_line_has_no_line_deviation(tmp_path):
     result = run_with(_plain(tmp_path, lambda m: _odd_family(m, **kw)))
     assert _numbers(result) == ["1", "2", "3", "4", "5"]
     assert "set aside" not in _warnings(result)
+
+
+# --- item 6 (F2e): `*` in labels, two stacked views on one sheet ------------------------------------
+
+
+@pytest.mark.parametrize("text", ["2*", "A*", "12*", "1A*", "3'*"])
+def test_a_star_may_end_a_label(text):
+    assert _LABEL_RE.match(text)
+
+
+@pytest.mark.parametrize("text", ["*", "*2", "2*3", "**", "2**"])
+def test_a_star_elsewhere_is_no_label(text):
+    assert not _LABEL_RE.match(text)
+
+
+def test_an_intermediate_axis_with_a_star_is_an_axis(tmp_path):
+    """EVAL-4 278: axis `2*` between 2 and 3 was an empty bubble and its line `grid_axis_unlabelled`."""
+
+    def fn(msp):
+        xs = (0.0, 5850.0, 7910.0, 10850.0, 15000.0)
+        for x, label in zip(xs, ("1", "2", "2*", "3", "4"), strict=True):
+            msp.add_line((x, 0), (x, 12000))
+            _bubble(msp, (x, -R), label)
+        for y, label in ((2000.0, "A"), (6180.0, "B")):
+            msp.add_line((-2000, y), (17000, y))
+            _bubble(msp, (-2000 - R, y), label)
+
+    result = run_with(_plain(tmp_path, fn))
+    fam = family(result, "unknown", "1 2 2* 3 4")
+    assert fam["proposal"]["coordinates"] == "0 5850 2060 2940 4150"
+    assert not questions(result, "grid_axis_unlabelled")
+    assert not questions(result, "grid_label_order_nonmonotonic")
+
+
+def _stacked(msp, letters=("a", "b", "a", "b")):
+    """Two plans stacked on one sheet: vertical axes 1..4 run through both (their labels are printed once),
+    each plan has its own horizontal axes."""
+    for x, label in zip((0.0, 5850.0, 10850.0, 15000.0), "1234", strict=True):
+        msp.add_line((x, -20000), (x, 12000))
+        _bubble(msp, (x, -20000 - R), label)
+    for y, label in zip((-14000.0, -9820.0, 2000.0, 6180.0), letters, strict=True):
+        msp.add_line((-2000, y), (17000, y))
+        _bubble(msp, (-2000 - R, y), label)
+
+
+def test_two_stacked_views_on_one_sheet_are_two_groups(tmp_path):
+    """EVAL-4 278 KC-01: the horizontal axes a b a b of two stacked plans were one family with duplicate
+    labels; the vertical axes (printed once) belong to both plans."""
+    result = run_with(_plain(tmp_path, _stacked))
+    assert len(result["groups"]) == 2
+    for g in result["groups"]:
+        assert sorted(f["proposal"]["labels"] for f in g["families"]) == ["1 2 3 4", "a b"]
+        assert {f["proposal"]["coordinates"] for f in g["families"]} == {"0 5850 5000 4150", "0 4180"}
+    assert not questions(result, "grid_label_duplicate")
+    assert not questions(result, "grid_label_order_nonmonotonic")
+    ids = [a["axis_id"] for g in result["groups"] for f in g["families"] for a in f["axes"]]
+    assert len(ids) == len(set(ids)) == 12
+    assert (
+        result["summary"]["bubbles_paired"] == 8
+    )  # each bubble once, though both views use the vertical axes
+
+
+def test_a_label_repeated_in_one_run_is_not_a_stacked_view(tmp_path):
+    """`1 2 2` (a typo): the second run is one axis long, so the view stays whole and asks the duplicate."""
+
+    def fn(msp):
+        for x, label in zip((0.0, 5850.0, 10850.0), ("1", "2", "2"), strict=True):
+            msp.add_line((x, 0), (x, 12000))
+            _bubble(msp, (x, -R), label)
+        for y, label in ((2000.0, "A"), (6180.0, "B")):
+            msp.add_line((-2000, y), (12000, y))
+            _bubble(msp, (-2000 - R, y), label)
+
+    result = run_with(_plain(tmp_path, fn))
+    assert len(result["groups"]) == 1 and questions(result, "grid_label_duplicate")
+
+
+def test_runs_with_different_labels_are_not_stacked_views(tmp_path):
+    """`a b a c`: the second run is not a repeat of the first (rebar marks among grid labels)."""
+    result = run_with(_plain(tmp_path, lambda m: _stacked(m, letters=("a", "b", "a", "c"))))
+    assert len(result["groups"]) == 1 and questions(result, "grid_label_duplicate")
+
+
+def test_a_b_a_is_not_a_stacked_view(tmp_path):
+    result = run_with(_plain(tmp_path, lambda m: _stacked_three(m)))
+    assert len(result["groups"]) == 1 and questions(result, "grid_label_duplicate")
+
+
+def _stacked_three(msp):
+    for x, label in zip((0.0, 5850.0, 10850.0), "123", strict=True):
+        msp.add_line((x, -20000), (x, 12000))
+        _bubble(msp, (x, -20000 - R), label)
+    for y, label in zip((-14000.0, -9820.0, 2000.0), ("a", "b", "a"), strict=True):
+        msp.add_line((-2000, y), (12000, y))
+        _bubble(msp, (-2000 - R, y), label)
+
+
+def test_two_repeating_families_are_not_split(tmp_path):
+    """Both directions repeat their labels (2 x 2 plans around shared lines): which family to cut by is not
+    clear, so the view stays whole and the duplicates are asked."""
+
+    def fn(msp):
+        xs = (0.0, 5850.0, 30000.0, 35850.0)
+        ys = (-14000.0, -9820.0, 2000.0, 6180.0)
+        for x, label in zip(xs, "1212", strict=True):
+            msp.add_line((x, -20000), (x, 12000))
+            _bubble(msp, (x, -20000 - R), label)
+        for y, label in zip(ys, "abab", strict=True):
+            msp.add_line((-2000, y), (38000, y))
+            _bubble(msp, (-2000 - R, y), label)
+
+    result = run_with(_plain(tmp_path, fn))
+    assert len(result["groups"]) == 1 and questions(result, "grid_label_duplicate")
+
+
+def test_two_axes_with_one_label_are_not_two_stacked_views(tmp_path):
+    result = run_with(_plain(tmp_path, lambda m: _simple_grid(m, xs=(0.0, 6000.0), labels=("1", "1"))))
+    assert len(result["groups"]) == 1 and questions(result, "grid_label_duplicate")
