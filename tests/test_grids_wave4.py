@@ -403,3 +403,134 @@ def test_a_file_with_only_single_source_systems_is_tested_on_all_of_them(tmp_pat
     doc = build_grid_systems(w.finish(), answers=[_mm()])
     assert "units_answer_contradicts_evidence" in codes(doc)
     assert doc["files"][0]["grid_spacing_median"] == {"value": 6.0, "count": 14}
+
+
+def _stadium_parts(msp, *, bulge_in: bool = False, skew_a: float = 0.0, skew_b: float = 0.0) -> None:
+    """A stadium of half-length HALF and cap radius RHO centred on the origin, caps `skew_a`/`skew_b` degrees
+    off true. Both LINEs run between the ends of cap a (right) shifted by the centre line d."""
+    out_a, out_b = (90.0, 270.0) if bulge_in else (-90.0, 90.0), (-90.0, 90.0) if bulge_in else (90.0, 270.0)
+    msp.add_arc((HALF, 0.0), RHO, out_a[0] + skew_a, out_a[1] + skew_a)
+    msp.add_arc((-HALF, 0.0), RHO, out_b[0] + skew_b, out_b[1] + skew_b)
+    a1 = (
+        HALF + RHO * math.cos(math.radians(out_a[0] + skew_a)),
+        RHO * math.sin(math.radians(out_a[0] + skew_a)),
+    )
+    a2 = (
+        HALF + RHO * math.cos(math.radians(out_a[1] + skew_a)),
+        RHO * math.sin(math.radians(out_a[1] + skew_a)),
+    )
+    for p in (a1, a2):
+        msp.add_line(p, (p[0] - 2 * HALF, p[1]))
+
+
+def test_caps_bulging_toward_each_other_are_no_obround(tmp_path):
+    result = run_with(_plain(tmp_path, lambda m: _stadium_parts(m, bulge_in=True)))
+    assert result["summary"]["circles"] == 0
+
+
+def test_a_cap_whose_diameter_is_skewed_is_no_obround(tmp_path):
+    for skew in ({"skew_a": 20.0}, {"skew_b": 20.0}):
+        result = run_with(_plain(tmp_path, lambda m, s=skew: _stadium_parts(m, **s)))
+        assert result["summary"]["circles"] == 0, skew
+
+
+def test_the_straight_stadium_parts_are_a_bubble(tmp_path):
+    """The helper above, unskewed, is accepted (guards the negatives against a broken fixture)."""
+    assert run_with(_plain(tmp_path, _stadium_parts))["summary"]["circles"] == 1
+
+
+def test_a_printed_layer_state_is_read_once_per_layer_name(tmp_path):
+    """Two layers, one off: lines on the off layer are left out, lines on the other are kept (the per-layer
+    cache must not hand one layer's state to the next)."""
+
+    def fn(msp):
+        _grid3(msp)
+        msp.doc.layers.add("OFFLAYER").off()
+        msp.doc.layers.add("ONLAYER")
+        msp.add_line((16000, 0), (16000, 12000), dxfattribs={"layer": "OFFLAYER"})
+        _bubble(msp, (16000, -R), "4")
+        msp.add_line((19000, 0), (19000, 12000), dxfattribs={"layer": "ONLAYER"})
+        _bubble(msp, (19000, -R), "5")
+
+    result = run_with(_plain(tmp_path, fn))
+    assert ["1", "2", "3", "5"] in _axes_labels(result)
+
+
+def _stadium_cases(msp, *, bulge_in: str = "", drop_line: str = "", half: float = HALF, rho: float = RHO):
+    """A stadium (half-length `half`, cap radius `rho`) at the origin: `bulge_in` 'a' / 'b' turns that cap
+    inward; `drop_line` ('top' or 'bottom') leaves out that LINE."""
+    a_range = (90.0, 270.0) if "a" in bulge_in else (-90.0, 90.0)
+    b_range = (-90.0, 90.0) if "b" in bulge_in else (90.0, 270.0)
+    msp.add_arc((half, 0.0), rho, *a_range)
+    msp.add_arc((-half, 0.0), rho, *b_range)
+    if drop_line != "top":
+        msp.add_line((-half, rho), (half, rho))
+    if drop_line != "bottom":
+        msp.add_line((-half, -rho), (half, -rho))
+
+
+@pytest.mark.parametrize("bulge_in", ["a", "b"])
+def test_one_cap_bulging_inward_is_no_obround(tmp_path, bulge_in):
+    result = run_with(_plain(tmp_path, lambda m: _stadium_cases(m, bulge_in=bulge_in)))
+    assert result["summary"]["circles"] == 0
+
+
+@pytest.mark.parametrize("dropped", ["top", "bottom"])
+def test_a_stadium_missing_one_line_is_no_obround(tmp_path, dropped):
+    assert (
+        run_with(_plain(tmp_path, lambda m: _stadium_cases(m, drop_line=dropped)))["summary"]["circles"] == 0
+    )
+    assert run_with(_plain(tmp_path, _stadium_cases))["summary"]["circles"] == 1
+
+
+def test_a_very_long_slot_is_no_obround(tmp_path):
+    """A slot 13 radii between the cap centres (a track, a long slotted hole) is not a label bubble."""
+    result = run_with(_plain(tmp_path, lambda m: _stadium_cases(m, half=6.5 * RHO)))
+    assert result["summary"]["circles"] == 0
+
+
+def test_two_semicircles_split_by_a_hair_are_a_circle_not_an_obround(tmp_path):
+    """A circle drawn as two half arcs whose straight parts are 0.05 radius long: too short for a stadium."""
+    result = run_with(_plain(tmp_path, lambda m: _stadium_cases(m, half=0.025 * RHO)))
+    assert result["summary"]["circles"] == 0
+
+
+def test_a_line_inside_a_block_on_layer_zero_is_kept_when_layer_zero_is_off(tmp_path):
+    """Layer 0 off hides top-level layer-0 lines; the same layer inside a block is the INSERT's layer, not
+    settled by Autodesk, so the block's line stays."""
+
+    def bubble(msp, c, label):
+        msp.add_circle(c, R, dxfattribs={"layer": "G"})
+        msp.add_text(label, height=TH, dxfattribs={"layer": "G"}).set_placement(
+            c, align=TextEntityAlignment.MIDDLE_CENTER
+        )
+
+    def fn(msp):
+        msp.doc.layers.add("G")
+        for x, label in ((0.0, "1"), (6000.0, "2"), (12000.0, "3")):
+            msp.add_line((x, 0), (x, 12000), dxfattribs={"layer": "G"})
+            bubble(msp, (x, -R), label)
+        for y, label in ((2000.0, "A"), (8000.0, "B")):
+            msp.add_line((-2000, y), (20000, y), dxfattribs={"layer": "G"})
+            bubble(msp, (-2000 - R, y), label)
+        blk = msp.doc.blocks.new("AXLINE")
+        blk.add_line((0, 0), (0, 12000), dxfattribs={"layer": "0"})
+        msp.add_blockref("AXLINE", (18000, 0), dxfattribs={"layer": "G"})
+        msp.add_line((16000, 0), (16000, 12000))  # a top-level line on layer 0: hidden
+        bubble(msp, (16000, -R), "X")
+        bubble(msp, (18000, -R), "4")
+        msp.doc.layers.get("0").off()
+
+    result = run_with(_plain(tmp_path, fn))
+    assert ["1", "2", "3", "4"] in _axes_labels(result)
+    assert result["unpaired_bubbles"]["count"] == 1  # X: its layer-0 line does not print
+
+
+def test_a_file_of_single_source_systems_counts_each_system_once(tmp_path, example):
+    """Only single-source systems: a big key plan (14 spacings of 300) does not outvote the one plan view
+    (4 spacings of 8000); the median of the two systems' medians is 4150, plausible in mm."""
+    w = Work(tmp_path, example)
+    w.add_file("plans.dxf", [_key_plan(300.0), *_plan_views(8000.0, sheets=("model#03",))])
+    doc = build_grid_systems(w.finish(), answers=[_mm()])
+    assert "units_answer_contradicts_evidence" not in codes(doc)
+    assert doc["files"][0]["grid_spacing_median"] == {"value": 4150.0, "count": 18}
