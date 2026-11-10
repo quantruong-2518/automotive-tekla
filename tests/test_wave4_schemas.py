@@ -54,3 +54,16 @@ def test_sheets_title_block_declares_job_number_like_sheet_number():
 def test_schema_ids_stay_at_0_1():
     for name in ("text-index", "marks", "sheets"):
         assert _schema(name)["$id"].endswith(":0.1")
+
+
+def test_marks_table_declares_blocked_cell_entries_as_optional_entry_ids():
+    table = _schema("marks")["$defs"]["table"]
+    prop = table["properties"]["blocked_cell_entries"]
+    assert prop["type"] == "array"
+    assert prop["items"] == table["properties"]["blocked_header_entries"]["items"]
+    assert "blocked_cell_entries" not in table["required"]
+
+
+def test_marks_cell_entry_id_null_is_described_as_the_header_placeholder_only():
+    desc = _schema("marks")["$defs"]["cell"]["properties"]["entry_id"]["description"]
+    assert "data cell" in desc and "blocked_cell_entries" in desc

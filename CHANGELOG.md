@@ -777,6 +777,10 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
     and the find-text `entries_searched`, `unassigned_entries` and `blocked_in_scope` cover PRINTED entries
     only; `not_printed_in_scope` counts the rest, and with `--include-hidden` all entries are in. The
     `list-sheets` `text_count` and `blocked_text_count` still count every entry.
+  - Tool wave 4, seam 2: `marks.schema.json` (`$id` still `0.1`): per table optional `blocked_cell_entries` (entry
+    ids of DATA cells whose text the font gate blocks; such a cell keeps `entry_id` null). The cell `entry_id`
+    description now names both null cases (header placeholder, blocked data cell). Nothing writes it until
+    package M.
 
 ### Changed
 - Question lifecycle (tool wave 2, EVAL-2 fix 5):
