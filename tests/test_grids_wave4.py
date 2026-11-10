@@ -564,7 +564,13 @@ XS = (0.0, 3130.0, 6670.0, 10190.0, 14780.0)
 
 
 def _styled_grid(
-    msp, *, off: float = 110.0, bubble_on_wall: bool = False, wall_layer: str = "0", wall_a: bool = False
+    msp,
+    *,
+    off: float = 110.0,
+    bubble_on_wall: bool = False,
+    wall_layer: str = "0",
+    wall_a: bool = False,
+    long_wall: bool = False,
 ):
     """EVAL-3 285: five vertical axes on layer TRUC / DASHED2, each with a bubble at both ends and the line
     running on past both. Beside the two end axes a short continuous wall line (`wall_layer`) sits `off`
@@ -580,6 +586,8 @@ def _styled_grid(
 
     for k, (x, label) in enumerate(zip(XS, "12345", strict=True)):
         msp.add_line((x, -4704), (x, TOP + 3495), dxfattribs={"layer": "TRUC"})
+        if long_wall and k == 0:  # a longer layer-0 line through both bubbles of axis 1, far past each
+            msp.add_line((x, -6000), (x, TOP + 6000), dxfattribs={"layer": wall_layer})
         wall_x = x - off if k == 0 else x + off
         end = k in (0, 4)
         if end:
@@ -645,6 +653,14 @@ def test_a_tie_between_styles_is_no_style_majority(tmp_path):
     result = run_with(_plain(tmp_path, fn))
     numbers = family(result, "unknown", "1 2 3 4")
     assert [a["line"]["layer"] for a in numbers["axes"]] == ["A", "A", "B", "B"]
+
+
+def test_a_longer_line_of_another_style_does_not_win_the_style_pairing(tmp_path):
+    """Axis 1 also has a longer layer-0 line through both bubbles: the sheet's style line stays the pair."""
+    result = run_with(_plain(tmp_path, lambda m: _styled_grid(m, long_wall=True)))
+    numbers = family(result, "unknown", "1 2 3 4 5")
+    assert {a["line"]["layer"] for a in numbers["axes"]} == {"TRUC"}
+    assert numbers["proposal"]["coordinates"] == "0 3130 3540 3520 4590"
 
 
 def test_the_wall_line_under_the_bubble_stays_when_the_axis_is_off_its_centre(tmp_path):
