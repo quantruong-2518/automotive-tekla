@@ -785,6 +785,10 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
       other, is set aside as an elevation or section: no grid system, no cross-check partner (EVAL-4 278
       KT-08: `1 2 4` at 10107 / 5192 against 25 plans of `1 2 2* 3 4`). The bubbles are listed as unpaired and
       a `grids.json` warning says why; a plan (two directions) is never set aside.
+    - `harness grid-system` prints `blocking_without_engineer_answer` (blocking questions the engineer has not
+      answered) and a `counts_note` beside the questions document's `answered` and `blocking_open`, which
+      count a simulated answer as an answer while `harness status` still keeps that question blocking, so
+      `blocking_open 0` read as "nothing left to answer".
 
 ### Changed
 - Question lifecycle (tool wave 2, EVAL-2 fix 5):

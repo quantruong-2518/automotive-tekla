@@ -16,8 +16,9 @@ from ezdxf.enums import TextEntityAlignment
 
 from _dxf_fixtures import TH, R
 from tekla_harness.extract_text import extract_text
-from tekla_harness.grid_system import build_grid_systems
+from tekla_harness.grid_system import build_grid_systems, run_grid_systems
 from tekla_harness.grids import _LABEL_RE, extract_grids
+from tekla_harness.questions import empty_registry
 from tekla_harness.schemas import validate
 from tekla_harness.sheets import extract_sheets
 from test_grid_system import Work, ans, codes, fam, view
@@ -1207,3 +1208,53 @@ def test_half_the_rounding_step_is_agreement_on_small_spacings(tmp_path):
         _elevation(msp, 200000.0, xs=(0.0, 1000.4, 3000.4), labels="124")
 
     assert len(run_with(_plain(tmp_path, fn))["groups"]) == 4
+
+
+# --- item 8 (V7): the grid-system stdout does not call a simulated answer a closed question -----------------
+
+
+def test_the_grid_system_stdout_labels_answered_and_open_counts(tmp_path, example):
+    """`blocking_open 0` was printed for a question that only a simulated answer touched and that
+    `harness status` still keeps blocking."""
+    work = Path(tmp_path)
+    w = Work(work, example)
+    w.add_file("plans.dxf", _plan_views(6000.0))
+    w.finish()
+    (work / "question-registry.json").write_text(json.dumps(empty_registry("demo-project")), encoding="utf-8")
+    first = run_grid_systems(work, svg=False).summary
+    assert first["answered"] == 0
+    assert first["blocking_without_engineer_answer"] == first["blocking_open"] >= 1
+    assert "simulated" in first["counts_note"] and "harness status" in first["counts_note"]
+
+    questions_doc = json.loads((work / "grid-system-questions.json").read_text(encoding="utf-8"))
+    axis = next(q for q in questions_doc["questions"] if q["code"] == "grid_system_axis_unassigned")
+    answer = {
+        **ans("grid_system_axis_unassigned", axis["file"], {"dir1": "Y", "dir2": "X"}),
+        "key": axis["key"],
+        "question_id": axis["id"],
+        "answered_by_role": "simulated",
+    }
+    doc = {"schema_version": "0.1", "project_id": "demo-project", "answers": [answer]}
+    (work / "answers.json").write_text(json.dumps(doc), encoding="utf-8")
+    second = run_grid_systems(work, svg=False).summary
+    assert second["answered"] == 1
+    assert second["blocking_open"] == first["blocking_open"] - 1  # the document counts the simulated answer
+    assert (
+        second["blocking_without_engineer_answer"] == first["blocking_without_engineer_answer"]
+    )  # not the gate
+
+    select = next(
+        q
+        for q in json.loads((work / "grid-system-questions.json").read_text())["questions"]
+        if q["code"] == "grid_system_select"
+    )
+    by_engineer = {
+        **ans("grid_system_select", None, {}),
+        "key": select["key"],
+        "question_id": select["id"],
+        "answered_by_role": "engineer",
+    }
+    doc["answers"] = [answer, by_engineer]
+    (work / "answers.json").write_text(json.dumps(doc), encoding="utf-8")
+    third = run_grid_systems(work, svg=False).summary
+    assert third["blocking_without_engineer_answer"] == first["blocking_without_engineer_answer"] - 1

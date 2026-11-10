@@ -2126,6 +2126,23 @@ class GridSystemsResult:
     summary: dict[str, Any]
 
 
+def _stdout_question_counts(questions: list[dict[str, Any]], summary: dict[str, int]) -> dict[str, Any]:
+    """The question counts `harness grid-system` prints: the questions document's own counts plus
+    `blocking_without_engineer_answer` and a note. The document counts a question as answered when any answer
+    is recorded for it, a simulated one included, while `harness status` keeps a question that only a
+    non-engineer answered open for gate 1: a bare `blocking_open 0` read as "nothing left to answer"."""
+    out: dict[str, Any] = dict(summary)
+    out["blocking_without_engineer_answer"] = sum(
+        1 for q in questions if q["blocking"] and not (q["answer"] and _by_engineer(q["answer"]))
+    )
+    out["counts_note"] = (
+        "answered and blocking_open count any recorded answer, a simulated one included; "
+        "blocking_without_engineer_answer counts the blocking questions the engineer has not answered "
+        "(run `harness status` for what keeps gate 1 closed)"
+    )
+    return out
+
+
 def run_grid_systems(work_dir: str | Path, *, svg: bool = True) -> GridSystemsResult:
     """`harness grid-system`: build the grid systems of a read-structure work folder from the active answers,
     register the questions (producer 'grid-system') and write `grid-systems.json`,
@@ -2216,7 +2233,7 @@ def run_grid_systems(work_dir: str | Path, *, svg: bool = True) -> GridSystemsRe
             }
             for d in doc["systems"]
         ],
-        **qdoc["summary"],
+        **_stdout_question_counts(questions, qdoc["summary"]),
         "question_counts": doc["question_counts"],
         "stale_answers": ledger.stale_answers(),
         "warnings": doc["warnings"],
