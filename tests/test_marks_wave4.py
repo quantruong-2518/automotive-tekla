@@ -25,7 +25,7 @@ from _marks_fixtures import (
 )
 from tekla_harness.callouts import callout_part_ids, detail_label_ids, extract_callouts, member_mark
 from tekla_harness.intake import run_intake
-from tekla_harness.marks import extract_marks, parse_mark
+from tekla_harness.marks import extract_marks, parse_mark, parse_title_marks
 from tekla_harness.schemas import validate
 from tekla_harness.text_gate import meaning_block_reason
 
@@ -643,3 +643,57 @@ def test_a_heading_on_a_duplicate_sheet_names_no_detail_of_the_texts_on_no_sheet
     assert "A1" in [p["mark"] for p in marks["plan_marks"]]
     callouts = extract_callouts(work)
     assert [c["display_text"] for c in callouts["candidates"] if c["kind"] == "member_mark"].count("A1") == 1
+
+
+# --- item 5 (R items): section labels, headings glued to a count, pile caps, numbered footing families ----
+
+SECTION_LABELS = [
+    ("mc 1-1", False),
+    ("MC 2-2", False),
+    ("mc 12-12", False),
+    ("mc 01-1", False),  # the numbers are compared as numbers
+    ("mc 1-2", True),  # two different numbers: a sub-numbered mark
+    ("mc1-1", True),  # no blank before the number: written as a mark
+    ("D1-1", True),
+    ("D1.1", True),
+    ("mc 1.1", True),  # only a hyphen names a cut
+    ("D 1-1", False),  # a letter, a blank and n-n is a cut label whatever the letters
+    ("C - 1", True),
+]
+
+
+@pytest.mark.parametrize(("text", "is_mark"), SECTION_LABELS)
+def test_section_cut_labels_are_no_marks(text, is_mark):
+    assert (parse_mark(text) is not None) is is_mark
+
+
+@pytest.mark.parametrize(
+    ("text", "word", "marks"),
+    [
+        ("dẦm d2-7(sl= 01)", "dẦm", ["d2-7"]),
+        ("dẦm d2-7 (sl= 01)", "dẦm", ["d2-7"]),
+        ("DẦM D1(220x400)", "DẦM", ["D1"]),
+        ("dẦm d2-7(sl= 01", "dẦm", ["d2-7"]),
+        ("ĐÀi dm 1", "ĐÀi", ["dm 1"]),
+        ("ĐÀI CỌC ĐC2", "ĐÀI CỌC", ["ĐC2"]),  # the longer word still wins
+        ("đài móng DM3", "đài móng", ["DM3"]),
+    ],
+)
+def test_headings_read_through_a_glued_bracket_and_the_pile_cap_word(text, word, marks):
+    found = parse_title_marks(text)
+    assert found is not None and found[0] == word and [m.text for m in found[1]] == marks
+
+
+def test_pile_cap_labels_and_section_cuts_in_a_plan(tmp_path):
+    work = build_marks_work(
+        tmp_path, plan_texts=("D1", "ĐÀi dm 1", "ĐÀi dm 2", "mc 1-1", "mc 2-2", "dẦm d2-7(sl= 01)")
+    )
+    doc = extract_marks(work, tmp_path / "input", check_inputs=True)
+    assert validate("marks", doc) == []
+    plan = {p["mark"]: p for p in doc["plan_marks"]}
+    assert "mc 1-1" not in plan and "mc 2-2" not in plan
+    assert plan["dm 1"]["form"] == "title" and plan["d2-7"]["form"] == "title"
+    sets = {s["family"]: s for s in doc["summary"]["mark_sets"]}
+    assert sets["DM"]["members"] == ["dm 1", "dm 2"] and sets["DM"]["source"] == ["detail_heading"]
+    (said,) = [w for w in doc["warnings"] if "section_label" in w]
+    assert "section_label 2" in said

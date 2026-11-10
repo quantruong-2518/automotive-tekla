@@ -33,7 +33,9 @@ reason and the first examples.
 Tool wave 4 (F4c): nor from a steel profile (`HEB-650`, `IPE 300`, `UC 254`: series letters and a section
 depth of 50 or more), a detail label (`DET-2`, or the bubble `A1` of a `DETAIL - A1` heading of the same sheet
 when every mark-shaped text of its prefix on that sheet is such an id: `callouts.detail_label_ids`), or a
-title-block value (the claim by the sheets document also covers a `job_number` found by shape alone).
+title-block value (the claim by the sheets document also covers a `job_number` found by shape alone), nor
+from a section-cut label (letters, a blank, `n-n` with the same number twice: `mc 1-1`). A heading may be
+glued to a bracket (`dẦm d2-7(sl= 01)`) and may start with the pile-cap word `đài` (`ĐÀi dm 1`).
 
 Legacy-font gate (`text_gate.meaning_block_reason`). Only an entry whose meaning is allowed can be a plan
 mark, a header keyword or a matchable schedule mark. The gate works per column (tool wave 2, fix 8): only
@@ -214,7 +216,7 @@ _BODY = (
 # a length in brackets after a lintel mark, `LT1(L=4700)` (267): kept only in display_text, never a size
 _LENGTH = r"\s*\(\s*L\s*=\s*\d+(?:[.,]\d+)?\s*\)"
 _MARK = re.compile("^" + _BODY + "(?:" + _SIZE + "|(?P<length>" + _LENGTH + "))$")
-_MARK_HEAD = re.compile("^" + _BODY + _SIZE + r"(?=$|[\s,;:])")
+_MARK_HEAD = re.compile("^" + _BODY + _SIZE + r"(?=$|[\s,;:(])")
 _SPACING_LETTERS = frozenset({"a", "s"})  # Ø8a150: a lone lower-case a / s is a spacing, not a mark
 
 # member-type words of a detail title (matched case-insensitively on NFC text), longest first
@@ -223,6 +225,7 @@ MEMBER_WORDS = (
     "dầm móng",
     "đài cọc",
     "đài móng",
+    "đài",
     "lanh tô",
     "dầm",
     "cột",
@@ -318,11 +321,24 @@ def mark_key(text: str) -> str:
     return "".join(normalize(text).split())
 
 
+SECTION_LABEL = "section_label"
+
+
+def _shape_reason(m: re.Match[str]) -> str | None:
+    """Why a text of a mark's shape is no member: a strength class, a signed level, a steel profile or a
+    detail label (`callouts.token_reason`), or a section-cut label (letters, a blank, then `n-n` with the same
+    number twice: `mc 1-1`, `MC 2-2`, R-k); else None."""
+    why = token_reason(m["prefix"], m["sep1"], m["n1"], bool(m["n2"]))
+    if why is None and m["sep1"] == " " and m["sep2"] == "-" and int(m["n1"]) == int(m["n2"]):
+        return SECTION_LABEL
+    return why
+
+
 def _mark_from(m: re.Match[str], text: str) -> Mark | None:
     if m["prefix"] in _SPACING_LETTERS:
         return None
-    if token_reason(m["prefix"], m["sep1"], m["n1"], bool(m["n2"])) is not None:
-        return None  # a strength class (`RB 500`) or a signed level (`cos -300`), not a member (F4a)
+    if _shape_reason(m) is not None:
+        return None  # not a member: see `_shape_reason` (F4a, F4c, R-k)
     mark_text = text[: m.end("suffix")].strip()
     code = _SHEET_CODE.match(mark_text.upper())
     if code and (code["disc"] in ("KT", "KC", "TCXD") or "-" in mark_text or "/" in mark_text):
@@ -352,9 +368,7 @@ def not_mark_reason(line: str) -> str | None:
     """Why a whole line that has a member mark's shape is no mark (callouts.token_reason: `grade_token`,
     `level_token`), else None; the reason a left-out line is reported with."""
     m = _MARK.match(unicodedata.normalize("NFC", line).strip())
-    if m is None:
-        return None
-    return token_reason(m["prefix"], m["sep1"], m["n1"], bool(m["n2"]))
+    return None if m is None else _shape_reason(m)
 
 
 # review C1: a heading may name several marks, 'DẦM D1, D2', 'dẦm ct-1,ct-2', 'DETAIL OF CP1 & CP2'

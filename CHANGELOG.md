@@ -766,6 +766,10 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
       (`steel_profile`, `detail_label` in `callouts.json` `rejected`; a warning in `marks.json`). A
       `job_number` title-block candidate is claimed by the title block even when found by shape alone, so
       `J-01` is never a mark next to J-02, J-03. Repro 180 (`HEB-650`, `A1` x16, `DET-2`).
+    - `marks` (EVAL-4 R-e, R-g, R-k): a section-cut label (letters, a blank, `n-n` with the same number
+      twice: `mc 1-1`, 355 on 286) is not a mark (`section_label` in the per-file warning); a heading may be
+      glued to a bracket (`dẦm d2-7(sl= 01)`, 286) and may start with the pile-cap word `đài` (`ĐÀi dm 1`,
+      285: the DM family appears in the mark sets).
 
 ### Changed
 - Question lifecycle (tool wave 2, EVAL-2 fix 5):
