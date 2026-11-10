@@ -8,13 +8,17 @@ encodings keep their flags and stay as stored).
   list_sheets(work_dir)                      one row per detected sheet of every file: detector id, printed
                                              sheet number (with confidence) or null, frame bbox, text count,
                                              blocked text count, title candidates (keyword titles first)
-  sheet_text(work_dir, file_rel, sheet_id)   the entries assigned to that sheet in reading order
+  sheet_text(work_dir, file_rel, sheet_id)   the entries assigned to that sheet in reading order; with
+                                             `unassigned=True` instead of a sheet id, the entries on no
+                                             sheet or on several (sheet id 'unassigned')
   find_text(work_dir, contains)              the entries containing a text, over all sheets of all files
+                                             (or, with `unassigned=True`, over the entries on no sheet)
 
 Legacy-font gate (`text_gate.meaning_block_reason`, computed on the FULL text-index entry): every entry any
 tool returns carries `meaning` ("allowed" | "blocked") and `blocked_reason`. A blocked entry is quoted
 verbatim with its entry id; no meaning may be taken from it. `sheet_text` also reports the sheet's
-`legacy_font_gate` (counts, styles, and the open question ids that ask for the encoding).
+`legacy_font_gate` (counts, styles, and the open question ids that ask for the encoding or, for
+`legacy_ascii_suspect` entries, what the file's legacy-ASCII style holds: legacy_ascii_text, tool wave 3 W3).
 
 Reading order: rows from the top of the sheet down (larger y first); two entries share a row when their
 y differs from the y of the row's FIRST entry by at most 0.6 x the median text height of the sheet (heights
@@ -23,8 +27,9 @@ id. Entries without a position go last, in id order, with row null. Rotated text
 like any other.
 
 `contains` is a plain substring test after Unicode NFC + casefold on both sides. Diacritics are significant
-('tầng' does not match 'tang'). Blocked entries are matched on their stored text only, which rarely contains
-a Vietnamese word: a search is incomplete over them and says how many there were. `sheet_text` output is
+('tầng' does not match 'tang'). Blocked entries are never matched, on any form of their text (tool wave 3,
+W4: typing the stored legacy form of a word would otherwise read them); a search is incomplete over them
+and says how many there were, a count that does not depend on the query. `sheet_text` output is
 capped at `max_entries` (default DEFAULT_MAX_ENTRIES; unbounded with `contains`); the counts are always the
 true ones and a truncated output carries a warning naming the `--max` that returns everything.
 
@@ -36,6 +41,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 import statistics
 import unicodedata
@@ -43,8 +49,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from tekla_harness.questions import LEGACY_ASCII_CODE
 from tekla_harness.schemas import validate
 from tekla_harness.text_gate import BLOCK_REASONS, meaning_block_reason
+from tekla_harness.visibility import is_printed
 
 SCHEMA_VERSION = "0.1"
 STRUCTURE_DIR = "structure"
@@ -52,6 +60,7 @@ DEFAULT_MAX_ENTRIES = 400
 MAX_TITLES = 5
 TITLE_CHARS = 120
 ROW_TOLERANCE = 0.6  # x median text height
+UNASSIGNED = "unassigned"  # sheet id of the entries on no sheet or on several (--unassigned)
 EXIT_INVALID, EXIT_USAGE = 1, 2
 MAX_LISTED_PROBLEMS = 20
 # registry codes that ask the engineer about the encoding of a file's text (they unblock the gate)
@@ -59,6 +68,7 @@ ENCODING_QUESTION_CODES = frozenset(
     {"font_encoding_proposed", "font_encoding_conflict", "text_encoding_hint", "encoding_unknown_non_ascii"}
 )
 REGISTRY_FILE = "question-registry.json"
+LEGACY_ASCII_REASON = "legacy_ascii_suspect"  # the gate reason legacy_ascii_text questions cover (W3)
 # title keywords, in rank order; matched as whole words (plural 's' allowed) on NFC + casefold text
 TITLE_KEYWORDS = (
     "MẶT BẰNG", "MẶT CẮT", "MẶT ĐỨNG", "CHI TIẾT", "BỐ TRÍ", "THỐNG KÊ", "GHI CHÚ", "DANH MỤC",
@@ -220,10 +230,19 @@ def sheet_label(sheet: dict[str, Any] | None) -> str:
 # --- reading order -------------------------------------------------------------------------------------
 
 
-def reading_order(entries: list[dict[str, Any]]) -> list[tuple[int | None, dict[str, Any]]]:
-    """(row index, entry) in reading order; see the module docstring."""
+def row_tolerance(entries: list[dict[str, Any]]) -> float:
+    """ROW_TOLERANCE x the median text height of `entries` (heights > 0 only); 0 when there is none."""
     heights = [e["height"] for e in entries if e["height"] is not None and e["height"] > 0]
-    tol = ROW_TOLERANCE * statistics.median(heights) if heights else 0.0
+    return ROW_TOLERANCE * statistics.median(heights) if heights else 0.0
+
+
+def reading_order(
+    entries: list[dict[str, Any]], tol: float | None = None
+) -> list[tuple[int | None, dict[str, Any]]]:
+    """(row index, entry) in reading order; see the module docstring. `tol`: the row tolerance, by default
+    `row_tolerance(entries)` (a region read passes its sheet's)."""
+    if tol is None:
+        tol = row_tolerance(entries)
     placed = sorted(
         (e for e in entries if e["position"]["y"] is not None),
         key=lambda e: (-e["position"]["y"], e["id"]),
@@ -258,6 +277,31 @@ _KEYWORD_PATTERNS = tuple(
 )
 
 
+def _matching(
+    ordered: list[tuple[int | None, dict[str, Any]]], contains: str
+) -> list[tuple[int | None, dict[str, Any]]]:
+    """The allowed entries whose display_text contains `contains` (NFC + casefold). A blocked entry is
+    never compared, on any form of its text: matching it would read it (tool wave 3, W4)."""
+    needle = normalize(contains)
+    return [
+        (r, e)
+        for r, e in ordered
+        if meaning_block_reason(e) is None and needle in normalize(e["display_text"])
+    ]
+
+
+def _hidden_warning(entries: list[dict[str, Any]]) -> list[str]:
+    """One warning when a --contains filter left blocked entries out (whatever the query, so the line says
+    nothing about their text)."""
+    blocked = sum(meaning_block_reason(e) is not None for e in entries)
+    if not blocked:
+        return []
+    return [
+        f"{blocked} blocked (legacy-font) entries are never matched by --contains: read them without "
+        "--contains or by entry id"
+    ]
+
+
 def _meaning(e: dict[str, Any]) -> dict[str, Any]:
     """`meaning` and `blocked_reason` of one full text-index entry (see text_gate)."""
     reason = meaning_block_reason(e)
@@ -276,6 +320,8 @@ def _compact(row: int | None, e: dict[str, Any]) -> dict[str, Any]:
     }
     if e["decode"]["case_uncertain"]:
         out["case_uncertain"] = True
+    if not is_printed(e):
+        out["printed"] = False
     out.update(
         layer=e["layer"],
         style=e["style"],
@@ -290,32 +336,57 @@ def _compact(row: int | None, e: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
-def _gate(entries: list[dict[str, Any]], question_ids: list[str]) -> dict[str, Any]:
-    """The `legacy_font_gate` block over a set of full entries."""
+def _printed_scope(entries: list[dict[str, Any]], include_hidden: bool) -> tuple[list[dict[str, Any]], int]:
+    """(the entries to read, how many do not print): the printed ones, or all with `include_hidden`."""
+    not_printed = sum(not is_printed(e) for e in entries)
+    return (entries if include_hidden else [e for e in entries if is_printed(e)]), not_printed
+
+
+def _id_order(qid: str) -> tuple[int, str]:
+    return len(qid), qid
+
+
+def _font_question_ids(reasons: list[str], question_ids: list[str], legacy_ids: list[str]) -> list[str]:
+    """The questions that cover these blocked reasons: the encoding questions when a reason an encoding
+    answer can lift is present (none lifts `legacy_ascii_suspect`: ASCII stays ASCII in every encoding), and
+    the file's legacy_ascii_text questions when `legacy_ascii_suspect` is (tool wave 3, W3; their answer
+    records the engineer's reading of the style and decodes nothing)."""
+    ids = set(question_ids) if any(r != LEGACY_ASCII_REASON for r in reasons) else set()
+    if LEGACY_ASCII_REASON in reasons:
+        ids |= set(legacy_ids)
+    return sorted(ids, key=_id_order)
+
+
+def _gate(
+    entries: list[dict[str, Any]], question_ids: list[str], legacy_ids: list[str] | None = None
+) -> dict[str, Any]:
+    """The `legacy_font_gate` block over a set of full entries; `question_ids` per `_font_question_ids`, so
+    a sheet with no blocked entry lists no question."""
     reasons = [r for r in (meaning_block_reason(e) for e in entries) if r is not None]
     styles = {e["style"] or "" for e in entries if meaning_block_reason(e) is not None}
     return {
         "blocked_entries": len(reasons),
         "by_reason": {r: reasons.count(r) for r in BLOCK_REASONS if r in reasons},
         "styles": sorted(styles),
-        "question_ids": question_ids,
+        "question_ids": _font_question_ids(reasons, question_ids, legacy_ids or []),
     }
 
 
-def _encoding_question_ids(inv: Inventory, file_rel: str) -> tuple[list[str], list[str]]:
-    """(ids, warnings): non-obsolete registry questions of this file asking about the text encoding."""
+def _encoding_question_ids(inv: Inventory, file_rel: str) -> tuple[list[str], list[str], list[str]]:
+    """(encoding ids, legacy_ascii_text ids, warnings): non-obsolete registry questions of this file asking
+    about the text encoding, and those asking what a legacy-ASCII style holds."""
     path = inv.work / REGISTRY_FILE
     if not path.is_file():
-        return [], [f"{REGISTRY_FILE} is missing: legacy_font_gate.question_ids is empty"]
+        return [], [], [f"{REGISTRY_FILE} is missing: legacy_font_gate.question_ids is empty"]
     registry = read_json(path, REGISTRY_FILE)
-    found = [
-        q["id"]
+    live = [
+        q
         for q in registry.get("questions", {}).values()
-        if q.get("file") == file_rel
-        and q.get("code") in ENCODING_QUESTION_CODES
-        and q.get("status") != "obsolete"
+        if q.get("file") == file_rel and q.get("status") != "obsolete"
     ]
-    return sorted(found, key=lambda i: (len(i), i)), []
+    encoding = [q["id"] for q in live if q.get("code") in ENCODING_QUESTION_CODES]
+    legacy = [q["id"] for q in live if q.get("code") == LEGACY_ASCII_CODE]
+    return sorted(encoding, key=_id_order), sorted(legacy, key=_id_order), []
 
 
 # --- public functions ------------------------------------------------------------------------------------
@@ -332,6 +403,33 @@ def _sheet_entries(loaded: LoadedFile, sheet: dict[str, Any]) -> list[dict[str, 
     assert loaded.text_index is not None
     by_id = index_by_id(loaded.text_index)
     return [by_id[tid] for tid in sheet["text_ids"] if tid in by_id]
+
+
+def _unassigned_entries(loaded: LoadedFile) -> list[dict[str, Any]]:
+    """The entries on no sheet or on several (sheets document `unassigned`), each once, ids the index lacks
+    left out."""
+    assert loaded.text_index is not None and loaded.sheets is not None
+    by_id = index_by_id(loaded.text_index)
+    off_sheet = loaded.sheets["unassigned"]
+    ids = dict.fromkeys([*off_sheet["text_ids"], *off_sheet["ambiguous_text_ids"]])
+    return [by_id[tid] for tid in ids if tid in by_id]
+
+
+def _space_key(space: str) -> tuple[bool, str]:
+    return space != "model", space
+
+
+def unassigned_order(entries: list[dict[str, Any]]) -> list[tuple[int | None, dict[str, Any]]]:
+    """Reading order of entries from several spaces: model space first, then the layouts by name, each in
+    `reading_order`; row numbers go on from one space to the next, so a row never mixes two spaces."""
+    ordered: list[tuple[int | None, dict[str, Any]]] = []
+    offset = 0
+    for space in sorted({e["space"] for e in entries}, key=_space_key):
+        part = reading_order([e for e in entries if e["space"] == space])
+        rows = [r for r, _ in part if r is not None]
+        ordered.extend((None if r is None else r + offset, e) for r, e in part)
+        offset += max(rows) + 1 if rows else 0
+    return ordered
 
 
 def _title_keyword(text: str) -> str | None:
@@ -398,6 +496,7 @@ def list_sheets(work_dir: Path | str, *, check_inputs: bool = False) -> dict[str
             "text_entries": None,
             "unassigned_text": None,
             "sheets": None,
+            "blocked_text_count": None,
         }
         files.append(entry)
         if loaded.skip is not None or loaded.text_index is None:
@@ -407,6 +506,10 @@ def list_sheets(work_dir: Path | str, *, check_inputs: bool = False) -> dict[str
         if loaded.sheets is None:
             entry.update(status="skipped", reason="no sheets document (run `harness read-structure`)")
             continue
+        # the whole file, on a sheet or not (tool wave 2, fix 11)
+        entry["blocked_text_count"] = sum(
+            meaning_block_reason(e) is not None for e in loaded.text_index["entries"]
+        )
         sheets = []
         for sh in loaded.sheets["sheets"]:
             entries = _sheet_entries(loaded, sh)
@@ -468,16 +571,34 @@ def _file_row(inv: Inventory, file_rel: str) -> dict[str, Any]:
 def sheet_text(
     work_dir: Path | str,
     file_rel: str,
-    sheet_id: str,
+    sheet_id: str | None,
     *,
     contains: str | None = None,
     max_entries: int | None = None,
     check_inputs: bool = False,
+    unassigned: bool = False,
+    region: tuple[float, float, float, float] | None = None,
+    include_hidden: bool = False,
 ) -> dict[str, Any]:
     """The text of one sheet in reading order. Raises ReaderError. See `load_file`.
 
+    `include_hidden` (tool wave 4): by default the entries that do not print (text index `printed: false`) are
+    left out of `entries` and of every count but `counts.not_printed_in_scope`; with it they are returned,
+    marked `printed: false`, and counted like any other.
+
     `max_entries` None: DEFAULT_MAX_ENTRIES, or unbounded when `contains` filters (query.max_entries is the
-    effective value, null = unbounded). `legacy_font_gate` covers ALL entries assigned to the sheet."""
+    effective value, null = unbounded). `legacy_font_gate` covers ALL entries assigned to the sheet.
+    `unassigned` (instead of a sheet id; tool wave 2, fix 4): the entries on no sheet or on several, as
+    sheet `unassigned` with null layout and bbox; its `space` names the spaces of those entries (model
+    first, then layouts by name, ', '-separated; 'none' when there is no such entry), and they are read in
+    `unassigned_order`. This is how the text of a file without a detected sheet is reached.
+    `region` (with a sheet id only): see `sheet_region`."""
+    if (sheet_id is None) == (not unassigned):
+        raise ReaderError(EXIT_USAGE, "give either a sheet id or --unassigned, not both and not neither")
+    if region is not None and unassigned:
+        raise ReaderError(
+            EXIT_USAGE, "a region reads a box of ONE sheet: give its sheet id, not --unassigned"
+        )
     if max_entries is not None and max_entries < 1:
         raise ReaderError(EXIT_USAGE, "max_entries must be at least 1")
     inv = load_inventory(work_dir)
@@ -486,53 +607,93 @@ def sheet_text(
         raise ReaderError(EXIT_USAGE, f"{file_rel} has no text to read: {loaded.skip}")
     if loaded.sheets is None:
         raise ReaderError(EXIT_USAGE, f"{file_rel}: " + "; ".join(loaded.warnings))
-    found = [s for s in loaded.sheets["sheets"] if s["sheet_id"] == sheet_id]
-    if not found:
-        ids = [s["sheet_id"] for s in loaded.sheets["sheets"]]
-        shown = ", ".join(ids[:MAX_LISTED_PROBLEMS]) + (" ..." if len(ids) > MAX_LISTED_PROBLEMS else "")
-        raise ReaderError(EXIT_USAGE, f"{file_rel} has no sheet '{sheet_id}' (sheets: {shown or 'none'})")
-    sh = found[0]
-    entries = _sheet_entries(loaded, sh)
-    ordered = reading_order(entries)
-    if contains is not None and contains != "":
-        needle = normalize(contains)
-        matched = [(r, e) for r, e in ordered if needle in normalize(e["display_text"])]
+    tol = 0.0  # the sheet's row tolerance; a region read needs it (never with --unassigned)
+    if unassigned:
+        entries, not_printed = _printed_scope(_unassigned_entries(loaded), include_hidden)
+        ordered = unassigned_order(entries)
+        spaces = sorted({e["space"] for e in entries}, key=_space_key)
+        sheet = {
+            "sheet_id": UNASSIGNED,
+            "space": ", ".join(spaces) or "none",
+            "layout": None,
+            "bbox": None,
+            "sheet_number": None,
+            "duplicate_of": None,
+        }
     else:
-        contains = None
-        matched = ordered
-        if max_entries is None:
-            max_entries = DEFAULT_MAX_ENTRIES
-    shown = matched if max_entries is None else matched[:max_entries]
-    question_ids, id_warnings = _encoding_question_ids(inv, file_rel)
-    doc = {
-        "schema_version": SCHEMA_VERSION,
-        "kind": "sheet_text",
-        "project_id": inv.doc["project_id"],
-        "file": file_rel,
-        "sheet": {
+        found = [s for s in loaded.sheets["sheets"] if s["sheet_id"] == sheet_id]
+        if not found:
+            ids = [s["sheet_id"] for s in loaded.sheets["sheets"]]
+            shown = ", ".join(ids[:MAX_LISTED_PROBLEMS]) + (" ..." if len(ids) > MAX_LISTED_PROBLEMS else "")
+            raise ReaderError(
+                EXIT_USAGE,
+                f"{file_rel} has no sheet '{sheet_id}' (sheets: {shown or 'none'}; "
+                "--unassigned reads the text on no sheet)",
+            )
+        sh = found[0]
+        entries, not_printed = _printed_scope(_sheet_entries(loaded, sh), include_hidden)
+        tol = row_tolerance(entries)
+        if region is None:
+            ordered = reading_order(entries, tol)
+        else:
+            ordered = reading_order([e for e in entries if _in_box(e, region)], tol)
+        sheet = {
             "sheet_id": sh["sheet_id"],
             "space": sh["space"],
             "layout": sh["layout"],
             "bbox": sh["bbox"],
             "sheet_number": printed_number(sh),
             "duplicate_of": sh["duplicate_of"],
+        }
+    hidden: list[str] = []
+    if contains is not None and contains != "":
+        matched = _matching(ordered, contains)
+        hidden = _hidden_warning(entries)
+    else:
+        contains = None
+        matched = ordered
+        if max_entries is None:
+            max_entries = DEFAULT_MAX_ENTRIES
+    shown = matched if max_entries is None else matched[:max_entries]
+    question_ids, legacy_ids, id_warnings = _encoding_question_ids(inv, file_rel)
+    doc = {
+        "schema_version": SCHEMA_VERSION,
+        "kind": "sheet_text",
+        "project_id": inv.doc["project_id"],
+        "file": file_rel,
+        "sheet": sheet,
+        "query": {
+            "contains": contains,
+            "max_entries": max_entries,
+            **({"unassigned": True} if unassigned else {}),
+            **({"region": list(region)} if region is not None else {}),
         },
-        "query": {"contains": contains, "max_entries": max_entries},
         "counts": {
-            "assigned": len(ordered),
+            "assigned": len(entries),
             "matched": len(matched),
             "returned": len(shown),
             "omitted": len(matched) - len(shown),
             "truncated": len(shown) < len(matched),
+            "not_printed_in_scope": not_printed,
         },
-        "legacy_font_gate": _gate(entries, question_ids),
+        "legacy_font_gate": _gate(entries, question_ids, legacy_ids),
         "entries": [_compact(r, e) for r, e in shown],
-        "warnings": [*loaded.warnings, *id_warnings],
+        "warnings": [*loaded.warnings, *id_warnings, *hidden],
     }
+    if region is not None:
+        rows, renumbered = _region_rows(shown, ordered, tol)
+        doc["region"] = list(region)
+        doc["rows"] = rows
+        doc["entries"] = [_compact(renumbered[e["id"]], e) for _, e in shown]
+        doc["warnings"].extend(_outside_warning(region, sheet))
     warning = truncation_warning(doc)
     if warning:
         doc["warnings"].append(warning)
     return _check_output(doc)
+
+
+def _ids(question_ids: set[str]) -> str:
+    return ", ".join(sorted(question_ids, key=_id_order))
 
 
 def find_text(
@@ -542,13 +703,18 @@ def find_text(
     file_rel: str | None = None,
     max_hits: int | None = None,
     check_inputs: bool = False,
+    unassigned: bool = False,
+    include_hidden: bool = False,
 ) -> dict[str, Any]:
     """Every entry of every sheet of every file (or of `file_rel`) whose text contains `contains`.
 
     Hits come in file path, sheet and reading order. `max_hits` None: unbounded; `counts.hits` is always
-    the true number. Blocked entries are matched on their stored text only, so the search is incomplete
-    over them: `counts.blocked_entries_not_searchable` is how many were examined (matched or not) and
-    `notes` says so. Entries on no sheet or on several sheets are not searched (counted separately)."""
+    the true number. Blocked entries are never matched, on their stored, decoded or any normalised text
+    (tool wave 3, W4): matching would read them. `counts.blocked_in_scope` is how many there are in the
+    searched files or sheets, the same for every query, and `notes` says the search is incomplete over
+    them. Entries on no sheet or on several sheets are not searched (counted separately).
+    `unassigned` (tool wave 2, fix 4): search only those entries instead, in `unassigned_order`; hits carry
+    sheet_id 'unassigned' and a null sheet_number, `counts.unassigned_entries_searched` says how many."""
     if not contains:
         raise ReaderError(EXIT_USAGE, "find-text needs a non-empty --contains")
     if max_hits is not None and max_hits < 1:
@@ -565,6 +731,10 @@ def find_text(
     needle = normalize(contains)
     files: list[dict[str, Any]] = []
     hits: list[dict[str, Any]] = []
+    encoding_ids: set[str] = set()  # questions whose answer can unblock an encoding reason (W3)
+    legacy_ids: set[str] = set()  # legacy_ascii_text questions: they record a reading and unblock nothing
+    blocked_encoding = blocked_legacy = 0
+    not_printed_total = 0
     for row in rows:
         loaded = load_file(inv, row, check_inputs=check_inputs)
         warnings.extend(f"{loaded.rel}: {w}" for w in loaded.warnings)
@@ -585,49 +755,110 @@ def find_text(
         if loaded.sheets is None:
             summary.update(status="skipped", reason="no sheets document (run `harness read-structure`)")
             continue
-        unassigned = loaded.sheets["unassigned"]
-        summary["unassigned_entries"] = len(unassigned["text_ids"]) + len(unassigned["ambiguous_text_ids"])
-        for sh in loaded.sheets["sheets"]:
-            summary["sheets_searched"] += 1
-            for _, e in reading_order(_sheet_entries(loaded, sh)):
-                reason = meaning_block_reason(e)
+        off_sheet_all = _unassigned_entries(loaded)
+        off_sheet, _ = _printed_scope(off_sheet_all, include_hidden)
+        summary["unassigned_entries"] = len(off_sheet)
+        if unassigned:
+            groups = [(UNASSIGNED, None, [e for _, e in unassigned_order(off_sheet)])]
+        else:
+            groups = [
+                (
+                    sh["sheet_id"],
+                    printed_number(sh),
+                    [
+                        e
+                        for _, e in reading_order(
+                            _printed_scope(_sheet_entries(loaded, sh), include_hidden)[0]
+                        )
+                    ],
+                )
+                for sh in loaded.sheets["sheets"]
+            ]
+            summary["sheets_searched"] = len(groups)
+        not_printed_total += (
+            sum(not is_printed(e) for e in off_sheet_all)
+            if unassigned
+            else sum(
+                _printed_scope(_sheet_entries(loaded, sh), include_hidden)[1]
+                for sh in loaded.sheets["sheets"]
+            )
+        )
+        reasons: list[str] = []
+        for sheet_id, number, entries in groups:
+            for e in entries:
                 summary["entries_searched"] += 1
-                summary["blocked_entries"] += reason is not None
+                reason = meaning_block_reason(e)
+                if reason is not None:  # never compared (W4): reachable by id only
+                    summary["blocked_entries"] += 1
+                    reasons.append(reason)
+                    continue
                 if needle not in normalize(e["display_text"]):
                     continue
                 summary["hits"] += 1
                 hits.append(
                     {
                         "file": loaded.rel,
-                        "sheet_id": sh["sheet_id"],
-                        "sheet_number": printed_number(sh),
+                        "sheet_id": sheet_id,
+                        "sheet_number": number,
                         "entry_id": e["id"],
                         "display_text": e["display_text"],
-                        "meaning": "allowed" if reason is None else "blocked",
-                        "blocked_reason": reason,
+                        "meaning": "allowed",
+                        "blocked_reason": None,
+                        **({} if is_printed(e) else {"printed": False}),
                     }
                 )
+        if reasons:
+            file_encoding_ids, file_legacy_ids, id_warnings = _encoding_question_ids(inv, loaded.rel)
+            by_legacy = [r == LEGACY_ASCII_REASON for r in reasons]
+            blocked_legacy += sum(by_legacy)
+            blocked_encoding += len(reasons) - sum(by_legacy)
+            if not all(by_legacy):
+                encoding_ids.update(file_encoding_ids)
+            if any(by_legacy):
+                legacy_ids.update(file_legacy_ids)
+            warnings.extend(f"{loaded.rel}: {w}" for w in id_warnings)
     blocked = sum(f["blocked_entries"] for f in files)
+    off_sheet_total = sum(f["unassigned_entries"] or 0 for f in files)
     shown = hits if max_hits is None else hits[:max_hits]
     notes = []
     if blocked:
-        notes.append(
-            f"{blocked} blocked entries (unknown, proposed or contradicted font encoding) were matched on "
-            "their stored text only, which rarely contains a Vietnamese word: this search is incomplete over "
-            "them; read them with sheet-text and ask the engineer to approve the font row"
+        note = (
+            f"{blocked} blocked entries (unknown, proposed or contradicted font encoding, or legacy-looking "
+            "ASCII) in the searched scope are never matched, on any form of their text: this search is "
+            "incomplete over them; read them by entry id or with sheet-text"
         )
+        if blocked_encoding:
+            note += (
+                f"; for the {blocked_encoding} with an encoding reason, ask the engineer to approve the font "
+                "row" + (f" (font questions: {_ids(encoding_ids)})" if encoding_ids else "")
+            )
+        if blocked_legacy:
+            note += (
+                f"; the {blocked_legacy} legacy-looking ASCII entries stay blocked whatever the answer, the "
+                "legacy_ascii_text question "
+                + (f"({_ids(legacy_ids)}) " if legacy_ids else "")
+                + "only records the engineer's reading of the style and would unblock nothing"
+            )
+        notes.append(note)
     doc = {
         "schema_version": SCHEMA_VERSION,
         "kind": "find_text",
         "project_id": inv.doc["project_id"],
-        "query": {"contains": contains, "file": file_rel, "max_hits": max_hits},
+        "query": {
+            "contains": contains,
+            "file": file_rel,
+            "max_hits": max_hits,
+            **({"unassigned": True} if unassigned else {}),
+        },
         "counts": {
             "hits": len(hits),
             "returned": len(shown),
             "omitted": len(hits) - len(shown),
             "truncated": len(shown) < len(hits),
-            "blocked_entries_not_searchable": blocked,
-            "unassigned_entries_not_searched": sum(f["unassigned_entries"] or 0 for f in files),
+            "blocked_in_scope": blocked,
+            "not_printed_in_scope": not_printed_total,
+            "unassigned_entries_not_searched": 0 if unassigned else off_sheet_total,
+            **({"unassigned_entries_searched": off_sheet_total} if unassigned else {}),
         },
         "files": files,
         "hits": shown,
@@ -635,3 +866,109 @@ def find_text(
         "warnings": warnings,
     }
     return _check_output(doc)
+
+
+def sheet_region(
+    work_dir: Path | str,
+    file_rel: str,
+    sheet_id: str,
+    region: tuple[float, float, float, float],
+    *,
+    contains: str | None = None,
+    max_entries: int | None = None,
+    check_inputs: bool = False,
+    include_hidden: bool = False,
+) -> dict[str, Any]:
+    """The entries of one sheet inside `region`, as `harness sheet-text W FILE SHEET --region x0,y0,x1,y1`
+    prints them (tool wave 3, a5: a notes-table cell becomes a tool claim, not an eyeball one).
+
+    `region` is x0, y0, x1, y1 in ABSOLUTE coordinates of the sheet's space (the entries' x/y and the
+    list-sheets frame bbox; not relative to the frame), x0 < x1 and y0 < y1, all finite. An entry is in the
+    box when its insertion point is (edges included); entries without a position never are. The result
+    is a `sheet_text` document whose query carries `region`, with top-level `region` and `rows`:
+      * rows: the box's entries in reading order (rows and their tolerance as `reading_order`, the
+        tolerance taken from the WHOLE sheet's median text height), numbered over the returned entries
+        (`entries[].row` indexes `rows`); a row's `y` is its first (topmost) entry's y in the box;
+      * cells: inside a row, left to right, a new cell starts where the gap between neighbouring insertion
+        x values exceeds that same tolerance; a cell joins its entries' display text with one space, is
+        blocked when any entry is (the first blocked entry's reason), and spans x0..x1 (insertion x). A
+        blank cell is never invented.
+    `counts.assigned` and `legacy_font_gate` stay the whole sheet's (the gate is unchanged); `matched` is
+    the box's entries passing `contains` (a blocked entry is never matched); `max_entries` as `sheet_text`.
+    A box that misses the sheet's frame gets a warning. Raises ReaderError (2 for a bad region).
+    """
+    if len(region) != 4 or not all(math.isfinite(v) for v in region):
+        raise ReaderError(EXIT_USAGE, f"region must be four finite numbers x0,y0,x1,y1, not {region}")
+    x0, y0, x1, y1 = region
+    if not (x0 < x1 and y0 < y1):
+        raise ReaderError(EXIT_USAGE, f"region {region}: need x0 < x1 and y0 < y1 (the box's corners)")
+    return sheet_text(
+        work_dir,
+        file_rel,
+        sheet_id,
+        contains=contains,
+        max_entries=max_entries,
+        check_inputs=check_inputs,
+        region=(float(x0), float(y0), float(x1), float(y1)),
+        include_hidden=include_hidden,
+    )
+
+
+def _in_box(entry: dict[str, Any], region: tuple[float, float, float, float]) -> bool:
+    x, y = entry["position"]["x"], entry["position"]["y"]
+    x0, y0, x1, y1 = region
+    return x is not None and y is not None and x0 <= x <= x1 and y0 <= y <= y1
+
+
+def _region_rows(
+    shown: list[tuple[int | None, dict[str, Any]]],
+    ordered: list[tuple[int | None, dict[str, Any]]],
+    tol: float,
+) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    """(rows, entry id -> row index) over the returned entries; see `sheet_region`."""
+    anchors: dict[int | None, float] = {}
+    for r, e in ordered:  # a row's first entry in `reading_order` is its topmost (the y it was opened at)
+        anchors[r] = max(anchors.get(r, e["position"]["y"]), e["position"]["y"])
+    rows: list[dict[str, Any]] = []
+    index: dict[int | None, int] = {}
+    renumbered: dict[str, int] = {}
+    last_x = 0.0
+    for r, e in shown:
+        x = e["position"]["x"]
+        if r not in index:
+            index[r] = len(rows)
+            rows.append({"y": anchors[r], "cells": []})
+        cells = rows[index[r]]["cells"]
+        if not cells or x - last_x > tol:
+            cells.append([])
+        cells[-1].append(e)
+        last_x = x
+        renumbered[e["id"]] = index[r]
+    for row in rows:
+        row["cells"] = [_cell(group) for group in row["cells"]]
+    return rows, renumbered
+
+
+def _cell(entries: list[dict[str, Any]]) -> dict[str, Any]:
+    reasons = [r for r in (meaning_block_reason(e) for e in entries) if r is not None]
+    xs = [e["position"]["x"] for e in entries]
+    return {
+        "entry_ids": [e["id"] for e in entries],
+        "display_text": " ".join(e["display_text"] for e in entries),
+        "meaning": "blocked" if reasons else "allowed",
+        "blocked_reason": reasons[0] if reasons else None,
+        "x0": min(xs),
+        "x1": max(xs),
+    }
+
+
+def _outside_warning(region: tuple[float, float, float, float], sheet: dict[str, Any]) -> list[str]:
+    """A warning when the box does not overlap the sheet's frame (often a frame-relative box)."""
+    bbox = sheet["bbox"]
+    x0, y0, x1, y1 = region
+    if bbox is None or (x0 <= bbox[2] and bbox[0] <= x1 and y0 <= bbox[3] and bbox[1] <= y1):
+        return []
+    return [
+        f"region {list(region)} lies outside the frame of {sheet['sheet_id']} {bbox}: region coordinates "
+        "are absolute (the entries' x/y and the list-sheets bbox), not relative to the frame"
+    ]

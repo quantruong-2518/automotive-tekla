@@ -162,3 +162,75 @@ Severity: `critical` · `major` · `minor`.
 - Regression test: `tests/test_guard_hook.py` — newline, CRLF, bash continuation and
   PowerShell trailing-backslash cases in `WRITE_COMMANDS` and `RECEIPT_WRITE_COMMANDS`; a
   multi-line commit message in `MENTION_ONLY_COMMANDS`.
+## RTI-0010 — On Windows, an unlocked reader can make a work-folder write fail
+
+- Source: independent review of the tool wave 2 seam (ADR-0011), 2026-11-08
+- Classification: tooling · Severity: minor · Status: **proposed**
+- Root cause: Python opens files on Windows without delete sharing, so while a read-only command
+  (status, sheet-text, find-text) has `answers.json` or the registry open, a writer's
+  `os.replace` in `write_text_atomic` fails with `PermissionError`. The registry may already be
+  written by then, and `harness answer` catches only `QuestionsError`, so the engineer sees a
+  traceback. ADR-0011 leaves readers unlocked by design. The same sharing rule can stop the
+  holder record from being removed (a warning only).
+- Proposed fix: retry the replace a few times with a short back-off on `PermissionError` on
+  Windows; turn a final failure into exit 3 with a "retry" message.
+- Regression test: Windows-only test that holds a read handle on the target while
+  `write_text_atomic` replaces it; it expects retry, then success, or exit 3 with no traceback.
+
+## RTI-0011 — An agent can declare itself the engineer when it records an answer
+
+- Source: independent review of the tool wave 2 seam, 2026-11-08 (finding M1)
+- Classification: safety layer · Severity: major · Status: **proposed** (needs engineer decision)
+- Root cause: gate 1 counts only answers recorded with `--role engineer` (tool wave 2, D4), but the
+  role is whatever the caller types. Any agent can run `harness answer … --role engineer`, or call
+  `record_answer(role="engineer")` from Python, and gate 1 then reports ready on an answer the
+  engineer never gave. Until P3, `status` even printed that command, ready to paste, in its reasons.
+  The engineer still opens every gate (principle 5), so gate readiness alone does not let an agent
+  build, but a wrong "ready" misleads the planner and the engineer.
+- What the tools can and cannot do (Claude Code docs, 2026-11-08): a PreToolUse hook sees every
+  Bash call that the model or a subagent makes, but not `!` commands typed by the engineer. A hook
+  matches command text only, so `sh -c`, a script or a Python call get past it; the permissions
+  page says such a rule "isn't a security boundary around the program". A hook cannot tell who
+  issued a call.
+- Proposed fix (defence in depth, none of it is a boundary on its own):
+  1. P3 (tool wave 2): no gate-1 reason or printed command hands an agent `--role engineer`; the
+     text says the engineer must answer.
+  2. Guard hook: deny any model-issued Bash command that runs `harness answer` with
+     `--role engineer`. The engineer records their answers with `! harness answer …` in the
+     session, or from their own terminal.
+  3. AGENTS.md hard rule: an agent never records an answer as the engineer; simulated answers
+     use `--role simulated`.
+  4. Later, if needed: engineer answers carry something an agent cannot produce (for example, an
+     answer file the engineer edits, checked by hash at gate time).
+- Regression test: the guard hook denies `harness answer W Q-1 --text x --by y --role engineer`
+  from the model and allows `--role simulated`; a `status` run after a simulated answer prints no
+  `--role engineer` command addressed to an agent.
+
+## RTI-0012 — `harness callouts` drops rebar callouts whose diameter sign is an unexpected glyph
+
+- Source: EVAL-3 (290 'ù' callouts, reader Q-144) and research note
+  `docs/research/diameter-glyph-u-grave.md`, 2026-11-09
+- Classification: tool · Severity: major · Status: **accepted**, fix in tool wave 3 (package M)
+- Root cause: the callout candidate scan only starts at Ø or `%%c`. In dwgshare 290, 507 callouts write the
+  diameter as `ù` (style `Arial`, TrueType family `CIC Arial Narrow E`), and 31 VNI-style callouts write it
+  as `Þ`. They get no candidate at all: they are neither parsed, nor listed as unparsed, nor blocked, and
+  no question is raised. All rebar of that house is missing from the counts without any sign.
+- Proposed fix: a diameter-position glyph that is not Ø or `%%c` is a candidate. It is listed as unparsed
+  with reason `symbol_glyph_unverified` and asked (`callout_unparsed`). It is never decoded until the
+  engineer approves a scoped knowledge row (the research note finds no safe rule today: byte 0xF9 is the
+  TCVN3 letter ự in sibling styles).
+- Regression test: a fixture with `2ù20` and `ù10a150` in a unicode-decoded style gives unparsed
+  candidates with that reason and one `callout_unparsed` question. No entry is silently dropped.
+
+## RTI-0013 — A style named like a Windows font hides its TrueType family from the font hint
+
+- Source: research note `docs/research/diameter-glyph-u-grave.md`, 2026-11-09
+- Classification: tool · Severity: major · Status: **proposed** (needs engineer decision; not in tool wave 3)
+- Root cause: `encoding.font_hint` decides `unicode` from the style name (`Arial`) before it looks at the
+  style's TrueType family (`CIC Arial Narrow E`), which can be a legacy Vietnamese font. The knowledge
+  table is consulted only after `unknown`, so even an approved row for that family would never be read.
+- Proposed fix: when the TrueType family is present and differs from the style name's font, the family
+  decides. Unknown families are `unknown`, not `unicode`. This blocks more text (290's M1 would rise), so it
+  needs the engineer's decision and a corpus measurement before it lands.
+- Regression test: a style named `Arial` with family `CIC Arial Narrow E` is not hinted `unicode`; a
+  style named `Arial` with family `Arial` still is.

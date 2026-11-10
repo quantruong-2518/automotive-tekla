@@ -715,8 +715,8 @@ def test_encoding_hint_asks_once_per_style_and_lists_the_matched_fields(tmp_path
 
 
 def test_probe_uses_the_same_rules_as_font_hint(tmp_path):
-    # One source of truth: encoding.font_hint decides, so the family XDATA, the bigfont and the old
-    # 'vni_' / 'vni ' prefixes are not hints (font_hint does not use or accept them).
+    # One source of truth: encoding.font_hint decides, so the bigfont and the old 'vni_' / 'vni '
+    # prefixes are not hints (font_hint does not use or accept them). The TrueType family is (fix 2a).
     def build(doc):
         st = doc.styles.new("VIAFAMILY", dxfattribs={"font": ""})
         st.set_extended_font_data(".VnArial")
@@ -725,8 +725,37 @@ def test_probe_uses_the_same_rules_as_font_hint(tmp_path):
         doc.styles.new("VNI STYLE2", dxfattribs={"font": "romans.shx"})
 
     result = probe(make(tmp_path, build), knowledge=EMPTY_TABLE)
-    assert result["text_encoding_hints"] == []
-    assert not [q for q in result["questions"] if q["code"] == "text_encoding_hint"]
+    assert [h["style"] for h in result["text_encoding_hints"]] == ["VIAFAMILY"]
+    assert [q["where"] for q in result["questions"] if q["code"] == "text_encoding_hint"] == [
+        "text style VIAFAMILY, family"
+    ]
+
+
+def test_the_ttf_family_gives_a_hint_with_its_field(tmp_path):
+    def build(doc):
+        doc.styles.new("kt..1", dxfattribs={"font": "VHAVAN_2.TTF"}).set_extended_font_data(".VnAvantH")
+        doc.styles.new("kt..2", dxfattribs={"font": "VHAVAN_2.TTF"})  # no XDATA
+        doc.styles.new(".VnTime", dxfattribs={"font": ".VnTime.ttf"}).set_extended_font_data(".VnTime")
+        doc.styles.new("kt..3", dxfattribs={"font": "VHARIAL.TTF"}).set_extended_font_data("Arial")
+
+    result = probe(make(tmp_path, build), knowledge=table_of(tmp_path, approved(pattern="VHARIAL.TTF")))
+    hints = {h["style"]: h for h in result["text_encoding_hints"]}
+    assert hints["kt..1"]["encoding_hint"] == "tcvn3" and hints["kt..1"]["source"] == "font_hint"
+    assert hints["kt..1"]["matched"] == [{"field": "family", "value": ".VnAvantH"}]
+    assert hints["kt..1"]["capital_font"] is True
+    assert "kt..2" not in hints
+    assert hints[".VnTime"]["matched"] == [
+        {"field": "name", "value": ".VnTime"},
+        {"field": "font", "value": ".VnTime.ttf"},
+        {"field": "family", "value": ".VnTime"},
+    ]
+    # a Unicode-looking family never decides: the approved font row does
+    assert hints["kt..3"]["source"] == "knowledge_table"
+    assert hints["kt..3"]["matched"] == [{"field": "font", "value": "VHARIAL.TTF"}]
+    styles = {s["name"]: s for s in result["text_styles"]}
+    assert (styles["kt..1"]["family"], styles["kt..1"]["capital_font"]) == (".VnAvantH", True)
+    assert (styles["kt..2"]["family"], styles["kt..2"]["capital_font"]) == ("", None)
+    assert validate("dxf-probe", result) == []
 
 
 def test_capital_font_hint_is_recorded_for_every_style(tmp_path):
@@ -809,13 +838,43 @@ def test_conflicting_approved_rows_leave_the_style_undecided_and_ask(tmp_path):
     assert not question["blocking"] and "vn*.shx" in question["found"] and "vn_vni.shx" in question["found"]
 
 
+def test_a_family_that_disagrees_with_an_approved_row_gives_no_hint_and_asks(tmp_path):
+    # review of tool wave 2 (F1 item 4): the same rule as extract_text (knowledge_conflict there)
+    def build(doc):
+        doc.styles.new("kt..1", dxfattribs={"font": "VHARIAL.TTF"}).set_extended_font_data("VNI-Times")
+        doc.styles.new("kt..2", dxfattribs={"font": "VHARIAL.TTF"}).set_extended_font_data(".VnArialH")
+
+    result = probe(make(tmp_path, build), knowledge=table_of(tmp_path, approved(pattern="VHARIAL.TTF")))
+    hints = {h["style"]: h for h in result["text_encoding_hints"]}
+    assert "kt..1" not in hints  # nothing decided for it
+    assert (hints["kt..2"]["encoding_hint"], hints["kt..2"]["source"]) == ("tcvn3", "font_hint")  # agrees
+    (question,) = [q for q in result["questions"] if q["code"] == "font_encoding_conflict"]
+    assert question["where"] == "text style kt..1" and not question["blocking"]
+    assert "VNI-Times" in question["found"] and "VHARIAL.TTF" in question["found"]
+    assert not [q for q in result["questions"] if q["code"] == "text_encoding_hint" and "kt..1" in q["where"]]
+    assert validate("dxf-probe", result) == []
+
+
+def test_approved_rows_that_disagree_leave_a_family_style_undecided(tmp_path):
+    def build(doc):
+        doc.styles.new("kt..1", dxfattribs={"font": "VHARIAL.TTF"}).set_extended_font_data(".VnArialH")
+
+    table = table_of(tmp_path, approved(pattern="VH*.TTF"), approved(pattern="VHARIAL.TTF", encoding="vni"))
+    result = probe(make(tmp_path, build), knowledge=table)
+    assert result["text_encoding_hints"] == []
+    (question,) = [q for q in result["questions"] if q["code"] == "font_encoding_conflict"]
+    assert "VH*.TTF" in question["found"] and "VHARIAL.TTF" in question["found"]
+
+
 def test_the_shipped_table_is_used_by_default(tmp_path):
     def build(doc):
         doc.styles.new("TKT", dxfattribs={"font": "vntimeh.shx"})
 
     result = probe(make(tmp_path, build))  # no knowledge argument: knowledge/font-encodings.csv
-    (question,) = [q for q in result["questions"] if q["code"] == "font_encoding_proposed"]
-    assert "vntimeh.shx" in question["where"]
+    assert not [q for q in result["questions"] if q["code"] == "font_encoding_proposed"]
+    (hint,) = [h for h in result["text_encoding_hints"] if h["style"] == "TKT"]  # approved 2026-11-07
+    got = (hint["encoding_hint"], hint["source"], hint["knowledge_pattern"])
+    assert got == ("tcvn3", "knowledge_table", "vntimeh.shx")
 
 
 def test_a_bad_default_knowledge_table_raises_instead_of_a_section_error(tmp_path, monkeypatch):
@@ -1097,12 +1156,16 @@ def test_group_42_is_exposed_and_agreeing_values_compare_normally(tmp_path):
     assert row["status"] == "ok"
 
 
-def test_group_42_disagreement_makes_override_rows_not_compared(tmp_path):
+def test_group_42_disagreement_makes_every_row_not_compared(tmp_path):
+    """Whatever the text rule: a measurement group 42 contradicts is never 'ok' (review F2 item 2)."""
     handles: dict[str, str] = {}
 
     def build(doc):
         handles["linear"] = add_dim(doc, text="1000", actual=1500.0)
         handles["plain"] = add_dim(doc, actual=1500.0)
+        handles["with_text"] = add_dim(doc, text="<> TYP", actual=1500.0)
+        handles["suppressed"] = add_dim(doc, text=" ", actual=1500.0)
+        handles["words"] = add_dim(doc, text="SEE PLAN", actual=1500.0)
         handles["angular_deg"] = add_angular(doc, text="90", actual=90.0)  # radians expected, degrees stored
 
     result = probe(make(tmp_path, build))
@@ -1110,10 +1173,14 @@ def test_group_42_disagreement_makes_override_rows_not_compared(tmp_path):
     assert rows[handles["linear"]]["status"] == "not_compared"
     assert "actual" in rows[handles["linear"]]["note"] and "1500" in rows[handles["linear"]]["note"]
     assert rows[handles["linear"]]["measurement_agrees"] is False
+    assert rows[handles["linear"]]["override_value"] == 1000.0  # the typed value is still reported
     assert rows[handles["angular_deg"]]["status"] == "not_compared"
-    assert rows[handles["plain"]]["status"] == "ok"  # nothing is compared on a measured-text row
-    assert rows[handles["plain"]]["measurement_agrees"] is False
-    assert any("group 42" in w and "3" in w for w in result["warnings"])
+    for name in ("plain", "with_text", "suppressed", "words"):
+        assert rows[handles[name]]["measurement_agrees"] is False
+        assert rows[handles[name]]["status"] == "not_compared", name
+        assert "1500" in rows[handles[name]]["note"]
+    assert rows[handles["words"]]["override_value"] is None
+    assert any("group 42" in w and "6" in w for w in result["warnings"])
 
 
 def test_group_42_may_be_geometry_times_a_positive_dimlfac(tmp_path):
@@ -1168,6 +1235,46 @@ def test_no_block_dimensions_means_in_blocks_zero_and_no_warning(tmp_path):
     result = probe(make(tmp_path, lambda doc: add_dim(doc)))
     assert result["dimension_audit"]["in_blocks"] == 0
     assert not any("block definitions" in w for w in result["warnings"])
+
+
+def test_measure_dimension_is_the_probe_row_without_seq(tmp_path, monkeypatch):
+    """Tool wave 2 seam: the public per-dimension measurement `harness dimensions` will use."""
+    from ezdxf.entities import Dimension
+    from ezdxf.filemanagement import readfile
+
+    from tekla_harness.read_dxf import measure_dimension
+
+    handles: dict[str, str] = {}
+
+    def build(doc):
+        handles["measured"] = add_dim(doc)
+        handles["differs"] = add_dim(doc, text="1200")
+        handles["words"] = add_dim(doc, text="TYP")
+        handles["negative"] = add_dim(doc, text="1000", override={"dimlfac": -75.0}, actual=1000.0)
+
+    path = make(tmp_path, build)
+    rows = audit_rows(probe(path))
+    doc = readfile(path)
+
+    def dim_of(handle: str) -> Dimension:
+        entity = doc.entitydb[handle]
+        assert isinstance(entity, Dimension)
+        return entity
+
+    for name, handle in handles.items():
+        row = measure_dimension(dim_of(handle), layout="Model", is_model=True, handles_ok=True)
+        assert row == {k: v for k, v in rows[handle].items() if k != "seq"}, name
+    # conservative defaults: no handle, and a negative DIMLFAC is not proven outside modelspace
+    row = measure_dimension(dim_of(handles["negative"]))
+    assert row["handle"] is None and row["status"] == "not_compared" and row["layout"] == ""
+
+    def boom(self):
+        raise RuntimeError("bad geometry")
+
+    monkeypatch.setattr(Dimension, "get_measurement", boom)
+    row = measure_dimension(dim_of(handles["differs"]), layout="Model", is_model=True)
+    assert row["status"] == "error" and row["note"] == "RuntimeError: bad geometry"
+    assert row["dim_type"] == "linear" and row["text"] == "1200"
 
 
 # non-finite and out-of-range numbers
@@ -1607,3 +1714,91 @@ def test_corpus_wrong_units_are_caught(name):
     result = probe_dxf(path)
     assert result["units"]["confidence"] == "low"
     assert {"units_conflict", "units_suspect"} & set(codes(result, blocking=True))
+
+
+# --- legacy_ascii_text (tool wave 3, W3) ----------------------------------------------------------------
+
+LEGACY_SUSPECT = ["4/g14", "/G10", "1/G16", "chi tiESt", "haFn 200", "coJC vaF", "DiJa"]  # 7: over the cap
+
+
+def _legacy_entry(eid: str, style: str | None, text: str, *, flagged: bool, font: str | None = None) -> dict:
+    return {
+        "id": eid,
+        "style": style,
+        "font_file": font,
+        "display_text": text,
+        "raw_text": text,
+        "flags": ["legacy_ascii_suspect"] if flagged else [],
+    }
+
+
+def test_legacy_ascii_text_is_one_question_per_style_with_count_and_five_examples(tmp_path):
+    from tekla_harness.extract_text import extract_text
+    from tekla_harness.questions import LEGACY_ASCII_CODE
+
+    def fn(doc):
+        doc.styles.add(".VnTime", font="vntime.ttf")
+        style = doc.styles.add("kt..9", font="plain.shx")
+        style.set_extended_font_data("VnSimH")  # a legacy family of unknown encoding
+        msp = doc.modelspace()
+        for i, text in enumerate(LEGACY_SUSPECT):
+            msp.add_text(text, dxfattribs={"style": ".VnTime", "height": 2.5, "insert": (0, 9 * i)})
+        msp.add_text("D1 200x300", dxfattribs={"style": ".VnTime", "height": 2.5, "insert": (0, 99)})
+        msp.add_text("haFn 200", dxfattribs={"style": "kt..9", "height": 2.5, "insert": (50, 0)})
+
+    path = make(tmp_path, fn)
+    text = extract_text(path, knowledge=EMPTY_TABLE)
+    flagged = [e for e in text["entries"] if "legacy_ascii_suspect" in e["flags"]]
+    assert len(flagged) == len(LEGACY_SUSPECT) + 1  # the fixture is what the test says
+    got = read_dxf.legacy_ascii_questions(text, "plans/a.dxf", probe(path)["text_styles"])
+    assert [q["code"] for q in got] == [LEGACY_ASCII_CODE] * 2
+    first, second = got  # sorted by style name
+    assert all(q["blocking"] is False and q["file"] == "plans/a.dxf" for q in got)
+    vn = [e for e in flagged if e["style"] == ".VnTime"]
+    assert first["count"] == len(vn) == 7 and first["truncated"] is True
+    assert [r["found"].split(":")[0] for r in first["refs"]] == [e["id"] for e in vn[:5]]
+    assert all(r["file"] == "plans/a.dxf" and ".VnTime" in r["where"] for r in first["refs"])
+    assert first["refs"][0]["found"] == f"{vn[0]['id']}: 4/g14"  # quoted as stored, never decoded
+    assert "'.VnTime'" in first["message"] and "vntime.ttf" in first["message"]
+    assert "7 " in first["message"] and "family none" in first["message"]
+    assert second["count"] == 1 and second["truncated"] is False and len(second["refs"]) == 1
+    assert "'kt..9'" in second["message"] and "plain.shx" in second["message"]
+    assert "family VnSimH" in second["message"]
+    assert second["refs"][0]["where"] == "text style kt..9 (font file plain.shx, TrueType family VnSimH)"
+    assert "D1 200x300" not in json.dumps(got)  # not flagged: not listed
+    # no legacy_ascii_suspect entry: no question
+    clean = {"entries": [_legacy_entry("T000001", "S", "D1", flagged=False)]}
+    assert read_dxf.legacy_ascii_questions(clean, "plans/a.dxf", []) == []
+
+
+def test_legacy_ascii_text_without_style_or_probe_styles_says_so():
+    text = {
+        "entries": [
+            _legacy_entry("T000002", None, "4/g14", flagged=True),
+            _legacy_entry("T000001", "B", "haFn", flagged=True, font="b.shx"),
+            _legacy_entry("T000003", "B", "tieRp", flagged=True, font="b.shx"),
+        ]
+    }
+    got = read_dxf.legacy_ascii_questions(text, "x.dxf", None)
+    # questions-md shows the refs, not the English message: each ref names the font file and family too
+    unknown = "TrueType family unknown (the probe has no text_styles section)"
+    assert [q["refs"][0]["where"] for q in got] == [
+        f"text style (no style) (font file none, {unknown})",
+        f"text style B (font file b.shx, {unknown})",
+    ]
+    assert "font file none" in got[0]["message"]
+    assert "family unknown (the probe has no text_styles section)" in got[1]["message"]
+    assert [r["found"] for r in got[1]["refs"]] == ["T000001: haFn", "T000003: tieRp"]
+    assert got[1]["count"] == 2 and got[1]["truncated"] is False
+    # deterministic: the same input gives the same questions in the same order
+    assert read_dxf.legacy_ascii_questions(text, "x.dxf", None) == got
+
+
+def test_legacy_ascii_text_examples_are_the_first_ids_in_numeric_order():
+    ids = ["T1000001", "T999998", "T1000000", "T000007", "T999999", "T000003", "T000005"]  # 7 digits after 6
+    text = {"entries": [_legacy_entry(i, "S", "4/g14", flagged=True) for i in ids]}
+    (got,) = read_dxf.legacy_ascii_questions(text, "x.dxf", [{"name": "S", "family": ""}])
+    assert [r["found"].split(":")[0] for r in got["refs"]] == [
+        "T000003", "T000005", "T000007", "T999998", "T999999",
+    ]  # fmt: skip
+    assert got["count"] == 7 and got["truncated"] is True

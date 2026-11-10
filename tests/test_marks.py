@@ -12,10 +12,23 @@ from typing import Any
 
 import pytest
 
-from _marks_fixtures import PROJECT, build_marks_work
+from _marks_fixtures import (
+    BLOCKED_H,
+    BLOCKED_SUB,
+    K_NOTE,
+    KINH,
+    PROJECT,
+    build_gate_work,
+    build_inferred_work,
+    build_marks_work,
+)
 from tekla_harness.callouts import run_callouts
 from tekla_harness.cli import main
 from tekla_harness.marks import (
+    _inferred_mark_column_ok,
+    _Table,
+    _table_doc,
+    _Text,
     extract_marks,
     header_keyword,
     mark_key,
@@ -191,7 +204,7 @@ def test_example_is_valid(example):
         lambda d: d["plan_marks"][0].update(confidence="high"),
         lambda d: d["plan_marks"][0].update(form="title"),  # a title needs its member word
         lambda d: next(t for t in d["tables"] if t["header_blocked"]).update(mark_column=0),
-        lambda d: d["question_counts"].update(member_mark_prefix_meaning=1),
+        lambda d: d["question_counts"].update(callout_ambiguous=1),  # another producer's code
     ],
 )
 def test_schema_rejects_damaged_documents(example, damage):
@@ -217,7 +230,11 @@ def test_title_word_is_evidence_not_a_prefix_meaning(doc):
     assert c2["form"] == "title" and c2["title_member_word"] == {"word": "COLUMN", "confidence": "medium"}
     (d3,) = plan(doc, "D3")
     assert d3["title_member_word"]["word"] == "DẦM"
-    assert "member_mark_prefix_meaning" not in json.dumps(doc["question_counts"])
+    # the prefix is still asked: a title word never answers it
+    (q,) = [q for q in marks_questions(doc) if q["code"] == "member_mark_prefix_meaning"]
+    assert {"C", "D"} <= {s["name"] for s in q["subjects"]}
+    assert "COLUMN" not in json.dumps(q["subjects"]) and "answer" not in q  # no meaning taken from it
+    assert {"COLUMN C2", "DẦM D3"} <= {r["found"] for r in q["refs"]}  # quoted as evidence, verbatim
 
 
 def test_line_grid_table(doc):
@@ -245,6 +262,7 @@ def test_blocked_header_table(doc):
     (t,) = [t for t in doc["tables"] if t["header_blocked"]]
     assert t["detection"] == "line_grid" and t["mark_column"] is None and t["confidence"] == "low"
     assert t["header_block_reasons"] and all(h["meaning"] == "blocked" for h in t["header"])
+    assert t["blocked_columns"] == []  # a header-blocked table lists no column apart
     assert all(c["meaning"] == "blocked" for r in t["rows"] for c in r["cells"])
     assert all(not r["marks"] for r in t["rows"])
     blocked = [b for b in doc["blocked_marks"] if b["table"] == t["id"]]
@@ -272,9 +290,10 @@ def test_unparsed_table(doc):
 
 def test_exact_match_schedule_only_and_plan_only(doc):
     m = matching(doc)
-    assert [x["key"] for x in m["matched"]] == ["c1", "c2", "d1", "d2"]
-    assert [x["key"] for x in m["schedule_only"]] == ["d1-1", "d9"]
-    assert {"b5", "d1.1", "d1a", "d3", "gm1"} <= {x["key"] for x in m["plan_only"]}
+    # tool wave 3 (a4): 'COLUMN C2' and 'DẦM D3' are detail headings, not plan marks, in the comparison
+    assert [x["key"] for x in m["matched"]] == ["c1", "d1", "d2"]
+    assert [x["key"] for x in m["schedule_only"]] == ["c2", "d1-1", "d3", "d9"]
+    assert {"b5", "d1.1", "d1a", "gm1"} <= {x["key"] for x in m["plan_only"]}
     assert all(x["confidence"] in ("medium", "low") for x in m["matched"])
 
 
@@ -300,9 +319,11 @@ def test_size_conflict_question_quotes_both_entries(doc):
 
 
 def test_question_counts(doc):
+    prefixes = {p["lexical"]["prefix"].upper() for p in doc["plan_marks"]}
     assert doc["question_counts"] == {
         "mark_notation_equivalence": 1,
         "mark_size_conflict": 1,
+        "member_mark_prefix_meaning": len(prefixes),
         "schedule_table_unparsed": 1,
     }
 
@@ -322,17 +343,17 @@ def test_without_input_dir_a_native_dxf_falls_back_to_text_alignment(base):
 def test_run_writes_documents_and_question_ids_are_stable(world):
     root, work = world
     first = run_marks(work, root)
-    assert first.exit_code == 0 and first.summary["questions"] == 3
+    assert first.exit_code == 0 and first.summary["questions"] == 4
     q1 = load(work / "marks-questions.json")
     assert validate("intake", q1) == [] and validate("marks", load(work / "marks.json")) == []
     second = run_marks(work, root)
     q2 = load(work / "marks-questions.json")
     assert [(q["id"], q["key"]) for q in q1["questions"]] == [(q["id"], q["key"]) for q in q2["questions"]]
-    assert second.summary["blocking_open"] == 2
+    assert second.summary["blocking_open"] == 3  # with member_mark_prefix_meaning
     registry = load(work / "question-registry.json")
-    assert {e["producer"] for e in registry["questions"].values() if e["code"].startswith("mark")} == {
-        "marks"
-    }
+    assert {
+        e["producer"] for e in registry["questions"].values() if e["code"].startswith(("mark", "member_mark"))
+    } == {"marks"}
 
 
 def test_cli_exit_codes(world, capsys, tmp_path):
@@ -369,7 +390,7 @@ def test_status_sees_marks_fresh_after_a_run(tmp_path):
     run_marks(work, root)
     after = {p["producer"]: p for p in build_status(work)["producers"]}
     assert after["marks"]["outputs"]["status"] == "fresh"
-    assert after["marks"]["questions"]["blocking_open"] == 2
+    assert after["marks"]["questions"]["blocking_open"] == 3
 
 
 # --- review fixes ---------------------------------------------------------------------------------
@@ -400,6 +421,486 @@ def test_rotated_header_keyword_is_an_unparsed_table_not_a_crash(tmp_path, capsy
     assert code == 0
     out = load(work / "marks.json")
     assert any("rotated" in u["reason"] for u in out["unparsed_tables"])
+
+
+# --- tool wave 2: the schedule gate per column (fix 8) and the counts (fix 11) ---------------------------
+
+NO_PLAN_SIZE = "the plan mark has no size"
+NO_SIZE_COLUMN = "the schedule table has no size column"
+SIZE_HEADER_BLOCKED = "the schedule header cells that could name a size column are blocked"
+SIZE_CELLS_BLOCKED = "the schedule size cells are blocked"
+
+
+@pytest.fixture(scope="module")
+def gate_base(tmp_path_factory) -> Path:
+    root = tmp_path_factory.mktemp("gate")
+    build_gate_work(root)
+    return root
+
+
+@pytest.fixture(scope="module")
+def gate(gate_base) -> dict[str, Any]:
+    return extract_marks(gate_base / "work", gate_base / "input", check_inputs=True)
+
+
+def header_entry(table: dict[str, Any], text: str) -> dict[str, Any]:
+    (h,) = [h for h in table["header"] if h["display_text"] == text]
+    return h
+
+
+def matched(doc: dict[str, Any], key: str) -> dict[str, Any]:
+    (m,) = [m for m in matching(doc)["matched"] if m["key"] == key]
+    return m
+
+
+def test_gate_document_is_schema_valid(gate):
+    assert validate("marks", gate) == []
+    assert gate["files"][0]["line_grid"]["status"] == "read"
+
+
+def test_a_blocked_header_cell_outside_the_mark_column_goes_to_blocked_columns(gate):
+    t = table_with(gate, "KÝ HIỆU")
+    kinh = header_entry(t, KINH)
+    assert kinh["meaning"] == "blocked"
+    assert t["header_blocked"] is False and t["mark_column"] == 0 and t["header_block_reasons"] == []
+    (column,) = t["blocked_columns"]
+    assert kinh["entry_id"] is None  # tool wave 4: the id lives in blocked_header_entries
+    assert column == {"column": 3, "entry_id": column["entry_id"], "reason": kinh["block_reason"]}
+    assert column["entry_id"] in t["blocked_header_entries"]
+    # a blocked text under the keyword, in the mark column's own header cell: the keyword names the
+    # column, so it neither blocks the table nor is a blocked column
+    assert header_entry(t, BLOCKED_SUB)["meaning"] == "blocked"
+    assert header_entry(t, BLOCKED_SUB)["column"] == 0
+    assert [c["role"] for c in t["columns"]] == ["mark", "b", "h", None]
+    assert [[m["text"] for m in r["marks"]] for r in t["rows"]] == [["E1"], ["E2"], ["E3"]]
+    for row in t["rows"]:  # numeric cells under the allowed headers stay allowed
+        for cell in row["cells"]:
+            assert cell["meaning"] == ("blocked" if cell["display_text"] == BLOCKED_H else "allowed")
+    assert t["rows"][0]["size"]["b"] == 220 and t["rows"][0]["size"]["h"] == 300
+    assert t["rows"][1]["size"] is None  # its h cell is blocked
+
+
+def test_a_keywordless_grid_whose_mark_column_header_is_other_text_stays_header_blocked(gate):
+    """Review F2 item 1: a header cell that is allowed text but no keyword ('SỐ HIỆU', 'STT', or 461's
+    'd63-d42' in a data row read as a header) says the column is something else, or that the header band
+    is no header: the seed's column is not taken as the mark column. The table stays header-blocked, as
+    before wave 2, because its header holds blocked text (KÍNH)."""
+    t = table_with(gate, "SỐ HIỆU")
+    assert t["header_blocked"] is True and t["mark_column"] is None
+    assert t["header_block_reasons"] == [header_entry(t, KINH)["block_reason"]]
+    assert t["blocked_columns"] == [] and t["confidence"] == "low"
+    assert all(r["marks"] == [] for r in t["rows"])
+    assert [b["display_text"] for b in gate["blocked_marks"] if b["table"] == t["id"]] == ["F1", "F2"]
+    assert not {"f1", "f2"} & {m["key"] for m in matching(gate)["matched"]}
+    assert {"f1", "f2"} <= {p["key"] for p in matching(gate)["plan_only"]}
+
+
+def test_a_blocked_mark_column_header_still_blocks_the_table(gate):
+    t = table_with(gate, "Abçd")
+    assert t["header_blocked"] is True
+    assert {h["display_text"] for h in t["header"]} == {"Abçd", "SL"}
+    assert t["mark_column"] is None and t["confidence"] == "low" and t["blocked_columns"] == []
+    assert [b["display_text"] for b in gate["blocked_marks"] if b["table"] == t["id"]] == ["G1", "G2"]
+    assert "g1" not in {m["key"] for m in matching(gate)["matched"]}
+
+
+def test_legacy_ascii_suspect_header_cells_gate_like_any_other_block_reason(tmp_path):
+    """P1's legacy_ascii_suspect (ASCII text that looks like TCVN3/VNI written in ASCII) reaches marks
+    through text_gate: a non-mark header cell goes to blocked_columns, a mark-column header still blocks."""
+    work = build_gate_work(tmp_path, blocked_word="haFn", g_mark_header="tiESt")
+    out = extract_marks(work, tmp_path / "input")
+    assert validate("marks", out) == []
+    e = table_with(out, "KÝ HIỆU")
+    suspect = header_entry(e, "haFn")
+    assert suspect["block_reason"] == "legacy_ascii_suspect"
+    assert e["header_blocked"] is False
+    (column,) = e["blocked_columns"]
+    assert suspect["entry_id"] is None and column["entry_id"] in e["blocked_header_entries"]
+    assert (column["column"], column["reason"]) == (3, "legacy_ascii_suspect")
+    assert "e1" in {m["key"] for m in matching(out)["matched"]}
+    blocked = [t for t in out["tables"] if t["header_blocked"]]
+    assert len(blocked) == 2  # G (its mark-column header) and F (its mark column has no keyword)
+    for t in blocked:
+        assert t["header_block_reasons"] == ["legacy_ascii_suspect"]
+        assert [b["reason"] for b in out["blocked_marks"] if b["table"] == t["id"]] == [
+            "header_blocked:legacy_ascii_suspect"
+        ] * 2
+
+
+def test_a_keywordless_grid_without_blocked_header_text_is_no_schedule(gate):
+    """Mark-shaped texts between drawn lines, under a header with neither a keyword nor blocked text,
+    are as likely a plan region: no table, and the texts stay plan marks."""
+    assert not [t for t in gate["tables"] if any(h["display_text"] == "TT" for h in t["header"])]
+    assert len(gate["tables"]) == 3
+    assert {"h1", "h2"} <= {p["key"] for p in gate["plan_marks"]}
+
+
+@pytest.fixture(scope="module")
+def inferred(tmp_path_factory) -> dict[str, Any]:
+    root = tmp_path_factory.mktemp("inferred")
+    build_inferred_work(root)
+    return extract_marks(root / "work", root / "input", check_inputs=True)
+
+
+def test_inferred_document_is_schema_valid(inferred):
+    assert validate("marks", inferred) == []
+    assert len(inferred["tables"]) == 3
+
+
+def test_a_keywordless_grid_with_an_empty_mark_header_cell_is_read_on_its_mark_column(inferred):
+    """The wave 2 gain kept: KÍNH blocks only its own column; the seed's column, whose header cell is
+    empty, is the mark column (confidence low). Only mark-shaped cells become keys (review F2 item 1)."""
+    t = table_with(inferred, "b")
+    kinh = header_entry(t, KINH)
+    assert t["header_blocked"] is False and t["mark_column"] == 0 and t["confidence"] == "low"
+    (column,) = t["blocked_columns"]
+    assert kinh["entry_id"] is None and column["entry_id"] in t["blocked_header_entries"]
+    assert (column["column"], column["reason"]) == (1, kinh["block_reason"])
+    assert [c["role"] for c in t["columns"]] == ["mark", None, "b"]
+    assert K_NOTE in {c["display_text"] for r in t["rows"] for c in r["cells"]}
+    assert [[m["text"] for m in r["marks"]] for r in t["rows"]] == [["K1"], ["K2"]]
+    assert {m["shape"] for r in t["rows"] for m in r["marks"]} == {"mark"}
+    keys = {m["key"] for m in matching(inferred)["matched"]}
+    assert keys == {"k1", "k2"}
+    assert matched(inferred, "k1")["confidence"] == "low"
+    assert not [s for s in matching(inferred)["schedule_only"] if "sl" in s["key"]]
+
+
+def test_a_keywordless_column_of_mostly_integers_is_no_mark_column(inferred):
+    """Row numbers ('1', '2', '3') under an empty header cell: the column is not a mark column even
+    though two of its cells look like marks; the table stays header-blocked (KÍNH)."""
+    t = table_with(inferred, "SL")
+    assert t["header_blocked"] is True and t["mark_column"] is None
+    assert all(r["marks"] == [] for r in t["rows"])
+    assert [b["display_text"] for b in inferred["blocked_marks"] if b["table"] == t["id"]] == ["M1", "M2"]
+    assert not {"m1", "m2", "1", "2", "3"} & {s["key"] for s in matching(inferred)["schedule_only"]}
+
+
+def _cell(text: str, block: str | None = None) -> _Text:
+    return _Text({"display_text": text}, (0.0, 0.0, 1.0, 1.0), 0.5, 0.5, 1.0, block)
+
+
+@pytest.mark.parametrize(
+    ("header_cols", "cells", "ok"),
+    [
+        ([1], ["K1", "K2"], True),  # header text in another column only
+        ([0], ["K1", "K2"], False),  # any header text over the mark column
+        ([1], ["K1", "1"], True),  # exactly half integers: not mostly
+        ([1], ["K1", "1", "2"], False),
+        ([1], ["K1", "2.5", "3.5"], True),  # decimals are not row numbers
+        ([1], ["K1", "3a", "4b"], True),  # an integer is the whole cell
+        ([1], ["K1", "1", "2", ("Abçd", "encoding_unknown"), ("Xyèz", "encoding_unknown")], False),
+        ([1], [], True),
+    ],
+)
+def test_when_a_keywordless_column_may_be_the_mark_column(header_cols, cells, ok):
+    """Unit rule of review F2 item 1 (blocked cells are not counted: their text cannot be read)."""
+    header: list[tuple[int | None, _Text]] = [(c, _cell("x")) for c in header_cols]
+    texts = [_cell(c) if isinstance(c, str) else _cell(*c) for c in cells]
+    box = (0.0, 0.0, 1.0, 1.0)
+    rows: list[tuple[tuple[float, float, float, float], list[tuple[int | None, _Text]]]] = [
+        (box, [(0, t)]) for t in texts
+    ]
+    assert _inferred_mark_column_ok(header, rows, 0) is ok
+
+
+def test_a_data_row_read_as_header_does_not_make_a_schedule(inferred):
+    """Sample 461: a plumbing list whose first data row ('d63-d42', a blocked name, '07') sat in the
+    header band was read as a member schedule on its column, keys d110, d63."""
+    t = table_with(inferred, "d63-d42")
+    assert t["header_blocked"] is True and t["mark_column"] is None
+    m = matching(inferred)
+    assert not {"d110", "d63"} & {s["key"] for s in m["schedule_only"]}
+    assert "d110" not in {x["key"] for x in m["matched"]}
+    assert "d110" in {p["key"] for p in m["plan_only"]}
+
+
+def test_every_match_says_whether_its_size_was_compared(doc, gate):
+    assert matched(doc, "d2")["size_compared"] is True and "size_not_compared_reason" not in matched(
+        doc, "d2"
+    )
+    assert matched(doc, "d1")["size_compared"] is False
+    assert matched(doc, "d1")["size_not_compared_reason"] == NO_PLAN_SIZE
+    assert matched(doc, "c1")["size_not_compared_reason"] == NO_SIZE_COLUMN
+    assert matched(gate, "e1")["size_compared"] is True  # same size: compared, no conflict
+    assert not matching(gate)["size_conflicts"]
+    assert matched(gate, "e2")["size_not_compared_reason"] == SIZE_CELLS_BLOCKED
+    assert matched(gate, "e3")["size_not_compared_reason"] == NO_PLAN_SIZE
+
+
+def test_a_blocked_header_cell_that_may_name_the_missing_size_column_is_said(inferred):
+    """Table K names b only; its blocked KÍNH column holds numbers, so it may be the h column."""
+    assert matched(inferred, "k1")["size_not_compared_reason"] == SIZE_HEADER_BLOCKED
+
+
+SIZE_NOT_NUMBERS = "the schedule size cells are not numbers"
+SIZE_CELLS_MISSING = "the schedule row has no size cells"
+BLOCKED = "encoding_unknown"
+
+
+def _entry_text(eid: str, text: str, block: str | None = None, x: float = 0.0) -> _Text:
+    entry = {
+        "id": eid,
+        "display_text": text,
+        "confidence": "medium",
+        "flags": [],
+        "decode": {"case_uncertain": False, "unmapped_count": 0, "nfd_damaged": False},
+    }
+    return _Text(entry, (x, 0.0, x + 1.0, 1.0), x + 0.5, 0.5, 1.0, block)
+
+
+def _doc_of(header: list[tuple[int | None, str, str | None]], rows: list[list[tuple[int, str, str | None]]]):
+    """_table_doc of a keyword table: header and rows as (column, text, block reason)."""
+    n = iter(range(1, 1000))
+    head = [(c, _entry_text(f"T{next(n):06d}", t, b, float(c or 0) * 10)) for c, t, b in header]
+    body: list[tuple[tuple[float, float, float, float], list[tuple[int | None, _Text]]]] = []
+    for row in rows:
+        cells: list[tuple[int | None, _Text]] = [
+            (c, _entry_text(f"T{next(n):06d}", t, b, c * 10.0)) for c, t, b in row
+        ]
+        body.append(((0.0, 0.0, 1.0, 1.0), cells))
+    columns = [(i * 10.0, i * 10.0 + 10.0) for i in range(4)]
+    tb = _Table("line_grid", (0.0, 0.0, 40.0, 10.0), columns, head, body, 0, False, head[0][1])
+    return _table_doc(REL, None, "model", tb)
+
+
+KW = (0, "KÝ HIỆU", None)
+
+
+@pytest.mark.parametrize(
+    ("header", "row", "reason"),
+    [
+        # a blocked column whose readable cells are words cannot be a size column
+        ([KW, (1, "Abçd", BLOCKED)], [(0, "X1", None), (1, "thép", None)], NO_SIZE_COLUMN),
+        # one numeric blocked column cannot give both b and h
+        ([KW, (1, "Abçd", BLOCKED)], [(0, "X1", None), (1, "16", None)], NO_SIZE_COLUMN),
+        (
+            [KW, (1, "Abçd", BLOCKED), (2, "Xyèz", BLOCKED)],
+            [(0, "X1", None), (1, "220", None), (2, "300", None)],
+            SIZE_HEADER_BLOCKED,
+        ),
+        ([KW, (1, "Abçd", BLOCKED)], [(0, "X1", None), (1, "220x300", None)], SIZE_HEADER_BLOCKED),
+        (
+            [KW, (1, "b", None), (2, "Abçd", BLOCKED)],
+            [(0, "X1", None), (1, "220", None), (2, "300", None)],
+            SIZE_HEADER_BLOCKED,
+        ),
+        (
+            [KW, (1, "b", None), (2, "Abçd", BLOCKED)],
+            [(0, "X1", None), (1, "220", None), (2, "Ø16", None)],
+            NO_SIZE_COLUMN,
+        ),
+        # a blocked column with no readable cell: it may be anything
+        (
+            [KW, (1, "b", None), (2, "Abçd", BLOCKED)],
+            [(0, "X1", None), (1, "220", None), (2, "3ç0", BLOCKED)],
+            SIZE_HEADER_BLOCKED,
+        ),
+        # the size columns are named: why this row has no size
+        ([KW, (1, "b", None), (2, "h", None)], [(0, "X1", None), (1, "220", None)], SIZE_CELLS_MISSING),
+        ([KW, (1, "b x h", None)], [(0, "X1", None)], SIZE_CELLS_MISSING),
+        (
+            [KW, (1, "b", None), (2, "h", None)],
+            [(0, "X1", None), (1, "220", None), (2, "abc", None)],
+            SIZE_NOT_NUMBERS,
+        ),
+        (
+            [KW, (1, "b", None), (2, "h", None)],
+            [(0, "X1", None), (1, "220", None), (2, "3ç0", BLOCKED)],
+            SIZE_CELLS_BLOCKED,
+        ),
+        ([KW, (1, "b", None), (2, "h", None)], [(0, "X1", None), (1, "220", None), (2, "300", None)], None),
+    ],
+)
+def test_each_size_reason_is_exact(header, row, reason):
+    """Review F2 item 3: SIZE_HEADER_BLOCKED only when a blocked column could give the missing size
+    (its readable cells are numbers or b x h, or none is readable); absent size cells are not 'not
+    numbers'."""
+    t = _doc_of(header, [row])
+    assert t["rows"][0]["_size_reason"] == reason
+    assert (t["rows"][0]["size"] is None) is (reason is not None)
+
+
+def test_a_header_cell_in_no_column_is_no_blocked_column():
+    t = _doc_of([KW, (1, "b", None), (None, "Abçd", BLOCKED)], [[(0, "X1", None), (1, "220", None)]])
+    assert t["blocked_columns"] == []
+    assert t["rows"][0]["_size_reason"] == NO_SIZE_COLUMN
+
+
+def test_summary_counts_size_comparisons(doc, gate):
+    assert doc["summary"]["size_comparisons"] == {
+        "compared": 1,
+        "not_compared": 2,
+        "by_reason": {NO_PLAN_SIZE: 1, NO_SIZE_COLUMN: 1},
+    }
+    s = gate["summary"]["size_comparisons"]
+    assert (s["compared"], s["not_compared"]) == (1, 2)
+    assert s["by_reason"] == {NO_PLAN_SIZE: 1, SIZE_CELLS_BLOCKED: 1}
+
+
+def test_summary_counts_per_sheet(doc, gate):
+    rows = doc["summary"]["by_sheet"]
+    assert [(r["file"], r["sheet"]) for r in rows] == [(REL, "model#01")]
+    (r,) = rows
+    assert r["sheet_number"]["value"] == "S-101"
+    s = doc["summary"]
+    assert {k: r[k] for k in s["by_file"][0] if k in r} == {
+        k: s[k]
+        for k in ("plan_marks", "tables", "header_blocked_tables", "rows", "unparsed_tables", "blocked_marks")
+    } | {"file": REL}
+    assert (r["header_blocked_tables"], r["unparsed_tables"], r["blocked_marks"]) == (1, 1, 2)
+    (g,) = gate["summary"]["by_sheet"]
+    assert (g["tables"], g["header_blocked_tables"], g["rows"], g["blocked_marks"]) == (3, 2, 7, 4)
+
+
+def test_summary_per_sheet_keeps_marks_on_no_sheet_apart(base, tmp_path):
+    shutil.copytree(base, tmp_path / "w")
+    work = tmp_path / "w" / "work"
+    path = work / "structure" / f"{REL}.sheets.json"
+    sheets = load(path)
+    index = load(work / "text" / f"{REL}.json")
+    off = {e["id"] for e in index["entries"] if e["display_text"] in ("B5", "gm1")}
+    for sh in sheets["sheets"]:
+        sh["text_ids"] = [i for i in sh["text_ids"] if i not in off]
+    path.write_text(json.dumps(sheets), encoding="utf-8")
+    out = extract_marks(work, tmp_path / "w" / "input")
+    rows = {r["sheet"]: r for r in out["summary"]["by_sheet"]}
+    assert list(rows) == ["model#01", None]
+    assert rows[None]["plan_marks"] == 2 and rows[None]["sheet_number"] is None
+    assert rows[None]["tables"] == 0
+    assert sum(r["plan_marks"] for r in rows.values()) == out["summary"]["plan_marks"]
+    assert validate("marks", out) == []
+
+
+# --- tool wave 2: marks asks what every plan-mark prefix means (fix 1b) ---------------------------------
+
+
+def prefix_question(doc: dict[str, Any]) -> dict[str, Any]:
+    (q,) = [q for q in marks_questions(doc) if q["code"] == "member_mark_prefix_meaning"]
+    return q
+
+
+def test_every_plan_mark_prefix_gets_one_blocking_question_per_file(gate):
+    q = prefix_question(gate)
+    assert q["blocking"] is True and q["file"] == REL
+    names = [s["name"] for s in q["subjects"]]
+    assert names == sorted(names) and {"C", "D", "LT"} <= set(names)
+    plan_prefixes = {p["lexical"]["prefix"].upper() for p in gate["plan_marks"]}
+    assert set(names) == plan_prefixes  # plan marks only: G2 (blocked schedule cell) adds nothing
+    lt = next(s for s in q["subjects"] if s["name"] == "LT")
+    assert lt["count"] == 1 and lt["examples"] == [{"mark": "LT1", "count": 1}]
+    assert q["count"] == sum(s["count"] for s in q["subjects"]) == len(gate["plan_marks"])
+    assert all(r["where"].startswith("plan mark prefix ") and r["file"] == REL for r in q["refs"])
+    assert {r.get("sheet") for r in q["refs"]} == {"model#01"}
+    assert gate["question_counts"]["member_mark_prefix_meaning"] == len(names)
+
+
+def test_prefixes_fold_case_and_titles_count(doc):
+    q = prefix_question(doc)
+    subjects = {s["name"]: s for s in q["subjects"]}
+    assert "GM" in subjects and subjects["GM"]["examples"] == [{"mark": "gm1", "count": 1}]
+    assert {"mark": "D3", "count": 1} in subjects["D"]["examples"]  # from the title 'DẦM D3'
+    assert "KC" not in subjects and "I" not in subjects  # a sheet code and a section label are no marks
+
+
+def test_prefix_refs_are_capped_but_counts_stay_true(gate, monkeypatch):
+    import tekla_harness.marks as marks_mod
+
+    monkeypatch.setattr(marks_mod, "MAX_PREFIX_REFS", 1)
+    q = prefix_question(gate)
+    e = next(s for s in q["subjects"] if s["name"] == "E")
+    assert e["count"] == 3 and sum(r["where"].startswith("plan mark prefix E,") for r in q["refs"]) == 1
+    assert q["truncated"] is True and q["count"] == len(gate["plan_marks"])
+
+
+def test_old_callouts_prefix_answer_goes_stale_once_and_marks_asks_anew(tmp_path):
+    """D6: the question moved from callouts to marks; an answer given to callouts' question goes stale
+    (asked again), and marks' question never collides with the old registry key."""
+    from tekla_harness.answers import record_answer
+
+    work = build_gate_work(tmp_path)
+    root = tmp_path / "input"
+    seeded = _seed_callouts_prefix_answer(work)
+    run_callouts(work, root)
+    answers = {a["question_id"]: a for a in load(work / "answers.json")["answers"]}
+    assert answers[seeded]["status"] == "stale"
+    assert "no longer raises" in answers[seeded]["stale_reason"]
+    run_marks(work, root)
+    q = next(
+        q
+        for q in load(work / "marks-questions.json")["questions"]
+        if q["code"] == "member_mark_prefix_meaning"
+    )
+    assert q["id"] != seeded and q["answer"] is None
+    registry = load(work / "question-registry.json")["questions"]
+    assert registry[q["key"]]["producer"] == "marks"
+    record_answer(work, q["id"], "C cot", "A. Nguyen", {"C": "column"}, role="engineer")
+    run_callouts(work, root)  # callouts no longer touches it
+    run_marks(work, root)
+    again = next(
+        q
+        for q in load(work / "marks-questions.json")["questions"]
+        if q["code"] == "member_mark_prefix_meaning"
+    )
+    assert again["id"] == q["id"] and again["answer"]["values"] == {"C": "column"}
+
+
+def _seed_callouts_prefix_answer(work: Path) -> str:
+    """What a pre-wave-2 callouts run left behind: its prefix question with an active answer (the key is
+    callouts' old ref wording). Returns the question id."""
+    from tekla_harness.callouts import extract_callouts
+    from tekla_harness.questions import dump_json, load_ledger, question_key, write_text_atomic
+
+    ledger = load_ledger(work, None, create=False)
+    sha = next(r["sha256"] for r in load(work / "inventory.json")["files"] if r["path"] == REL)
+    # the refs callouts built before wave 2: per prefix (sorted), its first 10 member marks
+    by_prefix: dict[str, list[dict[str, Any]]] = {}
+    for c in extract_callouts(work)["candidates"]:
+        if c["kind"] == "member_mark":
+            by_prefix.setdefault(c["lexical"]["prefix"], []).append(c)
+    refs = [
+        {
+            "file": REL,
+            "where": f"prefix {prefix}, text entry {c['text_ref']['entry_id']}",
+            "found": " ".join(c["display_text"].split()),
+            "sheet": c["sheet"],
+        }
+        for prefix in sorted(by_prefix)
+        for c in by_prefix[prefix][:10]
+    ]
+    key = question_key("member_mark_prefix_meaning", REL, sha, refs)
+    reg = ledger.registry
+    qid = f"Q-{reg['next_id']:03d}"
+    reg["questions"][key] = {
+        "id": qid,
+        "code": "member_mark_prefix_meaning",
+        "file": REL,
+        "producer": "callouts",
+        "status": "answered",
+        "first_seen_run": reg["runs"],
+        "last_seen_run": reg["runs"],
+        "blocking": True,
+        "file_sha256": sha,
+    }
+    reg["next_id"] += 1
+    ledger.answers["answers"].append(
+        {
+            "question_id": qid,
+            "key": key,
+            "code": "member_mark_prefix_meaning",
+            "file": REL,
+            "answer_text": "C cot",
+            "values": {"C": "column"},
+            "answered_by": "A. Nguyen",
+            "answered_by_role": "engineer",
+            "answered_on": "2026-11-01",
+            "status": "active",
+        }
+    )
+    ledger.check()
+    write_text_atomic(work / "question-registry.json", dump_json(ledger.registry))
+    write_text_atomic(work / "answers.json", dump_json(ledger.answers))
+    return qid
 
 
 def test_a_table_added_to_another_file_does_not_re_key_this_files_questions(doc):

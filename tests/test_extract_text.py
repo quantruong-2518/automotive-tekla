@@ -23,9 +23,10 @@ from ezdxf.tools.text import plain_mtext
 from tekla_harness import extract_text as mod
 from tekla_harness import read_dxf
 from tekla_harness.cli import main
-from tekla_harness.extract_text import MAX_BLOCK_DEPTH, extract_text, mtext_runs
+from tekla_harness.extract_text import MAX_BLOCK_DEPTH, extract_text, looks_legacy_ascii, mtext_runs
 from tekla_harness.knowledge import EMPTY_TABLE, KnowledgeError
 from tekla_harness.schemas import validate
+from tekla_harness.text_gate import meaning_block_reason
 from test_knowledge import approved, row, table_of
 
 REPO = Path(__file__).resolve().parents[1]
@@ -735,7 +736,9 @@ def test_the_shipped_table_is_the_default(tmp_path):
     path = build(tmp_path, lambda doc: text_at(doc.modelspace(), "T1", "VntimeH"))
     result = extract_text(path)  # no knowledge argument
     assert validate("text-index", result) == []
-    assert "proposed_knowledge_row" in result["entries"][0]["flags"]  # vntimeh.shx matches vn*.shx (proposed)
+    decode = result["entries"][0]["decode"]  # vntimeh.shx: approved TCVN3 row (engineer, 2026-11-07)
+    assert (decode["encoding_used"], decode["source"]) == ("tcvn3", "knowledge_table")
+    assert decode["knowledge_patterns"] == ["vntimeh.shx"]
 
 
 def test_a_bad_default_table_raises(tmp_path, monkeypatch):
@@ -745,6 +748,311 @@ def test_a_bad_default_table_raises(tmp_path, monkeypatch):
     monkeypatch.setattr(mod, "default_font_encodings", boom)
     with pytest.raises(KnowledgeError, match="malformed"):
         extract_text(build(tmp_path))
+
+
+# --- TrueType family of the text style (tool wave 2, fix 2a) -------------------------------------
+
+
+def family_style(doc, name: str, font: str, family: str | None) -> None:
+    style = doc.styles.add(name, font=font)
+    if family is not None:
+        style.set_extended_font_data(family)
+
+
+def test_the_ttf_family_decides_when_the_name_and_the_file_say_nothing(tmp_path):
+    def fn(doc):
+        family_style(doc, "kt..1", "VHAVAN_2.TTF", ".VnAvantH")
+        text_at(doc.modelspace(), "M" + A_DOT_BREVE_TCVN3 + "T", "kt..1")
+
+    e = only(index(build(tmp_path, fn)), entity_type="TEXT")
+    d = e["decode"]
+    assert (d["encoding_used"], d["source"]) == ("tcvn3", "style_family")
+    assert d["run_details"][0]["font_source"] == "style_family" and d["capital_font"] is True
+    assert e["decoded_text"] == "MẶT" and e["confidence"] == "medium"
+    assert "encoding_unknown_non_ascii" not in e["flags"]
+
+
+def test_an_mtext_whose_style_runs_are_decided_by_the_family_has_that_source(tmp_path):
+    def fn(doc):
+        family_style(doc, "kt..1", "VHAVAN_2.TTF", ".VnArial")
+        doc.modelspace().add_mtext("m" + A_DOT_BREVE_TCVN3 + "t", dxfattribs={"style": "kt..1"})
+
+    d = only(index(build(tmp_path, fn)), entity_type="MTEXT")["decode"]
+    assert (d["encoding_used"], d["source"], d["capital_font"]) == ("tcvn3", "style_family", False)
+
+
+def test_styles_without_a_usable_family_are_not_decoded_by_it(tmp_path):
+    def fn(doc):
+        family_style(doc, "noxdata", "VHAVAN_2.TTF", None)  # no ACAD XDATA at all
+        family_style(doc, "empty", "VHAVAN_2.TTF", "")
+        # ACAD XDATA with the family tag only: ezdxf's get_extended_font_data needs the 1071 flags tag
+        # too and returns '' (ezdxf 1.4.5), so such a family is not read
+        doc.styles.add("onetag", font="VHAVAN_2.TTF").set_xdata("ACAD", [(1000, ".VnAvantH")])
+        msp = doc.modelspace()
+        for i, style in enumerate(("noxdata", "empty", "onetag")):
+            text_at(msp, "m" + A_DOT_BREVE_TCVN3 + "t", style, insert=(0, 9 * i))
+
+    for e in index(build(tmp_path, fn))["entries"]:
+        assert e["decode"]["encoding_used"] == "unknown", e["style"]
+        assert "encoding_unknown_non_ascii" in e["flags"]
+
+
+def test_a_unicode_family_never_overrides_an_approved_font_row(tmp_path):
+    table = table_of(tmp_path, approved(pattern="VHARIAL.TTF"))
+
+    def fn(doc):
+        family_style(doc, "kt..1", "VHARIAL.TTF", "Arial")
+        text_at(doc.modelspace(), "m" + A_DOT_BREVE_TCVN3 + "t", "kt..1")
+
+    e = only(index(build(tmp_path, fn), knowledge=table), entity_type="TEXT")
+    assert (e["decode"]["encoding_used"], e["decode"]["source"]) == ("tcvn3", "knowledge_table")
+    assert e["decoded_text"] == "mặt"
+
+
+def test_a_legacy_family_comes_before_the_knowledge_table(tmp_path):
+    # an approved row that agrees with the family: the family decides, nothing is flagged
+    table = table_of(tmp_path, approved(pattern="VHAVAN_2.TTF", encoding="tcvn3"))
+
+    def fn(doc):
+        family_style(doc, "kt..1", "VHAVAN_2.TTF", ".VnAvant")
+        text_at(doc.modelspace(), "m" + A_DOT_BREVE_TCVN3 + "t", "kt..1")
+
+    e = only(index(build(tmp_path, fn), knowledge=table), entity_type="TEXT")
+    assert (e["decode"]["encoding_used"], e["decode"]["source"]) == ("tcvn3", "style_family")
+    assert e["decode"]["knowledge_patterns"] == [] and "knowledge_conflict" not in e["flags"]
+
+
+@pytest.mark.parametrize(
+    ("rows", "family"),
+    [
+        # review of tool wave 2 (F1 item 4): VHARIAL.TTF is approved TCVN3, a 'VNI-Times' family must not
+        # silently decode it as VNI
+        ((("VHARIAL.TTF", "font_file", "tcvn3"),), "VNI-Times"),
+        ((("kt..1", "style_name", "vni"),), ".VnArial"),  # a style-name row counts the same
+        ((("VHARIAL.TTF", "font_file", "unicode"),), ".VnArial"),
+        # approved rows that disagree among themselves: a conflict whatever the family says
+        ((("VH*.TTF", "font_file", "tcvn3"), ("VHARIAL.TTF", "font_file", "vni")), ".VnArial"),
+    ],
+)
+def test_a_family_that_disagrees_with_an_approved_row_is_a_knowledge_conflict(tmp_path, rows, family):
+    table = table_of(tmp_path, *(approved(pattern=p, applies_to=a, encoding=enc) for p, a, enc in rows))
+
+    def fn(doc):
+        family_style(doc, "kt..1", "VHARIAL.TTF", family)
+        text_at(doc.modelspace(), "m" + A_DOT_BREVE_TCVN3 + "t", "kt..1")
+
+    e = only(index(build(tmp_path, fn), knowledge=table), entity_type="TEXT")
+    assert "knowledge_conflict" in e["flags"]
+    assert e["decode"]["encoding_used"] == "unknown" and e["decoded_text"] == e["raw_text"]
+    assert meaning_block_reason(e) == "knowledge_conflict"
+
+
+def test_a_proposed_or_rejected_row_never_conflicts_with_the_family(tmp_path):
+    table = table_of(
+        tmp_path,
+        row(pattern="VHARIAL.TTF", encoding="vni"),
+        row(pattern="kt..1", applies_to="style_name", encoding="unicode", status="rejected", decided_by="x",
+            decided_on="2026-11-07"),
+    )  # fmt: skip
+
+    def fn(doc):
+        family_style(doc, "kt..1", "VHARIAL.TTF", ".VnArial")
+        text_at(doc.modelspace(), "m" + A_DOT_BREVE_TCVN3 + "t", "kt..1")
+
+    e = only(index(build(tmp_path, fn), knowledge=table), entity_type="TEXT")
+    assert (e["decode"]["encoding_used"], e["decode"]["source"]) == ("tcvn3", "style_family")
+    assert "knowledge_conflict" not in e["flags"]
+
+
+# --- ASCII text that looks like legacy Vietnamese (tool wave 2, fix 2b; default D2) -------------------
+
+# Shapes seen in EVAL-2 (dwgshare 267 / 461, ASCII-only entries in legacy-font styles): a slash before a
+# letter or brace ('4/g14', 'BT LO/ST #100'), and an uppercase tone letter S F R X J after a vowel
+# ('chi tiESt kim thu seSt', 'haFn 200'). Invented strings of the same shapes are used here.
+SUSPECT = ["4/g14", "/G10", "1/G16", "BT LO/ST #100", "3 L/}/{/SI %%c6", "chi tiESt kim thu seSt", "haFn 200",
+           "coJC vaF", "DiJa", "tieRp", "keXt",
+           # review of tool wave 2 (F1): slash shapes that must stay suspect, and the uppercase vowel with no
+           # tone letter inside a lowercase word (dwgshare 461 'dAy thu', 'tEn vAJt tU')
+           "/ST", "/G16", "2/G20", "BO/R 300", "T/U{Fng", "dAy", "tEn", "cOng trInh", "trInh", "thUc",
+           "TruoSng", "liEn kESt coJC vaF dAy tiESp DiJa"]  # fmt: skip
+# Structural ASCII that must stay readable: grid labels, marks, levels, dimensions, rebar callouts, units.
+CLEAN = ["A", "Z", "D1", "C2", "+3.850", "4500", "%%c8a150", "4%%c16", "1/2", "%%c10a200/150",
+         "D1.11(220X450)", "CB300-V", "S355JR", "HEA 300", "Rb = 115 kG/cm2", "q = 2 T/m2", "2800Kg/M2",
+         "MPa", "kN/m", "M20", "d1", "Q235B", "2L65x8", "TB-01", "GHI CHU", "cU/pvc/pvc 2X4 e1,5",
+         "Cu/XLPE/PVC 2(1X16)", "ROOF", "BASE PLATE", "CASE A",
+         # review of tool wave 2 (F1): false positives of the slash and tone rules (461 '1:100/a3' x12)
+         "1:100/a3", "%%c8a100/a200", "<> C/C", "O/O", "N/A", "b/h", "L/d", "W/O", "M/C",
+         "TieRod", "BaseRing", "HoleSize", "1/A", "12/B", "A/1", "B1a", "C2a", "kA", "mA 20"]  # fmt: skip
+
+
+def suspect_fixture(style: str, *, sibling: str | None = None):
+    def fn(doc):
+        doc.styles.add("Plain", font="plain.shx")
+        msp = doc.modelspace()
+        for i, text in enumerate(SUSPECT + CLEAN):
+            text_at(msp, text, style, insert=(0, 9 * i))
+        if sibling is not None:
+            text_at(msp, sibling, style, insert=(500, 0))
+
+    return fn
+
+
+def flagged(result: dict[str, Any]) -> dict[str, bool]:
+    ascii_entries = (e for e in result["entries"] if e["raw_text"].isascii())
+    return {e["raw_text"]: "legacy_ascii_suspect" in e["flags"] for e in ascii_entries}
+
+
+@pytest.mark.parametrize("style", [".VnTime", "VNI-Times"])
+def test_suspect_ascii_in_a_legacy_style_is_flagged_and_structural_ascii_is_not(tmp_path, style):
+    result = index(build(tmp_path, suspect_fixture(style)))
+    got = flagged(result)
+    assert {t for t in SUSPECT if not got[t]} == set()
+    assert {t for t in CLEAN if got[t]} == set()
+    assert all(only(result, raw_text=t)["confidence"] == "low" for t in SUSPECT)
+
+
+def test_an_approved_row_makes_a_legacy_style_too(tmp_path):
+    table = table_of(tmp_path, approved(pattern="plain.shx"))
+    got = flagged(index(build(tmp_path, suspect_fixture("Plain")), knowledge=table))
+    assert all(got[t] for t in SUSPECT) and not any(got[t] for t in CLEAN)
+
+
+def test_an_unknown_style_counts_only_with_a_non_ascii_sibling_of_unknown_encoding(tmp_path):
+    with_sibling = flagged(index(build(tmp_path, suspect_fixture("Plain", sibling="/D\xc2/FU COC"))))
+    assert all(with_sibling[t] for t in SUSPECT) and not any(with_sibling[t] for t in CLEAN)
+    alone = flagged(index(build(tmp_path, suspect_fixture("Plain"), name="alone.dxf")))
+    assert not any(alone.values())
+    # a sibling proved Unicode by its code points is no evidence of a legacy font
+    unicode_fixture = suspect_fixture("Plain", sibling="Ký hiệu")
+    assert not any(flagged(index(build(tmp_path, unicode_fixture, name="u.dxf"))).values())
+
+
+def test_the_shapes_on_their_own():
+    assert [t for t in SUSPECT if not looks_legacy_ascii(t)] == []
+    assert [t for t in CLEAN if looks_legacy_ascii(t)] == []
+    # not ASCII, so never judged in an index (the gate decides it by encoding): the shape itself is clean
+    assert not looks_legacy_ascii("Ø6a100/a200")
+
+
+@pytest.mark.parametrize(
+    ("name", "font", "family"),
+    [
+        ("DWGshare.com_21", "vncc-rms.shx", None),  # dwgshare 461: the font file is the only legacy name
+        ("VnSim", "plain.shx", None),  # the style name
+        ("kt..9", "plain.shx", "VnSimH"),  # the TrueType family (no dot: encoding unknown)
+    ],
+)
+def test_a_legacy_font_name_of_unknown_encoding_needs_no_sibling(tmp_path, name, font, family):
+    # review of tool wave 2 (F1, critical): 461 styles on vncc-rms.shx / vncc-sim.shx hold only ASCII
+    # Telex-style Vietnamese ('haFn 200' became plan marks); no non-ASCII sibling exists in them
+    def fn(doc):
+        family_style(doc, name, font, family)
+        msp = doc.modelspace()
+        for i, text in enumerate(SUSPECT + CLEAN):
+            text_at(msp, text, name, insert=(0, 9 * i))
+
+    result = index(build(tmp_path, fn))
+    got = flagged(result)
+    assert {t for t in SUSPECT if not got[t]} == set()
+    assert {t for t in CLEAN if got[t]} == set()
+    assert all(meaning_block_reason(only(result, raw_text=t)) == "legacy_ascii_suspect" for t in SUSPECT)
+
+
+def test_a_legacy_inline_font_name_of_unknown_encoding_needs_no_sibling(tmp_path):
+    def fn(doc):
+        msp = doc.modelspace()
+        msp.add_mtext("{\\fvncc-rms|c0;haFn 200} D1", dxfattribs={"style": "Plain", "insert": (0, 0)})
+        msp.add_mtext("{\\fPlainFont|c0;haFn 200} D1", dxfattribs={"style": "Plain", "insert": (0, 50)})
+
+    assert flagged(index(build(tmp_path, fn))) == {
+        "{\\fvncc-rms|c0;haFn 200} D1": True,
+        "{\\fPlainFont|c0;haFn 200} D1": False,
+    }
+
+
+def test_a_sibling_counts_for_every_style_on_the_same_font_file(tmp_path):
+    # review of tool wave 2 (F1): the sibling rule is about the font, so it is keyed by the font file
+    def fn(doc):
+        doc.styles.add("ROMANS", font="romans.shx")
+        doc.styles.add("rms", font="ROMANS.SHX")
+        doc.styles.add("nofile", font="")
+        doc.styles.add("nofile2", font="")
+        msp = doc.modelspace()
+        text_at(msp, "/D\xc2/FU COC", "ROMANS")
+        text_at(msp, "2/g12", "rms", insert=(0, 9))
+        text_at(msp, "/D\xc2/FU COC", "nofile", insert=(0, 18))
+        text_at(msp, "4/g14", "nofile2", insert=(0, 27))  # no font file: keyed by the style name
+
+    got = flagged(index(build(tmp_path, fn)))
+    assert got == {"2/g12": True, "4/g14": False}
+
+
+def test_a_unicode_style_is_never_suspect(tmp_path):
+    got = flagged(index(build(tmp_path, suspect_fixture("Arial", sibling="b\xb6n v\xcf"))))
+    assert not any(got.values())
+
+
+def test_a_run_proved_unicode_is_not_suspect_even_in_a_suspect_style(tmp_path):
+    # the '\\U+1EA1' escape is ASCII as stored but proves the run Unicode: its ASCII is plain ASCII
+    def fn(doc):
+        doc.styles.add("Plain", font="plain.shx")
+        text_at(doc.modelspace(), "/D\xc2/FU COC", "Plain")  # a non-ASCII sibling of unknown encoding
+        text_at(doc.modelspace(), "4/g14%%c\\U+1EA1", "Plain", insert=(0, 9))
+        text_at(doc.modelspace(), "4/g14%%c", "Plain", insert=(0, 18))
+
+    got = flagged(index(build(tmp_path, fn)))
+    assert got == {"4/g14%%c\\U+1EA1": False, "4/g14%%c": True}
+
+
+def test_a_sibling_in_another_style_does_not_count(tmp_path):
+    def fn(doc):
+        doc.styles.add("Plain", font="plain.shx")
+        doc.styles.add("Other", font="other.shx")
+        text_at(doc.modelspace(), "4/g14", "Plain")
+        text_at(doc.modelspace(), "/D\xc2/FU COC", "Other", insert=(0, 9))
+        text_at(doc.modelspace(), "1/G16", "Other", insert=(0, 18))
+
+    got = flagged(index(build(tmp_path, fn)))
+    assert got == {"4/g14": False, "1/G16": True}
+
+
+def test_a_sibling_inside_a_block_counts(tmp_path):
+    def fn(doc):
+        doc.styles.add("Plain", font="plain.shx")
+        blk = doc.blocks.new("NOTE")
+        blk.add_text("/D\xc2/FU COC", dxfattribs={"style": "Plain", "height": 2.5})
+        doc.modelspace().add_blockref("NOTE", (0, 50))
+        text_at(doc.modelspace(), "4/g14", "Plain")
+
+    assert flagged(index(build(tmp_path, fn))) == {"4/g14": True}
+
+
+def test_mixed_mtext_runs_are_judged_run_by_run(tmp_path):
+    def fn(doc):
+        msp = doc.modelspace()
+        # the suspect text sits in the legacy inline-font run: flagged
+        msp.add_mtext("{\\f.VnTime|c0;4/g14} 4500", dxfattribs={"style": "Arial", "insert": (0, 0)})
+        # the suspect text sits in the Unicode inline-font run of a legacy style: not flagged
+        msp.add_mtext("{\\fArial|c0;4/g14} D1", dxfattribs={"style": ".VnTime", "insert": (0, 50)})
+        # formatting codes and %% codes are not text: '\\P' and '%%c' never match
+        msp.add_mtext("D1\\PC2 %%c16", dxfattribs={"style": ".VnTime", "insert": (0, 100)})
+
+    result = index(build(tmp_path, fn))
+    assert flagged(result) == {
+        "{\\f.VnTime|c0;4/g14} 4500": True,
+        "{\\fArial|c0;4/g14} D1": False,
+        "D1\\PC2 %%c16": False,
+    }
+
+
+def test_special_codes_are_not_text_for_the_suspect_shapes(tmp_path):
+    # 'a%%dS1': the code between 'a' and 'S' must not join them into the tone shape 'aS';
+    # '%%uSo 1': the 'u' of the underline code is not a vowel of the text
+    def fn(doc):
+        text_at(doc.modelspace(), "a%%dS1", ".VnTime")
+        text_at(doc.modelspace(), "%%uSo 1", ".VnTime", insert=(0, 9))
+
+    assert flagged(index(build(tmp_path, fn))) == {"a%%dS1": False, "%%uSo 1": False}
 
 
 # --- damaged bytes ------------------------------------------------------------------------------

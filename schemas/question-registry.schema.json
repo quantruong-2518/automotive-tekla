@@ -33,8 +33,11 @@
         "last_seen_run": { "type": "integer", "minimum": 1 },
         "blocking": { "type": "boolean", "description": "The question's blocking flag as of the latest run that raised it. Absent in an entry written before this field existed." },
         "withdrawn_reason": { "type": "string", "minLength": 1, "description": "reader questions only: why `harness ask --withdraw` made the entry obsolete." },
+        "obsolete_reason": { "type": "string", "minLength": 1, "description": "Only on an obsolete entry that a producer run retired (tool wave 3, W5): why, in short English, set when the entry becomes obsolete and kept while it stays so: the question's input file was removed, or changed (the question now has a new key), or the producer declared it superseded by an answer to another code, or the producer's latest run simply no longer raises it (questions.OBSOLETE_* texts). Removed again when the key is raised again. Absent on an entry retired before this field existed and on a withdrawn reader question (withdrawn_reason)." },
         "file_sha256": { "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$", "description": "sha256 of `file` (inventory.json) when the latest run raised the question; null for a project-level question. Absent in an entry written before this field existed." }
-      }
+      },
+      "if": { "properties": { "status": { "const": "obsolete" } }, "required": ["status"] },
+      "else": { "not": { "required": ["obsolete_reason"] } }
     }
   }
 }

@@ -21,7 +21,23 @@
         "candidates": { "type": "integer", "minimum": 0 },
         "by_form": { "type": "object", "additionalProperties": { "type": "integer", "minimum": 0 } },
         "levels": { "type": "integer", "minimum": 0 },
-        "level_symbol_inserts": { "type": "integer", "minimum": 0 }
+        "level_symbol_inserts": { "type": "integer", "minimum": 0 },
+        "blocked_candidates": { "type": "integer", "minimum": 0, "description": "Length of blocked_candidates." }
+      }
+    },
+    "blocked_candidates": {
+      "type": "array",
+      "description": "Level-shaped texts the legacy-font gate blocks (text_gate.meaning_block_reason): listed, never turned into a candidate, level, group or question.",
+      "items": {
+        "type": "object",
+        "required": ["entry_id", "line", "value_text", "reason"],
+        "additionalProperties": false,
+        "properties": {
+          "entry_id": { "type": "string", "pattern": "^T[0-9]{6,}$" },
+          "line": { "type": "integer", "minimum": 0, "description": "0-based line of the entry's text." },
+          "value_text": { "type": "string", "description": "The level-shaped text as stored, verbatim." },
+          "reason": { "enum": ["knowledge_conflict", "encoding_proposed", "encoding_contradiction", "encoding_unknown", "legacy_ascii_suspect"] }
+        }
       }
     },
     "questions": { "type": "array", "items": { "$ref": "urn:tekla-harness:schema:sheets:0.1#/$defs/question" } },

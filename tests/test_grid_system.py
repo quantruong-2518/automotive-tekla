@@ -20,10 +20,11 @@ from tekla_harness.grid_system import (
     consumed_answers_digest,
     grid_system_questions,
     render_grid_system_svg,
+    run_grid_systems,
 )
 from tekla_harness.grids import coordinate_string
 from tekla_harness.intake import dump_json
-from tekla_harness.questions import question_key
+from tekla_harness.questions import empty_registry, question_key
 from tekla_harness.schemas import validate
 
 REPO = Path(__file__).resolve().parents[1]
@@ -52,7 +53,9 @@ def fam(
     evidence: list[dict[str, Any]] | None = None,
     conf: str = "medium",
     offsets: list[float] | None = None,
+    dims: dict[int, list[dict[str, Any]]] | None = None,
 ) -> dict[str, Any]:
+    """`dims`: spacing index -> grids.py dimension_evidence entries (dim() builds one)."""
     if offsets is None:
         offsets = [0.0]
         for s in spacings:
@@ -66,6 +69,21 @@ def fam(
         "complete": complete,
         "evidence": evidence or [],
         "conf": conf,
+        "dims": dims or {},
+    }
+
+
+def dim(a: str, b: str, displayed: float, *, text: str = "", status: str = "measured") -> dict[str, Any]:
+    """A grids.py dimension_evidence entry: a linear dimension from axis a to axis b."""
+    return {
+        "handle": f"D{a}{b}",
+        "from_label": a,
+        "to_label": b,
+        "measured": displayed,
+        "dimlfac": 1.0,
+        "displayed": displayed,
+        "text": text,
+        "status": status,
     }
 
 
@@ -119,7 +137,7 @@ def _family_json(
                     "provenance": _prov(file, sheet, "derived"),
                     "confidence": spec["conf"],
                 },
-                "dimension_evidence": [],
+                "dimension_evidence": spec.get("dims", {}).get(k, []),
                 "evidence": spec["evidence"] if k == 0 else [],
             }
         )
@@ -179,7 +197,9 @@ class Work:
         duplicates: dict[str, str] | None = None,
         content: str | None = None,
         median: dict[str, Any] | None = None,
+        unpaired: list[str] | None = None,
     ) -> None:
+        """`unpaired`: labels of bubbles that grids.py found but paired with no line (listed, model#09)."""
         duplicates = duplicates or {}
         dxf_sha = sha("dxf:" + (content or path))
         counter = [0]
@@ -205,13 +225,28 @@ class Work:
             "file": file_obj,
             "groups": groups,
             "cross_checks": [],
-            "unpaired_bubbles": {"count": 0, "listed": []},
+            "unpaired_bubbles": {
+                "count": len(unpaired or []),
+                "listed": [
+                    {
+                        "center": [1000.0 * k, -500.0],
+                        "radius": 400.0,
+                        "label": label,
+                        "label_source": "text",
+                        "tag": None,
+                        "text_id": f"T{k + 1:06d}",
+                        "block_path": [],
+                        "sheet": "model#09",
+                    }
+                    for k, label in enumerate(unpaired or [])
+                ],
+            },
             "summary": {
-                "circles": 0,
-                "bubbles_labelled": 0,
+                "circles": len(unpaired or []) + counter[0],
+                "bubbles_labelled": len(unpaired or []) + counter[0],
                 "bubbles_ambiguous_label": 0,
                 "bubbles_other_text": 0,
-                "bubbles_paired": 0,
+                "bubbles_paired": counter[0],
                 "axes": counter[0],
                 "groups": len(groups),
                 "families": sum(len(g["families"]) for g in groups),
@@ -286,6 +321,7 @@ def ans(code: str, file: str | None, values: dict[str, Any], status: str = "acti
         "answer_text": "synthetic",
         "values": values,
         "answered_by": "engineer",
+        "answered_by_role": "engineer",
         "answered_on": "2026-11-06",
         "status": status,
     }
@@ -435,8 +471,9 @@ def test_two_structures_same_labels_different_spacings_are_separate(tmp_path, ex
     conflicts = [q for q in doc["questions"] if q["code"] == "grid_system_conflict"]
     assert len(conflicts) == 1
     q = conflicts[0]
-    assert q["blocking"] and "S001" in q["where"] and "S002" in q["where"]
-    assert "A-B" in q["found"] and "1-2" in q["found"]
+    assert q["blocking"] and "S001" in q["message"] and "S002" in q["message"]
+    assert "A-B" in q["message"] and "1-2" in q["message"]
+    assert q["where"] == "plans.dxf V001/F001 vs plans.dxf V003/F005"  # no positional system id
     # never averaged: each system keeps its own drawn spacings
     assert {d["coordinates"] for d in s2["directions"]} == {"0 3600 4800", "0 2*5400"}
 
@@ -496,10 +533,12 @@ def test_single_direction_view_and_subset_of_two_direction_system(tmp_path, exam
     w.add_file("plans.dxf", [plan("V001", "model#01", 1), plan("V002", "model#02", 3), lone, other])
     doc = build_grid_systems(w.finish())
     check_invariants(doc)
-    assert len(doc["systems"]) == 2
-    s1, s2 = doc["systems"]
+    # the lettered view joins the two-direction system as a partial contributor; the unrelated one-direction
+    # family seen once is a stray beside the file's grid (tool wave 4), listed with its reason
+    (s1,) = doc["systems"]
     assert s1["evidence"]["partial_views"] == 1 and len(s1["directions"]) == 2
-    assert len(s2["directions"]) == 1 and "single_direction" in s2["flags"]
+    (row,) = doc["unassigned_families"]
+    assert row["labels"] == "P Q R" and "one direction" in row["reason"]
 
 
 def test_subset_of_two_conflicting_systems_stays_apart(tmp_path, example):
@@ -806,12 +845,22 @@ def answer_to(
     doc: dict[str, Any], code: str, values: dict[str, Any], where: str | None = None
 ) -> dict[str, Any]:
     """An active answer bound (by key) to this run's question of `code` (whose first ref is at `where`)."""
-    (q,) = [q for q in keyed(doc) if q["code"] == code and where in (None, q["refs"][0]["where"])]
+    (q,) = [q for q in keyed(doc) if q["code"] == code and where in (None, subject(q))]
     return {**ans(code, q["file"], values), "key": q["key"]}
 
 
+def subject(q: dict[str, Any]) -> str:
+    """What a question is about: an axis question's system id (in its message; its `where` names the
+    representative families, so its key survives renumbering), else its (first) `where`."""
+    if q["code"] == "grid_system_axis_unassigned":
+        m = re.search(r"Grid system (S\d+):", q["message"])
+        assert m, q["message"]
+        return m.group(1)
+    return q["refs"][0]["where"] if "refs" in q else q["where"]
+
+
 def blocking_of(doc: dict[str, Any]) -> list[tuple[str, str]]:
-    return sorted((q["code"], q["where"][:4]) for q in doc["questions"] if q["blocking"])
+    return sorted((q["code"], subject(q)[:4]) for q in doc["questions"] if q["blocking"])
 
 
 def _two_buildings(tmp_path: Path, example: Any) -> Path:
@@ -834,10 +883,11 @@ def test_one_axis_question_per_system_answered_by_direction_and_kept_once_answer
     work = _two_buildings(tmp_path, example)
     doc = build_grid_systems(work)
     axis = [q for q in keyed(doc) if q["code"] == "grid_system_axis_unassigned"]
-    assert [(q["refs"][0]["where"], q["count"], q["blocking"]) for q in axis] == [
+    assert [(subject(q), q["count"], q["blocking"]) for q in axis] == [
         ("S001", 1, True),
         ("S002", 1, True),
     ]
+    assert axis[0]["refs"][0]["where"] == "plans.dxf V001/F001 x V001/F002"  # families, not the system id
     assert axis[0]["subjects"] == [{"name": "dir1", "count": 2}, {"name": "dir2", "count": 2}]
     assert (
         axis[0]["refs"][0]["found"]
@@ -849,8 +899,8 @@ def test_one_axis_question_per_system_answered_by_direction_and_kept_once_answer
     s1 = after["systems"][0]
     assert s1["axis_assignment"]["status"] == "answered"
     assert [d["tekla_axis"] for d in s1["directions"]] == ["Y", "X"]
-    again = {q["refs"][0]["where"]: q for q in keyed(after) if q["code"] == "grid_system_axis_unassigned"}
-    assert [again[q["refs"][0]["where"]]["key"] for q in axis] == [q["key"] for q in axis]  # same keys
+    again = {subject(q): q for q in keyed(after) if q["code"] == "grid_system_axis_unassigned"}
+    assert [again[subject(q)]["key"] for q in axis] == [q["key"] for q in axis]  # same keys
     assert (again["S001"]["blocking"], again["S002"]["blocking"]) == (False, True)
     # an answer bound to another key, or that does not assign every direction, assigns nothing
     for wrong in (
@@ -872,7 +922,7 @@ def test_systems_outside_the_selection_raise_no_blocking_question(tmp_path, exam
     assert blocking_of(doc) == [
         ("grid_system_axis_unassigned", "S001"),
         ("grid_system_axis_unassigned", "S002"),
-        ("grid_system_conflict", "S001"),
+        ("grid_system_conflict", "plan"),
         ("grid_system_select", "S001"),
     ]
     select = answer_to(doc, "grid_system_select", {"systems": ["S001"]})
@@ -906,10 +956,301 @@ def test_a_conflict_closes_only_on_structured_values(tmp_path, example):
     )
     apart = build_grid_systems(work, answers=[separate])
     assert apart["conflicts"][0]["closed_by"] == "separate" and not apart["conflicts"][0]["blocking"]
-    assert ("grid_system_conflict", "S001") not in blocking_of(apart)
+    assert ("grid_system_conflict", "plan") not in blocking_of(apart)
     assert ("grid_system_axis_unassigned", "S002") in blocking_of(
         apart
     )  # a selected building still needs X/Y
+
+
+# --- question lifecycle: stable conflict ids, closures (tool wave 2, fix 5a) ---------------------------
+
+
+def _ledger_work(work: Path) -> Path:
+    """Give a Work folder an empty question registry, as `harness intake` would have left it."""
+    registry = empty_registry("demo-project")
+    (work / "question-registry.json").write_text(json.dumps(registry), encoding="utf-8")
+    return work
+
+
+def _set_answers(work: Path, answers: list[dict[str, Any]]) -> None:
+    doc = {"schema_version": "0.1", "project_id": "demo-project", "answers": answers}
+    assert validate("answers", doc) == []
+    (work / "answers.json").write_text(json.dumps(doc), encoding="utf-8")
+
+
+def _gs_questions(work: Path) -> list[dict[str, Any]]:
+    return json.loads((work / "grid-system-questions.json").read_text(encoding="utf-8"))["questions"]
+
+
+def _one(questions: list[dict[str, Any]], code: str) -> dict[str, Any]:
+    (q,) = [q for q in questions if q["code"] == code]
+    return q
+
+
+def test_a_conflict_keeps_its_id_across_a_units_answer_and_a_separate_rerun(tmp_path, example):
+    """EVAL-2 fix 5: the conflict key hashed the difference text, which switches to millimetres once the
+    units are answered, so the same conflict came back under a new Q-id."""
+    work = _ledger_work(_two_buildings(tmp_path, example))
+    run_grid_systems(work, svg=False)
+    first = _one(_gs_questions(work), "grid_system_conflict")
+    assert first["blocking"] and "closed_by" not in first
+    # identity: both sides' file and family ids and the shared labels; no system id, no difference text
+    ref = first["refs"][0]
+    assert ref["where"] == "plans.dxf V001/F001 vs plans.dxf V003/F005"
+    assert (
+        ref["found"]
+        == "V001/F001 x V003/F005: shared labels A B C; V001/F002 x V003/F006: shared labels 1 2 3"
+    )
+    assert "S001" in first["message"] and "A-B: 6000 vs 3600" in first["message"]
+
+    units = {
+        **ans("units_confirm_all", "plans.dxf", {"unit": "mm"}),
+        "key": "1" * 16,
+        "question_id": "Q-900",
+    }
+    _set_answers(work, [units])
+    run_grid_systems(work, svg=False)
+    in_mm = _one(_gs_questions(work), "grid_system_conflict")
+    assert (in_mm["id"], in_mm["key"]) == (first["id"], first["key"])
+    assert "A-B: 6000 vs 3600 mm" in in_mm["message"]
+
+    select = _one(_gs_questions(work), "grid_system_select")
+    separate = {
+        **ans("grid_system_select", None, {"systems": ["S001", "S002"], "separate": ["S001", "S002"]}),
+        "key": select["key"],
+        "question_id": select["id"],
+    }
+    _set_answers(work, [units, separate])
+    run_grid_systems(work, svg=False)
+    closed = _one(_gs_questions(work), "grid_system_conflict")
+    assert (closed["id"], closed["key"]) == (first["id"], first["key"])
+    assert not closed["blocking"]
+    assert closed["closed_by"] == {"question_id": select["id"], "reason": "separate"}
+    doc = json.loads((work / "grid-systems.json").read_text(encoding="utf-8"))
+    (conflict,) = doc["conflicts"]
+    assert conflict["question_id"] == first["id"] and conflict["closed_by"] == "separate"
+    # the relation stays a fact; the flag that asks for action clears
+    assert all("conflict" not in s["flags"] for s in doc["systems"])
+    assert doc["systems"][0]["relations"]["conflicts_with"] == ["S002"]
+
+
+def test_a_conflict_left_out_of_the_selection_keeps_its_id_and_is_closed(tmp_path, example):
+    work = _ledger_work(_two_buildings(tmp_path, example))
+    run_grid_systems(work, svg=False)
+    first = _one(_gs_questions(work), "grid_system_conflict")
+    select = _one(_gs_questions(work), "grid_system_select")
+    chosen = {
+        **ans("grid_system_select", None, {"systems": ["S001"]}),
+        "key": select["key"],
+        "question_id": select["id"],
+    }
+    _set_answers(work, [chosen])
+    run_grid_systems(work, svg=False)
+    closed = _one(_gs_questions(work), "grid_system_conflict")
+    assert closed["id"] == first["id"] and not closed["blocking"]
+    assert closed["closed_by"] == {"question_id": select["id"], "reason": "not_selected"}
+    doc = json.loads((work / "grid-systems.json").read_text(encoding="utf-8"))
+    assert "conflict" not in doc["systems"][0]["flags"]
+
+
+def test_an_open_conflict_keeps_the_conflict_flag(tmp_path, example):
+    work = _ledger_work(_two_buildings(tmp_path, example))
+    run_grid_systems(work, svg=False)
+    doc = json.loads((work / "grid-systems.json").read_text(encoding="utf-8"))
+    assert all("conflict" in s["flags"] for s in doc["systems"])
+    (conflict,) = doc["conflicts"]
+    assert conflict["question_id"] == _one(_gs_questions(work), "grid_system_conflict")["id"]
+
+
+def test_the_conflict_identity_lists_its_sides_in_file_order_not_system_order(tmp_path, example):
+    """S001 (two views) is in b.dxf, S002 (one view) in a.dxf: the key must not depend on which system
+    ranks first, so the sides are sorted by file, view and family."""
+    w = Work(tmp_path, example)
+    w.add_file("b.dxf", [plan("V001", "model#01", 1), plan("V002", "model#02", 3)])
+    other = view(
+        "V001",
+        "model#01",
+        fam("F001", ["A", "B", "C"], [3600.0, 4800.0], angle=0.0),
+        fam("F002", NUMBERS, [5400.0, 5400.0], angle=90.0),
+    )
+    w.add_file("a.dxf", [other])
+    doc = build_grid_systems(w.finish())
+    assert doc["systems"][0]["directions"][0]["representative"]["file"] == "b.dxf"
+    (q,) = [q for q in doc["questions"] if q["code"] == "grid_system_conflict"]
+    assert q["where"] == "a.dxf V001/F001 vs b.dxf V001/F001" and q["file"] == "a.dxf"
+    assert q["found"].startswith("V001/F001 x V001/F001: shared labels A B C")
+
+
+def test_an_answer_to_an_old_style_conflict_key_goes_stale_once(tmp_path, example):
+    """Conflict keys changed with fix 5a: an existing answer to the old key goes stale on the first run and
+    the conflict is asked under a new id; the next run changes nothing."""
+    work = _ledger_work(_two_buildings(tmp_path, example))
+    files = json.loads((work / "inventory.json").read_text(encoding="utf-8"))["files"]
+    digest = files[0]["sha256"]
+    old_ref = {
+        "file": "plans.dxf",
+        "where": "S001 (plans.dxf, sheet model#01, V001/F001) vs S002 (plans.dxf, sheet model#03, V003/F005)",
+        "found": "A-B: 6000 vs 3600; B-C: 6000 vs 4800; 1-2: 7200 vs 5400; 2-3: 7200 vs 5400",
+        "sheet": "model#01",
+    }
+    old_key = question_key("grid_system_conflict", "plans.dxf", digest, [old_ref])
+    registry = empty_registry("demo-project")
+    registry["questions"][old_key] = {
+        "id": "Q-001",
+        "code": "grid_system_conflict",
+        "file": "plans.dxf",
+        "producer": "grid-system",
+        "status": "answered",
+        "first_seen_run": 1,
+        "last_seen_run": 1,
+        "blocking": True,
+        "file_sha256": digest,
+    }
+    registry["next_id"], registry["runs"] = 2, 1
+    (work / "question-registry.json").write_text(json.dumps(registry), encoding="utf-8")
+    old = {**ans("grid_system_conflict", "plans.dxf", {}), "key": old_key, "question_id": "Q-001"}
+    _set_answers(work, [old])
+    result = run_grid_systems(work, svg=False)
+    assert [a["question_id"] for a in result.summary["stale_answers"]] == ["Q-001"]
+    new = _one(_gs_questions(work), "grid_system_conflict")
+    assert new["id"] != "Q-001" and new["answer"] is None
+    answers_after = (work / "answers.json").read_bytes()
+    run_grid_systems(work, svg=False)
+    assert (work / "answers.json").read_bytes() == answers_after
+    assert _one(_gs_questions(work), "grid_system_conflict")["id"] == new["id"]
+
+
+# --- file sets: systems are compared only within one set (fix 5d) --------------------------------------
+
+FILE_SET_KEY, FILE_SET_ID = "e" * 16, "Q-950"
+
+
+def _other_building(gid: str, sheet: str, k: int) -> dict[str, Any]:
+    """A-C x 1-3 with other spacings than plan(): a conflict with it on the shared labels."""
+    return view(
+        gid,
+        sheet,
+        fam(f"F{k:03d}", ["A", "B", "C"], [3600.0, 4800.0], angle=0.0),
+        fam(f"F{k + 1:03d}", NUMBERS, [5400.0, 5400.0], angle=90.0),
+    )
+
+
+def _with_file_set(work: Path) -> Path:
+    """A registry holding the live intake file_set_relation question (as harness intake raises it)."""
+    registry = empty_registry("demo-project")
+    registry["questions"][FILE_SET_KEY] = {
+        "id": FILE_SET_ID,
+        "code": "file_set_relation",
+        "file": None,
+        "producer": "intake",
+        "status": "open",
+        "first_seen_run": 1,
+        "last_seen_run": 1,
+        "blocking": True,
+        "file_sha256": None,
+    }
+    registry["next_id"], registry["runs"] = 951, 1
+    (work / "question-registry.json").write_text(json.dumps(registry), encoding="utf-8")
+    return work
+
+
+def _file_set_answer(**sets: list[str]) -> dict[str, Any]:
+    return {**ans("file_set_relation", None, sets), "key": FILE_SET_KEY, "question_id": FILE_SET_ID}
+
+
+def _two_files(tmp_path: Path, example: Any, second: dict[str, Any] | None = None) -> Path:
+    """a.dxf: plan() twice (A-D x 1-3); b.dxf: `second` twice (default: the conflicting A-C x 1-3)."""
+    w = Work(tmp_path, example)
+    w.add_file("a.dxf", [plan("V001", "model#01", 1), plan("V002", "model#02", 3)])
+    make = (lambda g, s, k: second) if second is not None else _other_building
+    w.add_file("b.dxf", [make("V001", "model#01", 1), make("V002", "model#02", 3)])
+    return w.finish()
+
+
+def _gs_doc(work: Path) -> dict[str, Any]:
+    return json.loads((work / "grid-systems.json").read_text(encoding="utf-8"))
+
+
+def test_a_cross_file_conflict_waits_for_the_file_set_answer_and_keeps_its_id(tmp_path, example):
+    work = _with_file_set(_two_files(tmp_path, example))
+    run_grid_systems(work, svg=False)
+    pending = _one(_gs_questions(work), "grid_system_conflict")
+    assert not pending["blocking"] and "closed_by" not in pending
+    assert pending["message"].startswith(f"Not blocking yet: pending {FILE_SET_ID} (file_set_relation)")
+    doc = _gs_doc(work)
+    assert doc["file_sets"] == {"status": "pending", "sets": None, "question_id": FILE_SET_ID}
+    assert doc["conflicts"][0]["blocking"] is False and doc["conflicts"][0]["closed_by"] is None
+    # one set: the files are one project, the conflict blocks under the same id
+    _set_answers(work, [_file_set_answer(set1=["a.dxf", "b.dxf"])])
+    run_grid_systems(work, svg=False)
+    one = _one(_gs_questions(work), "grid_system_conflict")
+    assert (one["id"], one["key"], one["blocking"]) == (pending["id"], pending["key"], True)
+    assert _gs_doc(work)["file_sets"] == {
+        "status": "answered",
+        "sets": [["a.dxf", "b.dxf"]],
+        "question_id": FILE_SET_ID,
+    }
+
+
+def test_files_of_two_sets_are_never_compared(tmp_path, example):
+    work = _with_file_set(_two_files(tmp_path, example))
+    _set_answers(work, [_file_set_answer(set1=["a.dxf"], set2=["b.dxf"])])
+    run_grid_systems(work, svg=False)
+    doc = _gs_doc(work)
+    assert doc["file_sets"] == {
+        "status": "answered",
+        "sets": [["a.dxf"], ["b.dxf"]],
+        "question_id": FILE_SET_ID,
+    }
+    assert doc["conflicts"] == [] and "grid_system_conflict" not in [q["code"] for q in _gs_questions(work)]
+    assert [s["relations"] for s in doc["systems"]] == [
+        {"compatible_with": [], "conflicts_with": [], "subset_of": []}
+    ] * 2
+
+
+def test_the_same_grid_in_two_sets_stays_two_systems(tmp_path, example):
+    """Two projects drawn on one grid module must not merge into one system (nor confirm each other)."""
+    work = _with_file_set(_two_files(tmp_path, example, second=plan("V001", "model#01", 1)))
+    _set_answers(work, [_file_set_answer(set1=["a.dxf", "b.dxf"])])
+    run_grid_systems(work, svg=False)
+    assert [s["evidence"]["files"] for s in _gs_doc(work)["systems"]] == [2]
+    _set_answers(work, [_file_set_answer(set1=["b.dxf"], set2=["a.dxf"])])
+    run_grid_systems(work, svg=False)
+    doc = _gs_doc(work)
+    assert [s["evidence"]["files"] for s in doc["systems"]] == [1, 1]
+    assert {s["directions"][0]["representative"]["file"] for s in doc["systems"]} == {"a.dxf", "b.dxf"}
+    assert doc["file_sets"]["sets"] == [["b.dxf"], ["a.dxf"]]
+
+
+def test_a_conflict_inside_one_file_blocks_while_the_file_set_answer_is_pending(tmp_path, example):
+    w = Work(tmp_path, example)
+    w.add_file("a.dxf", [plan("V001", "model#01", 1), _other_building("V002", "model#02", 3)])
+    w.add_file("b.dxf", [view("V001", "model#01", fam("F001", ["X", "Y"], [5000.0]))])
+    work = _with_file_set(w.finish())
+    run_grid_systems(work, svg=False)
+    conflict = _one(_gs_questions(work), "grid_system_conflict")
+    assert conflict["blocking"] and "pending" not in conflict["message"]
+
+
+def test_without_a_live_file_set_question_cross_file_conflicts_block(tmp_path, example):
+    """An intake run before fix 5d raised no file_set_relation: nothing would ever release a pending
+    conflict, so it blocks as before."""
+    work = _ledger_work(_two_files(tmp_path, example))
+    run_grid_systems(work, svg=False)
+    assert _one(_gs_questions(work), "grid_system_conflict")["blocking"]
+    assert "file_sets" not in _gs_doc(work)
+
+
+def test_one_readable_drawing_file_is_a_single_file_set(tmp_path, example):
+    work = _ledger_work(_two_buildings(tmp_path, example))
+    run_grid_systems(work, svg=False)
+    assert _gs_doc(work)["file_sets"] == {"status": "single", "sets": None, "question_id": None}
+
+
+def test_the_answers_digest_covers_the_file_set_answer():
+    base = [ans("units_suspect", "a.dxf", {"unit": "cm"})]
+    with_sets = [*base, _file_set_answer(set1=["a.dxf"])]
+    assert consumed_answers_digest(with_sets) != consumed_answers_digest(base)
 
 
 def test_a_units_answer_the_drawing_contradicts_blocks_until_confirmed(tmp_path, example):
@@ -993,6 +1334,667 @@ def test_select_key_changes_when_two_systems_swap_files(tmp_path, example):
     assert select_key(swapped) != select_key(doc)
     (q,) = [q for q in grid_system_questions(doc) if q["code"] == "grid_system_select"]
     assert all(f"[file {r['file']}, sha256 " in r["found"] for r in q["refs"])
+
+
+# --- provenance: an answer the engineer did not give proposes, never confirms (tool wave 3) -------------
+
+
+def sim(answer: dict[str, Any], role: str | None = "simulated") -> dict[str, Any]:
+    """The same answer, recorded by an agent standing in for the engineer (or, role None, before roles)."""
+    out = {k: v for k, v in answer.items() if k != "answered_by_role"}
+    return out if role is None else {**out, "answered_by_role": role}
+
+
+@pytest.mark.parametrize("role", ["simulated", None])
+def test_a_non_engineer_units_answer_converts_nothing(tmp_path, example, role):
+    work = _cm_work(tmp_path, example)
+    doc = build_grid_systems(work, answers=[sim(ans("units_suspect", "plans.dxf", {"unit": "cm"}), role)])
+    check_invariants(doc)
+    s = doc["systems"][0]
+    assert s["units"] == {
+        "declared": "mm",
+        "answered": "cm",
+        "status": "proposed_simulated",
+        "reason": "units answered by a non-engineer role",
+    }
+    assert all(d["mm"] is None for d in s["directions"]) and s["tekla_grid"] is None
+    assert "units_not_confirmed" in s["flags"]
+    assert doc["files"][0]["units_answer"] == {"status": "proposed_simulated", "unit": "cm"}
+    (q,) = [q for q in doc["questions"] if q["code"] == "grid_system_units_unconfirmed"]
+    assert not q["blocking"]  # still raised: the units question it points to stays open
+    # the engineer's own answer confirms
+    ok = build_grid_systems(work, answers=[ans("units_suspect", "plans.dxf", {"unit": "cm"})])
+    assert ok["systems"][0]["units"]["status"] == "confirmed"
+
+
+def test_one_non_engineer_file_keeps_the_units_proposed_and_merges_nothing(tmp_path, example):
+    work = _cm_work(tmp_path, example, files=("a.dxf", "b.dxf"))
+    answers = [
+        ans("units_suspect", "a.dxf", {"unit": "cm"}),
+        sim(ans("units_suspect", "b.dxf", {"unit": "cm"})),
+    ]
+    s = build_grid_systems(work, answers=answers)["systems"][0]
+    assert (s["units"]["status"], s["units"]["reason"]) == (
+        "proposed_simulated",
+        "units answered by a non-engineer role",
+    )
+    assert all(d["mm"] is None for d in s["directions"])
+    # an engineer answer that disagrees, or none for a file, still wins over a proposal as the reason
+    none = build_grid_systems(work, answers=[sim(ans("units_suspect", "a.dxf", {"unit": "cm"}))])
+    assert none["systems"][0]["units"]["reason"] == "units not confirmed"
+    # one building in m and mm merges in millimetres only on the engineer's answers
+    split = build_grid_systems(_two_unit_work(tmp_path / "u", example), answers=[M_MM[0], sim(M_MM[1])])
+    assert [s["system_id"] for s in split["systems"]] == ["S001", "S002"]
+    # a file the engineer answered is not a proposal, whatever another role says on another question
+    both = [
+        *answers[:1],
+        sim(ans("units_confirm_all", "a.dxf", {"unit": "cm"})),
+        answers[0] | {"file": "b.dxf"},
+    ]
+    doc = build_grid_systems(work, answers=both)
+    assert [f["units_answer"] for f in doc["files"]] == [{"status": "answered", "unit": "cm"}] * 2
+    assert doc["systems"][0]["units"]["status"] == "confirmed"
+
+
+@pytest.mark.parametrize("role", ["simulated", None])
+def test_a_non_engineer_axis_answer_assigns_nothing_and_its_question_still_blocks(tmp_path, example, role):
+    work = _cm_work(tmp_path, example)
+    doc = build_grid_systems(work)
+    system_answer = sim(answer_to(doc, "grid_system_axis_unassigned", {"dir1": "Y", "dir2": "X"}), role)
+    family_answer = sim(ans("grid_family_axis_assignment", "plans.dxf", {"F001": "Y", "F002": "X"}), role)
+    for answer in (system_answer, family_answer):
+        out = build_grid_systems(work, answers=[ans("units_suspect", "plans.dxf", {"unit": "cm"}), answer])
+        check_invariants(out)
+        s = out["systems"][0]
+        assert s["axis_assignment"]["status"] == "proposed_simulated", answer["code"]
+        assert "engineer" in s["axis_assignment"]["reason"]
+        assert all(d["tekla_axis"] is None for d in s["directions"]) and s["tekla_grid"] is None
+        assert "axis_unassigned" in s["flags"]
+        (q,) = [q for q in out["questions"] if q["code"] == "grid_system_axis_unassigned"]
+        assert q["blocking"]
+    # an engineer answer next to a contradicting non-engineer one decides alone
+    engineer = answer_to(doc, "grid_system_axis_unassigned", {"dir1": "Y", "dir2": "X"})
+    both = build_grid_systems(work, answers=[engineer, sim(family_answer, role) | {"values": {"F001": "X"}}])
+    assert both["systems"][0]["axis_assignment"]["status"] == "answered"
+
+
+@pytest.mark.parametrize("role", ["simulated", None])
+def test_a_non_engineer_select_answer_closes_no_conflict(tmp_path, example, role):
+    work = _two_buildings(tmp_path, example)
+    doc = build_grid_systems(work)
+    for values, would in (
+        ({"systems": ["S001"]}, "not_selected"),
+        ({"systems": ["S001", "S002"], "separate": ["S001", "S002"]}, "separate"),
+    ):
+        after = build_grid_systems(work, answers=[sim(answer_to(doc, "grid_system_select", values), role)])
+        check_invariants(after)
+        assert blocking_of(after) == blocking_of(doc), values
+        (c,) = after["conflicts"]
+        assert (c["blocking"], c["closed_by"], c["proposed_closed_by"]) == (True, None, would)
+        assert any("non-engineer" in w and "grid_system_select" in w for w in after["warnings"])
+    engineer = build_grid_systems(work, answers=[answer_to(doc, "grid_system_select", {"systems": ["S001"]})])
+    assert "proposed_closed_by" not in engineer["conflicts"][0]
+    assert "proposed_closed_by" not in doc["conflicts"][0]
+    # one system declared separate is not two separate buildings: nothing would close
+    half = {"systems": ["S001", "S002"], "separate": ["S001"]}
+    after = build_grid_systems(work, answers=[sim(answer_to(doc, "grid_system_select", half), role)])
+    assert "proposed_closed_by" not in after["conflicts"][0]
+    eng_half = build_grid_systems(work, answers=[answer_to(doc, "grid_system_select", half)])
+    assert eng_half["conflicts"][0]["closed_by"] is None and eng_half["conflicts"][0]["blocking"]
+
+
+def test_a_non_engineer_file_set_answer_keeps_the_sets_pending(tmp_path, example):
+    work = _with_file_set(_two_files(tmp_path, example))
+    _set_answers(work, [sim(_file_set_answer(set1=["a.dxf"], set2=["b.dxf"]))])
+    run_grid_systems(work, svg=False)
+    doc = _gs_doc(work)
+    assert doc["file_sets"] == {"status": "pending", "sets": None, "question_id": FILE_SET_ID}
+    (c,) = doc["conflicts"]  # still compared, and waiting for the engineer's answer
+    assert c["blocking"] is False and c["closed_by"] is None
+    assert any("non-engineer" in w and "file_set_relation" in w for w in doc["warnings"])
+
+
+def test_a_conflict_retired_by_the_engineer_file_set_answer_says_so(tmp_path, example):
+    work = _with_file_set(_two_files(tmp_path, example))
+    run_grid_systems(work, svg=False)
+    conflict = _one(_gs_questions(work), "grid_system_conflict")
+    _set_answers(work, [_file_set_answer(set1=["a.dxf"], set2=["b.dxf"])])
+    run_grid_systems(work, svg=False)
+    registry = json.loads((work / "question-registry.json").read_text(encoding="utf-8"))
+    entry = registry["questions"][conflict["key"]]
+    assert entry["status"] == "obsolete"
+    assert entry["obsolete_reason"] == "superseded by an answer to file_set_relation"
+
+
+def test_a_conflict_gone_while_a_non_engineer_file_set_answer_is_active_was_not_superseded(tmp_path, example):
+    """The sets stay pending under a non-engineer answer, so a conflict that goes away (here: b.dxf's grid
+    redrawn, same file) went for another reason."""
+    work = _with_file_set(_two_files(tmp_path, example))
+    _set_answers(work, [sim(_file_set_answer(set1=["a.dxf"], set2=["b.dxf"]))])
+    run_grid_systems(work, svg=False)
+    conflict = _one(_gs_questions(work), "grid_system_conflict")
+    w = Work(work, example)
+    w.add_file("a.dxf", [plan("V001", "model#01", 1), plan("V002", "model#02", 3)])
+    w.add_file("b.dxf", [plan("V001", "model#01", 1), plan("V002", "model#02", 3)])  # same content (sha)
+    w.finish()
+    run_grid_systems(work, svg=False)
+    registry = json.loads((work / "question-registry.json").read_text(encoding="utf-8"))
+    entry = registry["questions"][conflict["key"]]
+    assert entry["obsolete_reason"] == "the latest grid-system run no longer raises it"
+
+
+def test_a_non_engineer_confirmation_of_a_contradicted_unit_confirms_nothing(tmp_path, example):
+    w = Work(tmp_path, example)
+    w.add_file("plans.dxf", [plan("V001", "model#01", 1)], median={"value": 6000.0, "count": 5})
+    work = w.finish()
+    metres = ans("units_confirm_all", "plans.dxf", {"unit": "m"})
+    doc = build_grid_systems(work, answers=[metres])
+    confirm = answer_to(doc, "units_answer_contradicts_evidence", {"unit": "m"})
+    out = build_grid_systems(work, answers=[metres, sim(confirm)])
+    assert out["systems"][0]["units"]["status"] == "not_confirmed"
+    assert out["files"][0]["units_answer"] == {"status": "contradicted", "unit": None}
+    # a non-engineer unit the drawing contradicts is still flagged (it is what an agent would build on)
+    proposed = build_grid_systems(work, answers=[sim(metres)])
+    assert "units_answer_contradicts_evidence" in codes(proposed)
+    assert proposed["files"][0]["units_answer"] == {"status": "proposed_simulated", "unit": "m"}
+    assert proposed["systems"][0]["units"]["reason"] == "units answered by a non-engineer role"
+
+
+# --- ADR-0013: a grid system from the engineer's answer (grid_system_missing) --------------------------
+
+MISSING = "grid_system_missing"
+CONTRADICTS = "grid_answer_contradicts_drawing"
+GRID = {
+    "dir1_labels": ["1", "2", "3", "4", "5"],
+    "dir1_spacings": [3130, 3540, 3520, 4590],
+    "dir2_labels": ["A", "B", "C"],
+    "dir2_spacings": [4250, 3730.0],
+    "sheet": "model#05",
+}
+
+
+def _no_grid(
+    tmp_path: Path, example: Any, labels: list[str] | None = None, dims: dict[int, Any] | None = None
+) -> Path:
+    """house.dxf: one direction of axes only (A B C, horizontal lines) and three bubbles 1 2 3 on no line."""
+    w = Work(tmp_path, example)
+    letters = labels or ["A", "B", "C"]
+    w.add_file(
+        "house.dxf",
+        [view("V001", "model#05", fam("F001", letters, [4250.0, 3730.0], angle=0.0, dims=dims))],
+        unpaired=["1", "2", "3"],
+    )
+    return w.finish()
+
+
+def _missing(doc: dict[str, Any], file: str = "house.dxf") -> dict[str, Any]:
+    (q,) = [q for q in doc["questions"] if q["code"] == MISSING and q["file"] == file]
+    return q
+
+
+def _built(doc: dict[str, Any]) -> list[dict[str, Any]]:
+    return [s for s in doc["systems"] if s.get("source") == "engineer_answer"]
+
+
+def test_a_file_with_no_usable_grid_system_asks_for_one(tmp_path, example):
+    doc = build_grid_systems(_no_grid(tmp_path, example))
+    check_invariants(doc)
+    q = _missing(doc)
+    assert q["blocking"] and q["where"] == "house.dxf: no usable grid system" and "sheet" not in q
+    assert q["found"].startswith("6 labelled bubble(s), 3 paired with a line, 3 axis(es) in 1 famil")
+    assert "unpaired bubble labels: 1 2 3" in q["found"] and "axis labels: A B C" in q["found"]
+    for key in ("dir1_labels=", "dir1_spacings=", "dir2_labels=", "dir2_spacings=", "--role engineer"):
+        assert key in q["message"], key
+    assert "S001" in q["message"] and "single direction" in q["message"]  # what was found, in words
+    # a file with a two-direction system is not asked
+    assert MISSING not in codes(build_grid_systems(_cm_work(tmp_path / "plan", example)))
+
+
+def test_a_file_whose_systems_the_engineer_rejected_asks_for_a_grid(tmp_path, example):
+    work = _two_files(tmp_path, example)
+    doc = build_grid_systems(work)
+    assert MISSING not in codes(doc)
+    select = answer_to(doc, "grid_system_select", {"systems": ["S001"]})
+    rejected = build_grid_systems(work, answers=[select])
+    assert [q["file"] for q in rejected["questions"] if q["code"] == MISSING] == ["b.dxf"]
+    assert "not selected" in _missing(rejected, "b.dxf")["message"]
+    # the same selection proposed by an agent rejects nothing
+    assert MISSING not in codes(build_grid_systems(work, answers=[sim(select)]))
+
+
+def test_the_engineer_answer_builds_a_grid_system(tmp_path, example):
+    work = _no_grid(tmp_path, example)
+    doc = build_grid_systems(work)
+    answer = {**answer_to(doc, MISSING, GRID), "question_id": "Q-031"}
+    out = build_grid_systems(work, answers=[answer])
+    check_invariants(out)
+    (s,) = _built(out)
+    assert s["system_id"] == "S002"  # after the detected systems: their ids do not move
+    assert s["source_answer"] == {"question_id": "Q-031", "key": answer["key"]}
+    one, two = s["directions"]
+    assert (one["labels"], one["spacings"], one["coordinates"]) == (
+        ["1", "2", "3", "4", "5"],
+        [3130.0, 3540.0, 3520.0, 4590.0],
+        "0 3130 3540 3520 4590",
+    )
+    assert (two["labels"], two["coordinates"], two["unit"]) == (["A", "B", "C"], "0 4250 3730", "mm")
+    assert one["provenance"] == {
+        "file": "house.dxf",
+        "sheet": "model#05",
+        "method": "engineer_answer",
+        "question_id": "Q-031",
+    }
+    assert (one["representative"], one["families"], one["rounding_step"], one["angle_deg"]) == (
+        None,
+        0,
+        None,
+        None,
+    )
+    ev = s["evidence"]
+    assert (ev["views"], ev["independent_views"], ev["sheets"], ev["files"], ev["contributors"]) == (
+        0,
+        0,
+        1,
+        1,
+        [],
+    )
+    assert s["units"]["status"] == "not_confirmed" and s["axis_assignment"]["status"] == "not_answered"
+    assert {"units_not_confirmed", "axis_unassigned"} <= set(s["flags"]) and s["confidence"] == "medium"
+    # the question stays raised under the same key (its answer must not go stale), and the system goes
+    # through the same gate-1 steps: select, X/Y, units
+    assert _missing(out)["found"] == _missing(doc)["found"]
+    assert any(q["code"] == "grid_system_select" and "S002" in q["where"] for q in out["questions"])
+    axis = answer_to(out, "grid_system_axis_unassigned", {"dir1": "X", "dir2": "Y"}, "S002")
+    assert next(q for q in keyed(out) if q["key"] == axis["key"])["blocking"]
+    done = build_grid_systems(
+        work, answers=[answer, axis, ans("units_confirm_all", "house.dxf", {"unit": "mm"})]
+    )
+    check_invariants(done)
+    (s,) = _built(done)
+    assert s["tekla_grid"] == {
+        "unit": "mm",
+        "coordinate_x": "0 3130 3540 3520 4590",
+        "label_x": "1 2 3 4 5",
+        "coordinate_y": "0 4250 3730",
+        "label_y": "A B C",
+    }
+    assert s["units"]["status"] == "confirmed" and s["axis_assignment"]["status"] == "answered"
+
+
+def test_an_engineer_answer_in_words_only_is_warned_as_such(tmp_path, example):
+    work = _no_grid(tmp_path, example)
+    words = answer_to(build_grid_systems(work), MISSING, {})
+    out = build_grid_systems(work, answers=[words])
+    assert _built(out) == [] and any("in words only" in w for w in out["warnings"])
+
+
+def test_an_answer_without_a_sheet_builds_a_system_on_no_sheet(tmp_path, example):
+    work = _no_grid(tmp_path, example)
+    values = {k: v for k, v in GRID.items() if k != "sheet"}
+    out = build_grid_systems(work, answers=[answer_to(build_grid_systems(work), MISSING, values)])
+    check_invariants(out)
+    (s,) = _built(out)
+    assert s["evidence"]["sheets"] == 0
+    assert {d["provenance"]["sheet"] for d in s["directions"]} == {"unknown"}
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"answered_by_role": "simulated"},
+        {"answered_by_role": None},
+        {"values": {}},
+        {"values": {k: v for k, v in GRID.items() if not k.startswith("dir2")}},
+        {"values": {**GRID, "dir1_spacings": [3130, 3540, 3520]}},
+        {"values": {**GRID, "dir1_spacings": [3130, True, 3520, 4590]}},
+        {"values": {**GRID, "dir1_spacings": [3130, 0, 3520, 4590]}},
+        {"values": {**GRID, "dir1_spacings": [3130, float("inf"), 3520, 4590]}},
+        {"values": {**GRID, "dir1_spacings": [3130, 10**400, 3520, 4590]}},  # review m1: float() overflows
+        {"values": {**GRID, "dir1_spacings": [3130, 1000000.5, 3520, 4590]}},  # above MAX_SPACING
+        {"values": {**GRID, "dir2_labels": ["A", "A", "C"]}},
+        {"values": {**GRID, "dir2_labels": ["A", "a", "C"]}},  # review m2: one axis, case-blind
+        {"values": {**GRID, "dir2_labels": ["A", "A ", "C"]}},
+        {"values": {**GRID, "dir2_labels": ["A", " ", "C"]}},
+        {"values": {**GRID, "dir2_labels": ["A"], "dir2_spacings": []}},
+        {"values": {**GRID, "dir3_labels": ["X", "Y"]}},
+        {"values": {**GRID, "sheet": " "}},
+        {"values": {**GRID, "dir1_labels": "1,2,3,4,5"}},
+        {"file": "other.dxf"},
+    ],
+    ids=lambda c: next(iter(c)) + ":" + str(next(iter(c.values())))[:24],
+)
+def test_an_answer_that_is_not_the_engineers_structured_grid_builds_nothing(tmp_path, example, change):
+    work = _no_grid(tmp_path, example)
+    doc = build_grid_systems(work)
+    answer = {**answer_to(doc, MISSING, GRID), **change}
+    if change.get("answered_by_role", "") is None:
+        del answer["answered_by_role"]
+    out = build_grid_systems(work, answers=[answer])
+    check_invariants(out)
+    assert _built(out) == [] and [s["system_id"] for s in out["systems"]] == ["S001"]
+    assert _missing(out)["blocking"]
+    assert any(MISSING in w and "builds nothing" in w for w in out["warnings"]), out["warnings"]
+
+
+def test_the_answer_built_system_survives_reruns(tmp_path, example):
+    """Ledger.sync makes an answer stale when its question is not raised: the question must stay raised once
+    its answer built the system (run, answer, run, run)."""
+    work = _ledger_work(_no_grid(tmp_path, example))
+    run_grid_systems(work, svg=False)
+    q = _one(_gs_questions(work), MISSING)
+    _set_answers(work, [{**ans(MISSING, "house.dxf", GRID), "key": q["key"], "question_id": q["id"]}])
+    for _ in range(2):
+        run_grid_systems(work, svg=False)
+        assert [s["source_answer"]["question_id"] for s in _built(_gs_doc(work))] == [q["id"]]
+        again = _one(_gs_questions(work), MISSING)
+        assert (again["id"], again["key"], again["answer"]["status"]) == (q["id"], q["key"], "active")
+
+
+def test_a_rejected_system_then_an_answer_does_not_oscillate(tmp_path, example):
+    """Select S001 (b.dxf's S002 rejected) -> b.dxf is asked -> its answer builds S003, which changes the
+    select question (its answer goes stale, S002 is selected again) -> the grid answer stays bound anyway."""
+    work = _ledger_work(_two_files(tmp_path, example))
+    run_grid_systems(work, svg=False)
+    select = _one(_gs_questions(work), "grid_system_select")
+    chosen = {
+        **ans("grid_system_select", None, {"systems": ["S001"]}),
+        "key": select["key"],
+        "question_id": select["id"],
+    }
+    _set_answers(work, [chosen])
+    run_grid_systems(work, svg=False)
+    q = next(q for q in _gs_questions(work) if q["code"] == MISSING and q["file"] == "b.dxf")
+    grid = {**ans(MISSING, "b.dxf", GRID), "key": q["key"], "question_id": q["id"]}
+    _set_answers(work, [chosen, grid])
+    for _ in range(3):
+        run_grid_systems(work, svg=False)
+        assert [s["system_id"] for s in _built(_gs_doc(work))] == ["S003"]
+        answers = json.loads((work / "answers.json").read_text(encoding="utf-8"))["answers"]
+        assert next(a for a in answers if a["key"] == q["key"])["status"] == "active"
+
+
+@pytest.mark.parametrize("labels", [["A", "B", "C"], ["a", "b", "c"]])
+def test_a_given_spacing_that_a_dimension_contradicts_raises_a_question(tmp_path, example, labels):
+    """ADR-0013 §5 (285 KC-03: B-A reads 4260 where the grid is 4250). Drawing labels match case-blind
+    (285's TCVN3 capitals decode as 'a b c')."""
+    a, b, c = labels
+    dims = {0: [dim(a, b, 4260.0, text="4260", status="differs")], 1: [dim(b, c, 3730.0), dim(a, c, 7980.0)]}
+    work = _no_grid(tmp_path, example, labels=labels, dims=dims)
+    answer = answer_to(build_grid_systems(work), MISSING, GRID)
+    out = build_grid_systems(work, answers=[answer])
+    check_invariants(out)
+    (q,) = [q for q in out["questions"] if q["code"] == CONTRADICTS]
+    assert q["blocking"] and q["file"] == "house.dxf" and answer["key"] in q["where"]
+    assert f"{a}-{b}: answer 4250 vs dimension" in q["found"] and "4260" in q["found"]
+    assert f"{b}-{c}" not in q["found"] and f"{a}-{c}" not in q["found"]  # 3730 and 4250 + 3730 agree
+    assert len(_built(out)) == 1  # the engineer stays authoritative: the system is built
+
+
+@pytest.mark.parametrize(
+    ("dims", "raised"),
+    [
+        ({0: [dim("A", "B", 4250.8)]}, False),  # within the drafting tolerance (2e-4 of 4250 = 0.85)
+        ({0: [dim("A", "B", 4251.0)]}, True),
+        ({1: [dim("A", "C", 8000.0)]}, True),  # a span checks the sum of the given spacings
+        ({0: [dim("A", "B", 4260.0, text="x", status="not_numeric") | {"displayed": None}]}, False),
+    ],
+)
+def test_which_dimensions_contradict_a_given_grid(tmp_path, example, dims, raised):
+    work = _no_grid(tmp_path, example, dims=dims)
+    out = build_grid_systems(work, answers=[answer_to(build_grid_systems(work), MISSING, GRID)])
+    assert (CONTRADICTS in codes(out)) is raised
+
+
+def test_a_given_grid_with_no_dimension_to_check_says_so(tmp_path, example):
+    work = _no_grid(tmp_path, example)
+    out = build_grid_systems(work, answers=[answer_to(build_grid_systems(work), MISSING, GRID)])
+    assert CONTRADICTS not in codes(out)
+    assert any("not checked" in w and "house.dxf" in w for w in out["warnings"])
+
+
+def test_the_answers_digest_covers_the_grid_answer():
+    base = [ans("units_suspect", "a.dxf", {"unit": "cm"})]
+    assert consumed_answers_digest([*base, ans(MISSING, "a.dxf", GRID)]) != consumed_answers_digest(base)
+
+
+# --- review M1: an answer-built system is conflict-checked like a detected one (ADR-0013 decision 6) --------
+
+
+def _conflict_pairs(doc: dict[str, Any]) -> list[tuple[list[str], bool, str | None]]:
+    return [(c["systems"], c["blocking"], c["closed_by"]) for c in doc["conflicts"]]
+
+
+def _system(doc: dict[str, Any], sid: str) -> dict[str, Any]:
+    (s,) = [s for s in doc["systems"] if s["system_id"] == sid]
+    return s
+
+
+def test_an_answer_built_system_that_disagrees_with_a_detected_one_conflicts(tmp_path, example):
+    """house.dxf's detected S001 is A B C = 4250 / 3730; the answer gives A B C = 4000 / 3730."""
+    work = _no_grid(tmp_path, example)
+    values = {**GRID, "dir2_spacings": [4000, 3730]}
+    out = build_grid_systems(work, answers=[answer_to(build_grid_systems(work), MISSING, values)])
+    check_invariants(out)
+    assert _conflict_pairs(out) == [(["S001", "S002"], True, None)]
+    assert _system(out, "S002")["relations"]["conflicts_with"] == ["S001"]
+    assert _system(out, "S001")["relations"]["conflicts_with"] == ["S002"]
+    assert "conflict" in _system(out, "S002")["flags"] and "conflict" in _system(out, "S001")["flags"]
+    (q,) = [q for q in out["questions"] if q["code"] == "grid_system_conflict"]
+    assert q["blocking"] and q["file"] == "house.dxf"
+    assert "A-B: 4250 vs 4000" in q["message"] and "shared labels A B C" in q["found"]
+    # the key does not depend on the system ids or the spacings: the same labels, other spacings, same key
+    again = build_grid_systems(
+        work,
+        answers=[answer_to(build_grid_systems(work), MISSING, {**GRID, "dir2_spacings": [4100, 3730]})],
+    )
+    (q2,) = [q for q in keyed(again) if q["code"] == "grid_system_conflict"]
+    assert q2["key"] == next(q for q in keyed(out) if q["code"] == "grid_system_conflict")["key"]
+
+
+def test_an_answer_built_system_that_agrees_with_a_detected_one_is_compatible(tmp_path, example):
+    work = _no_grid(tmp_path, example)
+    out = build_grid_systems(work, answers=[answer_to(build_grid_systems(work), MISSING, GRID)])
+    assert out["conflicts"] == []
+    assert _system(out, "S002")["relations"]["compatible_with"] == ["S001"]
+    assert _system(out, "S001")["relations"]["compatible_with"] == ["S002"]
+
+
+def test_a_select_answer_closes_an_answer_built_conflict_like_any_other(tmp_path, example):
+    work = _no_grid(tmp_path, example)
+    grid = answer_to(build_grid_systems(work), MISSING, {**GRID, "dir2_spacings": [4000, 3730]})
+    out = build_grid_systems(work, answers=[grid])
+    separate = answer_to(
+        out, "grid_system_select", {"systems": ["S001", "S002"], "separate": ["S001", "S002"]}
+    )
+    assert _conflict_pairs(build_grid_systems(work, answers=[grid, separate])) == [
+        (["S001", "S002"], False, "separate")
+    ]
+    only = answer_to(out, "grid_system_select", {"systems": ["S002"]})
+    assert _conflict_pairs(build_grid_systems(work, answers=[grid, only])) == [
+        (["S001", "S002"], False, "not_selected")
+    ]
+
+
+def _b_answer(
+    work: Path, *, file_set: tuple[str, str] | None = None, extra: tuple[dict[str, Any], ...] = ()
+) -> dict[str, Any]:
+    """a.dxf (A-D x 1-3) and b.dxf (A-C x 1-3, other spacings); the engineer keeps S001 only, then gives
+    b.dxf's grid as the other building's: A B C = 3600 / 4800, 1 2 3 = 5400 / 5400 (b.dxf's own S002)."""
+    first = build_grid_systems(work, answers=list(extra), file_set=file_set)
+    only_a = answer_to(first, "grid_system_select", {"systems": ["S001"]})
+    rejected = build_grid_systems(work, answers=[*extra, only_a], file_set=file_set)
+    values = {
+        "dir1_labels": ["A", "B", "C"],
+        "dir1_spacings": [3600, 4800],
+        "dir2_labels": NUMBERS,
+        "dir2_spacings": [5400, 5400],
+    }
+    grid = answer_to(rejected, MISSING, values)
+    assert grid["file"] == "b.dxf"
+    return build_grid_systems(work, answers=[*extra, only_a, grid], file_set=file_set)
+
+
+def test_an_answer_built_system_is_compared_with_the_systems_of_other_files(tmp_path, example):
+    out = _b_answer(_two_files(tmp_path, example))
+    check_invariants(out)
+    assert [s["system_id"] for s in _built(out)] == ["S003"]
+    # S001 (a.dxf) vs S002 (b.dxf, detected) as before, and now S001 vs S003 (b.dxf, built); S002 and S003
+    # agree (compatible)
+    assert _conflict_pairs(out) == [(["S001", "S002"], True, None), (["S001", "S003"], True, None)]
+    assert _system(out, "S003")["relations"]["compatible_with"] == ["S002"]
+
+
+def test_an_answer_built_conflict_across_files_waits_for_the_file_sets(tmp_path, example):
+    work = _two_files(tmp_path, example)
+    pending = _b_answer(work, file_set=(FILE_SET_KEY, FILE_SET_ID))
+    assert _conflict_pairs(pending) == [(["S001", "S002"], False, None), (["S001", "S003"], False, None)]
+    one_set = _file_set_answer(set1=["a.dxf", "b.dxf"])
+    one = _b_answer(work, file_set=(FILE_SET_KEY, FILE_SET_ID), extra=(one_set,))
+    assert _conflict_pairs(one) == [(["S001", "S002"], True, None), (["S001", "S003"], True, None)]
+    two_sets = _file_set_answer(set1=["a.dxf"], set2=["b.dxf"])
+    two = _b_answer(work, file_set=(FILE_SET_KEY, FILE_SET_ID), extra=(two_sets,))
+    assert two["conflicts"] == []  # two sets are never compared, a built system included
+    # S003 is compared with b.dxf's own S002 only (same set), never with a.dxf's S001
+    assert _system(two, "S003")["relations"] == {
+        "compatible_with": ["S002"],
+        "conflicts_with": [],
+        "subset_of": [],
+    }
+
+
+def test_a_same_file_conflict_with_a_built_system_blocks_while_the_file_sets_are_asked(tmp_path, example):
+    """Rule 9: only a conflict between systems with no file in common waits for file_set_relation; the
+    built system's file counts (mutant: a built system with no files)."""
+    work = _no_grid(tmp_path, example)
+    pending = (FILE_SET_KEY, FILE_SET_ID)
+    grid = answer_to(
+        build_grid_systems(work, file_set=pending), MISSING, {**GRID, "dir2_spacings": [4000, 3730]}
+    )
+    out = build_grid_systems(work, answers=[grid], file_set=pending)
+    assert out["file_sets"]["status"] == "pending"
+    assert _conflict_pairs(out) == [(["S001", "S002"], True, None)]
+
+
+def test_a_built_system_is_compared_in_millimetres_when_both_files_answer_their_units(tmp_path, example):
+    """a.dxf draws the plan in mm (6000 / 6000 / 4500), house.dxf is in cm and its given grid is the same
+    building in cm (600 / 600 / 450): one building in mm, so no conflict (mutant: built families never in
+    mm, then 6000 vs 600)."""
+    w = Work(tmp_path, example)
+    w.add_file("a.dxf", [plan("V001", "model#01", 1)])
+    w.add_file(
+        "house.dxf", [view("V001", "model#05", fam("F001", ["X", "Y"], [500.0], angle=0.0))], unit="cm"
+    )
+    work = w.finish()
+    units = [
+        ans("units_confirm_all", "a.dxf", {"unit": "mm"}),
+        ans("units_confirm_all", "house.dxf", {"unit": "cm"}),
+    ]
+    values = {"dir1_labels": LETTERS, "dir1_spacings": [600, 600, 450], "dir2_labels": NUMBERS,
+              "dir2_spacings": [720, 720]}  # fmt: skip
+    grid = answer_to(
+        build_grid_systems(work, answers=units), MISSING, values, "house.dxf: no usable grid system"
+    )
+    out = build_grid_systems(work, answers=[*units, grid])
+    check_invariants(out)
+    (built,) = _built(out)
+    assert out["conflicts"] == [] and "S001" in built["relations"]["compatible_with"]
+    # the same numbers with no units answer are compared as drawn: 6000 vs 600 conflict
+    raw = build_grid_systems(work, answers=[grid])
+    assert any(built["system_id"] in c["systems"] for c in raw["conflicts"])
+
+
+def test_two_answer_built_systems_are_compared(tmp_path, example):
+    """house.dxf and shed.dxf: neither has a usable system; both grids are given, and disagree on 1-2."""
+    w = Work(tmp_path, example)
+    w.add_file(
+        "house.dxf", [view("V001", "model#05", fam("F001", ["A", "B", "C"], [4250.0, 3730.0], angle=0.0))]
+    )
+    w.add_file("shed.dxf", [view("V001", "model#01", fam("F001", ["X", "Y"], [5000.0], angle=0.0))])
+    work = w.finish()
+    first = build_grid_systems(work)
+    house = answer_to(first, MISSING, GRID, "house.dxf: no usable grid system")
+    shed_values = {"dir1_labels": ["1", "2", "3"], "dir1_spacings": [3000, 3000], "dir2_labels": ["X", "Y"],
+                   "dir2_spacings": [5000]}  # fmt: skip
+    shed = answer_to(first, MISSING, shed_values, "shed.dxf: no usable grid system")
+    out = build_grid_systems(work, answers=[house, shed])
+    check_invariants(out)
+    assert [s["system_id"] for s in _built(out)] == ["S003", "S004"]
+    assert (["S003", "S004"], True, None) in _conflict_pairs(out)
+    (q,) = [q for q in out["questions"] if q["code"] == "grid_system_conflict" and "S004" in q["message"]]
+    assert "1-2: 3130 vs 3000" in q["message"]
+
+
+# --- no_grid=yes (ADR-0013 decision 2) ------------------------------------------------------------------
+
+
+def test_the_question_offers_no_grid_for_a_file_without_a_plan(tmp_path, example):
+    q = _missing(build_grid_systems(_no_grid(tmp_path, example)))
+    assert "--value no_grid=yes" in q["message"] and "no plan that needs a grid" in q["message"]
+
+
+def test_the_engineers_no_grid_builds_nothing_and_keeps_the_question_answered(tmp_path, example):
+    work = _ledger_work(_no_grid(tmp_path, example))
+    run_grid_systems(work, svg=False)
+    q = _one(_gs_questions(work), MISSING)
+    _set_answers(
+        work, [{**ans(MISSING, "house.dxf", {"no_grid": "yes"}), "key": q["key"], "question_id": q["id"]}]
+    )
+    for _ in range(2):  # the answer stays bound: the question is raised under its key, never stale
+        run_grid_systems(work, svg=False)
+        doc = _gs_doc(work)
+        assert _built(doc) == [] and [s["system_id"] for s in doc["systems"]] == ["S001"]
+        assert not any("builds nothing" in w for w in doc["warnings"])
+        again = _one(_gs_questions(work), MISSING)
+        assert (again["id"], again["key"], again["answer"]["status"]) == (q["id"], q["key"], "active")
+        assert again["message"].startswith("Answered: the engineer states that house.dxf holds no plan")
+
+
+def test_a_simulated_no_grid_is_warned_and_builds_nothing(tmp_path, example):
+    work = _no_grid(tmp_path, example)
+    answer = sim(answer_to(build_grid_systems(work), MISSING, {"no_grid": "yes"}))
+    out = build_grid_systems(work, answers=[answer])
+    assert _built(out) == [] and _missing(out)["blocking"]
+    assert not _missing(out)["message"].startswith("Answered")
+    assert any("non-engineer role" in w and "builds nothing" in w for w in out["warnings"])
+
+
+def test_an_engineers_no_grid_keeps_the_question_raised_after_the_file_is_covered(tmp_path, example):
+    """Unlike a words-only answer (M2), no_grid=yes is the engineer's statement about the file: it stays
+    bound (active) while it stands."""
+    work = _two_files(tmp_path, example)
+    only_a = answer_to(build_grid_systems(work), "grid_system_select", {"systems": ["S001"]})
+    no_grid = answer_to(build_grid_systems(work, answers=[only_a]), MISSING, {"no_grid": "yes"})
+    again = build_grid_systems(work, answers=[only_a, no_grid])
+    both = answer_to(again, "grid_system_select", {"systems": ["S001", "S002"], "separate": ["S001", "S002"]})
+    final = build_grid_systems(work, answers=[both, no_grid])
+    assert [q["file"] for q in final["questions"] if q["code"] == MISSING] == ["b.dxf"]
+
+
+# --- review M2: only an answer that builds a grid keeps grid_system_missing raised -------------------------
+
+
+def test_a_words_only_engineer_answer_does_not_keep_the_question_raised(tmp_path, example):
+    """Select S001 only: b.dxf is asked; the engineer answers in words only; then selects both again. b.dxf is
+    covered by a selected system again, so it is no longer asked (the words-only answer goes stale)."""
+    work = _two_files(tmp_path, example)
+    only_a = answer_to(build_grid_systems(work), "grid_system_select", {"systems": ["S001"]})
+    rejected = build_grid_systems(work, answers=[only_a])
+    words = answer_to(rejected, MISSING, {})
+    again = build_grid_systems(work, answers=[only_a, words])
+    assert [q["file"] for q in again["questions"] if q["code"] == MISSING] == ["b.dxf"]  # still not covered
+    both = answer_to(again, "grid_system_select", {"systems": ["S001", "S002"], "separate": ["S001", "S002"]})
+    final = build_grid_systems(work, answers=[both, words])
+    assert MISSING not in codes(final)
+
+
+def test_an_answer_built_system_is_drawn(tmp_path, example):
+    work = _no_grid(tmp_path, example)
+    answer = answer_to(build_grid_systems(work), MISSING, GRID)
+    doc = build_grid_systems(work, answers=[answer], write=True)
+    (s,) = _built(doc)
+    svg = (work / s["svg"]).read_text(encoding="utf-8")
+    ET.fromstring(svg)
+    assert "1 2 3 4 5" in svg and "0 4250 3730" in svg
 
 
 # --- SVG -------------------------------------------------------------------------------------------

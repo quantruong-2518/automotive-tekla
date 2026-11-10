@@ -376,8 +376,669 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
   `.claude/agents/doc-reader.md` (first three) and `planner.md` (the plan). Trigger check, 2 runs per
   query: intake 10/10 and 6/6 on fresh queries, reader 10/10 and 5/6, report 10/10, plan 10/10; no
   near-miss triggered.
+- Work-folder write lock (tool wave 2, ADR-0011, proposed): `worklock.work_lock` holds an exclusive OS
+  lock on `work/.harness.lock` (POSIX `flock`, Windows `msvcrt.locking` on byte 0) for the whole run of
+  intake, read-structure, callouts, marks, grid-system, answer, ask, finding add / withdraw and
+  questions-md. A held lock is exit 3 at once, naming the holder (pid, host, command, start time) from
+  `.harness.lock.json`, which the holder removes before unlocking; no waiting, no stale-lock rule, the
+  lock file is never deleted. A filesystem without lock support is exit 3 (never runs unlocked).
+  Read-only commands (status, list-sheets, sheet-text, find-text, finding list, dimensions) and the
+  path-based tools (validate, detect, dwg2dxf, read-dxf, extract-*, env-check) do not lock; every
+  subcommand must be on one list (`cli.UNLOCKED_COMMANDS`, test-checked). A writer whose work folder does
+  not exist is refused with exit 2 before it runs ("not a folder"). The holder record names its
+  `platform`; a record from the other OS (WSL vs Windows, whose locks do not see each other) refuses the
+  lock with exit 3 and says how to clear a stale one. Intake now resolves its converters before it reads
+  the work folder's registry, and creates the work folder just before locking it.
+- Tool wave 2 seam (EVAL-2 fixes; the packages fill in the behaviour). Schemas, all additive and optional,
+  `$id` still `0.1` (engineer, 2026-11-07): `text-index` decode source `style_family` and flag
+  `legacy_ascii_suspect`; `dxf-probe` hint `matched.field` `family`; `sheet-text` block reason
+  `legacy_ascii_suspect`, `list_file.blocked_text_count`, sheet id `unassigned` with null layout and bbox,
+  `query.unassigned`, `find_text.counts.unassigned_entries_searched`; `levels` `blocked_candidates`;
+  `marks` `table.blocked_columns`, match `size_compared` / `size_not_compared_reason`, `summary.by_sheet`,
+  `summary.size_comparisons`; `callouts` `summary.unparsed_by_reason` and reason `legacy_ascii_suspect`;
+  `intake` question `closed_by` and ref `families`; `answers` `answered_by_role` (engineer | simulated) and
+  `file_set_relation` values; `reader-findings` `decoded_by` and list `summary.by_class`; `grid-system`
+  `conflicts[].question_id` and `file_sets`; `status` `gate1.closed` and `gate1.non_engineer_answers`. New
+  schemas `dimensions` and `supplements` with examples. Shared code: `questions.FILE_SET_CODE`, `ROLES`,
+  `Closure`; `lifecycle.closures` and `supplements.load_supplements` stubs (no closure, no supplement
+  yet); `harness status` leaves closed questions out of the blocking counts and makes a `simulated`
+  answer to a gate-relevant question a gate-1 reason (an answer without a role still counts as the
+  engineer's); `harness questions-md` renders closures and supplements and has a `file_set_relation` row;
+  `harness answer --role engineer|simulated` and `file_set_relation` values (every file of the question
+  once); `harness ask` gives `member_mark_prefix_meaning` to marks and `file_set_relation` to intake;
+  `read_dxf.measure_dimension`. Not implemented yet (exit 3): `harness dimensions`, `sheet-text` /
+  `find-text --unassigned`, `harness ask --supplement` / `--withdraw-supplement`.
+- `marks` schema: `question_counts` accepts `member_mark_prefix_meaning` (tool wave 2, D6: marks asks the
+  plan-mark prefix question instead of callouts); `anchor_entry_id` and `columns.role` descriptions cover
+  line-grid tables found from a mark text with no header keyword. `$id` stays `0.1`.
+- Tool wave 2 package P3, answer provenance and reader supplements (EVAL-2 fixes 10 and 7):
+  - `harness answer --role engineer|simulated` is required (exit 2 without it). Every `harness answer`
+    command that `harness status` and `harness questions-md` print names `--role engineer` after `--by`.
+  - Gate 1 no longer counts an answer recorded without a role (DESIGN D4): like a `simulated` answer to a
+    question of intake, read-structure, grid-system or the reader, it is a gate-1 reason naming its
+    question id (`gate1.non_engineer_answers`, role null) until the engineer answers again.
+  - The same holds for a non-engineer active answer whose question is not live (no registry entry, or
+    obsolete) when a gate check still reads its code from every active answer (units, grid-system): the
+    reason names the answer's key.
+  - Review M1: every `harness answer` command in a gate-1 reason is introduced as the engineer's own step
+    (`the engineer runs: …`), the role reason says the engineer must answer again themselves, and
+    questions.md labels the command as one the engineer runs and an agent never runs instead.
+    `record_answer` takes `role` as a required keyword (no default; None is a usage error).
+  - Review M2: `harness status` and `harness questions-md` accept a `lifecycle.closures` closure only when
+    its reason fits the closed question (not_selected / separate: grid-system `grid_system_conflict`;
+    units_answered: read-structure `grid_units_doubt`; rejected_systems_only: read-structure `grid_*`
+    except `grid_gate1_confirmation`; other_file_set: none yet, nothing derives it), the question is not
+    the reader's, and it names a live question of the code the reason needs (`grid_system_select`, or
+    `units_confirm_all` for units_answered) with an active engineer answer. A refused closure leaves the
+    question open and is a `closures:` gate-1 reason. A closure a producer already wrote (registry
+    `blocking: false` plus `closed_by` in the question document) is checked against the same contract;
+    a refused one counts the question as blocking again, in status and in questions.md. An unreadable or
+    invalid document the lifecycle reads is exit 1 in `harness status` and `harness questions-md`.
+  - A grid-system conflict pending on an unanswered `file_set_relation` question (non-blocking, no
+    `closed_by`) gets a gate-1 reason that names that question and its answer command, instead of the
+    `separate=` advice.
+  - `harness ask --supplement Q-id --where --found --text [--file --sheet]` adds the reader's evidence to a
+    producer's question in `reader-supplements.json` (key = target key, file, file sha256, where; prints
+    `new` or `already_supplemented`); exit 2 for an unknown, obsolete or reader-owned target, a withdrawn
+    place, or `--code` / `--blocking`. `--withdraw-supplement KEY --reason R` keeps it as withdrawn. A
+    supplement whose target goes obsolete reads as `stale`; questions.md shows active ones under the
+    question. The target's blocking flag, answer and refs never change.
+  - `harness finding add` records `decoded_by`: per decode source and knowledge pattern of the cited
+    entries' runs, the knowledge row's status and decision date. `finding list` marks a finding `stale`
+    when that row's status or date changes or the row is gone; such a finding no longer counts as a
+    duplicate or as a sheet's active class.
+  - `harness finding list` prints `summary.by_class`: the listed `sheet_class` findings per class, counting
+    only active, non-stale ones (a withdrawn or stale class would count a sheet twice).
+- Tool wave 2, package P4 (marks and dimensions):
+  - `harness marks` gates schedule tables per column (EVAL-2 fix 8): only a blocked mark-column header
+    blocks a table; any other blocked header cell is listed in `table.blocked_columns` and the table is
+    read. A line-grid table without a keyword is read on the column it was found from (confidence low)
+    unless that column's header is blocked. Every matched mark says `size_compared`, else
+    `size_not_compared_reason`; `summary.size_comparisons` counts them.
+  - Counts the report asks for (EVAL-2 fix 11): `harness marks` `summary.by_sheet` (plan marks, tables,
+    header-blocked tables, rows, unparsed tables, blocked marks per detector sheet; sheet null for texts on
+    no sheet) and `harness callouts` `summary.unparsed_by_reason` (unparsed candidates per reason).
+  - `harness dimensions <work_dir> <file> [--sheet ID | --unassigned] [--layer L] [--max N] [--input-dir
+    DIR]` (EVAL-2 fix 11), read-only: every DIMENSION of one drawing, also inside nested INSERTs (virtual
+    copy, handle null, `block_path`), with what it measures next to its printed or override text and the
+    probe's text rule and status, plus layer and detector sheet. Values as stored, never converted;
+    `units` reports the declared and the answered unit only. A native DXF needs `--input-dir` (exit 2).
+    The layer is the effective one: inside a block, layer 0 takes the layer of the placing INSERT
+    (recursively), so `--layer` finds it; the stored layer is not reported (one layer field in the schema).
+  - `member_mark_prefix_meaning` moves from `harness callouts` to `harness marks` (EVAL-2 fix 1b): one
+    blocking question per file with one subject per prefix of its plan marks (upper-cased; titles such
+    as `DẦM D3` count, schedule cells do not); `marks.json` `question_counts` counts the prefixes. Callouts
+    still lists `member_mark` candidates but no longer asks; an answer to callouts' old question goes stale
+    once at the next callouts run and the engineer answers the marks question (default D6, reversible).
+- Tool wave 3 (EVAL-3 fixes; the packages fill in the behaviour):
+  - Tool wave 3, seam. Schemas, all new fields optional, `$id` still `0.1`:
+    - `answers`: `grid_system_missing` values `dir1_labels`, `dir1_spacings`, `dir2_labels`,
+      `dir2_spacings` (arrays; both directions, or none) and optional `sheet` (ADR-0013 §2);
+      `grid_answer_contradicts_drawing` takes no value.
+    - `question-registry`: `obsolete_reason`, only on obsolete entries.
+    - `grid-system`: question codes `grid_system_missing` and `grid_answer_contradicts_drawing`; system
+      `source` (`detected` | `engineer_answer`) and `source_answer` (question id, key); a system built from
+      an answer has no view, contributor or representative family, and its provenance method is
+      `engineer_answer`; status `proposed_simulated` for `units.status`, `axis_assignment.status` and
+      `files[].units_answer.status`, units reason `units answered by a non-engineer role`; conflict
+      `proposed_closed_by` (what a non-engineer select answer would close; it closes nothing).
+    - `marks`: `summary.mark_sets` (`file`, `family`, `members`, `complete`, `source`); `compared_with` on
+      matched, schedule-only and plan-only marks (`schedule` | `detail_heading`, plus `none` for plan-only),
+      `detail_headings` refs (a heading-only match needs no schedule row) and the per-file
+      `detail_headings` count.
+    - `callouts`: candidate `unparsed_code` (reason family, incl. `symbol_glyph_unverified`), top-level
+      `rejected` matches with `reason_code` and `reason`, summary `unparsed_by_code`, `rejected`,
+      `rejected_by_reason`, question count `callout_unparsed`.
+    - `sheet-text`: `query.region`, `region` and `rows` (cells of entry ids with display text and the
+      gate's meaning) for a region read; find-text `counts.blocked_in_scope` (query-independent); one of
+      it and the deprecated `blocked_entries_not_searchable` is required.
+    - `intake` question `places` and `amendments` (reader questions); new schema `reader-questions`
+      (`harness validate reader-questions`), with example; examples `grid-system-answer` and
+      `sheet-region`.
+    - `status`: `gate1.closed` stays optional until `harness status` always writes it.
+  - Tool wave 3, seam: a registry entry that a producer run makes obsolete records `obsolete_reason`
+    (W5), first match wins: its input file was removed, or changed (asked again under a new key), or
+    the producer declared its code superseded by an answer to another code (`Ledger.sync(...,
+    superseded_by={code: answer_code})`, only while such an answer is active), else the latest run no
+    longer raises it. Set on the transition, kept while obsolete, dropped when the key is raised again.
+  - Tool wave 3, seam: new question codes `sheet_number_gap`, `callout_unparsed`, `legacy_ascii_text`,
+    `grid_system_missing`, `grid_answer_contradicts_drawing` (shared constants in `questions`, with the
+    `grid_system_missing` value keys) and their proposed Vietnamese rows in `harness questions-md`, whose
+    answer command for `grid_system_missing` prints the ADR-0013 keys. New flags, parsed and checked
+    (exit 2 on misuse) but not implemented yet (exit 3, nothing written) until their package lands:
+    `harness ask --amend Q-id [--text T] [--places P ...]` (package C; `--places` only with `--amend`) and
+    `harness sheet-text W FILE SHEET --region x0,y0,x1,y1` (package T; four finite numbers, x0 < x1,
+    y0 < y1, a sheet id and no `--unassigned`; write negative coordinates as `--region=-5000,...`,
+    which the help says, because argparse takes a `-` value after a space for an option). `harness find-text` warns with `blocked_in_scope` when the
+    output has it. `harness answer --help` names the `grid_system_missing` keys.
+  - Tool wave 3, package S (sheets + levels):
+    - Levels: a storey word names a storey except in the non-names seen on the corpus: a slab-plan
+      title whose only storey word is `sàn` (slab), a quantity or schedule heading (`khối lượng`,
+      `thống kê`), and a storey word with nothing else (`tầng`, `floor slab`). A sure name (`tầng 3`,
+      `first floor`, `upper floor`, `tầng thượng`, `tầng kỹ thuật`, `tầng điển hình`, `áp mái`,
+      `penthouse`) always counts, also as the text next to a bare value. So `level_name_conflict` is no
+      longer raised between slab-plan titles (290: three false conflicts; 267: one) but still is between
+      names without a number (`TẦNG THƯỢNG +10.800 / +10.500`), and storey heights fall back to the
+      asked, low rule instead of skipping unnamed levels (290: +7.300 is no longer skipped).
+    - Levels (safety): when storeys are named, an unnamed level that carries a storey word (on its line
+      or in the text next to it), between the named levels or outside them, caps the storey heights at
+      low and raises the blocking `level_storey_selection` listing those levels; before, `GROUND / FIRST /
+      SECOND / ROOF FLOOR` gave one 10.8 m storey with no question, and a bare `GROUND ±0.000` or an
+      unnamed basement below named floors was dropped from the heights silently. No known file changes.
+    - Levels: a sign with one space before the digits right after `(` is a sign, so
+      `(+ 6.00M LEVEL)` gives the level +6.000 (161 and Steel_01). Elsewhere a spaced sign after other
+      text is still read as a dash (`TẦNG 2 - 3.600`).
+    - Sheets: the sheet-number pattern (used only when no title field gives one) looks in the title-block
+      corner, the last quarter of the frame along the text's reading direction and its lowest fifth,
+      not the lower-right quadrant. A portrait frame is also read at 90 and 270 degrees. A member mark
+      is never a number: a code that appears twice on its sheet, has a mark family on its sheet
+      (`gĐ-1`, `gĐ-2`), or appears twice outside every title block. Among several corner codes a
+      position repeated in other sheets' corners wins, then the tallest; a tie stays a
+      `title_field_conflict`. Every corner code not taken is listed in `warnings` with its reason. A
+      model text shown on a layout sheet is never in that sheet's corner. Corpus: 285 model#03
+      `kc- 03`, 290 model#16-18 `Kc - 13` and 267 model#16-20 / #43-44 are now read; the false
+      `gĐ-3` on 286 model#04 is gone.
+    - Sheets (safety): a corner code is taken as the sheet number only when its position repeats in
+      another sheet's corner. A code with no such backing (and every code of a one-sheet file) is a
+      warning, and the sheet gets the blocking `sheet_number_missing`; before, a lone mark in the corner
+      (`C-1` next to a number like `S101` that is not code-shaped) became the number with no question.
+      Codes without a separator (`S101`) are still not sheet codes: on the known files that shape picks
+      up stirrup spacings (`a100`, `a200`).
+    - Sheets: a text equal to another sheet's corner code is a reference to that sheet (a detail callout,
+      a drawing list, an index sheet), not evidence that the corner code is a mark, so a number referenced
+      from two sheets or a sheet that references its siblings keeps its number. Only corner codes that pass
+      their own sheet's mark checks count as sheets to reference. References to sheets outside the file
+      still count as marks, so that sheet is asked. No known file changes.
+    - Sheets: new non-blocking question `sheet_number_gap`, one per file, when the chosen sheet numbers
+      of a letter series skip numbers that no sheet of any series carries (one counter may run over
+      several series, as Kc and KT on 290). `found` gives each missing number or range with the sheets
+      on each side, and the sheets without a detected number. `KT 1/18` counts as 1, `KC-05A` as 5;
+      other values are left out. Corpus: 290 `missing 25`, 461 `missing 6-9` (three sheets there have
+      no detected number); no other known file.
+    - Sheets: more than 9 missing sheet numbers in a row (`SHEET_GAP_MAX_RUN`) is a numbering jump, not
+      a gap: `S-101 / S-201 / S-301` (numbering by hundreds) no longer asks `missing 102-200; 202-300`.
+      Each jump is a warning with the numbers and sheets on each side; shorter gaps next to it are still
+      asked. The known gaps (290: 1 number, 461: 4) do not change.
+  - Tool wave 3, package T:
+    - W4 (safety): `harness find-text` and `harness sheet-text --contains` never match a blocked
+      (legacy-font) entry, on its stored, decoded or any normalised text; before, typing the stored legacy
+      form of a word (`thèng kª`) found and in effect decoded blocked text (EVAL-3 F-B17). Blocked entries
+      are reached by entry id or sheet listing only. find-text reports `counts.blocked_in_scope`, the
+      blocked entries of the searched files or sheets whatever the query, and no longer writes the
+      deprecated `blocked_entries_not_searchable`; hits are always `allowed`. sheet-text `--contains` warns
+      how many blocked entries of the sheet it never matches.
+    - W3: `read_dxf.legacy_ascii_questions(text_index, file, probe text_styles)` builds the
+      `legacy_ascii_text` questions of one file: one per text style holding `legacy_ascii_suspect`
+      entries, not blocking, `count` = the style's flagged entries, the first 5 listed by entry id and
+      quoted as stored, the message and every ref's `where` naming the style, its font file and its
+      TrueType family (`harness questions-md` shows the refs, not the English message). `harness
+      intake` raises them after the `encoding_unknown_non_ascii` questions (none for a file whose text
+      index is unreadable); on 267 one question covers the 786 ROMANS entries, on 461 two questions
+      cover 14. The `questions.py` docstring and the intake schema descriptions now say these questions
+      (and `callout_unparsed`) are one per file and style (or reason family), not one per code and
+      file. The sheet-text
+      `legacy_font_gate.question_ids` lists the file's live `legacy_ascii_text` questions when the sheet
+      has `legacy_ascii_suspect` entries (encoding questions still only when an encoding answer can lift
+      a reason); find-text `notes` names the questions covering the blocked entries in scope; `harness
+      finding` counts `legacy_ascii_text` as a font question when it refuses a blocked entry.
+    - a5: `harness sheet-text W FILE SHEET --region=x0,y0,x1,y1` (absolute coordinates, the entries' x/y
+      and the list-sheets bbox) returns the sheet's entries whose insertion point lies in the box, edges
+      included, as `rows` of `cells`: rows as the reading order with the whole sheet's row tolerance
+      (0.6 x its median text height), a new cell where the insertion-x gap to the left neighbour exceeds
+      that tolerance, each cell with its entry ids, joined display text, meaning and x span; no blank
+      cell is invented. `entries[].row` indexes `rows`; `counts.assigned` and `legacy_font_gate` stay the
+      whole sheet's; `--contains` and `--max` work as without a region. A box that misses the frame is
+      warned about. On 286 the `Ø<10mm` row reads `Ø<10mm | CI | 225` (T001075, T001074, T001072).
+  - Tool wave 3, package G:
+    - `harness read-structure` finds grid bubbles drawn as an ARC that is a full turn within
+      `FULL_ARC_GAP_DEG` (1 degree; EVAL-3 285 and 286 block `SADF`, an arc from 90.00006 to 90.0000031
+      degrees), and a grid line drawn through the bubbles at both of its ends and on to the frame pairs
+      with them when two bubbles of one label, at least `MIN_AXIS_LENGTH` radii apart, both lie on it
+      (286 model#05). A ratio-1 ELLIPSE is a circle only when it, too, is a full turn (a door swing in an
+      unevenly scaled block was counted). 285 now gives 1-2-3-4-5 = 3130/3540/3520/4590 x A-B-C =
+      4250/3730 (and 4254 on model#03), 286 gives 1-2-3 = 3400/3980 x A-B-C = 4840/4190 on 13 sheets.
+    - `harness grid-system` reads only the engineer's answers (`answered_by_role` engineer) as decisions.
+      Units or Tekla X/Y that only a simulated or role-less answer gives are `proposed_simulated`
+      (`units.answered` names the proposed unit; nothing is converted or assigned; the X/Y question keeps
+      blocking); a `grid_system_select` answer from another role selects nothing and records what it would
+      close as `proposed_closed_by` (the conflict keeps blocking); a `file_set_relation` answer from another
+      role leaves the file sets pending; a `units_answer_contradicts_evidence` confirmation counts only from
+      the engineer. Each such answer is named in `warnings`. A conflict that the engineer's file-set answer
+      retires records `obsolete_reason` "superseded by an answer to file_set_relation".
+    - ADR-0013 route in `harness grid-system`: every read drawing file that no selected two-direction
+      detected system covers gets a blocking `grid_system_missing` question (`found` quotes the bubbles,
+      labels and axes grids.py found; the message names the file's detected systems and why none is
+      usable, and the `--value` keys). An active answer by the engineer with `dir1_labels`,
+      `dir1_spacings`, `dir2_labels`, `dir2_spacings` (and optional `sheet`) builds a system with
+      `source: engineer_answer` and `source_answer`, numbered after the detected systems; it is selected,
+      given Tekla X/Y and units like a detected one, and the question stays raised while that answer is
+      active, so the answer and the system survive reruns. A simulated, role-less, words-only or malformed
+      answer builds nothing and is warned. The given spacings are checked against the linear dimensions
+      between two of the given axes (labels case-blind, spans as sums, drafting tolerance): a
+      disagreement raises a blocking `grid_answer_contradicts_drawing` quoting both values; a grid with no
+      dimension to check is warned. `grid_system_missing` answers are part of the answers digest.
+  - Tool wave 3, package C:
+    - `harness answer` takes the `grid_system_missing` values (ADR-0013 §2): `dir1_labels`,
+      `dir1_spacings`, `dir2_labels`, `dir2_spacings` together, optional `sheet`, or no value for an answer
+      in words only. Per direction at least two distinct, non-blank labels and exactly one spacing fewer,
+      each a plain decimal > 0 (no sign, exponent, `inf` or `nan`); anything else is exit 1, nothing
+      written. Stored in `answers.json` as arrays: labels as strings, spacings as numbers (`3130` stays an
+      integer, `3540.5` a float). The answer itself builds nothing; `harness grid-system` reads it.
+    - `harness ask` refuses the producer codes `legacy_ascii_text` (intake) and
+      `grid_answer_contradicts_drawing` (grid-system; it no longer falls under read-structure's `grid_`
+      prefix) as reader codes (exit 2).
+    - `harness ask --amend Q-id [--text T] [--places P ...]` works (it was a stub, exit 3): it changes a
+      live, unanswered reader question in place. The id, key and ref stay; the new message and/or `places`
+      replace the old ones, which are kept in `amendments` (`at` = the registry run counter, bumped once
+      per amendment; only what changed is recorded). The same values again change nothing (status
+      `unchanged`). Refused with exit 2 for an unknown, producer, withdrawn or answered question (any
+      active answer, simulated included). A live entry missing from `reader-questions.json` is exit 1.
+      `harness ask` now checks `reader-questions.json` against the `reader-questions` schema before it
+      writes it, and when it reads it (a document that breaks the reader rules is refused, exit 1).
+    - `harness status` always writes `gate1.closed`, as `[]` when nothing is closed (W5).
+    - `harness status`: an answer to `grid_system_missing` closes it only with its grid values (ADR-0013
+      decision 2). The engineer's answer in words only (`{}`) builds nothing, so the question stays in
+      `blocking_open`, and a `grid systems:` gate-1 reason gives the `harness answer` command with the
+      `dir1_labels` / `dir1_spacings` / `dir2_labels` / `dir2_spacings` values. `harness questions-md`
+      lists it with the open blocking questions as "chưa đóng: câu trả lời chỉ có lời", with those values.
+    - `status` schema: `gate1.closed` is required (`$id` still 0.1; example updated). A status output
+      written before tool wave 3 without it no longer validates; rerun `harness status`.
+  - Tool wave 3, package M (marks + callouts):
+    - `harness callouts`: every unparsed candidate names its reason family in `unparsed_code`
+      (`ambiguous_notation`, `grade_unverified`, `notation_unverified`, `conflicting_values`,
+      `member_mark_undefined`, `symbol_glyph_unverified`), counted in `summary.unparsed_by_code`. A character
+      in diameter position that is not Ø or %%c (W1b: `2ù20`, `ù14a150` in drawing 290's style Arial, `2Þ16`
+      in its VNI styles, U+2300 / U+2205) is an unparsed `rebar_callout` with `symbol_glyph_unverified`,
+      never decoded: a non-ASCII letter only in the shapes count + diameter or diameter + spacing (`Đ`/`đ`
+      never), the two diameter-like symbols also alone with a number. Before, these texts gave no candidate.
+    - `harness callouts` drops nothing silently: text that matched and is no candidate is listed in
+      `rejected` (file, sheet, entry id, the text, kind, `reason_code`, reason), counted in
+      `summary.rejected` / `rejected_by_reason`: a diameter sign that no pattern reads
+      (`diameter_sign_no_notation`, e.g. `Ø<10mm`, a glued `A4Ø16`), a mark-shaped sheet code
+      (`sheet_code`), and a mark-shaped text another extractor took (`claimed_by_title_block`,
+      `claimed_by_grids`, `claimed_by_levels`). Blocked texts stay in `blocked_entries` only.
+    - `harness callouts` raises `callout_unparsed` (blocking for lot specs; callouts is no gate-1 producer):
+      one question per file and `unparsed_code` over the unparsed candidates no other question asks (no
+      ambiguity, no member mark, no legacy grade group). Subject = the code with the true count; refs = the
+      first five examples (text entry ids, verbatim, scan order) and one `sheets` ref with the count per
+      sheet. On EVAL-3's set this asks the 554 unparsed Ø-callouts and drawing 290's 538 glyph callouts.
+    - Fix: a title-block candidate found by shape alone (the lower-right sheet-code fallback, evidence kind
+      `pattern`) no longer consumes a real mark in `harness callouts` and `harness marks` when the sheet
+      holds a family of that mark (another unclaimed mark-shaped text with the same prefix, style and
+      height): 286's tie-beam mark `gĐ-3` is a mark again. Sheet numbers found the same way without such a
+      family (461 `Đn-05`) stay claimed.
+    - Fix: a whole `M<n>` text with a bolt size n is a member mark, not a bolt label, in `harness callouts`
+      and `harness marks` when its footing family stands next to it: a whole `M<n-1>` or `M<n+1>` that is
+      no bolt size, on the same sheet, in the same style and height. 433's footing `M8` (T000555, next to
+      `M7`) joins M1–M7; bolt labels elsewhere (161, Steel) are unchanged.
+    - `harness marks` reads a mark followed by a length in brackets, `LT1(L=4700)` (267's lintels), as the
+      plan mark `LT1`; the length stays in `display_text` only (no size). 267 gains 41 lintel plan marks.
+    - `harness marks` (a4) compares plan marks with RC detail headings as a second source besides parsed
+      schedules: a title-form plan mark (`DẦM D1 (SL= 02)`, `CỘT C9`, `ĐÀI CỌC ĐC2`) and an English
+      `DETAIL OF/ON <mark>` line (161 `DETAIL ON AB-20B`) are headings and no longer the plan side of the
+      comparison (they stay plan marks for the prefix question). Matched, schedule-only and plan-only marks
+      carry `compared_with` (`schedule` when a schedule row exists, else `detail_heading`), headings are
+      listed in `detail_headings` (entry id, sheet, text) and counted per file in
+      `matching[].detail_headings`. A match through headings only is not size-compared (reason
+      `matched through detail headings only: no schedule row to compare`). `plan_only` is listed only for a
+      file with a schedule or a heading; a file with neither is not compared (`none` is never written).
+      Changed: a title that used to match a schedule row (`COLUMN C2`) is now a schedule-only key with
+      that heading. The heading comparison covers only the families (prefix) that have both a plain plan
+      mark and a heading; any other family is not compared through headings, so it gives no plan-only or
+      schedule-only finding (433's footings next to column headings only; 286's pile-cap headings with no
+      plan label read). `matching[].detail_headings` counts the headings that took part.
+    - `harness marks` (W6) writes `summary.mark_sets`: one set per file and mark family (prefix,
+      upper-cased as in `member_mark_prefix_meaning`) with `members` (one per key, as drawn, natural order,
+      gaps kept), `source` (`schedule`, `detail_heading`, `plan_marks`) and `complete`. `complete` is true
+      only when a parsed schedule or the heading sweep lists the family and nothing says the list may be
+      short: no plan-only mark in the family, no notation variant, and no unparsed table, header-blocked
+      table or blocked mark in the file. Otherwise the report writes "ít nhất". 433: `M1`…`M8` and `GM1`…`GM5`,
+      `GM7`, `GM8`, both incomplete (plan marks only).
+  - Tool wave 3, package GRIDGATE:
+    - `grid_system_missing` takes `no_grid=yes`, alone (ADR-0013 decision 2): the engineer states that
+      the file holds no plan that needs a grid (notes, details or sections only). `harness answer`
+      accepts it from any role and refuses it with any other key or value (exit 1); `answers` schema:
+      `values.no_grid` const `yes`, alone (`$id` still 0.1). `harness grid-system` builds nothing for it
+      and keeps the question raised, answered, while the engineer's answer stands. `harness status` closes
+      the question on the engineer's `no_grid=yes` only; a simulated one closes nothing. The question's
+      message, the `grid systems:` reasons, `harness answer --help` and `harness questions-md` (a "Hoặc"
+      line with the command, in Vietnamese) print the option.
+    - Fix (review C1, EVAL-3 b1): `harness marks` no longer calls a partial family complete. A heading
+      that lists marks (`dẦm ct-1,ct-2`, `CỘT C1, C2, C3`, `DẦM D1 & D2`, `DETAIL OF CP1 & CP2`) gives one
+      heading per mark when every item after a `,` or `&` is a whole mark of the same family; before, only
+      the first was read (290: `CT` = `ct-1` alone, complete). A list in shorthand (286 `dẦm d2-4, 5`,
+      `dẦm d2, 3, 4, 5 , 6, 7, m-12`) is never expanded and names no mark (no false `d2`); it is listed in
+      `warnings` with its entry id and keeps the families it may name incomplete. `complete` now needs a
+      parsed schedule, or detail headings and plain plan marks that name the same keys (headings alone
+      list the drawn details, not every member), and no blocked plain text anywhere in the file (a blocked
+      text may be a heading). Known set: 290 `CT` = ct-1, ct-2; complete sets 10 → 3 (433 `C`, Steel_02
+      `C`, `MB`); 286 loses 7 heading matches `d2-4` … `dm-4` (they came only from shorthand lists; now
+      plan-only) and the false schedule-only `d2`; 290 gains schedule-only `d2`, `d3`, `d4` (from
+      `dẦm d1 , d2`, `dẦm d5 , d4 , d3`) and 3 notation-variant groups.
+    - Fix (review M2): `harness callouts` no longer drops glyph callouts outside the two narrow shapes.
+      Glyph callouts joined by `+` or `/` (`2ù20+2ù18`, `2ù20 + 2ù18`, `2ù20/2ù18`, `2Þ16+2Þ18`) are one
+      unparsed `rebar_callout` with `symbol_glyph_unverified` (rule `SYMBOL_GLYPH_JOIN`), as their Ø twins
+      are one candidate; before, they gave no candidate and no `rejected` row (the spaced form gave two).
+      A glyph before or between digits that no shape reads (bare `ù12`, `ù8@150`, `Ô1`) and a U+2300 /
+      U+2205 no pattern reads are listed in `rejected` with `diameter_glyph_no_notation`: not a candidate,
+      so a slab-panel letter raises no blocking question. Known drawings: no change (none of these forms
+      occurs; 290 keeps 507 `ù` + 31 `Þ` candidates).
+    - Fix (review, tie): when a sheet's shape-only (`pattern`) title-block candidates of one field have
+      two values or more, `harness callouts` and `harness marks` claim none of them: sheets already chose
+      none and raised a blocking `title_field_conflict`, so a mark among them stays a member mark in
+      `marks.json` instead of a `claimed_by_title_block` row. One shape-only candidate (461 `Đn-05`) stays
+      claimed. Known drawings: no change (no such tie in their sheets documents).
+- Tool wave 4 (EVAL-4 fixes; the packages fill in the behaviour):
+  - Tool wave 4, seam. Schemas, all new fields optional, `$id` still `0.1`; nothing reads or writes them
+    yet:
+    - `text-index`: per entry `printed` (boolean), `not_printed_reasons` (`entity_invisible`,
+      `attribute_invisible`, `layer_off`, `layer_frozen`, `layer_no_plot`) and `print_uncertain_reasons`
+      (`insert_invisible`, `attmode_not_normal`, `viewport_frozen`, `defpoints_layer`). The flags
+      `layer_off`, `layer_frozen` and `attribute_invisible` stay in `flags`.
+    - `marks`: per table `blocked_header_entries` (entry ids of blocked header cells; `header[]` keeps a
+      placeholder only) and a header `cell` may have `entry_id` null for that placeholder.
+    - `sheets`: `title_block.job_number` (shaped like `sheet_number`) and candidate field `job_number`.
+  - Tool wave 4, seam: `tekla_harness.visibility` (`is_printed`, `not_printed_reasons`; a missing `printed`
+    counts as printed); question code `text_visibility_uncertain` (constant in `questions`, Vietnamese
+    row in `harness questions-md`, raised by package T); flag `--include-hidden` on `harness sheet-text`
+    and `harness find-text` (also show entries that do not print, marked), exit 3 with nothing run until
+    package T lands. A synthetic R2018 (AC1032) DXF is tested through intake and read-structure.
+  - Tool wave 4, package M (marks + callouts):
+    - `marks`: a blocked schedule header cell keeps only a placeholder in `tables[].header[]` (`entry_id`
+      null, verbatim text and reason kept); its id is listed in the table's `blocked_header_entries`, so no
+      blocked id is cited outside a `blocked*` list (EVAL-4 criterion 2, M2).
+    - `marks` and `callouts` leave out every text entry that says `printed: false` (a hidden ATTRIB is no
+      plan mark, header keyword, table cell, callout or footing-family evidence, and does not set the line
+      tolerance); a file with such entries gets one warning with the count per `not_printed_reasons`
+      (the documents have no counter field). An index without `printed` reads as printed. Repro: 271
+      phantom `dẦm d2-1` on 12 sheets.
+    - `marks` and `callouts` (EVAL-4 A4a): the ATTRIBs of a rebar-callout block (an INSERT with a spacing
+      value `a150` / `A200` among its ATTRIBs, or a `THEP` / `KHOANGCACH` tag) are parts of a callout, not
+      member marks; a strength class (`RB 500`, `CB 400`: grade prefix and verified yield class) and a signed
+      level (`cos -300`) are not marks. `callouts.json` lists them in `rejected` (`callout_part`,
+      `grade_token`, `level_token`); `marks.json` has no such list, so one warning per file gives the count
+      per reason and five examples. Repro 278 (D6..D25, A150, `RB 500`, `cos -300`); second files 285, 286
+      (`SH thep` blocks).
+    - `marks` and `callouts` (EVAL-4 A4c): a steel profile (`HEB-650`, `IPE 300`, `UC 254`: series letters
+      and a depth of 50 or more) and a detail label (`DET-2`; the bubble `A1` of a `DETAIL - A1` heading on
+      the same sheet, when every mark-shaped text of its prefix on that sheet is such an id; English
+      `DETAIL` headings only) are not marks
+      (`steel_profile`, `detail_label` in `callouts.json` `rejected`; a warning in `marks.json`). A
+      `job_number` title-block candidate is claimed by the title block even when found by shape alone, so
+      `J-01` is never a mark next to J-02, J-03. Repro 180 (`HEB-650`, `A1` x16, `DET-2`).
+    - `marks` (EVAL-4 R-e, R-g, R-k): a section-cut label (letters, a blank, `n-n` with the same number
+      twice: `mc 1-1`, 355 on 286) is not a mark (`section_label` in the per-file warning); a heading may be
+      glued to a bracket (`dẦm d2-7(sl= 01)`, 286) and may start with the pile-cap word `đài` (`ĐÀi dm 1`,
+      285: the DM family appears in the mark sets).
+    - `marks` (EVAL-4 R-c): a schedule drawn with lines may have ONE data row: when its mark cell is allowed
+      text with a mark's shape (or a member-word title) and the row has a second cell, it is a table, not an
+      `unparsed_tables` entry (161's crane-beam table: CB-01 is matched, not plan-only). Without lines two
+      rows are still needed.
+    - `marks` and `callouts` (EVAL-4 271): a whole text `<letters><n>` that a callout pattern claims (`bm-1`
+      read as a plate tag) is a mark when it stands in a run of three consecutive numbers of one prefix,
+      text style and height on one sheet (271 `bm-1` .. `bm-7`: the BM footing family, 16 plan marks); a
+      plate number alone (`BM12`) stays a plate. Texts that do not print take no part.
+    - `marks` (EVAL-4 R-f): when one mark of a family appears three times or more as a title-form text
+      (`dẦm d-1`) on a sheet, every title-form text of that family on the sheet is a plan label, not a detail
+      heading (form `plain` / `with_size` / `sub_number`, no `title_member_word`); one warning per file counts
+      them per sheet. 290 `dẦm d-n`: matched 5 -> 16, schedule_only 17 -> 5. Review fix C1: a family
+      with a quantity tail (`(sl= 02)`, `SL: 2`, `số lượng 5`) on the sheet is never demoted: a detail
+      sheet heads one beam with its count and labels its cross-sections with bare titles (285 KC-17).
+    - `marks` (review M1, SEAM-2): a data cell whose text the font gate blocks has `entry_id` null and its
+      id is listed in the table's `blocked_cell_entries`; `blocked_marks` keeps the id. M2 on the marks
+      test fixtures (gate: 1, inferred: 2) is 0. A cell of a header-blocked table with allowed text keeps
+      its id (only ids the text index blocks are moved).
+    - `marks` and `callouts` (review M3): a numbered run (`bm-1` .. `bm-7`) is a mark family only when a
+      printed text of the file names its prefix in a member-word heading (`bẢn mÓng bm-3`: a line that ends
+      with the mark and has a `MEMBER_WORDS` word before it); plate tags numbered in a connection detail
+      (`BM1 BM2 BM3`, `PL1`..`PL4`) stay plates. `MEMBER_WORDS` now lives in `callouts` (`marks` imports it).
+  - Tool wave 4, package T (text), visibility: `harness extract-text` fills `printed`,
+    `not_printed_reasons` and `print_uncertain_reasons` on every entry. Not printed: group 60 on the entity
+    (TEXT, MTEXT, ATTRIB, MULTILEADER, DIMENSION, also on block content), ATTRIB flag bit 1 (`invisible`
+    stays that flag only), the effective layer off, frozen or with the plot flag 0. Kept printed but
+    uncertain: an INSERT with group 60 above the entry, `$ATTMODE` other than 1 on an attribute (mode 2 shows even
+    a flag-1 attribute, so that one is uncertain; mode 0 hides every attribute, so a flag-1 attribute is not
+    printed), a layer frozen in some viewport (model space text only) and the `Defpoints` layer
+    (ezdxf rewrites its plot flag to 0 on every load, so only its name counts). Entries stay in the index;
+    the flags `layer_off`, `layer_frozen`, `attribute_invisible` and `text_gate` are unchanged. Known
+    drawings, not printed: 271 305 (232 on real entities, the exact set of the EVAL-4 hidden list, plus 73
+    rebar callout TEXT copies inside anonymous blocks), 278 46, 285 6 (dimension texts on a layer with plot
+    0), the other seven 0.
+  - Tool wave 4, package T (text), question: `read_dxf.text_visibility_questions(text_index, rel)` builds the
+    one non-blocking `text_visibility_uncertain` question of a file that has printed entries with
+    `print_uncertain_reasons` (a ref per reason with its entry count, then five example entry ids; `count` is
+    the number of entries). Intake calls it from seam 2.
+  - Tool wave 4, package T (text), wording: the `harness find-text` note no longer tells the engineer to
+    approve the font row for `legacy_ascii_suspect` entries. It names the `legacy_ascii_text` questions as
+    recording a reading that unblocks nothing, and mentions the font row (with its questions) only for
+    entries blocked by an encoding reason.
+  - Tool wave 4, package T (text), gate: unchanged. A font-evidence lift for plain Unicode text in a TrueType
+    file (271 `KÍNH`) was built and reverted after review: it let TCVN3 / VNI strings past the gate. Such text
+    stays blocked `encoding_unknown`; `tests/test_legacy_text_stays_blocked.py` keeps it so.
+  - Tool wave 4, package S (sheets and levels):
+    - Texts that do not print (`printed: false`, written by package T) give no sheet number, title field
+      or level: `harness sheets` leaves them out of every label, value, title-block evidence, corner code
+      and mark count (they keep their sheet in `text_ids`); `harness levels` gives no candidate and no
+      storey name from them. Each file gets one warning counting them (and, for levels, the level-shaped
+      values in them). An index written before `printed` existed still lowers confidence by `flags`.
+      Measured with the 271 hidden set emulated from DXF group 60 (232 texts): the phantom levels
+      +3.850, +3.450 and +3.050 (86 candidates) leave `levels.json`; the real `printed` field shows only
+      once package T lands.
+    - Sheet numbers by label (V3): a title-field label pairs with its value inside its title-block cell
+      (the box between the nearest drawn lines; a label with no cell or an empty one keeps a reading-direction
+      test: on its row to the right, with the value's box overlapping the label's rows, or just below it),
+      one value per label and one label per value, nearest first. The old test (value centre within
+      0.6 label heights of the label centre) missed values set larger than their label. New title field
+      `job_number` (labels `JOB NO.`, `SỐ HĐ`, `MÃ CÔNG TRÌNH`, tags `JOBNO` ...): `title_block.job_number`
+      (null when absent), a non-blocking `title_field_conflict` when its candidates disagree; its value is
+      never a sheet number, not even as a corner code (180 `J-01` had become the number of 3D-1/3D-2).
+      Known drawings: 180 numbers 2/8 -> 8/8 detected (P-01, P-01A, P-01B, P-02A, P-02B, P-04, 3D-1, 3D-2),
+      its `sheet_number_duplicate` and six blocking sheet-number `title_field_conflict` questions leave; 264 gains
+      `job_number` 08/2008 VKH; 278 gains low `title` candidates; 271, 285, 286, 290, 161, 267, 433 and
+      Steel_01: no change. For marks, the entry ids of the number and job values are
+      `title_block.candidates[].evidence.value_text_id` (fields `sheet_number`, `job_number`).
+    - Title-block frame turned by a hair, drawing-list header (F6): a closed rectangle whose edges miss the
+      axes by up to 1e-3 of its length (0.06 degrees; was 1e-6) is a frame, so a title-block INSERT scaled and
+      turned by 0.002 degrees is a sheet (271 KC-00, bbox 164846 234376 215925 270497: 34 -> 35 sheets, the
+      sheet ids after it shift by one). A sheet-number label whose value heads a column of two or more
+      further sheet codes is the header of a drawing list: no candidate, one warning (271 `drawing no` over
+      `dm-00`, `kc-00` ...: the drawing-list sheet now reads `kc - 01` from its own title block, and the
+      blocking `title_field_conflict` becomes a blocking `sheet_number_duplicate` with the foundation plan,
+      which prints the same number). Other known drawings: no change.
+    - Levels (V4): a sign set apart from its digits by any number of spaces is a level sign when the sign
+      starts the text (`+  0.000`, written with two spaces on 278: its eight storey levels +0.000 ... +28.650
+      were missing and Q-067 said "no datum"); after a level word or `(` the one-space rule of tool wave 3
+      stays, and `TẦNG 2 -  3.600` is still a name, a dash and an unsigned number. A storey name set beside
+      the value counts as on its row when the text boxes overlap vertically or lie within 0.1 of the taller
+      text's height (was: centres within 0.75 of the value's height, which missed a taller name text: 285
+      `+0.450` with `tẦng 1`). Known drawings: 278 levels 4 -> 14 (the ten key levels ±0.000 TẦNG 1 ...
+      +28.650 MÁI, all named); 285 names TẦNG 1-3 on +0.450, +4.350, +7.950; 290 gains -0.050, +1.140,
+      +2.430, +3.850 (written `+  1.140` on one sheet); 271 names +7.660 MÁI; 264, 180, 286, 161, 267, 433,
+      Steel_01: no change.
+    - Review fixes (package S): the drawing-list header rule counts only a table column, a chain of rows with
+      the first directly under the value, each next one within 3 row heights of the previous and of about its
+      height; sheet-code-shaped marks further down the sheet no longer drop a real sheet number (a title block
+      in the right strip with `C-1`, `C-2` 21 000 below it lost its number). 271 `kc - 01` / `dm-00` is unchanged.
+      A level sign set apart from its digits by more than one space is read only for a bare value (nothing but
+      the number, a unit or a closing bracket after it): `-   2.500 kN/m2` is no level. Known drawings: no
+      change (the four 290 values are bare).
+      A storey name beside the value is on its row by the old rule (centres within 0.75 of the value's height) or
+      by the box rule of c09581a; the box rule only adds pairs (it had dropped a small name centred below the
+      value). Its 0.1 limit: named candidates on the 11 known files are the same for 0.05 and 0.1 (285 needs
+      more than 0), and 0.2 adds two names on 271.
+      Title-block cell lines come from printed geometry only: a line or polyline edge on a layer that is off,
+      frozen or set not to plot, or with its own invisible flag (group 60), no longer closes a cell; a block
+      entity on layer 0 takes the layer of the INSERT that holds it (`Placed.outer_layer`). Known drawings:
+      no change.
+  - Tool wave 4, seam 2: `harness intake` now raises the non-blocking `text_visibility_uncertain` question
+    (one per file with printed entries that have `print_uncertain_reasons`, built by
+    `read_dxf.text_visibility_questions`); it comes after `legacy_ascii_text` in `questions.json` and
+    `ask.py` leaves its ownership to intake. The intake schema's question-order description lists it.
+  - Tool wave 4, seam 2: `harness sheet-text` and `harness find-text` hide entries that do not print by default;
+    `--include-hidden` lists them marked `printed: false` (the exit-3 stub is gone). `sheet-text.schema.json`
+    (`$id` still `0.1`): entry and hit `printed` (const false, only on a hidden entry) and
+    `counts.not_printed_in_scope`. Meaning change: by default `counts.assigned`, `matched`, `legacy_font_gate`
+    and the find-text `entries_searched`, `unassigned_entries` and `blocked_in_scope` cover PRINTED entries
+    only; `not_printed_in_scope` counts the rest, and with `--include-hidden` all entries are in. The
+    `list-sheets` `text_count` and `blocked_text_count` still count every entry.
+  - Tool wave 4, seam 2: `marks.schema.json` (`$id` still `0.1`): per table optional `blocked_cell_entries` (entry
+    ids of DATA cells whose text the font gate blocks; such a cell keeps `entry_id` null). The cell `entry_id`
+    description now names both null cases (header placeholder, blocked data cell). Nothing writes it until
+    package M.
+  - Tool wave 4, package G (grids, `grids.py` and `grid_system.py`; no schema change):
+    - Text, lines, circles and dimensions that do not print are left out of bubbles, labels, axes and
+      dimension evidence (not-printed text entries via `visibility.is_printed`; geometry by its own group 60
+      and its layer off / frozen / plot 0, read from the DXF). An entity on layer 0 inside a block and the
+      contents of an invisible INSERT stay (Autodesk does not settle them). What was left out is counted
+      in `warnings` (the grids schema has no counter field).
+    - Obround bubbles (two straight LINEs and two semicircular ARCs of one radius around the label) count as
+      bubbles, with half the overall length as radius (EVAL-4 180: 0 of its framing-plan bubbles were found).
+    - The grid-spacing units evidence uses plan systems only: `files[].grid_spacing_median` of
+      `grid-systems.json` is the median spacing of the file's systems with two or more independent views
+      (a single-source key plan never decides; a file with only single-source systems takes the median of
+      its systems' medians), so a small key plan no longer raises `units_answer_contradicts_evidence`
+      (EVAL-4 180, Q-199). `grid_units_doubt` in `grids.json` takes the median of the views' medians.
+    - A line or circle on a layer that has no LAYER table row is read as a plain printing layer (a
+      line there was dropped before, counted in `walk_skipped`).
+    - A bubble pairs with the axis line of its sheet's axis style (the layer and linetype most axes of the
+      sheet are on, when one clearly leads) before a nearer line of another style: another end candidate
+      of the style, or a line of the style drawn through the bubbles at both of its ends (EVAL-3 285:
+      the end bubbles took wall lines 110 outside their axes; spacings 3240 / 4700 become 3130 / 4590).
+      A bubble already on a line of the style counts as the other end of that line, so the left bubble of an
+      axis `a` no longer stays on a wall line 90 under it (285: `a a b c` becomes `a b c`).
+    - An axis that differs from its family in two of three things is no axis: its size (bubble radius or
+      label height more than 20 % from the family median), its block (the circle's outermost block name) or
+      its line (layer + linetype); for block and line the family value is the one more than half of the
+      axes share, and a family needs three axes (EVAL-4 264 `5` / `4` on a HIDDEN line, 278 section marker
+      `T`, 271 rebar bubbles `12` / `14` / `20`). The bubbles are listed as unpaired bubbles and the
+      warnings of `grids.json` name each axis and what differs.
+    - A `*` may end an axis label (`2*`, an intermediate axis; EVAL-4 278). Two plans stacked on one sheet,
+      whose shared axes are printed once, are two views: when exactly one family of a view repeats its
+      labels in alike runs of at least two axes (`a b a b`, never `1 2 2` or `1 2 1 3`), the view is cut into
+      one view per run and every other axis of it belongs to each (EVAL-4 278 KC-01). `bubbles_paired` counts
+      each bubble once.
+    - `harness grid-system`: a system of one direction seen in one view (any number of axes: rebar or pile
+      marks, 3D views, details: EVAL-3 286 `b bt`, 290 `8 1` / `6 1` / `3 16`, 180 model#05 / #06) is not
+      proposed as a grid system when its file has a main system, a two-direction system with three or more
+      axes in each direction from any number of views (180: every plan is seen once, as half of one grid).
+      It is listed in `unassigned_families` with the reason, counted in `summary.families_unassigned`, and
+      raises no `grid_system_axis_unassigned` question. 180: 8 systems / 31 blocking grid questions become
+      5 / 17; the other ten known drawings are unchanged.
+    - Schema descriptions (no field changes, `$id` unchanged): `grid-system` `files[].grid_spacing_median` is the median of the file's plan systems (single-source case stated); `grids` `unpaired_bubbles` also holds the bubbles of set-aside axes and views, which have lines.
+    - A view of one direction (one family of two or more axes, nothing across it) whose shared labels contradict
+      every other family that shares two or more of them, while two or more of those families agree with each
+      other, is set aside as an elevation or section: no grid system, no cross-check partner (EVAL-4 278
+      KT-08: `1 2 4` at 10107 / 5192 against 25 plans of `1 2 2* 3 4`). The bubbles are listed as unpaired and
+      a `grids.json` warning says why; a plan (two directions) is never set aside.
+    - `harness grid-system` prints `blocking_without_engineer_answer` (blocking questions the engineer has not
+      answered) and a `counts_note` beside the questions document's `answered` and `blocking_open`, which
+      count a simulated answer as an answer while `harness status` still keeps that question blocking, so
+      `blocking_open 0` read as "nothing left to answer".
+
+### Changed
+- Question lifecycle (tool wave 2, EVAL-2 fix 5):
+  - `grid_system_conflict` keeps its Q-id across a units answer and a select rerun: its key is built from
+    both sides' file, view and family ids and their shared labels; the system ids and the spacing
+    differences (in mm once units are answered) moved into the message. Existing answers to a conflict go
+    stale once (they never closed it). A conflict the `grid_system_select` answer settles carries
+    `closed_by` {select question id, not_selected | separate}, `conflicts[].question_id` names its question,
+    and a system's `conflict` flag stays only while one of its conflicts is open. `lifecycle.closures`
+    returns these closures from a fresh `grid-systems.json`.
+  - `harness intake` raises one blocking project-level `file_set_relation` question when two or more DXF /
+    DWG files were read (one ref per file with its sha256; a file added, removed or changed asks again).
+    `harness grid-system` reads its answer (`set1=a.dwg,b.dwg set2=c.dwg`): grids of two sets never merge
+    into one system and are never compared; `grid-systems.json` records `file_sets` (pending, answered or
+    single). While it is open, a conflict between two systems with no file in common does not block
+    ("pending Q-x"); the answer is part of the answers `harness status` checks grid-systems.json against.
+  - `harness read-structure` grid refs name the grid `families` they cite (the last listed ref of a
+    truncated question also carries the unlisted refs' families; none when they are not all known).
+    `lifecycle.closures` closes a read-structure grid question (`rejected_systems_only`) only when every
+    family it cites belongs to a system the `grid_system_select` answer leaves out; a family of a selected
+    system, of no system, or a ref without families keeps it open; `grid_gate1_confirmation` is never closed.
+  - `grid_units_doubt` is closed (`units_answered`, naming the units question) once the same file's
+    `units_confirm_all` has an active answer.
+- `knowledge/font-encodings.csv`: the three seed rows are approved by the engineer (2026-11-07) after
+  reading decoded samples: `VHARIAL.TTF` and `vntimeh.shx` = TCVN3, `vn_vni.shx` = VNI. Text in these
+  fonts is now decoded instead of blocked by the legacy-font gate. The engineer also endorsed the
+  `.Vn*…H` = TCVN3 capital-font naming convention that `encoding.font_hint` already applies.
+  Test fixtures that need a blocked font now pin their own proposed-row table instead of the shipped one.
+- Tool wave 2, package P1 (fonts and text access; EVAL-2 fixes 2a, 2b, 1a, 4, 11):
+  - `encoding.font_hint(style, font_file, family)` also reads the text style's TrueType family (ACAD
+    XDATA), after the style name and the font file: a `.Vn*` family gives TCVN3 and a `VNI-*` family VNI;
+    a Unicode-looking family decides nothing (a legacy font file may carry one; the knowledge table then
+    decides). The `H` capital-font rule applies to the family too (default D3, reversible); when the
+    style name and the family disagree on case, the hint is null. `harness extract-text` records such a
+    decision as `decode.source` / `run_details[].font_source` `style_family`; `harness read-dxf` lists
+    `matched` field `family`. A `.Vn*` family now decides before an approved font-file row, so those
+    styles carry no `knowledge_patterns`.
+  - `harness extract-text` flags `legacy_ascii_suspect` (confidence low) on pure-ASCII text that looks like
+    Vietnamese written in ASCII by a legacy font: a slash before a letter or brace (`4/g14`, `BT LO/ST`;
+    not before a unit such as `kG/cm2` or a word of 3+ letters such as `Cu/PVC`) or an uppercase tone
+    letter S F R X J after a vowel (`chi tiESt`, `haFn`). Only runs in a TCVN3 / VNI font, or in an
+    unknown-encoding font that also holds non-ASCII text of unknown encoding, are judged (default D2,
+    reversible: suspect shapes only, not all ASCII). The legacy-font gate blocks such text with reason
+    `legacy_ascii_suspect`, ahead of the ASCII rule.
+  - Level extractor (`read-structure`) applies the legacy-font gate: a blocked text gives no candidate,
+    level, storey height, storey name or question; each level-shaped value in it is listed in
+    `levels.json` `blocked_candidates` (entry id, line, value as stored, reason; count in
+    `summary.blocked_candidates`), and `level_none_found` says how many were held back. A literal `±`
+    in an unknown-encoding font is non-ASCII, so it is blocked too (`%%p` is read as before).
+  - `harness sheet-text <work> <file> --unassigned` (instead of a sheet id) returns the entries on no sheet
+    or on several as sheet `unassigned` (null layout and bbox; `space` lists their spaces; model space
+    first, rows numbered on across spaces), and `harness find-text --unassigned` searches only those
+    entries (hits with sheet id `unassigned`, `counts.unassigned_entries_searched`): the text of a file
+    without a detected sheet is now reachable. A sheet id together with `--unassigned` is exit 2.
+    `find-text` counts unassigned entries once each (an id both unassigned and ambiguous was counted twice).
+  - `harness list-sheets` gives each listed file `blocked_text_count`: its text-index entries the
+    legacy-font gate blocks, on a sheet or not (null for a skipped file).
 
 ### Fixed
+- Tool wave 3, package GRIDGATE (review of packages G and C; ADR-0013 decisions 2 and 6):
+  - Gate 1 no longer opens on a grid that was never built or confirmed. `harness status` closes
+    `grid_system_missing` only from the built result: the engineer's answer and a fresh
+    `grid-systems.json` holding a system whose `source_answer.key` is the question's key, which the
+    `grid_system_select` answer uses. Grid values alone close nothing; a values answer that built nothing,
+    or whose system the select answer leaves out, stays in `blocking_open` with a `grid systems:` reason
+    (`harness questions-md` shows it as "chưa đóng"). Who answered (`answered_by_role`) is part of the
+    answers fingerprint of `grid-systems.json`, so an answer the engineer gives again with the same values
+    after a simulated one makes it stale until `harness grid-system` reruns; every existing
+    `grid-systems.json` reads as stale once. Every used system needs `units.status` confirmed and, once
+    its units and X/Y are, a non-null `tekla_grid`.
+  - `harness grid-system` compares a system built from a `grid_system_missing` answer with every other
+    system, detected or built, like two detected ones: shared labels in order, distances between
+    consecutive shared labels within the drafting tolerance (in mm when both files have an engineer units
+    answer), the same file-set rules. A disagreement is a `grid_system_conflict` (blocking until the
+    select answer leaves one out or declares both separate); an agreement is `compatible_with`. The
+    conflict question's key names the answered question's key, not the system id. A
+    `grid_system_missing` answer that builds nothing (words only, malformed) no longer keeps the question
+    raised: once the file is covered by a selected system again, it is not asked and the answer goes stale.
+  - `harness answer` refuses a `grid_system_missing` spacing above `MAX_SPACING` (1000000 drawing units)
+    or one that is not finite as a float (a 400-digit number crashed it with `inf`), and labels that are
+    equal ignoring case (`A,a`: the drawing check reads them as one axis); exit 1, nothing written.
+    `harness grid-system` builds nothing from such a hand-written answer and warns, instead of crashing
+    (`OverflowError` on a 400-digit integer).
+- Tool wave 2, package F2 (review of P4, marks and dimensions):
+  - `harness dimensions` measures block content on its block definition (ezdxf `origin_of_copy`), not on
+    the virtual copy: a linear dimension stored without an angle in an INSERT rotated by 90 degrees
+    measured about 0 (sample 270: 40 rows reported `ok` against group 42 = 4000). The copy still gives
+    the sheet and the layer; an INSERT's scale no longer changes the measured value.
+  - `harness dimensions` and the dxf-probe `dimension_audit`: a row whose group 42 disagrees with the
+    measurement is `not_compared` with a note, whatever its text rule (measured-text rows were `ok`).
+  - `harness marks`: a line-grid table without a keyword is read on the seed's column only when that
+    column's header cell holds no text and at most half of its allowed cells are integers; only its
+    mark-shaped cells become schedule marks. Otherwise it is header-blocked, as before wave 2 (sample 270:
+    bar schedules keyed on the 'STT' row numbers, keys '1'..'11', '(sl:01)'; sample 461: plumbing lists
+    whose first data row sat in the header band, keys 'd110', 'selta').
+  - `harness marks` size reasons are exact: "the schedule header cells that could name a size column are
+    blocked" only when a blocked column could give the missing size (its readable cells are numbers or
+    `b x h` values, or none is readable), else "the schedule table has no size column"; a row with no
+    cell in its size columns says "the schedule row has no size cells" (was "... are not numbers");
+    `blocked_columns` no longer lists a header cell that lies in no column (`column: null`).
+  - `harness dimensions` rows carry `text_entry` (schema `dimensions`, additive optional field, `$id` still
+    0.1): the text-index entry of the dimension's own text and the legacy-font gate's verdict (`meaning`,
+    `block_reason`); null for a text that only shows the measurement. An override text the gate blocks is
+    not read (override_value null, status `not_compared`, note). A text with no index entry is counted in
+    `warnings`. Sample 270: 75 of 75 texts linked, 15 blocked (were `not_numeric`).
 - Reading toolchain, after an independent review of the EVAL-1 wave:
   - `harness marks`: a rotated header keyword (or one that is not a cell text) no longer crashes the run;
     the table becomes a non-blocking `schedule_table_unparsed`. Questions no longer quote table ids, so a
@@ -397,6 +1058,61 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
     a document whose `next_id` is not above every `F-` id is refused.
   - `harness questions-md` prints reader questions as written (never "chưa có bản dịch"); `harness ask
     --text` is the Vietnamese question the engineer reads.
+- Tool wave 2, review fixes, package F1 (legacy-font gate and grids):
+  - Capital-font hint: a style name or family gives a case hint only when it is itself a font name
+    (`.Vn`/`Vn` then letters, digits, spaces). Style names such as `VN-ABC` or `VNARIALH-BOLD` no longer
+    veto their family's hint (`.VnAvantH` → capital); `vntimeh.shx` used as a style name no longer reads
+    the `x` of its extension as "not capital" (its case is now reported as uncertain).
+  - `legacy_ascii_suspect` (`harness extract-text`): an unknown-encoding run also counts as legacy when its
+    style name, font file or family (inline font: its name) looks like a legacy Vietnamese font
+    (`encoding.legacy_font_name`: `vncc-rms.shx`, `vnsimli.shx`), with no non-ASCII sibling needed; the
+    sibling rule is keyed by the font file, so styles on one file share the evidence. New shape: an
+    uppercase vowel between lowercase letters (`dAy`, `tEn`, `cOng trInh`). No longer suspect: `/a` plus a
+    digit (`%%c8a100/a200`, `1:100/a3`), one letter ending the token after a slash (`C/C`, `N/A`, `b/h`,
+    `1/A`) unless two letters stand before it (`BO/R`), and CamelCase words (`TieRod`, `HoleSize`). On
+    dwgshare 461 the 16 Telex-style texts of the `vncc-rms.shx` / `vncc-sim.shx` styles are blocked
+    (except `s.l`, `stt`): `haFn 200` is no longer two plan marks with a `HAFN` prefix question.
+  - A TrueType family no longer silently overrides an approved knowledge row: when the family decides and
+    an approved row for the style or its font file gives another encoding (or approved rows disagree),
+    `harness extract-text` decodes nothing and flags `knowledge_conflict` (the gate blocks it), and
+    `harness read-dxf` gives no hint and asks `font_encoding_conflict`. An agreeing row changes nothing.
+    This replaces P1's "a `.Vn*` family decides before an approved font-file row" for disagreeing rows.
+  - Grid extractor (`read-structure`) applies the legacy-font gate: a label-shaped text in a bubble that
+    `text_gate` blocks (`4/g14`, `2/G20` in a TCVN3 style) is never a label or an axis; it is listed in
+    `grids.json` `blocked_candidates` (entry id, value as shown, reason, sheet; count in
+    `summary.blocked_candidates`), and a family line ending in such a circle asks `grid_label_missing`.
+    `grids` schema: both fields added, optional (`$id` stays 0.1).
+  - `harness sheet-text` / `find-text`: `legacy_font_gate.question_ids` lists the file's font questions only
+    when some blocked entry has a reason an encoding answer can lift; a sheet whose blocked entries are all
+    `legacy_ascii_suspect`, or that has none, lists no question. Schema descriptions of `question_ids` and
+    `legacy_ascii_suspect` updated (no structural change, `$id` stays 0.1).
+- Tool wave 2, package F3 (review of gate 1 and questions.md):
+  - Only the engineer's answer settles a question of intake, read-structure, grid-system or the reader:
+    a simulated or role-less answer leaves it in `blocking_open` / `blocking_open_ids`, out of `answered`,
+    and in questions.md section 2, where the answer is shown labelled "(mô phỏng)" or "(chưa rõ vai
+    trò)". Every non-engineer answer questions.md prints carries that label.
+  - questions.md no longer says a grid-system conflict was "closed by the grid_system_select answer"
+    when it is only non-blocking while the file sets are asked: it says the conflict waits for the
+    `file_set_relation` question named in grid-systems.json `file_sets`. Any other open, non-blocking
+    conflict shows how to close it.
+  - Every gate-1 reason that tells someone to answer says the engineer does it (`the engineer answers …`,
+    `the engineer says …`, `the engineer runs: harness answer …`): the select, axis, conflict, file-set,
+    units-disagree and units-contradiction reasons; the conflict reason now prints the select answer
+    command. questions.md "Cách đóng" lines carry "kỹ sư tự chạy, tác tử không chạy thay".
+  - `harness status` validates each question document it reads for written closures against its schema:
+    a damaged one (e.g. a list as a question key, an unknown closure reason) is exit 1 naming the
+    document, not a traceback.
+  - An unreadable DXF/DWG no longer gets the units reason "rerun harness intake", which no rerun clears:
+    it stays a gate-1 reason through its own blocking intake question (`read_failed`,
+    `conversion_empty`, `no_reader_implemented`) until the engineer answers it, and is a `files:` reason
+    when no such question is live.
+  - `harness grid-system`: a system's `grid_system_axis_unassigned` question is keyed by its representative
+    families (`where` = `<file> <view>/<family> x <view>/<family>`), not by its positional system id, which
+    moves to the message (`Grid system S00n: …`). Adding an unrelated drawing file no longer re-asks it or
+    leaves the engineer's X/Y answer stale. Existing X/Y answers go stale once, on the first rerun.
+  - `status` schema: the `blocking_open` / `answered` descriptions say that only the engineer's answer
+    counts for those producers; the `grid-system` example shows the new axis `where` and message (no
+    structural change, `$id` stays 0.1).
 - Schema `pattern` now has ECMA-262 meaning in `harness validate` (JSON Schema 2020-12): Python's
   `$` matched before a final newline, so `"L1-C-A2\n"` passed the `spec_id` pattern; `.` no longer
   matches `\r`, U+2028 or U+2029. Applies to every schema (ADR-0010 Amendment 1 §10).

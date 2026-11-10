@@ -9,10 +9,12 @@ frame, instead of one sheet per layout. Every later value needs a real sheet in 
 Algorithm (deterministic, every threshold is a named constant below):
 
 1. Frames. In model space and in every layout, collect axis-aligned closed rectangles (LWPOLYLINE,
-   2D POLYLINE), at top level and inside INSERTs (recursively, world/paper coordinates, so a frame
-   block whose geometry sits far from its base point is still placed right). A rectangle is a frame
-   when its long/short side ratio is within FRAME_RATIO (paper sheets: A-series is 1.414), it holds
-   >= FRAME_MIN_TEXTS text entries, and its short side is >= FRAME_MIN_SIDE_IN_TEXT_HEIGHTS x the median
+   2D POLYLINE; edges within FRAME_AXIS_TOL of the axes, so a frame block scaled and turned by a few
+   thousandths of a degree still counts), at top level and inside INSERTs (recursively, world/paper
+   coordinates, so a frame block whose geometry sits far from its base point is still placed right). A
+   rectangle is a frame when its long/short side ratio is within FRAME_RATIO (paper sheets: A-series is
+   1.414), it holds >= FRAME_MIN_TEXTS text entries, and its short side is >=
+   FRAME_MIN_SIDE_IN_TEXT_HEIGHTS x the median
    height of the text inside it (a detail box is small compared with its text, a sheet is not); without
    title-block evidence inside (a title-field label or field ATTRIB) it must reach
    FRAME_MIN_SIDE_NO_TITLE heights or have the size of an accepted frame (a schedule table is not a
@@ -32,14 +34,35 @@ Algorithm (deterministic, every threshold is a named constant below):
    (`attrib_tag`, medium at most) and that sits on the title block (the frame's own INSERT, an INSERT
    carrying ATTRIBs of two or more fields, or within TITLE_REGION_MARGIN text heights of a title-field
    label: a section callout's SHEET_NO is not), a text 'label: value' (`inline_label`, medium at most),
-   a value text right of or below a label text (`adjacent_label`, low), or, for the sheet number only
-   and only when nothing else was found, the single sheet-code-looking text in the lower-right quadrant
-   (`pattern`, low; TCVN 5571 places the title block there). Constant text of the frame's own block
-   is template text and never a value. A field value is chosen only when ALL its candidates agree;
-   any disagreement is a title_field_conflict question (blocking for sheet_number and revision).
+   a value text right of or below a label text (`adjacent_label`, low; `_pair_labels`: the value lies in the
+   label's title-block cell, the box between the nearest drawn lines around it, or, with no such cell or an
+   empty one, on the label's row to its right or just below it; one value per label and one label per
+   value, nearest first; a sheet-number label whose value heads a column of two or more further sheet codes
+   is a drawing-list header and gives nothing), or, for the sheet number only
+   and only when nothing else was found, a sheet-code-looking text in the title-block corner
+   (`pattern`, low; TCVN 5571 places the title block at the lower right): the last CORNER_U of the
+   frame along the text's reading direction and the lowest CORNER_V across it. A portrait frame is
+   also read at 90 and 270 degrees (a landscape sheet drawn turned). A member mark is never a number
+   (`_pick_corner_numbers`: the same code twice on its sheet, a mark family on its sheet, or the code
+   twice outside every title block of the file; a text equal to another sheet's corner code is a
+   reference to that sheet, not mark evidence); among the rest a position repeated in other sheets'
+   corners wins, then the tallest. A code whose position repeats in no other sheet's corner is never
+   taken (nothing backs it; a one-sheet file has nothing to back it with). Ties stay a conflict, and
+   every corner code not taken is a warning.
+   The job / contract number (labels `JOB NO.`, `SỐ HĐ`, `MÃ CÔNG TRÌNH`) is a title field of its own
+   (`title_block.job_number`, null when absent); its value is never a sheet number, not even as a corner
+   code. Constant text of the frame's own block is template text and never a value. A text that does not print
+   (`printed: false`, tool wave 4) is no label, no value, no title evidence and no corner code: it keeps its
+   sheet in `text_ids`, and one warning counts such texts. A field value is chosen
+   only when ALL its candidates agree; any disagreement is a title_field_conflict question (blocking
+   for sheet_number and revision).
+5. Number gaps. One non-blocking sheet_number_gap question per file lists the numbers that a letter
+   series skips and no sheet of any series carries, with the sheets on each side
+   (`_number_gap_question`). More than SHEET_GAP_MAX_RUN missing numbers in a row is a numbering jump
+   (S-101 to S-201), given as a warning and not asked.
 
-Not done here (documented gaps): frames drawn as four LINEs, rotated frames, clipped viewports
-(the rectangle is used), and the drawing list / sheet index (`drawing_list.status` is
+Not done here (documented gaps): frames drawn as four LINEs, rotated frame rectangles, clipped
+viewports (the rectangle is used), and the drawing list / sheet index (`drawing_list.status` is
 'not_searched'; nothing is asserted about it).
 """
 
@@ -62,6 +85,8 @@ from ezdxf.document import Drawing
 from ezdxf.filemanagement import readfile
 
 from tekla_harness.detect import sha256_file
+from tekla_harness.questions import SHEET_GAP_CODE
+from tekla_harness.visibility import is_printed
 
 SCHEMA_VERSION = "0.1"
 SHEET_UNKNOWN = "unknown"  # provenance.sheet when a value lies on no detected sheet
@@ -79,6 +104,31 @@ TITLE_REGION_MARGIN = 10.0  # text heights around the title-block anchors (label
 SAME_SIZE_TOL = 0.005  # relative: two frames are 'the same size'
 CONTAIN_TOL = 0.01  # relative to the larger frame's short side
 MAX_LISTED = 50  # ids listed in one question
+# Title-block corner for the sheet-code pattern (tool wave 3, EVAL-3 a1): the last quarter of the frame along
+# the reading direction and the lowest fifth across it. Corpus numbers sit at 0.92-0.97 along and 0.01-0.06
+# up (267, 270, 285, 290, 461); the tie-beam mark taken on 286 sat at 0.59 / 0.44.
+CORNER_U = 0.25
+CORNER_V = 0.20
+CORNER_POS_TOL = 0.03  # frame shares: two corner codes at 'the same position' on different sheets
+SHEET_GAP_MAX_RUN = 9  # missing numbers in a row asked as a gap; a longer run is a numbering jump
+# Title-block cells (tool wave 4, V3). A label's cell is the box of the nearest drawn lines around the label
+# centre; its value is a text inside that cell, right of or below the label. Distances are in label heights.
+CELL_MAX_HEIGHT = 12.0  # a taller box between lines is a table or a drawing area, not a field cell
+CELL_MAX_WIDTH = 60.0
+CELL_SPAN_SLACK = 0.5  # a line spans a point when it extends to within this of it
+AXIS_LINE_TOL = 1e-3  # relative: a segment this close to horizontal / vertical is a cell line
+CELL_MAX_VERTICES = 12  # polylines with more vertices are not cell outlines
+# A frame drawn in a block that was scaled and turned by a hair (271: 0.002 degrees, so the edges miss the
+# axes by a few units over 51 000) is still a frame. Relative to the rectangle's long side: 1e-3 is 0.06
+# degrees.
+FRAME_AXIS_TOL = 1e-3
+# A sheet-number label over a column of this many further sheet codes heads a drawing list, not a title block.
+# The column is a chain of rows: the first directly under the value and each next one within TABLE_ROW_GAP
+# row heights of the previous one, of about the same height (TABLE_ROW_HEIGHT_TOL, relative).
+# Sheet-code-shaped marks scattered further down the sheet are not rows.
+TABLE_COLUMN_MIN_ROWS = 2
+TABLE_ROW_GAP = 3.0
+TABLE_ROW_HEIGHT_TOL = 0.25
 
 _CONF_ORDER = {"low": 0, "medium": 1, "high": 2}
 _BUILDING_UNITS = {"mm", "cm", "m", "in", "ft"}
@@ -231,6 +281,7 @@ class Placed:
     top_handle: str | None  # handle of the top-level entity it came through (itself at top level)
     owner: int  # serial of the INSERT occurrence that holds it (0 at top level)
     serial: int  # this occurrence's serial (an INSERT's children carry it as owner)
+    outer_layer: str | None = None  # effective layer of the INSERT that holds it (None at top level)
 
 
 @dataclass
@@ -265,10 +316,11 @@ class Walker:
         owner: int,
         serial: int,
         types: frozenset[str] | None,
+        outer_layer: str | None = None,
     ) -> Iterator[Placed]:
         kind = entity.dxftype()
         if types is None or kind in types:
-            yield Placed(entity, space, path, top, owner, serial)
+            yield Placed(entity, space, path, top, owner, serial, outer_layer)
         if kind != "INSERT":
             return
         name = str(entity.dxf.get("name", ""))
@@ -299,9 +351,11 @@ class Walker:
         except Exception as exc:
             self.skipped[f"expand_error:{type(exc).__name__}"] += 1
             return
+        own = str(entity.dxf.get("layer", "0"))
+        inner_layer = outer_layer if own == "0" and outer_layer else own  # layer 0 follows the INSERT
         for child in children:
             self._serial += 1
-            yield from self._visit(child, space, (*path, name), top, serial, self._serial, types)
+            yield from self._visit(child, space, (*path, name), top, serial, self._serial, types, inner_layer)
 
 
 def layout_spaces(doc: Drawing) -> list[tuple[str, Any, bool]]:
@@ -353,7 +407,7 @@ def _axis_aligned_rect(points: list[tuple[float, float]]) -> tuple[float, float,
     size = max(x1 - x0, y1 - y0)
     if size <= 0 or min(x1 - x0, y1 - y0) <= 0:
         return None
-    tol = 1e-6 * size
+    tol = FRAME_AXIS_TOL * size
     for (ax, ay), (bx, by) in zip(pts, pts[1:] + pts[:1], strict=True):
         if not (abs(ax - bx) <= tol or abs(ay - by) <= tol):
             return None
@@ -385,6 +439,42 @@ def rect_of(entity: Any) -> tuple[float, float, float, float] | None:
             return None
         return _axis_aligned_rect(pts)
     return None
+
+
+def _prints_geometry(placed: Placed, doc: Drawing) -> bool:
+    """Does this line or polyline print? Not when its own invisible flag (group 60) is set, or when its layer
+    is off, frozen or set not to plot. A block entity on layer 0 takes the layer of the INSERT that holds it
+    (`Placed.outer_layer`; ezdxf keeps layer 0 on the virtual copy)."""
+    entity = placed.entity
+    if entity.dxf.get("invisible", 0) == 1:
+        return False
+    name = str(entity.dxf.get("layer", "0"))
+    if name == "0" and placed.outer_layer:
+        name = placed.outer_layer
+    if name not in doc.layers:
+        return True
+    row = doc.layers.get(name)
+    return not (row.is_off() or row.is_frozen() or row.dxf.get("plot", 1) == 0)
+
+
+def _collect_segments(entity: Any, lines: _CellLines) -> None:
+    """Add the straight edges of a LINE or of a small polyline to the cell-line index."""
+    kind = entity.dxftype()
+    if kind == "LINE":
+        a, b = entity.dxf.start, entity.dxf.end
+        lines.add((a.x, a.y), (b.x, b.y))
+    elif kind == "LWPOLYLINE" and len(entity) <= CELL_MAX_VERTICES:
+        if any(abs(bulge) > 1e-12 for *_xy, bulge in entity.get_points("xyb")):
+            return
+        pts = [(v.x, v.y) for v in entity.vertices_in_wcs()]
+        for a, b in zip(pts, pts[1:] + (pts[:1] if entity.closed else []), strict=False):
+            lines.add(a, b)
+    elif kind == "POLYLINE" and entity.is_2d_polyline and len(entity.vertices) <= CELL_MAX_VERTICES:
+        if any(abs(v.dxf.get("bulge", 0.0)) > 1e-12 for v in entity.vertices):
+            return
+        pts = [(v.x, v.y) for v in entity.points_in_wcs()]
+        for a, b in zip(pts, pts[1:] + (pts[:1] if entity.is_closed else []), strict=False):
+            lines.add(a, b)
 
 
 class _TextGrid:
@@ -643,6 +733,17 @@ FIELD_LABELS: dict[str, tuple[str, ...]] = {
     "scale": ("scale", "ty le", "ti le"),
     "date": ("date", "ngay", "ngay thang"),
     "project": ("project", "cong trinh", "du an"),
+    # the contract / job number of the title block (tool wave 4): never a sheet number
+    "job_number": (
+        "job no",
+        "job no.",
+        "job number",
+        "job num",
+        "so hd",
+        "so hop dong",
+        "ma cong trinh",
+        "ma hop dong",
+    ),
 }
 # ATTRIB tags, folded and stripped of everything but letters and digits.
 FIELD_TAGS: dict[str, tuple[str, ...]] = {
@@ -664,6 +765,7 @@ FIELD_TAGS: dict[str, tuple[str, ...]] = {
     "scale": ("scale", "tyle", "tile"),
     "date": ("date", "ngay"),
     "project": ("project", "projectname", "congtrinh", "duan"),
+    "job_number": ("jobno", "jobnumber", "jobnum", "sohd", "sohopdong", "macongtrinh", "mahopdong"),
 }
 _LABEL_LOOKUP = {label: f for f, labels in FIELD_LABELS.items() for label in labels}
 _TAG_LOOKUP = {tag: f for f, tags in FIELD_TAGS.items() for tag in tags}
@@ -712,6 +814,73 @@ def _anchor_field(entry: dict[str, Any]) -> str | None:
     return None
 
 
+class _CellLines:
+    """Axis-aligned drawn segments of one space (LINEs and straight polyline edges, INSERTs expanded).
+
+    `cell(box, height)` answers which title-block cell a label sits in: the rectangle bounded by the
+    nearest horizontal line above and below the label centre and the nearest vertical line right and left
+    of it, each line spanning the centre. None when a side has no line within the reach or the rectangle
+    is too large to be a field cell (CELL_MAX_HEIGHT / CELL_MAX_WIDTH label heights)."""
+
+    def __init__(self) -> None:
+        self._h: list[tuple[float, float, float]] = []  # (y, x0, x1)
+        self._v: list[tuple[float, float, float]] = []  # (x, y0, y1)
+        self._ready = False
+
+    def add(self, a: tuple[float, float], b: tuple[float, float]) -> None:
+        dx, dy = abs(b[0] - a[0]), abs(b[1] - a[1])
+        length = max(dx, dy)
+        if length <= 0:
+            return
+        if dy <= AXIS_LINE_TOL * length:
+            self._h.append(((a[1] + b[1]) / 2, min(a[0], b[0]), max(a[0], b[0])))
+        elif dx <= AXIS_LINE_TOL * length:
+            self._v.append(((a[0] + b[0]) / 2, min(a[1], b[1]), max(a[1], b[1])))
+
+    def _prepare(self) -> None:
+        if not self._ready:
+            self._h.sort()
+            self._v.sort()
+            self._hk = [t[0] for t in self._h]
+            self._vk = [t[0] for t in self._v]
+            self._ready = True
+
+    def cell(
+        self, box: tuple[float, float, float, float], height: float
+    ) -> tuple[float, float, float, float] | None:
+        if height <= 0 or not (self._h and self._v):
+            return None
+        self._prepare()
+        cx, cy = box_center(box)
+        slack, ry, rx = CELL_SPAN_SLACK * height, CELL_MAX_HEIGHT * height, CELL_MAX_WIDTH * height
+
+        def nearest(
+            segs: list[tuple[float, float, float]],
+            keys: list[float],
+            at: float,
+            span: float,
+            reach: float,
+            up: bool,
+        ) -> float | None:
+            if up:
+                rng = range(bisect.bisect_right(keys, at), bisect.bisect_right(keys, at + reach))
+            else:
+                rng = range(bisect.bisect_left(keys, at) - 1, bisect.bisect_left(keys, at - reach) - 1, -1)
+            for i in rng:
+                key, lo, hi = segs[i]
+                if lo - slack <= span <= hi + slack:
+                    return key
+            return None
+
+        top = nearest(self._h, self._hk, cy, cx, ry, True)
+        bottom = nearest(self._h, self._hk, cy, cx, ry, False)
+        right = nearest(self._v, self._vk, cx, cy, rx, True)
+        left = nearest(self._v, self._vk, cx, cy, rx, False)
+        if top is None or bottom is None or right is None or left is None:
+            return None
+        return (left, bottom, right, top)
+
+
 def _entry_conf(entry: dict[str, Any], cap: str) -> str:
     conf = min_conf(entry["confidence"], cap, "medium")
     flags = set(entry["flags"])
@@ -726,6 +895,7 @@ class _SheetCtx:
     box: tuple[float, float, float, float]
     template: Callable[[dict[str, Any]], bool]
     own_insert: Callable[[dict[str, Any]], bool] = lambda e: False  # ATTRIB of the frame's own INSERT
+    lines: _CellLines | None = None  # drawn cell lines of the sheet's space (None: no line data)
 
 
 def _insert_key(entry: dict[str, Any]) -> tuple[Any, ...]:
@@ -768,38 +938,94 @@ def _horizontal(entry: dict[str, Any]) -> bool:
     return min(rot, 360.0 - rot) < 1.0
 
 
+def _candidate(
+    fld: str,
+    value: str,
+    kind: str,
+    key: str,
+    ventry: dict[str, Any],
+    lentry: dict | None,
+    conf: str,
+    sheet_id: str,
+    file_path: str,
+) -> dict[str, Any] | None:
+    """One title-block candidate (schema `candidates[]`), or None when the value is blank."""
+    value = value.strip().strip(_COLONS).strip()
+    if not value:
+        return None
+    vbox = text_box(ventry) or (ventry["position"]["x"], ventry["position"]["y"]) * 2
+    return {
+        "field": fld,
+        "value": value,
+        "evidence": {
+            "kind": kind,
+            "key": key,
+            "value_text_id": ventry["id"],
+            "label_text_id": lentry["id"] if lentry else None,
+            "position": [rnum(ventry["position"]["x"]), rnum(ventry["position"]["y"])],
+        },
+        "confidence": conf,
+        "provenance": {
+            "file": file_path,
+            "sheet": sheet_id,
+            "method": "dxf_entity",
+            "region": {"bbox": rbox(vbox)},
+        },
+    }
+
+
+def _heads_code_column(value: dict[str, Any], vbox: Box, values: list[tuple[dict[str, Any], Box]]) -> int:
+    """Length of the table column under this value: sheet-code texts overlapping it in x, stacked as a
+    chain of rows (the first directly under the value, each next one within TABLE_ROW_GAP row heights of
+    the previous one and of about its height). Codes elsewhere below the value are not rows."""
+    below = sorted(
+        (
+            (obox, other)
+            for other, obox in values
+            if other is not value
+            and _SHEET_CODE_RE.match(other["display_text"].strip())
+            and obox[3] <= vbox[1]
+            and obox[0] < vbox[2]
+            and obox[2] > vbox[0]
+        ),
+        key=lambda t: (-t[0][3], t[1]["id"]),
+    )
+    rows = 0
+    prev = vbox
+    for obox, _other in below:
+        prev_h, h = prev[3] - prev[1], obox[3] - obox[1]
+        if obox[3] > prev[1]:
+            continue  # beside or above the previous row
+        if obox[0] >= prev[2] or obox[2] <= prev[0]:
+            continue  # not in the previous row's column
+        if prev[1] - obox[3] > TABLE_ROW_GAP * max(prev_h, h):
+            break  # too far below: the chain ends here
+        if abs(h - prev_h) > TABLE_ROW_HEIGHT_TOL * prev_h:
+            break  # another size: not the same table
+        rows += 1
+        prev = obox
+    return rows
+
+
 def _title_candidates(
-    entries: list[dict[str, Any]], ctx: _SheetCtx, file_path: str, cap: str
+    entries: list[dict[str, Any]],
+    ctx: _SheetCtx,
+    file_path: str,
+    cap: str,
+    warnings: list[str] | None = None,
 ) -> list[dict[str, Any]]:
+    """Candidates from field ATTRIBs and labels; the sheet-code pattern is `_pick_corner_numbers`.
+
+    A sheet-number label whose value heads a column of further sheet codes is the header of a drawing list (a
+    table of the set's sheets), not a title-block field: no candidate, one warning in `warnings`."""
     out: list[dict[str, Any]] = []
 
     def add(
         fld: str, value: str, kind: str, key: str, ventry: dict[str, Any], lentry: dict | None, conf: str
     ):
-        value = value.strip().strip(_COLONS).strip()
-        if not value:
-            return
-        vbox = text_box(ventry) or (ventry["position"]["x"], ventry["position"]["y"]) * 2
-        out.append(
-            {
-                "field": fld,
-                "value": value,
-                "evidence": {
-                    "kind": kind,
-                    "key": key,
-                    "value_text_id": ventry["id"],
-                    "label_text_id": lentry["id"] if lentry else None,
-                    "position": [rnum(ventry["position"]["x"]), rnum(ventry["position"]["y"])],
-                },
-                "confidence": conf,
-                "provenance": {
-                    "file": file_path,
-                    "sheet": ctx.sheet_id,
-                    "method": "dxf_entity",
-                    "region": {"bbox": rbox(vbox)},
-                },
-            }
-        )
+        cand = _candidate(fld, value, kind, key, ventry, lentry, conf, ctx.sheet_id, file_path)
+        if cand is not None:
+            out.append(cand)
 
     labels: list[tuple[dict[str, Any], str, tuple[float, float, float, float]]] = []
     values: list[tuple[dict[str, Any], tuple[float, float, float, float]]] = []
@@ -848,58 +1074,355 @@ def _title_candidates(
         if box:
             values.append((e, box))
 
-    for lentry, fld, lbox in labels:
-        lh = lentry.get("height") or (lbox[3] - lbox[1]) or 0.0
+    boxes = {v["id"]: b for v, b in values}
+    for lentry, fld, vpicked in _pair_labels(labels, values, ctx.lines):
+        rows = _heads_code_column(vpicked, boxes[vpicked["id"]], values) if fld == "sheet_number" else 0
+        if rows >= TABLE_COLUMN_MIN_ROWS:
+            if warnings is not None:
+                warnings.append(
+                    f"{ctx.sheet_id}: label '{lentry['display_text'].strip()}' ({lentry['id']}) heads a "
+                    f"column of {rows + 1} sheet codes (a drawing list): '{vpicked['display_text'].strip()}' "
+                    f"({vpicked['id']}) is not read as this sheet's number."
+                )
+            continue
+        add(
+            fld,
+            vpicked["display_text"],
+            "adjacent_label",
+            lentry["display_text"].strip(),
+            vpicked,
+            lentry,
+            "low",
+        )
+
+    return out
+
+
+Box = tuple[float, float, float, float]
+
+
+def _label_height(entry: dict[str, Any], box: Box) -> float:
+    return entry.get("height") or (box[3] - box[1]) or 0.0
+
+
+def _in_cell(cell: Box, lbox: Box, vbox: Box, lh: float) -> bool:
+    """Is the value inside the label's cell, right of or below the label (its top not above the label's)?"""
+    vcx, vcy = box_center(vbox)
+    return (
+        cell[0] <= vcx <= cell[2]
+        and cell[1] <= vcy <= cell[3]
+        and vbox[3] <= lbox[3] + 0.5 * lh
+        and vcx >= lbox[0] - 0.5 * lh
+    )
+
+
+def _beside_label(lbox: Box, vbox: Box, lh: float) -> bool:
+    """Reading-direction test without cell lines: the value starts right of the label end on the label's row
+    (its box overlaps the label's rows), or lies just below the label and overlaps it in x."""
+    right = vbox[1] < lbox[3] and vbox[3] > lbox[1] and 0 < vbox[0] - lbox[2] + 0.5 * lh <= 30 * lh
+    below = (
+        vbox[0] < lbox[2]
+        and vbox[2] > lbox[0]
+        and 0 < lbox[1] - vbox[3] + 0.5 * lh <= 4 * lh
+        and box_center(vbox)[1] < box_center(lbox)[1]
+    )
+    return right or below
+
+
+def _pair_labels(
+    labels: list[tuple[dict[str, Any], str, Box]],
+    values: list[tuple[dict[str, Any], Box]],
+    lines: _CellLines | None,
+) -> list[tuple[dict[str, Any], str, dict[str, Any]]]:
+    """(label entry, field, value entry) pairs, each label with at most one value and each value with at
+    most one label (tool wave 4, V3).
+
+    A label whose cell (drawn lines around it) holds values takes the nearest of them, right of or below the
+    label. A label with no cell, or an empty cell, uses the reading-direction test of `_beside_label`. All
+    cell pairs are settled before any other, nearest first, and a value taken by one label is not offered to
+    another: a title block with a job cell above a drawing-number cell never lets the job value answer the
+    drawing-number label."""
+    options: list[tuple[int, float, str, str, int, int]] = []  # (tier, distance, value id, label id, l, v)
+    for li, (lentry, _fld, lbox) in enumerate(labels):
+        lh = _label_height(lentry, lbox)
         if lh <= 0:
             continue
         lcx, lcy = box_center(lbox)
-        best: tuple[float, str, dict[str, Any]] | None = None
-        for ventry, vbox in values:
-            vcx, vcy = box_center(vbox)
-            right = abs(vcy - lcy) <= 0.6 * lh and 0 < vbox[0] - lbox[2] + 0.5 * lh <= 30 * lh
-            below = (
-                vbox[0] < lbox[2]
-                and vbox[2] > lbox[0]
-                and 0 < lbox[1] - vbox[3] + 0.5 * lh <= 4 * lh
-                and vcy < lcy
-            )
-            if not (right or below):
-                continue
-            dist = math.hypot(vcx - lcx, vcy - lcy)
-            key = (dist, ventry["id"])
-            if best is None or key < (best[0], best[1]):
-                best = (dist, ventry["id"], ventry)
-        if best is not None:
-            add(
-                fld,
-                best[2]["display_text"],
-                "adjacent_label",
-                lentry["display_text"].strip(),
-                best[2],
-                lentry,
-                "low",
-            )
-
-    if not any(c["field"] == "sheet_number" for c in out):
-        x0, y0, x1, y1 = ctx.box
-        quadrant = ((x0 + x1) / 2, y0, x1, (y0 + y1) / 2)
-        hits = [
-            (e, box)
-            for e, box in values
-            if _SHEET_CODE_RE.match(e["display_text"].strip()) and inside(quadrant, *box_center(box))
+        cell = lines.cell(lbox, lh) if lines is not None else None
+        inside = [
+            vi for vi, (_v, vbox) in enumerate(values) if cell is not None and _in_cell(cell, lbox, vbox, lh)
         ]
-        if len(hits) == 1:
-            add(
-                "sheet_number",
-                hits[0][0]["display_text"],
-                "pattern",
-                "sheet_code_lower_right",
-                hits[0][0],
-                None,
-                "low",
-            )
-    out.sort(key=lambda c: (c["field"], c["evidence"]["value_text_id"], c["evidence"]["kind"]))
+        tier = 0
+        if not inside:
+            tier = 1
+            inside = [vi for vi, (_v, vbox) in enumerate(values) if _beside_label(lbox, vbox, lh)]
+        for vi in inside:
+            ventry, vbox = values[vi]
+            vcx, vcy = box_center(vbox)
+            options.append((tier, math.hypot(vcx - lcx, vcy - lcy), ventry["id"], lentry["id"], li, vi))
+    options.sort()
+    taken_l: set[int] = set()
+    taken_v: set[int] = set()
+    out: list[tuple[dict[str, Any], str, dict[str, Any]]] = []
+    for _tier, _dist, _vid, _lid, li, vi in options:
+        if li in taken_l or vi in taken_v:
+            continue
+        taken_l.add(li)
+        taken_v.add(vi)
+        out.append((labels[li][0], labels[li][1], values[vi][0]))
+    out.sort(key=lambda t: t[0]["id"])
     return out
+
+
+def _candidate_order(c: dict[str, Any]) -> tuple[str, str, str]:
+    return (c["field"], c["evidence"]["value_text_id"], c["evidence"]["kind"])
+
+
+# --- printed sheet number in the title-block corner (tool wave 3, EVAL-3 a1) -------------------------
+
+
+def _code_key(text: str) -> str:
+    """A sheet code or mark compared as letters and digits only ('Kc - 13' and 'KC-13' are one code)."""
+    return re.sub(r"[^0-9a-z]", "", fold(text))
+
+
+def _right_angle(entry: dict[str, Any]) -> int | None:
+    """The text's rotation when it is a multiple of 90 degrees (within 1 degree), else None."""
+    rot = (entry.get("rotation") or 0.0) % 360.0
+    quarter = round(rot / 90.0)
+    return (quarter % 4) * 90 if abs(rot - quarter * 90.0) < 1.0 else None
+
+
+def _reading_position(
+    frame: tuple[float, float, float, float], point: tuple[float, float], rotation: int
+) -> tuple[float, float]:
+    """(u, v) of a point in a frame read along `rotation`: u from the reading left (0) to right (1), v from
+    the reading bottom (0) to top (1). At 270 the reading 'right' is world -y and 'up' is world +x."""
+    a = (point[0] - frame[0]) / (frame[2] - frame[0])
+    b = (point[1] - frame[1]) / (frame[3] - frame[1])
+    return {0: (a, b), 90: (b, 1.0 - a), 180: (1.0 - a, 1.0 - b), 270: (1.0 - b, a)}[rotation]
+
+
+@dataclass
+class _CornerHit:
+    """A sheet-code-shaped text in a frame's title-block corner."""
+
+    entry: dict[str, Any]
+    sheet_id: str
+    u: float
+    v: float
+    key: str
+    prefix: str
+
+
+def _corner_scan(
+    entries: list[dict[str, Any]], ctx: _SheetCtx
+) -> tuple[list[_CornerHit], list[dict[str, Any]]]:
+    """(sheet-code texts in the frame's title-block corner, sheet-code texts elsewhere on the sheet).
+
+    The corner is the last CORNER_U of the frame along the text's reading direction and the lowest
+    CORNER_V across it (TCVN 5571 puts the title block at the lower right). A landscape frame is read at
+    0 degrees only; a portrait frame also at 90 and 270 degrees (a landscape sheet drawn turned, as on 267
+    and 290). Constant text of the frame's own block is template text and never a value."""
+    x0, y0, x1, y1 = ctx.box
+    portrait = (y1 - y0) > (x1 - x0)
+    allowed = (0, 90, 270) if portrait else (0,)
+    corner: list[_CornerHit] = []
+    body: list[dict[str, Any]] = []
+    for e in entries:
+        text = e["display_text"].strip()
+        if e["position"]["x"] is None or "\n" in text or not _SHEET_CODE_RE.match(text):
+            continue
+        box = text_box(e)
+        rot = _right_angle(e)
+        # a model text shown through a layout's viewport has model coordinates: never in that layout's box
+        if box is not None and rot in allowed and not ctx.template(e) and inside(ctx.box, *box_center(box)):
+            u, v = _reading_position(ctx.box, box_center(box), rot)  # type: ignore[arg-type]
+            if u >= 1.0 - CORNER_U and v <= CORNER_V:
+                key = _code_key(text)
+                prefix = re.match(r"[a-z]*", key)
+                corner.append(_CornerHit(e, ctx.sheet_id, u, v, key, prefix.group(0) if prefix else ""))
+                continue
+        body.append(e)
+    return corner, body
+
+
+def _pick_corner_numbers(
+    corner: dict[str, list[_CornerHit]],
+    body: dict[str, list[dict[str, Any]]],
+    unplaced_codes: Counter[str],
+    need: set[str],
+) -> tuple[dict[str, list[_CornerHit]], list[str]]:
+    """Sheet-number picks for the sheets in `need` (no other sheet-number candidate), and one warning per
+    corner code not picked. Rules, in order:
+
+    1. A member mark is never a sheet number. A corner code is a mark when the same code appears on
+       another text of its own sheet (a sheet prints its number once), when two or more other texts of its
+       sheet share its letters with other numbers (a mark family such as gĐ-1, gĐ-2), or when the code
+       appears two or more times outside every title-block corner of the file. A text on a sheet whose code
+       is the corner code of ANOTHER sheet of the file is a reference to that sheet (a detail callout, a
+       drawing list, an index sheet), never mark evidence; only corner codes that pass the two own-sheet
+       checks count as sheets that can be referenced. References to sheets outside the file cannot be told
+       apart: they still count, so the sheet is asked (sheet_number_missing), never given a wrong number.
+    2. A code at a position that repeats in another sheet's corner (within CORNER_POS_TOL) beats one that
+       does not; then the tallest wins. Codes that tie on both are all kept, so they become a
+       title_field_conflict question, never a silent choice.
+    3. A pick needs that backing (review M3): when no code of a sheet's corner sits at a position repeated
+       in another sheet's corner (a one-sheet file never has one), nothing is picked; each code is a
+       warning and the sheet gets sheet_number_missing."""
+
+    def own_counts(sid: str, hits: list[_CornerHit], refs: set[str]):
+        own = Counter(k for e in body.get(sid, []) if (k := _code_key(e["display_text"])) not in refs)
+        own.update(h.key for h in hits)
+        families: Counter[str] = Counter()
+        for key, n in own.items():
+            families[re.match(r"[a-z]*", key).group(0)] += n  # type: ignore[union-attr]
+        return own, families
+
+    # corner codes that pass the own-sheet checks with every body text counted: the sheets a body text can
+    # reference. A body text equal to its OWN sheet's corner code makes that code a twice-seen mark, which
+    # is never referable, so a referable code always names another sheet.
+    referable: set[str] = set()
+    for sid, hits in corner.items():
+        own, families = own_counts(sid, hits, set())
+        referable.update(h.key for h in hits if own[h.key] < 2 and families[h.prefix] - own[h.key] < 2)
+
+    outside = Counter(unplaced_codes)
+    for texts in body.values():
+        outside.update(k for e in texts if (k := _code_key(e["display_text"])) not in referable)
+    marks: dict[int, str] = {}
+    for sid, hits in corner.items():
+        own, families = own_counts(sid, hits, referable)
+        for h in hits:
+            others = families[h.prefix] - own[h.key]
+            if own[h.key] >= 2:
+                marks[id(h)] = f"the same text appears {own[h.key]} times on this sheet (a member mark)"
+            elif others >= 2:
+                marks[id(h)] = f"{others} other texts on this sheet share its letters (a mark family)"
+            elif outside[h.key] >= 2:
+                marks[id(h)] = f"it appears {outside[h.key]} times outside the title blocks (a mark)"
+    usable = [h for hits in corner.values() for h in hits if id(h) not in marks]
+    picks: dict[str, list[_CornerHit]] = {}
+    warnings: list[str] = []
+    for sid in [sid for sid in corner if sid in need]:  # sheet order
+        hits = corner[sid]
+
+        def rank(h: _CornerHit) -> tuple[bool, float]:
+            repeats = any(
+                o.sheet_id != h.sheet_id
+                and abs(o.u - h.u) <= CORNER_POS_TOL
+                and abs(o.v - h.v) <= CORNER_POS_TOL
+                for o in usable
+            )
+            return (repeats, float(h.entry.get("height") or 0.0))
+
+        ranked = [(rank(h), h) for h in hits if id(h) not in marks]
+        best = max((r for r, _ in ranked), default=(False, 0.0))
+        backed = best[0]  # rule 3: some code of this corner sits at a position repeated elsewhere
+        chosen = [h for r, h in ranked if backed and r[0] and _same_height(r[1], best[1])]
+        if chosen:
+            picks[sid] = chosen
+        for r, h in ranked:
+            if h in chosen:
+                continue
+            if not backed:
+                why = "its position repeats in no other sheet's corner, so nothing backs it as a sheet number"
+            elif not r[0]:
+                why = "a code at a position repeated on other sheets was preferred"
+            else:
+                why = "a taller code was preferred"
+            warnings.append(
+                f"{sid}: corner code '{h.entry['display_text'].strip()}' ({h.entry['id']}) is "
+                f"not the sheet number: {why}."
+            )
+        for h in hits:
+            if id(h) in marks:
+                warnings.append(
+                    f"{sid}: corner code '{h.entry['display_text'].strip()}' ({h.entry['id']}) is "
+                    f"not the sheet number: {marks[id(h)]}."
+                )
+    return picks, warnings
+
+
+def _same_height(a: float, b: float) -> bool:
+    return abs(a - b) <= 1e-6 * max(abs(a), abs(b), 1.0)
+
+
+# --- gaps in the printed numbers (tool wave 3, KC-25 on 290) ---------------------------------------------
+
+# A chosen sheet number as letters and a sequence number: 'KC-05', 'Kc - 13', 'S-101A' (a letter suffix
+# counts as its number), 'KT 1/18' (sheet 1 of 18). Anything else ('A1-02', 'GENERAL') is left out of the
+# gap check.
+_NUMBER_PARTS_RE = re.compile(
+    r"^(?P<prefix>[a-z]{1,4})\s?(?:[-:.]\s?(?P<n>\d{1,3})[a-z]?|(?P<n2>\d{1,3})\s?/\s?\d{1,3})$"
+)
+
+
+def _number_gap_question(sheets: list[dict[str, Any]]) -> tuple[dict[str, Any] | None, list[str]]:
+    """(one non-blocking sheet_number_gap question per file or None when no printed number is skipped,
+    one warning per numbering jump).
+
+    A number is missing when it lies between the lowest and highest number of one letter series and no
+    sheet of ANY series carries it: on 290 one counter runs over Kc and KT sheets (Kc - 13, KT - 14,
+    Kc - 15), so KT - 14 fills the Kc series. Consecutive missing numbers are one range, given with the
+    sheets on each side. Sheets without a chosen number are listed: they may carry a missing one.
+    A range of more than SHEET_GAP_MAX_RUN numbers is a numbering jump, not a gap (review: S-101, S-201,
+    S-301 number by hundreds): it is a warning with the sheets on each side, never asked. The known gaps
+    are 1 (290) and 4 (461) numbers long; hundreds numbering skips 98 or more."""
+    by_number: dict[int, list[tuple[str, str]]] = defaultdict(list)  # number -> (sheet id, printed value)
+    series: dict[str, list[int]] = defaultdict(list)
+    for s in sheets:
+        chosen = s["title_block"]["sheet_number"]
+        if chosen is None:
+            continue
+        m = _NUMBER_PARTS_RE.match(fold(chosen["value"]))
+        if m is None:
+            continue
+        n = int(m.group("n") or m.group("n2"))
+        by_number[n].append((s["sheet_id"], chosen["value"]))
+        series[m.group("prefix")].append(n)
+    missing = sorted(
+        {n for nums in series.values() for n in range(min(nums), max(nums) + 1) if n not in by_number}
+    )
+    runs: list[list[int]] = []
+    for n in missing:
+        if runs and runs[-1][-1] == n - 1:
+            runs[-1].append(n)
+        else:
+            runs.append([n])
+    order = {s["sheet_id"]: i for i, s in enumerate(sheets)}
+    around: set[str] = set()
+    parts = []
+    jumps = []
+    for run in runs:
+        lo, hi = by_number[run[0] - 1], by_number[run[-1] + 1]
+        if len(run) > SHEET_GAP_MAX_RUN:
+            jumps.append(
+                f"Sheet numbers jump from {lo[0][1]} ({', '.join(sid for sid, _ in lo)}) to {hi[0][1]} "
+                f"({', '.join(sid for sid, _ in hi)}): {len(run)} numbers skipped, taken as a numbering jump "
+                f"(more than {SHEET_GAP_MAX_RUN}), not asked as a gap."
+            )
+            continue
+        around.update(sid for sid, _ in lo + hi)
+        span = str(run[0]) if len(run) == 1 else f"{run[0]}-{run[-1]}"
+        parts.append(
+            f"missing {span} (between {lo[0][1]} on {', '.join(sid for sid, _ in lo)} "
+            f"and {hi[0][1]} on {', '.join(sid for sid, _ in hi)})"
+        )
+    if not parts:
+        return None, jumps
+    unnumbered = [s["sheet_id"] for s in sheets if s["title_block"]["sheet_number"] is None]
+    if unnumbered:
+        parts.append(f"{len(unnumbered)} sheet(s) without a detected number: {listed(unnumbered)}")
+    gap = question(
+        SHEET_GAP_CODE,
+        False,
+        "The printed sheet numbers of this file skip some numbers: is a sheet missing from the set, does "
+        "the numbering jump on purpose, or was a number misread?",
+        listed(sorted(around, key=order.__getitem__)),
+        "; ".join(parts),
+    )
+    return gap, jumps
 
 
 def _choose(cands: list[dict[str, Any]], fld: str) -> tuple[dict[str, Any] | None, list[str]]:
@@ -940,15 +1463,21 @@ def extract_sheets(dxf_path: str | Path, text_index: dict[str, Any], *, doc: Dra
     rejected_total = 0
     frame_sources: dict[str, _Rect] = {}
     entry_by_id = {e["id"]: e for e in entries}
+    cell_lines: dict[str, _CellLines] = defaultdict(_CellLines)  # drawn lines per space, for title cells
 
     def title_evidence(ids: list[str]) -> bool:
-        return any(_anchor_field(entry_by_id[t]) for t in ids if t in entry_by_id)
+        return any(
+            _anchor_field(entry_by_id[t]) for t in ids if t in entry_by_id and is_printed(entry_by_id[t])
+        )
 
     def build_frame_sheets(space: str, layout_name: str, frame: str, layout: Any) -> list[dict[str, Any]]:
         nonlocal rejected_total
         rects: list[_Rect] = []
-        for p in walker.walk(layout, space, frozenset({"LWPOLYLINE", "POLYLINE"})):
+        lines = cell_lines[space]
+        for p in walker.walk(layout, space, frozenset({"LINE", "LWPOLYLINE", "POLYLINE"})):
             try:
+                if _prints_geometry(p, doc):  # a cell is closed by lines that print
+                    _collect_segments(p.entity, lines)
                 box = rect_of(p.entity)
             except Exception:
                 walker.skipped[f"rect_error:{p.entity.dxftype()}"] += 1
@@ -1040,7 +1569,12 @@ def extract_sheets(dxf_path: str | Path, text_index: dict[str, Any], *, doc: Dra
                     },
                     "model_windows": [],
                     "text_ids": [],
-                    "title_block": {"sheet_number": None, "revision": None, "candidates": []},
+                    "title_block": {
+                        "sheet_number": None,
+                        "job_number": None,
+                        "revision": None,
+                        "candidates": [],
+                    },
                     "duplicate_of": None,
                 }
             )
@@ -1106,7 +1640,12 @@ def extract_sheets(dxf_path: str | Path, text_index: dict[str, Any], *, doc: Dra
                             },
                             "model_windows": [],
                             "text_ids": [],
-                            "title_block": {"sheet_number": None, "revision": None, "candidates": []},
+                            "title_block": {
+                                "sheet_number": None,
+                                "job_number": None,
+                                "revision": None,
+                                "candidates": [],
+                            },
                             "duplicate_of": None,
                             "_other": other,
                         }
@@ -1199,8 +1738,10 @@ def extract_sheets(dxf_path: str | Path, text_index: dict[str, Any], *, doc: Dra
         final.append(s)
     sheets = final
 
-    # title blocks
-    conflicted: set[tuple[str, str]] = set()  # (sheet, field) with disagreeing candidates
+    # title blocks: field ATTRIBs and labels per sheet, then the sheet-code pattern over all sheets
+    title_cands: dict[str, list[dict[str, Any]]] = {}
+    corner: dict[str, list[_CornerHit]] = {}
+    body: dict[str, list[dict[str, Any]]] = {}
     for s in sheets:
         src = frame_sources.get(s["sheet_id"])
 
@@ -1220,12 +1761,52 @@ def extract_sheets(dxf_path: str | Path, text_index: dict[str, Any], *, doc: Dra
                 return src.top_handle in firsts
             return e["block_name"] == src.block_path[0] or e["block_path"][:1] == [src.block_path[0]]
 
-        ctx = _SheetCtx(s["sheet_id"], tuple(s["bbox"]), is_template, own_insert)  # type: ignore[arg-type]
-        mine = [entry_by_id[t] for t in s["text_ids"]]
-        cands = _title_candidates(mine, ctx, file_path, cap)
+        box = tuple(s["bbox"])
+        ctx = _SheetCtx(s["sheet_id"], box, is_template, own_insert, cell_lines.get(s["space"]))  # type: ignore[arg-type]
+        mine = [entry_by_id[t] for t in s["text_ids"] if is_printed(entry_by_id[t])]
+        cands = title_cands[s["sheet_id"]] = _title_candidates(mine, ctx, file_path, cap, warnings)
+        # a value taken as the job number is never a sheet number: a label pairs with one value only, so the
+        # only other road to the sheet number is the corner code, which leaves these texts out
+        job_ids = {c["evidence"]["value_text_id"] for c in cands if c["field"] == "job_number"}
+        corner[s["sheet_id"]], body[s["sheet_id"]] = _corner_scan(
+            [e for e in mine if e["id"] not in job_ids], ctx
+        )
+    on_sheets = {t for s in sheets for t in s["text_ids"]}
+    unplaced = Counter(
+        _code_key(e["display_text"])
+        for e in entries
+        if e["id"] not in on_sheets and is_printed(e) and _SHEET_CODE_RE.match(e["display_text"].strip())
+    )
+    need = {sid for sid, cands in title_cands.items() if not any(c["field"] == "sheet_number" for c in cands)}
+    picks, corner_warnings = _pick_corner_numbers(corner, body, unplaced, need)
+    warnings.extend(corner_warnings)
+    conflicted: set[tuple[str, str]] = set()  # (sheet, field) with disagreeing candidates
+    for s in sheets:
+        cands = title_cands[s["sheet_id"]]
+        for h in picks.get(s["sheet_id"], []):
+            cand = _candidate(
+                "sheet_number",
+                h.entry["display_text"],
+                "pattern",
+                "sheet_code_lower_right",
+                h.entry,
+                None,
+                "low",
+                s["sheet_id"],
+                file_path,
+            )
+            if cand is not None:
+                cands.append(cand)
+        cands.sort(key=_candidate_order)
         number, _ = _choose(cands, "sheet_number")
         revision, _ = _choose(cands, "revision")
-        s["title_block"] = {"sheet_number": number, "revision": revision, "candidates": cands}
+        job, _ = _choose(cands, "job_number")
+        s["title_block"] = {
+            "sheet_number": number,
+            "job_number": job,
+            "revision": revision,
+            "candidates": cands,
+        }
         for fld in sorted({c["field"] for c in cands}):
             values = sorted({c["value"] for c in cands if c["field"] == fld})
             if len(values) > 1:
@@ -1290,6 +1871,10 @@ def extract_sheets(dxf_path: str | Path, text_index: dict[str, Any], *, doc: Dra
                     shown,
                 )
             )
+    gap, jumps = _number_gap_question(sheets)
+    warnings.extend(jumps)
+    if gap is not None:
+        questions.append(gap)
     signatures: dict[tuple[str, ...], list[str]] = defaultdict(list)
     for s in sheets:
         texts = tuple(sorted(entry_by_id[t]["display_text"] for t in s["text_ids"]))
@@ -1348,6 +1933,12 @@ def extract_sheets(dxf_path: str | Path, text_index: dict[str, Any], *, doc: Dra
         )
     for reason, n in sorted(walker.skipped.items()):
         warnings.append(f"{n} block entit(ies)/insert(s) not expanded while looking for frames: {reason}.")
+    not_printed = sum(1 for e in entries if not is_printed(e))
+    if not_printed:
+        warnings.append(
+            f"{not_printed} of {len(entries)} indexed texts are not printed (printed: false) and are left "
+            "out of every title-block value; they keep their sheet in text_ids."
+        )
 
     assigned = sum(len(s["text_ids"]) for s in sheets)
     return {

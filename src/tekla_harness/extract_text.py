@@ -9,7 +9,8 @@ interpreted: no title block, no grid, no level. That is the job of later slices 
 Decoding order (the hazard is documented in docs/research/vietnamese-legacy-encodings.md):
   1. split an MTEXT into runs at inline font switches (`\\F`/`\\f`), with ezdxf's MTextParser;
   2. choose each run's encoding. Precedence: code-point evidence, then FONT NAMES via `encoding.font_hint`
-     (inline font, else the text style), then an APPROVED row of the knowledge table (text style runs
+     (inline font, else the text style: its name, font file, then its TrueType family from the ACAD XDATA,
+     source `style_family`), then an APPROVED row of the knowledge table (text style runs
      only, and only when `font_hint` said nothing), else unknown. Evidence: legacy TCVN3/VNI text is one
      byte per character, so a Vietnamese letter above U+00FF (or a tone mark) proves the run is Unicode
      whatever the font name says (`encoding.has_unicode_vietnamese`); it is judged on the text as the
@@ -35,12 +36,13 @@ import re
 from collections import Counter
 from collections.abc import Iterator
 from dataclasses import dataclass, field, replace
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Any
 
 from ezdxf import const as dxf_const
 from ezdxf.document import Drawing
 from ezdxf.entities.dxfentity import DXFEntity
+from ezdxf.entities.viewport import Viewport
 from ezdxf.enums import MTextEntityAlignment
 from ezdxf.filemanagement import readfile
 from ezdxf.fonts.font_face import FontFace
@@ -56,10 +58,11 @@ from tekla_harness.encoding import (
     font_hint,
     has_lone_surrogate,
     has_unicode_vietnamese,
+    legacy_font_name,
     scrub_surrogates,
 )
 from tekla_harness.knowledge import FontEncodingRow, FontEncodingTable, default_font_encodings
-from tekla_harness.read_dxf import CONVERTER_CAPS, handles_reliable, num
+from tekla_harness.read_dxf import CONVERTER_CAPS, handles_reliable, num, text_style_family
 from tekla_harness.readlog import timed_attempt
 
 SCHEMA_VERSION = "0.1"
@@ -94,6 +97,7 @@ _SOURCE_ORDER = (
     "knowledge_table",
     "mtext_inline_font",
     "style_font",
+    "style_family",
 )  # entry-level source
 
 
@@ -121,6 +125,7 @@ class _RunResult:
     unknown_non_ascii: bool = False
     reencode_failed: bool = False
     unknown_code: bool = False
+    literals: list[str] = field(default_factory=list)  # the run's text pieces between '%%' codes, as stored
     knowledge_pattern: str | None = None
     contradicts_font: bool = False  # Unicode evidence in a run whose font said TCVN3 / VNI
     eth: bool = False
@@ -198,10 +203,14 @@ def _has_unknown_code(text: str) -> bool:
     return any(not _SPECIAL_RE.fullmatch(m.group(0)) for m in _ANY_SPECIAL_RE.finditer(text))
 
 
+# (font key: ("file", font file leaf) | ("style", name) | ("font", inline family), encoding, legacy font name)
+_SuspectRun = tuple[tuple[str, str], str, bool]
+
+
 @dataclass(frozen=True)
 class _StyleDecision:
     hint: FontHint
-    source: str = "style_font"  # style_font | knowledge_table
+    source: str = "style_font"  # style_font | style_family | knowledge_table
     pattern: str | None = None  # the approved knowledge row that decided
     conflict: bool = False
     proposed: tuple[FontEncodingRow, ...] = ()
@@ -216,13 +225,23 @@ class _Context:
     cap: str
     handles_ok: bool
     layer_state: dict[str, str]
+    layer_no_plot: frozenset[str] = (
+        frozenset()
+    )  # case-folded names of layers with the plot flag off (group 290)
+    viewport_frozen: frozenset[str] = frozenset()  # case-folded names of layers frozen in some viewport
+    attmode: int = 1  # header $ATTMODE (1 when absent): 0 none shown, 1 by their own flag, 2 all shown
     knowledge: FontEncodingTable = field(default_factory=FontEncodingTable)
     style_cache: dict[str, tuple[str | None, bool]] = field(default_factory=dict)
+    family_cache: dict[str, str | None] = field(default_factory=dict)
     decision_cache: dict[str, _StyleDecision] = field(default_factory=dict)
     proposed_hits: dict[int, tuple[FontEncodingRow, Counter[str]]] = field(default_factory=dict)
     block_info: dict[str, tuple[bool, tuple[str, ...]]] = field(default_factory=dict)
     bears_text: dict[str, bool] = field(default_factory=dict)
     entries: list[dict[str, Any]] = field(default_factory=list)
+    # legacy_ascii_suspect: fonts (("style", name) or ("font", inline family)) holding non-ASCII text of
+    # unknown encoding, and the pure-ASCII entries with a legacy-looking run, judged once all are read
+    unknown_non_ascii_fonts: set[tuple[str, str]] = field(default_factory=set)
+    ascii_suspects: list[tuple[dict[str, Any], list[_SuspectRun]]] = field(default_factory=list)
     errors: list[dict[str, Any]] = field(default_factory=list)
     errors_total: int = 0
     empty_skipped: int = 0
@@ -273,16 +292,25 @@ class _Context:
         return False
 
     def style_decision(self, style: str | None) -> _StyleDecision:
-        """Encoding hint of a text style: `font_hint`, then an approved knowledge row if that says nothing."""
+        """Encoding hint of a text style: `font_hint` (name, font file, TrueType family), then an approved
+        knowledge row if that says nothing. A family that disagrees with an approved row (or approved rows
+        that disagree among themselves) decides nothing: a knowledge conflict, as between rows."""
         key = style or ""
         if key not in self.decision_cache:
             if not style:
                 self.decision_cache[key] = _StyleDecision(FontHint("unknown", None))
             else:
                 font_file, _exists = self.style_font(style)
-                hint = font_hint(style, font_file)
-                decision = _StyleDecision(hint)
-                if hint.encoding == "unknown":
+                hint = font_hint(style, font_file, self.style_family(style))
+                source = "style_family" if hint.decided_by == "family" else "style_font"
+                decision = _StyleDecision(hint, source)
+                if hint.decided_by == "family":
+                    found = self.knowledge.match(style, font_file)
+                    if found.conflict or (found.encoding is not None and found.encoding != hint.encoding):
+                        decision = _StyleDecision(
+                            FontHint("unknown", hint.capital_font), conflict=True, proposed=found.proposed
+                        )
+                elif hint.encoding == "unknown":
                     found = self.knowledge.match(style, font_file)
                     decision = _StyleDecision(hint, conflict=bool(found.conflict), proposed=found.proposed)
                     if found.encoding is not None:
@@ -307,6 +335,28 @@ class _Context:
             else:
                 self.style_cache[style] = (None, False)
         return self.style_cache[style]
+
+    def font_key(self, style: str | None) -> tuple[str, str]:
+        """The font a style run is drawn with, for the sibling rule (`_flag_legacy_ascii`): its font file's
+        leaf, case-folded, so styles sharing one file share the evidence; the style name without a file."""
+        font_file, _exists = self.style_font(style)
+        if font_file:
+            return ("file", PureWindowsPath(font_file).name.casefold())
+        return ("style", style or "")
+
+    def style_names(self, style: str | None) -> tuple[str, ...]:
+        """Style name, font file and TrueType family of a text style (the names `font_hint` reads)."""
+        if not style:
+            return ()
+        font_file, _exists = self.style_font(style)
+        return tuple(n for n in (style, font_file, self.style_family(style)) if n)
+
+    def style_family(self, style: str) -> str | None:
+        """TrueType family of a text style (read_dxf.text_style_family); None when absent or empty."""
+        if style not in self.family_cache:
+            entry = self.doc.styles.get(style) if self.doc.styles.has_entry(style) else None
+            self.family_cache[style] = (text_style_family(entry) or None) if entry is not None else None
+        return self.family_cache[style]
 
 
 def _decode_run(ctx: _Context, run: _Run, decision: _StyleDecision) -> _RunResult:
@@ -338,6 +388,7 @@ def _decode_run(ctx: _Context, run: _Run, decision: _StyleDecision) -> _RunResul
             decoded.append(piece)
             display.append(_SPECIAL_EXPANSION[piece[2:].lower()])
             continue
+        result.literals.append(piece)
         if encoding in ("tcvn3", "vni"):
             latin, ok = ctx.legacy_form(piece)
             if not ok:
@@ -378,6 +429,16 @@ def _decode_text(ctx: _Context, raw: str, style: str | None, *, mtext: bool) -> 
         escapes.append("dxf_unicode_escape_decoded")
     mif = any(has_mif_encoding(r.text) for r in runs)
     results = [_decode_run(ctx, run, decision) for run in runs]
+    suspect: list[_SuspectRun] = []  # the runs that look legacy
+    for run, r in zip(runs, results, strict=True):
+        key = ctx.font_key(style) if run.font is None else ("font", run.font.casefold())
+        if r.unknown_non_ascii:
+            ctx.unknown_non_ascii_fonts.add(key)
+        if r.encoding in ("tcvn3", "vni", "unknown") and any(
+            piece.isascii() and looks_legacy_ascii(piece) for piece in r.literals
+        ):
+            names = ctx.style_names(style) if run.font is None else (run.font,)
+            suspect.append((key, r.encoding, any(legacy_font_name(n) for n in names)))
 
     encodings = [r.encoding for r in results]
     used = encodings[0] if len(set(encodings)) == 1 else "mixed"
@@ -462,11 +523,71 @@ def _decode_text(ctx: _Context, raw: str, style: str | None, *, mtext: bool) -> 
         },
         "flags": flags,
         "confidence": confidence,
+        "_suspect_runs": suspect,
     }
 
 
 def _min_conf(a: str, b: str) -> str:
     return min(a, b, key=_CONFIDENCE_ORDER.__getitem__)
+
+
+# --- ASCII text that looks like legacy Vietnamese (tool wave 2, fix 2b) ----------------------------
+# Legacy fonts keep ASCII as ASCII, so the gate allows pure-ASCII text (text_gate). Some legacy Vietnamese
+# fonts, though, write Vietnamese with plain ASCII letters. EVAL-2 saw two shapes in legacy-font styles
+# (dwgshare 267 and 461): a slash before a letter or brace ('4/g14', 'BT LO/ST #100', '3 L/}/{/SI') and an
+# uppercase tone letter after a vowel, Telex style: S F R X J = acute, grave, hook, tilde, dot ('chi tiESt
+# kim thu seSt', 'haFn 200', 'coJC'). The encoding.py TCVN3 / VNI tables do not produce either shape (their
+# Vietnamese letters are all bytes >= 0x80), so the shapes come from the observed strings, kept narrow:
+#   * a slash before a unit denominator is not suspect ('kG/cm2', 'T/m2', 'kN/m', 'Kg/M2'), nor before a word
+#     of three or more letters ('Cu/PVC/PVC', seen in a TCVN3 capital-font style of dwgshare 461);
+#   * a slash before 'a' and a digit is a bar spacing or a paper size ('%%c8a100/a200', '1:100/a3'), and one
+#     letter that ends the token after a slash is an abbreviation or a grid sub-axis ('C/C', 'N/A', 'b/h',
+#     '1/A'), unless two letters stand before the slash ('BO/R', the 'BO/R 300mm' of dwgshare 267);
+#   * a tone letter needs a lowercase vowel just before it, or an uppercase A E O that follows a lowercase
+#     letter ('tiESt'), so all-capital words ('EST', 'HEA 300', 'S355JR') and marks ('D1', 'C2') never match;
+#   * an uppercase vowel between two lowercase letters is a circumflex vowel written as a capital ('dAy',
+#     'tEn vAJt', 'cOng trInh', dwgshare 461), never a unit ('kA') or a mark;
+#   * both letter shapes are judged per word, and a CamelCase word is English, not Telex: a capitalised first
+#     part, then humps of an uppercase letter and two or more lowercase letters with a vowel ('TieRod',
+#     'BaseRing', 'HoleSize'); 'DiJa' (one letter after the hump) stays suspect.
+# A text is flagged when such a run is in a TCVN3 / VNI font, or in an unknown-encoding font that has a legacy
+# Vietnamese name (`encoding.legacy_font_name` of the style name, font file or family; inline font: its
+# family), or that also holds non-ASCII text of unknown encoding (its "siblings", judged per font file: two
+# styles on one file share it). Default D2, reversible: suspect patterns only, not all ASCII.
+_SLASH_LETTER = re.compile(
+    r"/(?!(?i:mm|cm|dm|m)[23]?(?![A-Za-z0-9]))"  # a unit denominator
+    r"(?![A-Za-z]{3})"  # a word
+    r"(?!a\d)"  # a bar spacing or a paper size
+    r"(?:(?<=[A-Za-z]{2}/)|(?![A-Za-z](?![A-Za-z0-9{}])))"  # one letter ending the token
+    r"[A-Za-z{}]"
+)
+_WORD = re.compile(r"[A-Za-z]+")
+_TONE_LETTER = re.compile(r"(?:[aeiouy]|(?<=[a-z])[AEO])[SFRXJ]")
+_CAPITAL_VOWEL = re.compile(r"(?<=[a-z])[AEIOUY](?=[a-z])")
+_CAMEL_CASE = re.compile(r"[A-Z][a-z]+(?:[A-Z](?=[a-z]*[aeiouy])[a-z]{2,})+")
+
+
+def looks_legacy_ascii(text: str) -> bool:
+    """True when ASCII `text` has a shape legacy Vietnamese fonts give when written in ASCII (see above)."""
+    if _SLASH_LETTER.search(text):
+        return True
+    return any(
+        not _CAMEL_CASE.fullmatch(word) and (_TONE_LETTER.search(word) or _CAPITAL_VOWEL.search(word))
+        for word in _WORD.findall(text)
+    )
+
+
+def _flag_legacy_ascii(ctx: _Context) -> None:
+    """Flag `legacy_ascii_suspect` (confidence low) on each pure-ASCII entry with a legacy-looking run in a
+    TCVN3 / VNI font, in an unknown-encoding font with a legacy name, or in one that holds non-ASCII text of
+    unknown encoding."""
+    for entry, runs in ctx.ascii_suspects:
+        if any(
+            enc in ("tcvn3", "vni") or legacy_name or key in ctx.unknown_non_ascii_fonts
+            for key, enc, legacy_name in runs
+        ):
+            entry["flags"].append("legacy_ascii_suspect")
+            entry["confidence"] = "low"
 
 
 # --- entities ------------------------------------------------------------------------
@@ -480,6 +601,9 @@ class _Frame:
     block_path: tuple[str, ...] = ()
     insert_handles: tuple[str | None, ...] = ()
     container_layer: str | None = None  # effective layer of the INSERT whose definition we are reading
+    insert_invisible: bool = (
+        False  # an INSERT on the way down has group 60 = 1 (print_uncertain: insert_invisible)
+    )
 
 
 def _point(entity: Any, point: Vec3) -> tuple[float | None, float | None]:
@@ -498,6 +622,53 @@ def _layer_fields(ctx: _Context, frame: _Frame, layer: str) -> tuple[str, str | 
     if frame.container_layer is not None and layer == "0":
         effective, definition = frame.container_layer, layer
     return effective, definition, ctx.layer_state.get(effective.casefold(), "unknown")
+
+
+def _visibility(
+    ctx: _Context,
+    frame: _Frame,
+    *,
+    entity: Any,
+    entity_type: str,
+    layer: str,
+    state: str,
+    attribute_flag: bool,
+    own_insert_invisible: bool,
+) -> tuple[list[str], list[str]]:
+    """(not_printed_reasons, print_uncertain_reasons) of one entry, `layer` being its effective layer.
+
+    A hard reason is a setting Autodesk documents as keeping the object off the printed sheet: group 60 on the
+    entity, ATTRIB flag bit 1 (unless `$ATTMODE` 2 shows every attribute), the layer off, frozen or plot 0.
+    With any, the entry is not printed and nothing uncertain is listed. Otherwise the entry stays printed and
+    lists what the file does not settle: an INSERT with group 60 above it, `$ATTMODE` != 1 on an attribute, a
+    layer frozen in some viewport (model space text only) and the Defpoints layer.
+    """
+    attribute = entity_type == "ATTRIB"
+    attmode_overrides = attribute and ctx.attmode != 1
+    key = layer.casefold()
+    hard: list[str] = []
+    if entity.dxf.get("invisible", 0):
+        hard.append("entity_invisible")
+    if attribute_flag and not (attribute and ctx.attmode == 2):
+        hard.append("attribute_invisible")
+    if state == "off":
+        hard.append("layer_off")
+    if state == "frozen":
+        hard.append("layer_frozen")
+    if key in ctx.layer_no_plot:
+        hard.append("layer_no_plot")
+    if hard:
+        return hard, []
+    uncertain: list[str] = []
+    if frame.insert_invisible or own_insert_invisible:
+        uncertain.append("insert_invisible")
+    if attmode_overrides:
+        uncertain.append("attmode_not_normal")
+    if frame.space == "model" and key in ctx.viewport_frozen:
+        uncertain.append("viewport_frozen")
+    if key == "defpoints":
+        uncertain.append("defpoints_layer")
+    return hard, uncertain
 
 
 def _handle_of(ctx: _Context, entity: DXFEntity) -> str | None:
@@ -529,12 +700,14 @@ def _add_entry(
     text_rule: str | None = None,
     extra_flags: tuple[str, ...] = (),
     dimension: bool = False,
+    insert_invisible: bool = False,
 ) -> None:
     if raw.strip() == "":
         ctx.empty_skipped += 1
         return
     font_file, style_exists = ctx.style_font(style)
     decoded = _decode_text(ctx, raw, style, mtext=mtext)
+    suspect_runs = decoded.pop("_suspect_runs")
     flags = list(extra_flags) + decoded.pop("flags")
     if has_lone_surrogate(raw):  # undecodable bytes: scrubbed on output, so say it here
         flags.append("invalid_utf8_bytes")
@@ -548,6 +721,16 @@ def _add_entry(
         flags.append("layer_from_insert")
     if invisible:
         flags.append("attribute_invisible")
+    not_printed, uncertain = _visibility(
+        ctx,
+        frame,
+        entity=entity,
+        entity_type=entity_type,
+        layer=effective,
+        state=state,
+        attribute_flag=bool(invisible),
+        own_insert_invisible=insert_invisible,
+    )
     extrusion = entity.dxf.get("extrusion") if entity.dxf.is_supported("extrusion") else None
     if extrusion is not None and tuple(extrusion) != (0.0, 0.0, 1.0):
         flags.append("non_default_extrusion")
@@ -584,7 +767,12 @@ def _add_entry(
         },
     }
     entry["flags"] = flags
+    entry["printed"] = not not_printed
+    entry["not_printed_reasons"] = not_printed
+    entry["print_uncertain_reasons"] = uncertain
     ctx.entries.append(entry)
+    if suspect_runs and raw.isascii():
+        ctx.ascii_suspects.append((entry, suspect_runs))
 
 
 def _definition_handle(ctx: _Context, entity: Any) -> str | None:
@@ -815,6 +1003,7 @@ def _visit_insert(ctx: _Context, frame: _Frame, ins: Any) -> None:
                 block_name=name,
                 insert_handle=insert_handle,
                 invisible=bool(attrib.dxf.get("flags", 0) & 1),
+                insert_invisible=bool(ins.dxf.get("invisible", 0)),
             )
         except Exception as exc:
             _record_error(ctx, frame, attrib, "ATTRIB", exc)
@@ -838,6 +1027,7 @@ def _visit_insert(ctx: _Context, frame: _Frame, ins: Any) -> None:
         block_path=(*frame.block_path, name),
         insert_handles=(*frame.insert_handles, insert_handle),
         container_layer=own_layer,
+        insert_invisible=frame.insert_invisible or bool(ins.dxf.get("invisible", 0)),
     )
     instances = list(ins.multi_insert()) if getattr(ins, "mcount", 1) > 1 else [ins]
     for instance in instances:
@@ -973,6 +1163,27 @@ def _layer_states(doc: Drawing) -> dict[str, str]:
     return states
 
 
+def _layer_no_plot(doc: Drawing) -> frozenset[str]:
+    """Case-folded names of the layers whose plot flag (group 290) is 0. Defpoints is left out: ezdxf sets its
+    flag to 0 on every load, so the file's own value is unknown there (it is `defpoints_layer`, uncertain)."""
+    return frozenset(
+        str(layer.dxf.name).casefold()
+        for layer in doc.layers
+        if int(layer.dxf.get("plot", 1)) == 0 and str(layer.dxf.name).casefold() != "defpoints"
+    )
+
+
+def _viewport_frozen(doc: Drawing) -> frozenset[str]:
+    """Layers frozen in at least one viewport of any layout (VIEWPORT group 331), case-folded."""
+    return frozenset(
+        name.casefold()
+        for layout in doc.layouts
+        for viewport in layout.query("VIEWPORT")
+        if isinstance(viewport, Viewport)
+        for name in viewport.frozen_layers
+    )
+
+
 def extract_text(
     path: str | Path,
     converter: str = "none",
@@ -1062,6 +1273,9 @@ def _extract_text(
         cap,
         handles_ok,
         _layer_states(doc),
+        layer_no_plot=_layer_no_plot(doc),
+        viewport_frozen=_viewport_frozen(doc),
+        attmode=int(doc.header.get("$ATTMODE", 1)),
         knowledge=table,
         codepage=codepage,
         source=source or str(path),
@@ -1072,6 +1286,7 @@ def _extract_text(
         frame = _Frame("model" if is_model else name, name, "wcs" if is_model else "paper")
         for entity in layout:
             _visit_entity(ctx, frame, entity)
+    _flag_legacy_ascii(ctx)
     attdefs: list[dict[str, Any]] = []
     try:
         attdefs = _attdefs(ctx)

@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:tekla-harness:schema:dimensions:0.1",
+  "title": "Dimensions of one drawing",
+  "description": "Output of the read-only `harness dimensions <work_dir> <file> [--sheet ID | --unassigned] [--layer L] [--max N] [--input-dir DIR]` (stdout, nothing written): the DIMENSION entities of one drawing of a work folder, optionally limited to one detector sheet (or to dimensions on no sheet) and one layer, with what the geometry measures next to what the drawing prints. Every row is `read_dxf.measure_dimension` (the same rules as the dxf-probe dimension_audit row, without seq) plus where the dimension sits. Values are in the drawing's units as stored: nothing is converted, whatever unit was declared or answered (see `units`). Dimensions inside block definitions are reached through the INSERTs that place them (block_path, outermost first).",
+  "type": "object",
+  "required": ["schema_version", "kind", "project_id", "file", "query", "units", "counts", "dimensions", "warnings"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": "0.1" },
+    "kind": { "const": "dimensions" },
+    "project_id": { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/project_id" },
+    "file": { "type": "string", "minLength": 1, "description": "Inventory path of the drawing, relative to the input folder." },
+    "query": {
+      "type": "object",
+      "required": ["sheet", "unassigned", "layer", "max"],
+      "additionalProperties": false,
+      "properties": {
+        "sheet": { "type": ["string", "null"], "description": "Detector sheet id (model#01, <layout>#01); null = every sheet." },
+        "unassigned": { "type": "boolean", "description": "True: only dimensions on no sheet or on several sheets. Never together with sheet." },
+        "layer": { "type": ["string", "null"], "description": "Layer filter, compared case-insensitively; null = every layer." },
+        "max": { "type": ["integer", "null"], "minimum": 1, "description": "Rows returned at most; null = unbounded." }
+      }
+    },
+    "units": {
+      "type": "object",
+      "required": ["declared", "answered", "converted"],
+      "additionalProperties": false,
+      "properties": {
+        "declared": { "type": ["string", "null"], "description": "The unit the header declares ($INSUNITS, as the probe reports it); null when none." },
+        "answered": { "anyOf": [{ "type": "null" }, { "enum": ["mm", "cm", "m", "in", "ft"] }], "description": "The unit of the file's active units_confirm_all answer; null when not answered." },
+        "converted": { "const": false, "description": "Always false: every value is as stored in the drawing." }
+      }
+    },
+    "counts": {
+      "type": "object",
+      "description": "True counts, whatever was returned.",
+      "required": ["dimensions", "matched", "returned", "omitted", "truncated", "by_status", "by_text_rule"],
+      "additionalProperties": false,
+      "properties": {
+        "dimensions": { "type": "integer", "minimum": 0, "description": "DIMENSION entities of the file (block content counted once per placing INSERT)." },
+        "matched": { "type": "integer", "minimum": 0, "description": "Dimensions passing the sheet / unassigned / layer filters." },
+        "returned": { "type": "integer", "minimum": 0 },
+        "omitted": { "type": "integer", "minimum": 0, "description": "matched - returned." },
+        "truncated": { "type": "boolean" },
+        "by_status": { "type": "object", "additionalProperties": { "type": "integer", "minimum": 1 }, "description": "Over the matched rows." },
+        "by_text_rule": { "type": "object", "additionalProperties": { "type": "integer", "minimum": 1 }, "description": "Over the matched rows." }
+      }
+    },
+    "dimensions": { "type": "array", "items": { "$ref": "#/$defs/dimension" } },
+    "warnings": { "type": "array", "items": { "type": "string" } }
+  },
+  "$defs": {
+    "dimension": {
+      "type": "object",
+      "required": ["handle", "layout", "dim_type", "text_rule", "text", "measured", "actual_measurement", "measurement_agrees", "expected_text_value", "override_value", "tolerance", "status", "note", "layer", "sheet", "block_path"],
+      "additionalProperties": false,
+      "properties": {
+        "handle": { "type": ["string", "null"], "description": "Null when the file's handles are not reliable, or for a virtual copy from block content (its definition's handle is in block_path order)." },
+        "layout": { "type": "string", "description": "Layout of the dimension (or of its outermost INSERT)." },
+        "dim_type": { "type": "string" },
+        "text_rule": { "enum": ["measured", "measured_with_text", "suppressed", "override"], "description": "As in the dxf-probe dimension_audit: 'override' is any text that does not show the measurement." },
+        "text": { "type": "string", "description": "dxf.text verbatim (the override text, '' or '<>' when the measurement is shown)." },
+        "measured": { "type": ["number", "null"], "description": "ezdxf get_measurement(), drawing units (angular: degrees); block content is measured on its block definition, in the block's units." },
+        "actual_measurement": { "type": ["number", "null"], "description": "Group 42 as stored (angular: radians); null when absent." },
+        "measurement_agrees": { "type": ["boolean", "null"] },
+        "expected_text_value": { "type": ["number", "null"] },
+        "override_value": { "type": ["number", "null"] },
+        "tolerance": { "type": ["number", "null"] },
+        "status": { "enum": ["ok", "override_differs", "not_numeric", "not_compared", "error"] },
+        "note": { "type": ["string", "null"] },
+        "layer": { "type": ["string", "null"] },
+        "sheet": { "type": ["string", "null"], "description": "Detector sheet id the dimension lies on; null when on no sheet or several, or when the sheets document is missing." },
+        "block_path": { "type": "array", "items": { "type": "string" }, "description": "Block names from the outermost INSERT inwards; empty for a dimension placed directly in a layout." },
+        "text_entry": {
+          "description": "The text-index entry of the dimension's own text (text rule override or measured_with_text) and the legacy-font gate's verdict on it; null when the text shows only the measurement, or when the index has no matching entry (counted in warnings). An override whose meaning is blocked is not read: status not_compared, override_value null.",
+          "anyOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "required": ["entry_id", "meaning", "block_reason"],
+              "additionalProperties": false,
+              "properties": {
+                "entry_id": { "type": "string", "pattern": "^T[0-9]{6,}$" },
+                "meaning": { "enum": ["allowed", "blocked"] },
+                "block_reason": { "type": ["string", "null"], "description": "A text_gate reason when meaning is blocked, else null." }
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

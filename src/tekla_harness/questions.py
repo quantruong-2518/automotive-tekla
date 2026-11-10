@@ -9,13 +9,16 @@ identity that does not depend on the position:
             asked again.
   id        Q-001.. allocated by the registry (`question-registry.json`) in increasing order and NEVER
             reused. A key keeps its id for ever. A key its producer no longer raises becomes 'obsolete'
-            (kept, not deleted).
+            (kept, not deleted), with an `obsolete_reason` (OBSOLETE_*: file removed, file changed,
+            superseded by an answer the producer names, or not raised any more).
   answer    `answers.json`: the engineer's words, bound to the key. An answer whose file was changed or
             removed (or whose question is no longer raised) becomes 'stale'; it is never deleted and never
             re-bound to another key.
 
 One question is one (code, blocking flag, file) with its refs (file null = a question about the whole
-project). Six producers share the registry and own disjoint code sets: `intake` (harness intake),
+project), except one per file and text style for legacy_ascii_text and one per file and unparsed_code for
+callout_unparsed (tool wave 3): those differ by their refs, so by their key.
+Six producers share the registry and own disjoint code sets: `intake` (harness intake),
 `structure` (harness read-structure), `callouts` (harness callouts), `marks` (harness marks: member marks
 and schedules), `grid-system` (harness grid-system) and
 `reader` (harness ask, the drawing-reader agent's own questions, see ask.py: one question per
@@ -43,6 +46,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -89,6 +94,49 @@ CONFLICT_CODE = "grid_system_conflict"
 PREFIX_CODE = "member_mark_prefix_meaning"
 SELECT_CODE = "grid_system_select"
 AXIS_DIRECTIONS = ("dir1", "dir2")  # value keys of a grid_system_axis_unassigned answer
+# intake, project level: which readable drawing files form one set (one building, one grid); answered with
+# set1=a.dwg,b.dwg set2=c.dwg, every file of the question's refs exactly once
+FILE_SET_CODE = "file_set_relation"
+FILE_SET_KEY = re.compile(r"set[1-9][0-9]*")
+# tool wave 3 codes (names frozen: the EVAL-4 metrics use them), with their producers:
+SHEET_GAP_CODE = "sheet_number_gap"  # read-structure (sheets), not blocking: gaps in a file's sheet numbers
+CALLOUT_UNPARSED_CODE = "callout_unparsed"  # callouts: one per file and unparsed_code; blocks lot specs
+LEGACY_ASCII_CODE = "legacy_ascii_text"  # intake (read-dxf), not blocking: one per file and text style
+GRID_MISSING_CODE = "grid_system_missing"  # grid-system, blocking (ADR-0013): a file with no usable system
+GRID_CONTRADICTS_CODE = "grid_answer_contradicts_drawing"  # grid-system, blocking (ADR-0013 §5)
+# value keys of a grid_system_missing answer (ADR-0013 §2): comma-separated labels and spacings per
+# direction, both directions required; GRID_ANSWER_SHEET_KEY is optional
+GRID_ANSWER_KEYS = ("dir1_labels", "dir1_spacings", "dir2_labels", "dir2_spacings")
+GRID_ANSWER_SHEET_KEY = "sheet"
+# tool wave 4 code (V1; package T raises it): texts that may not print, which the file does not settle
+TEXT_VISIBILITY_CODE = "text_visibility_uncertain"  # intake (extract-text), not blocking: one per file
+# who gave an answer (answers.json answered_by_role): gate 1 counts the engineer's answers only
+ROLES = ("engineer", "simulated")
+# why a question is closed without an answer of its own (intake schema closed_by.reason; lifecycle.py)
+CLOSURE_REASONS = ("not_selected", "separate", "units_answered", "rejected_systems_only", "other_file_set")
+# why a producer run made a registry entry obsolete (registry `obsolete_reason`, tool wave 3 W5), in the
+# precedence order Ledger.sync applies: the file went, the file changed, an answer superseded it, or simply
+# not raised any more
+OBSOLETE_FILE_REMOVED = "its input file was removed"
+OBSOLETE_FILE_CHANGED = "its input file changed (the question is asked again under a new key)"
+OBSOLETE_SUPERSEDED = "superseded by an answer to {code}"
+OBSOLETE_NOT_RAISED = "the latest {producer} run no longer raises it"
+
+
+@dataclass(frozen=True)
+class Closure:
+    """A question closed by another answer or selection (lifecycle.closures): `question_id` is the question
+    whose answer closes it (None when no single question does), `reason` one of CLOSURE_REASONS."""
+
+    question_id: str | None
+    reason: str
+
+    def __post_init__(self) -> None:
+        if self.reason not in CLOSURE_REASONS:
+            raise ValueError(f"unknown closure reason '{self.reason}'")
+
+    def as_dict(self) -> dict[str, str | None]:
+        return {"question_id": self.question_id, "reason": self.reason}
 
 
 class QuestionsError(Exception):
@@ -326,13 +374,18 @@ class Ledger:
         raw: list[dict[str, Any]],
         file_hashes: dict[str, str],
         stale_files: dict[str, str] | None = None,
+        *,
+        superseded_by: Mapping[str, str] | None = None,
     ) -> list[dict[str, Any]]:
         """Register this run's questions of `producer` and return them rendered, in the producer's order:
         id, key, code, blocking, file, message, count, truncated, refs, [subjects], answer.
 
-        New keys get the next ids (in order). Keys of this producer that were not raised become obsolete.
-        An active answer becomes stale when its file is in `stale_files` (path -> 'changed' | 'removed')
-        or when its question is no longer raised. `file_hashes`: input-relative path -> sha256."""
+        New keys get the next ids (in order). Keys of this producer that were not raised become obsolete,
+        with `obsolete_reason` set on that transition (_obsolete_reason) and dropped if the key is raised
+        again. An active answer becomes stale when its file is in `stale_files` (path -> 'changed' |
+        'removed') or when its question is no longer raised. `file_hashes`: input-relative path -> sha256.
+        `superseded_by`: question code -> answer code, for codes this run stopped raising BECAUSE of an
+        answer to that code (e.g. grid-system: grid_system_conflict -> file_set_relation)."""
         if producer not in PRODUCERS:
             raise ValueError(f"unknown producer '{producer}'")
         registry, entries = self.registry, self.registry["questions"]
@@ -394,7 +447,14 @@ class Ledger:
             entry["file_sha256"] = file_hashes.get(q["file"]) if q["file"] is not None else None
         for key, entry in entries.items():
             if entry["producer"] == producer:
-                entry["status"] = "obsolete" if key not in seen else ("answered" if key in active else "open")
+                if key in seen:  # raised (again): a revived key forgets why it was obsolete
+                    entry.pop("obsolete_reason", None)
+                    entry["status"] = "answered" if key in active else "open"
+                elif entry["status"] != "obsolete":  # the reason is the transition's; later runs keep it
+                    entry["status"] = "obsolete"
+                    entry["obsolete_reason"] = self._obsolete_reason(
+                        entry, producer, file_hashes, stale_files or {}, superseded_by or {}
+                    )
             elif entry["status"] != "obsolete":  # another producer's question whose answer just went stale
                 entry["status"] = "answered" if key in active else "open"
 
@@ -417,6 +477,34 @@ class Ledger:
             rendered.append(out)
         self.check()
         return rendered
+
+    def _obsolete_reason(
+        self,
+        entry: dict[str, Any],
+        producer: str,
+        file_hashes: dict[str, str],
+        stale_files: dict[str, str],
+        superseded_by: Mapping[str, str],
+    ) -> str:
+        """Why `producer`'s run no longer raises this entry (OBSOLETE_*), first match wins: its file was
+        removed (intake's diff, or absent from the run's hashes) or changed (intake's diff, or a sha256 other
+        than the one recorded when it was raised); the producer declared its code superseded by an answer
+        to another code (`superseded_by`: code -> answer code) and such an answer is active; else not
+        raised. A project-level entry (file null) has no file reason."""
+        file = entry["file"]
+        if file is not None:
+            diff = stale_files.get(file)
+            if diff == "removed" or (diff is None and file not in file_hashes):
+                return OBSOLETE_FILE_REMOVED
+            recorded = entry.get("file_sha256")
+            if diff == "changed" or (recorded is not None and file_hashes.get(file) != recorded):
+                return OBSOLETE_FILE_CHANGED
+        answer_code = superseded_by.get(entry["code"])
+        if answer_code is not None and any(
+            a["code"] == answer_code and a["status"] == "active" for a in self.answers["answers"]
+        ):
+            return OBSOLETE_SUPERSEDED.format(code=answer_code)
+        return OBSOLETE_NOT_RAISED.format(producer=producer)
 
     def write(self) -> None:
         """Registry (always) and answers (when they changed); call BEFORE writing any question document."""

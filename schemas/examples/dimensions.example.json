@@ -1,0 +1,56 @@
+{
+  "schema_version": "0.1",
+  "kind": "dimensions",
+  "project_id": "demo-warehouse",
+  "file": "drawings/S-101.dwg",
+  "query": { "sheet": "model#01", "unassigned": false, "layer": null, "max": null },
+  "units": { "declared": "mm", "answered": "mm", "converted": false },
+  "counts": {
+    "dimensions": 3,
+    "matched": 2,
+    "returned": 2,
+    "omitted": 0,
+    "truncated": false,
+    "by_status": { "ok": 1, "override_differs": 1 },
+    "by_text_rule": { "measured": 1, "override": 1 }
+  },
+  "dimensions": [
+    {
+      "handle": "2A1",
+      "layout": "Model",
+      "dim_type": "linear",
+      "text_rule": "measured",
+      "text": "",
+      "measured": 6000.0,
+      "actual_measurement": 6000.0,
+      "measurement_agrees": true,
+      "expected_text_value": null,
+      "override_value": null,
+      "tolerance": null,
+      "status": "ok",
+      "note": null,
+      "layer": "S-DIM",
+      "sheet": "model#01",
+      "block_path": []
+    },
+    {
+      "handle": null,
+      "layout": "Model",
+      "dim_type": "linear",
+      "text_rule": "override",
+      "text": "3500",
+      "measured": 3000.0,
+      "actual_measurement": 3000.0,
+      "measurement_agrees": true,
+      "expected_text_value": 3000.0,
+      "override_value": 3500.0,
+      "tolerance": 0.005,
+      "status": "override_differs",
+      "note": null,
+      "layer": "S-DIM",
+      "sheet": "model#01",
+      "block_path": ["GRID_DIMS"]
+    }
+  ],
+  "warnings": []
+}

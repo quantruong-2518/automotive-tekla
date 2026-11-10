@@ -33,6 +33,7 @@ from ezdxf.version import __version__ as EZDXF_VERSION
 from tekla_harness.detect import sha256_file
 from tekla_harness.encoding import font_hint, guess_encoding_from_font, scrub_surrogates
 from tekla_harness.knowledge import FontEncodingRow, FontEncodingTable, default_font_encodings
+from tekla_harness.questions import LEGACY_ASCII_CODE, TEXT_VISIBILITY_CODE, question_group
 from tekla_harness.readlog import timed_attempt
 
 SCHEMA_VERSION = "0.1"
@@ -80,6 +81,12 @@ _DIM_TYPES = {
 _PLAIN_NUMBER = re.compile(r"^[+-]?(\d+(\.\d+)?|\.\d+)$")
 _GROUP_5 = re.compile(rb"(?m)^[ \t]*5[ \t]*\r?\n[ \t]*[0-9A-Fa-f]+[ \t]*\r?$")
 MAX_STYLES_LISTED = 10  # style names named in one knowledge question
+MAX_LEGACY_EXAMPLES = 5  # example entries listed in one legacy_ascii_text question (count stays the total)
+MAX_VISIBILITY_EXAMPLES = 5  # example entries listed in one text_visibility_uncertain question
+MAX_VISIBILITY_TEXT = 60  # characters of an example's text kept in the question
+# print_uncertain_reasons of a text-index entry (text-index schema), in the order a question lists them
+PRINT_UNCERTAIN_REASONS = ("insert_invisible", "attmode_not_normal", "viewport_frozen", "defpoints_layer")
+NO_STYLE = "(no style)"
 
 TOLERANCE_RULE = (
     "Tolerance is half of the displayed precision: 0.5 * 10^-DIMDEC "
@@ -623,13 +630,23 @@ def _style_names(names: list[str]) -> str:
     return shown + (f" (+{len(names) - MAX_STYLES_LISTED} more)" if len(names) > MAX_STYLES_LISTED else "")
 
 
+def text_style_family(style: Any) -> str:
+    """TrueType family of a text style from its ACAD XDATA; '' when there is none.
+
+    ezdxf's `Textstyle.get_extended_font_data()` returns '' without ACAD XDATA, and also when the XDATA
+    holds the family tag (1000) without the flags tag (1071) after it (ezdxf 1.4.5: it reads both or
+    neither). ezdxf calls this data optional and not reliable: it is a naming hint like the others."""
+    return str(style.get_extended_font_data()[0]) if style.has_xdata("ACAD") else ""
+
+
 def _text_styles(
     doc: Drawing, table: FontEncodingTable
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
     """Text styles, one hint row per legacy-looking style, and the questions about them.
 
-    The rules are `encoding.font_hint(style name, font file)` (the same call `extract_text` makes); the
-    knowledge table is consulted only when that returns "unknown", and only approved rows decide.
+    The rules are `encoding.font_hint(style name, font file, TrueType family)` (the same call
+    `extract_text` makes); the knowledge table is consulted only when that returns "unknown", and only
+    approved rows decide.
     """
     styles, hints, questions = [], [], []
     proposed: dict[int, tuple[FontEncodingRow, list[str]]] = {}
@@ -637,17 +654,34 @@ def _text_styles(
         name = str(style.dxf.name)
         font = str(style.dxf.get("font", ""))
         bigfont = str(style.dxf.get("bigfont", ""))
-        family = str(style.get_extended_font_data()[0]) if style.has_xdata("ACAD") else ""
+        family = text_style_family(style)
         shx = any(f.lower().endswith(".shx") for f in (font, bigfont))
-        hint = font_hint(name, font or None)
+        hint = font_hint(name, font or None, family or None)
         capital = hint.capital_font
         encoding, source, pattern = hint.encoding, "font_hint", None
         matched = [
             {"field": field_name, "value": value}
-            for field_name, value in (("name", name), ("font", font))
+            for field_name, value in (("name", name), ("font", font), ("family", family))
             if value and guess_encoding_from_font(value) == encoding
         ]  # empty when the encoding is "unknown"
-        if encoding == "unknown":
+        if hint.decided_by == "family":  # a family never silently overrides an approved row (as extract_text)
+            found = table.match(name, font or None)
+            disagree = found.conflict or (found.rows if found.encoding not in (None, encoding) else ())
+            if disagree:
+                encoding = "unknown"
+                questions.append(
+                    {
+                        "code": "font_encoding_conflict",
+                        "blocking": False,
+                        "message": "The TrueType family of a text style names one legacy encoding and "
+                        "approved rows of the font-encoding knowledge table give another (or disagree). "
+                        "Nothing is decoded for this style. Fix or reject the row, or confirm the encoding.",
+                        "where": f"text style {name}",
+                        "found": f"family '{family}' -> {hint.encoding}; "
+                        + "; ".join(f"{r.cite()} [{r.source}]" for r in disagree),
+                    }
+                )
+        elif encoding == "unknown":
             found = table.match(name, font or None)
             if found.conflict:
                 questions.append(
@@ -714,6 +748,94 @@ def _text_styles(
             }
         )
     return styles, hints, questions
+
+
+def legacy_ascii_questions(
+    text_index: dict[str, Any], rel: str, text_styles: list[dict[str, Any]] | None
+) -> list[dict[str, Any]]:
+    """legacy_ascii_text questions of one file (tool wave 3, W3): one per text style holding entries flagged
+    `legacy_ascii_suspect` (extract_text), sorted by style name ('(no style)' when an entry has none).
+
+    Built from the file's text index, since the probe itself reads no text, plus the probe's `text_styles`
+    rows for the TrueType family. Raw intake questions (no id, key or answer): not blocking, `count` is
+    the style's flagged entries, refs list the first MAX_LEGACY_EXAMPLES in id order, each quoted as stored
+    with its entry id (never decoded). The answer records the engineer's reading of the style; it decodes
+    and unblocks nothing (the legacy-font gate stays shut).
+    """
+    by_style: dict[str, list[dict[str, Any]]] = {}
+    for e in sorted(text_index["entries"], key=lambda e: (len(e["id"]), e["id"])):
+        if "legacy_ascii_suspect" in e["flags"]:
+            by_style.setdefault(e["style"] if e["style"] is not None else NO_STYLE, []).append(e)
+    families = None if text_styles is None else {s["name"]: s["family"] for s in text_styles}
+    out = []
+    for style, entries in sorted(by_style.items()):
+        font = next((e["font_file"] for e in entries if e["font_file"]), None)
+        if families is None:
+            family = "unknown (the probe has no text_styles section)"
+        else:
+            family = families.get(style) or "none"
+        n = len(entries)
+        # questions-md shows the refs, not this English message: each ref names the font too
+        where = f"text style {style} (font file {font or 'none'}, TrueType family {family})"
+        message = (
+            f"{n} pure-ASCII text entr{'y' if n == 1 else 'ies'} in text style '{style}' (font file "
+            f"{font or 'none'}, TrueType family {family}) {'has' if n == 1 else 'have'} the shape legacy "
+            "Vietnamese text takes when stored as ASCII (flag legacy_ascii_suspect), so the legacy-font gate "
+            "blocks them. Open the drawing at the example entries listed and say what this style holds and "
+            "whether its text can be read as it is stored. The answer records your reading of the style; it "
+            "decodes nothing and unblocks nothing."
+        )
+        refs = [{"file": rel, "where": where, "found": f"{e['id']}: {e['display_text']}"} for e in entries]
+        out.append(question_group(LEGACY_ASCII_CODE, False, message, refs, MAX_LEGACY_EXAMPLES, file=rel))
+    return out
+
+
+def text_visibility_questions(text_index: dict[str, Any], rel: str) -> list[dict[str, Any]]:
+    """The text_visibility_uncertain question of one file (tool wave 4, V1): none unless a printed entry lists
+    `print_uncertain_reasons`, else one non-blocking question.
+
+    Refs: first one per reason with the number of entries it covers (an entry with two reasons counts under
+    both), then the first MAX_VISIBILITY_EXAMPLES entries in id order, each quoted with its entry id. `count`
+    is the number of entries with any reason. Those entries stay printed; the engineer says whether they
+    print.
+    An entry that is not printed is never counted (its hard reason settles it), and an index written before
+    the field existed raises nothing.
+    """
+    uncertain = [
+        e
+        for e in sorted(text_index["entries"], key=lambda e: (len(e["id"]), e["id"]))
+        if e.get("printed") is not False and e.get("print_uncertain_reasons")
+    ]
+    if not uncertain:
+        return []
+    per_reason = {
+        r: [e for e in uncertain if r in e["print_uncertain_reasons"]] for r in PRINT_UNCERTAIN_REASONS
+    }
+    refs = [
+        {
+            "file": rel,
+            "where": f"reason {reason}",
+            "found": f"{len(rows)} {'entry' if len(rows) == 1 else 'entries'}",
+        }
+        for reason, rows in per_reason.items()
+        if rows
+    ]
+    for e in uncertain[:MAX_VISIBILITY_EXAMPLES]:
+        text = " ".join(str(e["display_text"]).split())
+        text = text[:MAX_VISIBILITY_TEXT] + ("..." if len(text) > MAX_VISIBILITY_TEXT else "")
+        where = f"layer {e['layer']}; {', '.join(e['print_uncertain_reasons'])}"
+        refs.append({"file": rel, "where": where, "found": f"{e['id']}: {text}"})
+    counts = ", ".join(f"{r} {len(rows)}" for r, rows in per_reason.items() if rows)
+    message = (
+        f"{len(uncertain)} text entr{'y' if len(uncertain) == 1 else 'ies'} may not print, which the file "
+        f"does not settle ({counts}): an INSERT hidden over its content, $ATTMODE other than 1, a layer "
+        "frozen in a viewport or the Defpoints layer. They are read as printed. Open the drawing at the "
+        "example entries and say whether they print."
+    )
+    question = question_group(TEXT_VISIBILITY_CODE, False, message, refs, file=rel)
+    question["count"] = len(uncertain)
+    question["truncated"] = len(uncertain) > MAX_VISIBILITY_EXAMPLES
+    return [question]
 
 
 def _unreadable(scan: _Scan, handles_ok: bool) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
@@ -829,26 +951,29 @@ def _audit_dimension(ref: _DimRef, seq: int, handles_ok: bool) -> dict[str, Any]
         agrees = is_raw or is_scaled
         raw_only = bool(is_raw and scaled and not is_scaled)
     row.update(measured=measured, actual_measurement=actual, measurement_agrees=agrees)
+    # a measurement group 42 contradicts is never 'ok', whatever the text rule (an override keeps its value)
+    disagreement = None
+    if agrees is False:
+        disagreement = (
+            f"group 42 actual measurement {actual:g} disagrees with the geometry measurement "
+            f"{measured:g}{' (degrees)' if angular else ''}; the reading is not trusted"
+        )
     if rule != "override":
-        return row
+        return row if disagreement is None else _not_compared(row, disagreement)
 
     stripped = "".join(plain_mtext(text)).strip()
+    value = num(stripped) if _PLAIN_NUMBER.match(stripped) else None
+    row["override_value"] = value
+    if disagreement is not None:
+        return _not_compared(row, disagreement)
     if not _PLAIN_NUMBER.match(stripped):
         row["status"] = "not_numeric"
         return row
-    value = num(stripped)
     if value is None:
         row.update(status="not_numeric", note="the number is out of range")
         return row
-    row["override_value"] = value
     if dimtype == 6 or measured is None:
         return _not_compared(row, "no scalar measurement to compare with")
-    if agrees is False:
-        return _not_compared(
-            row,
-            f"group 42 actual measurement {actual:g} disagrees with the geometry measurement "
-            f"{measured:g}{' (degrees)' if angular else ''}; the reading is not trusted",
-        )
     if raw_only:
         return _not_compared(
             row,
@@ -896,6 +1021,56 @@ def _audit_dimension(ref: _DimRef, seq: int, handles_ok: bool) -> dict[str, Any]
     return row
 
 
+def _measured_row(ref: _DimRef, seq: int, handles_ok: bool) -> dict[str, Any]:
+    """The audit row of one dimension; a dimension that raises becomes an 'error' row, never dropped."""
+    dim = ref.dim
+    try:
+        return _audit_dimension(ref, seq, handles_ok)
+    except Exception as exc:  # reported on the row, never dropped
+        text = str(dim.dxf.get("text", ""))
+        try:
+            dim_type = _dim_type_name(_dimtype(dim))
+        except Exception:
+            dim_type = "unknown"
+        return {
+            "seq": seq,
+            "handle": _handle(dim, handles_ok),
+            "layout": ref.label,
+            "dim_type": dim_type,
+            "text_rule": _text_rule(text),
+            "text": text,
+            "measured": None,
+            "actual_measurement": None,
+            "measurement_agrees": None,
+            "expected_text_value": None,
+            "override_value": None,
+            "tolerance": None,
+            "status": "error",
+            "note": f"{type(exc).__name__}: {exc}",
+        }
+
+
+def measure_dimension(
+    dim: Dimension,
+    *,
+    layout: str = "",
+    is_model: bool = False,
+    in_block: bool = False,
+    handles_ok: bool = False,
+) -> dict[str, Any]:
+    """What one DIMENSION measures and prints, by the dimension_audit rules of the probe: its row without
+    `seq` (handle, layout, dim_type, text_rule, text, measured, actual_measurement, measurement_agrees,
+    expected_text_value, override_value, tolerance, status, note). Values in drawing units, never converted.
+
+    `layout`: the name to report. `is_model`: the dimension is in modelspace, where a negative DIMLFAC means
+    factor 1 when group 42 proves it (False: never assumed). `handles_ok`: the file's handles are reliable
+    (False: handle null). The defaults are the conservative ones. A dimension that raises is an 'error'
+    row."""
+    row = _measured_row(_DimRef(dim, layout, is_model, in_block), 0, handles_ok)
+    del row["seq"]
+    return row
+
+
 @dataclass
 class _Audit:
     rows: list[dict[str, Any]]  # every dimension, in file order
@@ -911,30 +1086,7 @@ def _audit_all(scan: _Scan, handles_ok: bool) -> _Audit:
     magnitudes: list[float] = []
     for seq, ref in enumerate(scan.dimensions, start=1):
         dim = ref.dim
-        try:
-            row = _audit_dimension(ref, seq, handles_ok)
-        except Exception as exc:  # reported on the row, never dropped
-            text = str(dim.dxf.get("text", ""))
-            try:
-                dim_type = _dim_type_name(_dimtype(dim))
-            except Exception:
-                dim_type = "unknown"
-            row = {
-                "seq": seq,
-                "handle": _handle(dim, handles_ok),
-                "layout": ref.label,
-                "dim_type": dim_type,
-                "text_rule": _text_rule(text),
-                "text": text,
-                "measured": None,
-                "actual_measurement": None,
-                "measurement_agrees": None,
-                "expected_text_value": None,
-                "override_value": None,
-                "tolerance": None,
-                "status": "error",
-                "note": f"{type(exc).__name__}: {exc}",
-            }
+        row = _measured_row(ref, seq, handles_ok)
         rows.append(row)
         if ref.is_model and row["dim_type"] in ("linear", "aligned"):
             length = row["actual_measurement"] if row["actual_measurement"] is not None else row["measured"]
@@ -969,7 +1121,7 @@ def _dimension_audit(audit: _Audit) -> tuple[dict[str, Any], list[dict[str, Any]
     if disagree:
         warnings.append(
             f"{disagree} dimension(s): group 42 (actual measurement) disagrees with the geometry "
-            "measurement; override text on those dimensions is not compared."
+            "measurement; those dimensions are not compared (status not_compared)."
         )
     if in_blocks:
         warnings.append(

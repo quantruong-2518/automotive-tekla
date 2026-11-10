@@ -24,7 +24,7 @@ the wave-2 tools and from the role distinction (simulated vs engineer answers).
   `harness status` and `questions.md` print carries `--role engineer` and is labelled as the
   engineer's own step (`the engineer runs: …`; `Lệnh trả lời (kỹ sư tự chạy, tác tử không chạy
   thay)`). Rev 5 first told the agent to record answers with `--role engineer|simulated`; it now
-  follows RTI-0010: the agent never records `--role engineer`, relays an eval simulator's answer
+  follows RTI-0011: the agent never records `--role engineer`, relays an eval simulator's answer
   with `--role simulated`, and asks the orchestrator when no role is stated.
 - A closure counts only when `harness status` accepts it and lists it in `gate1.closed`. The
   producer still writes `closed_by` into its question document, but status refuses it when the
@@ -57,7 +57,7 @@ the wave-2 tools and from the role distinction (simulated vs engineer answers).
 | 2 | "After any … answer" also covers the file-set answer; a question another answer settles is closed only when `gate1.closed` lists it; a `closures:` reason leaves it blocking | Fix 5 (5a–5c); closure contract (P3 review M2) | Reading the results |
 | 3 | **No sheet detected**: the file's text is reachable with `--unassigned` on `sheet-text` / `find-text`; report the file so the reader takes that route | Fix 4 | Reading the results |
 | 4 | **Legacy fonts**: ASCII text in a legacy font shaped like encoded Vietnamese (`legacy_ascii_suspect`) is blocked too | Fix 2b, applied to the gate rule of fix 3 | Reading the results |
-| 5 | **Answers** rewritten per RTI-0010: the printed command (`--role engineer`) is the engineer's own step, handed to the engineer; the agent records only an answer the orchestrator relays from an eval's simulator, from the question's **Lệnh trả lời** line in `questions.md` with `--role engineer` *replaced* by `--role simulated` (argparse keeps the last `--role`: appending would record an engineer answer — checked); no role stated → ask the orchestrator. Rev 4's `harness answer` template line (no `--role`, now exit 2) is removed rather than given a role: the per-question line is the single source and names the values (the `answers:` re-answer command in `status` has no `--value`). "Only the engineer answers" removed (contradicted eval relays) | Fix 10; RTI-0010; EVAL-3 protocol §6.2 | Answers |
+| 5 | **Answers** rewritten per RTI-0011: the printed command (`--role engineer`) is the engineer's own step, handed to the engineer; the agent records only an answer the orchestrator relays from an eval's simulator, from the question's **Lệnh trả lời** line in `questions.md` with `--role engineer` *replaced* by `--role simulated` (argparse keeps the last `--role`: appending would record an engineer answer — checked); no role stated → ask the orchestrator. Rev 4's `harness answer` template line (no `--role`, now exit 2) is removed rather than given a role: the per-question line is the single source and names the values (the `answers:` re-answer command in `status` has no `--value`). "Only the engineer answers" removed (contradicted eval relays) | Fix 10; RTI-0011; EVAL-3 protocol §6.2 | Answers |
 | 6 | `questions-format.md`: reader evidence on a producer question (`harness ask --supplement Q-id`, printed under it as "Bổ sung của người đọc") is also what the reader writes into `questions.md` | Fix 7 | questions-format.md |
 
 Also cut: "It closes only on `--value unit=…`" (Units bullet): the command `questions.md` prints
