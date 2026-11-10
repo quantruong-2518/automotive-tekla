@@ -790,6 +790,10 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
       A level sign set apart from its digits by more than one space is read only for a bare value (nothing but
       the number, a unit or a closing bracket after it): `-   2.500 kN/m2` is no level. Known drawings: no
       change (the four 290 values are bare).
+      A storey name beside the value is on its row by the old rule (centres within 0.75 of the value's height) or
+      by the box rule of c09581a; the box rule only adds pairs (it had dropped a small name centred below the
+      value). Its 0.1 limit: named candidates on the 11 known files are the same for 0.05 and 0.1 (285 needs
+      more than 0), and 0.2 adds two names on 271.
 
 ### Changed
 - Question lifecycle (tool wave 2, EVAL-2 fix 5):

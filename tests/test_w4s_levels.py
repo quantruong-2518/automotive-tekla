@@ -108,6 +108,20 @@ def test_the_name_must_touch_the_value_row(tmp_path, gap, named):
     assert _names(run(path)) == {"+0.450": "TẦNG 1" if named else None}
 
 
+def test_a_small_name_centred_below_the_value_is_still_a_name(tmp_path):
+    # review m5: the old rule took a name whose centre is within 0.75 of the value's height; keep that pair.
+    # Value h 139.4 (box -594205 .. -594065.6, centre -594135.3); name h 20, centre -594235.3: 100 below
+    # (< 0.75 x 139.4), and its box top (-594225.3) is 20.3 clear of the value's bottom (> 0.1 x 139.4)
+    path = _file(tmp_path, [("+0.450", "TẦNG 1", (1025363, -594205), (1024115, -594245.3), 139.4, 20.0)])
+    assert _names(run(path)) == {"+0.450": "TẦNG 1"}
+
+
+def test_a_small_name_centred_over_three_quarters_of_the_height_below_is_not(tmp_path):
+    # as above with the name centre 130 below the value centre (> 0.75 x 139.4) and 50 clear of its box
+    path = _file(tmp_path, [("+0.450", "TẦNG 1", (1025363, -594205), (1024115, -594275.3), 139.4, 20.0)])
+    assert _names(run(path)) == {"+0.450": None}
+
+
 def test_a_name_ten_heights_away_on_the_row_is_a_name_and_thirty_is_not(tmp_path):
     near = _file(
         tmp_path, [("+0.450", "TẦNG 1", (1025363, -594205), (1025363 - 1900, -594205), 139.4, 139.4)]

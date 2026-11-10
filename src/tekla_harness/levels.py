@@ -89,9 +89,10 @@ LEVEL_RANGE_M = (-50.0, 300.0)
 SYMBOL_DISTANCE = 6.0  # text heights
 NAME_SAME_LINE = 15.0  # text heights, left or right of the value
 NAME_ABOVE = 2.5  # text heights
-# A name beside the value counts as on the value's row when the two text boxes overlap vertically or lie
-# within this share of the taller text's height of each other (extents are estimates; 285 sets the name
-# 5 % below the value).
+# A name beside the value is on the value's row when its centre is within 0.75 of the value's height of the
+# value's (tool wave 3), or when the two text boxes overlap vertically or lie within this share of the taller
+# text's height of each other (extents are estimates; 285 sets a taller name 5 % below the value). The second
+# test only adds pairs.
 NAME_ROW_GAP = 0.1
 MAX_QUESTIONS_PER_CODE = 50
 
@@ -692,10 +693,10 @@ def _adjacent_name(
         if obox is None:
             continue
         ox, oy = (obox[0] + obox[2]) / 2, (obox[1] + obox[3]) / 2
-        same_line = (
+        same_row = abs(oy - cy) <= 0.75 * h or (
             max(box[1] - obox[3], obox[1] - box[3]) <= NAME_ROW_GAP * max(h, obox[3] - obox[1])
-            and min(abs(obox[2] - box[0]), abs(obox[0] - box[2])) <= NAME_SAME_LINE * h
         )
+        same_line = same_row and min(abs(obox[2] - box[0]), abs(obox[0] - box[2])) <= NAME_SAME_LINE * h
         above = (
             obox[1] >= box[3] - 0.25 * h
             and obox[1] - box[3] <= NAME_ABOVE * h
