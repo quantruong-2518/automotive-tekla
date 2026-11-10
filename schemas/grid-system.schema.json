@@ -152,7 +152,7 @@
         "views": { "type": "integer", "minimum": 0 },
         "families_usable": { "type": "integer", "minimum": 0 },
         "grid_spacing_median": {
-          "description": "Median positive grid spacing over every family of the file's grids document, in drawing units, and how many spacings. Null when the file has no spacing. `harness grid-system` and `harness status` test the engineer's answered unit against it (plausible range 0.5 m to 30 m) next to the dimension median (units_answer_contradicts_evidence). Always written by harness grid-system; absent only in a document from an older run.",
+          "description": "Median positive grid spacing of the file's PLAN systems, in drawing units, and how many spacings (tool wave 4). A system with fewer than two independent views (a key plan, a detail) never decides while the file has a system with two or more; a file whose systems are all single-source takes the median of its systems' medians (each system counts once; `count` is then the total number of spacings of those systems, not the number the median was taken over). Null when the file has no spacing. `harness grid-system` and `harness status` test the engineer's answered unit against it (plausible range 0.5 m to 30 m) next to the dimension median (units_answer_contradicts_evidence). Always written by harness grid-system; absent only in a document from an older run.",
           "anyOf": [
             { "type": "null" },
             {

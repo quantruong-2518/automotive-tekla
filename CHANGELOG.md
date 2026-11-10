@@ -782,6 +782,7 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
       It is listed in `unassigned_families` with the reason, counted in `summary.families_unassigned`, and
       raises no `grid_system_axis_unassigned` question. 180: 8 systems / 31 blocking grid questions become
       5 / 17; the other ten known drawings are unchanged.
+    - Schema descriptions (no field changes, `$id` unchanged): `grid-system` `files[].grid_spacing_median` is the median of the file's plan systems (single-source case stated); `grids` `unpaired_bubbles` also holds the bubbles of set-aside axes and views, which have lines.
     - A view of one direction (one family of two or more axes, nothing across it) whose shared labels contradict
       every other family that shares two or more of them, while two or more of those families agree with each
       other, is set aside as an elevation or section: no grid system, no cross-check partner (EVAL-4 278

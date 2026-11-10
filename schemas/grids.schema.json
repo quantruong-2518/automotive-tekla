@@ -42,7 +42,7 @@
         "listed"
       ],
       "additionalProperties": false,
-      "description": "Labelled circles with no axis line (bar marks, section marks, or a bubble whose line was not found).",
+      "description": "Labelled circles that are not an axis of a reported family: bar marks, section marks, a bubble whose line was not found, and (tool wave 4) bubbles of an axis or view that was set aside (it differs from its family in two of size, block and line, or it is an elevation or section view contradicting the plans); those have a line, and `grids.json` warnings say which and why.",
       "properties": {
         "count": {
           "type": "integer",
