@@ -774,6 +774,10 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
       text with a mark's shape (or a member-word title) and the row has a second cell, it is a table, not an
       `unparsed_tables` entry (161's crane-beam table: CB-01 is matched, not plan-only). Without lines two
       rows are still needed.
+    - `marks` and `callouts` (EVAL-4 271): a whole text `<letters><n>` that a callout pattern claims (`bm-1`
+      read as a plate tag) is a mark when it stands in a run of three consecutive numbers of one prefix,
+      text style and height on one sheet (271 `bm-1` .. `bm-7`: the BM footing family, 16 plan marks); a
+      plate number alone (`BM12`) stays a plate. Texts that do not print take no part.
 
 ### Changed
 - Question lifecycle (tool wave 2, EVAL-2 fix 5):

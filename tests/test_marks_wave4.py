@@ -752,3 +752,68 @@ def test_a_one_row_line_grid_schedule_with_a_mark_shaped_cell_is_a_table(tmp_pat
         14000.0,
         38000.0,
     ]
+
+
+# --- item 5 (271): a numbered run of texts a callout pattern claims is a mark family (bm-1 .. bm-7) --------
+
+
+def test_a_run_of_numbered_plate_looking_texts_is_a_mark_family(tmp_path):
+    work = build_marks_work(
+        tmp_path, plan_texts=("bm-1", "bm-2", "bm-3", "bm-4", "BM12", "PL-1", "PL-2", "pl 7", "D1")
+    )
+    marks = extract_marks(work, tmp_path / "input", check_inputs=True)
+    plan = sorted(p["mark"] for p in marks["plan_marks"] if p["mark"].lower().startswith(("bm", "pl", "d")))
+    assert plan == [
+        "D1",
+        "bm-1",
+        "bm-2",
+        "bm-3",
+        "bm-4",
+    ]  # BM12, PL-1, PL-2, pl 7 are plates (no run of three)
+    sets = {s["family"]: s for s in marks["summary"]["mark_sets"]}
+    assert sets["BM"]["members"] == ["bm-1", "bm-2", "bm-3", "bm-4"]
+    callouts = extract_callouts(work)
+    plates = sorted(c["display_text"] for c in callouts["candidates"] if c["kind"] == "plate")
+    assert plates == [
+        "BM12",
+        "PL-1",
+        "PL-2",
+        "bm-1",
+        "bm-2",
+        "bm-3",
+        "bm-4",
+        "pl 7",
+    ]  # callouts keeps its view
+
+
+def test_a_run_needs_three_consecutive_numbers_of_one_prefix_style_and_height(tmp_path):
+    from tekla_harness.callouts import numbered_run_labels
+
+    def entry(
+        eid: str, text: str, style: str = "S", height: float = 3.5, printed: bool = True
+    ) -> dict[str, Any]:
+        e: dict[str, Any] = {"id": eid, "display_text": text, "style": style, "height": height}
+        if not printed:
+            e["printed"] = False
+        return e
+
+    sheet_of = {f"T{n:06d}": {"sheet_id": "s1"} for n in range(1, 40)}
+    entries = [
+        entry("T000001", "BM-1"),
+        entry("T000002", "BM-2"),
+        entry("T000003", "BM-4"),  # 1 2 4: no run of three
+        entry("T000004", "PL-5"),
+        entry("T000005", "PL-6"),
+        entry("T000006", "PL-7"),  # a run
+        entry("T000007", "PL-4", style="OTHER"),  # another style: not joined to the run 5 6 7
+        entry("T000008", "BM-3", height=7.0),  # another height: not joined
+        entry("T000009", "PL-11"),
+        entry("T000010", "PL-12"),
+        entry("T000011", "PL-13", printed=False),  # does not print: 11 12 13 is no run
+        entry("T000012", "D1"),  # no callout pattern claims D1 D2 D3: marks already, no run to report
+        entry("T000013", "D2"),
+        entry("T000014", "D3"),
+    ]
+    assert numbered_run_labels(entries, sheet_of) == {"T000004", "T000005", "T000006"}
+    sheet_of["T000005"] = {"sheet_id": "s2"}  # a run is per sheet
+    assert numbered_run_labels(entries, sheet_of) == set()

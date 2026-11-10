@@ -870,6 +870,38 @@ def footing_m_labels(entries: list[dict[str, Any]], sheet_of: dict[str, dict[str
         for n, ids in numbers.items():
             if bolt[n] and any(k in numbers and not bolt[k] for k in (n - 1, n + 1)):
                 out.update(ids)
+    return out | numbered_run_labels(entries, sheet_of)
+
+
+# 271 `bm-1` .. `bm-7` (footings, two sheets): the plate pattern reads `BM<n>` as a plate tag. A whole text
+# `<letters><n>` that a callout pattern claims but that stands in a run of at least three consecutive numbers
+# of the same prefix, text style and height on one sheet is a family of marks, not a run of plates (a plate
+# schedule does not number its plates 1, 2, 3).
+_RUN_TEXT = re.compile(r"^(?P<prefix>[A-Za-z]{1,3})\s?-?\s?(?P<n>\d{1,3})$")
+MIN_RUN = 3
+
+
+def numbered_run_labels(entries: list[dict[str, Any]], sheet_of: dict[str, dict[str, Any]]) -> set[str]:
+    """Ids of the printed texts that are a whole `<letters><n>`, claimed by a callout pattern, and in a run of
+    `MIN_RUN` consecutive numbers of one prefix, style and height on one sheet (see above)."""
+    groups: dict[tuple[str | None, str, str | None, float | None], dict[int, list[str]]] = {}
+    for e in entries:
+        text = e["display_text"].strip()
+        m = _RUN_TEXT.match(text)
+        if (
+            m is None
+            or not is_printed(e)
+            or not scan_line(text, e.get("decode", {}).get("case_uncertain", False))
+        ):
+            continue
+        sheet = sheet_of.get(e["id"])
+        key = (None if sheet is None else sheet["sheet_id"], m["prefix"].casefold(), e["style"], e["height"])
+        groups.setdefault(key, {}).setdefault(int(m["n"]), []).append(e["id"])
+    out: set[str] = set()
+    for numbers in groups.values():
+        for n, ids in numbers.items():
+            if any(all(k in numbers for k in range(a, a + MIN_RUN)) for a in range(n - MIN_RUN + 1, n + 1)):
+                out.update(ids)
     return out
 
 
@@ -887,7 +919,7 @@ def _entry_hits(
     cu = dec["case_uncertain"]
     literal_sign_unsafe = dec["encoding_used"] != "unicode" and "%%c" not in entry["special_codes"]
     for line in entry["display_text"].split("\n"):
-        hits = [] if as_mark else scan_line(line, cu)
+        hits = [] if as_mark and member_mark(line, cu) is not None else scan_line(line, cu)
         if not hits:
             mark = member_mark(line, cu)
             if mark is not None and claimed_by is not None:
