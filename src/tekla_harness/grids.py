@@ -92,6 +92,16 @@ FAMILY_ANGLE_TOL = 0.5  # degrees
 # is drawn as a circle (EVAL-3 285/286: block SADF, an arc from 90.00006 to 90.0000031 degrees)
 FULL_ARC_GAP_DEG = 1.0
 ORTHO_TOL = 0.1  # degrees
+# Heuristics for an obround bubble (two LINEs and two semicircular ARCs around the label; EVAL-4 180): the
+# caps have one radius within OBROUND_RADIUS_TOL (x radius), their diameters are perpendicular to the line
+# between their centres within OBROUND_PERP_TOL (|cos|), the two LINEs join their ends within
+# OBROUND_END_TOL (x radius), and the straight part is at most OBROUND_MAX_LENGTH radii long. The bubble's
+# radius is half the overall length (straight part + both caps), so a label as tall as the stadium is wide
+# still fits the label-height test (0.15 r .. 1.6 r).
+OBROUND_RADIUS_TOL = 0.02
+OBROUND_PERP_TOL = 0.05
+OBROUND_END_TOL = 0.05
+OBROUND_MAX_LENGTH = 12.0
 DIM_POINT_TOL = 0.05  # x r: a dimension extension point lies on an axis
 SCALE_TOL = 1e-3  # relative: two spacing sets differ by one ratio
 # Heuristic (not a standard): two views whose spacing differs by at most this fraction of the spacing
@@ -233,6 +243,22 @@ class _Circle:
     r: float
     space: str
     block_path: tuple[str, ...]
+
+
+@dataclass
+class _Arc:
+    """A semicircular ARC, in world coordinates: the cap of a possible obround bubble."""
+
+    p1: tuple[float, float]
+    p2: tuple[float, float]
+    mid: tuple[float, float]  # the point halfway along the arc
+    r: float
+    space: str
+    block_path: tuple[str, ...]
+
+    @property
+    def c(self) -> tuple[float, float]:
+        return ((self.p1[0] + self.p2[0]) / 2, (self.p1[1] + self.p2[1]) / 2)
 
 
 @dataclass
@@ -554,6 +580,7 @@ class _Ctx:
 def _collect(doc: Drawing, walker: Walker, ctx: _Ctx):
     segs: list[_Seg] = []
     circles: list[_Circle] = []
+    caps: list[_Arc] = []
     dims: list[_Dim] = []
     layers: dict[str, str | None] = {}
     for space, layout, _ in layout_spaces(doc):
@@ -579,6 +606,8 @@ def _collect(doc: Drawing, walker: Walker, ctx: _Ctx):
                         if e.dxf.get("extrusion", (0, 0, 1))[2] < 0:
                             c = e.ocs().to_wcs(c)
                         circles.append(_Circle((c.x, c.y), float(e.dxf.radius), space, p.block_path))
+                    elif e.dxf.radius > 0 and abs(sweep - 180.0) <= FULL_ARC_GAP_DEG:
+                        caps.append(_cap(e, space, p.block_path))
                 elif kind == "ELLIPSE":
                     span = math.degrees((float(e.dxf.end_param) - float(e.dxf.start_param)) % math.tau)
                     full = span >= 360.0 - FULL_ARC_GAP_DEG or span == 0.0  # 0 and 2 pi: a whole ellipse
@@ -606,7 +635,15 @@ def _collect(doc: Drawing, walker: Walker, ctx: _Ctx):
                             )
             except Exception as exc:
                 walker.skipped[f"read_error:{kind}:{type(exc).__name__}"] += 1
-    return segs, circles, dims
+    return segs, circles, caps, dims
+
+
+def _cap(e: Any, space: str, block_path: tuple[str, ...]) -> _Arc:
+    start, end = float(e.dxf.start_angle), float(e.dxf.end_angle)
+    sweep = (end - start) % 360.0
+    p1, p2 = e.start_point, e.end_point
+    (m,) = e.vertices([start + sweep / 2.0])
+    return _Arc((p1.x, p1.y), (p2.x, p2.y), (m.x, m.y), float(e.dxf.radius), space, block_path)
 
 
 def _dimension(e: Any, handle: str | None, space: str, ctx: _Ctx) -> _Dim | None:
@@ -641,6 +678,73 @@ def _dimension(e: Any, handle: str | None, space: str, ctx: _Ctx) -> _Dim | None
         space,
         ctx.locator.locate(space, *mid),
     )
+
+
+def _joins(seg: _Seg, p: tuple[float, float], q: tuple[float, float], tol: float) -> bool:
+    """The segment runs from p to q (either way) within `tol`."""
+    return (math.dist(seg.a, p) <= tol and math.dist(seg.b, q) <= tol) or (
+        math.dist(seg.a, q) <= tol and math.dist(seg.b, p) <= tol
+    )
+
+
+def _obround_circles(caps: list[_Arc], segs: list[_Seg]) -> list[_Circle]:
+    """Bubbles drawn as an obround (stadium): two semicircular ARCs of one radius facing away from each other,
+    their ends joined by two LINEs (EVAL-4 180 framing plans: 0 of the labelled bubbles were circles). Each is
+    returned as a circle at the middle of the stadium with half its overall length as radius (see
+    OBROUND_*). Nothing is taken from the layer or the label: the geometry alone decides."""
+    if len(caps) < 2:
+        return []
+    cell = statistics.median(a.r for a in caps) * 4
+    by_space: dict[str, _Index] = defaultdict(lambda: _Index(cell))
+    for k, a in enumerate(caps):
+        by_space[a.space].add(a.c, (k, a))
+    ends: _Index | None = None
+    out: list[_Circle] = []
+    used: set[int] = set()
+    for i, a in enumerate(caps):
+        if i in used:
+            continue
+        nx, ny = a.p2[0] - a.p1[0], a.p2[1] - a.p1[1]
+        norm = math.hypot(nx, ny)
+        if norm == 0:
+            continue
+        for j, b in sorted(by_space[a.space].near(a.c, OBROUND_MAX_LENGTH * a.r), key=lambda t: t[0]):
+            if j <= i or j in used or abs(b.r - a.r) > OBROUND_RADIUS_TOL * a.r:
+                continue
+            d = (b.c[0] - a.c[0], b.c[1] - a.c[1])
+            length = math.hypot(*d)
+            if not 0.1 * a.r <= length <= OBROUND_MAX_LENGTH * a.r:
+                continue
+            # both diameters are perpendicular to d, and the caps bulge away from each other
+            nb = (b.p2[0] - b.p1[0], b.p2[1] - b.p1[1])
+            if abs(nx * d[0] + ny * d[1]) > OBROUND_PERP_TOL * norm * length:
+                continue
+            if abs(nb[0] * d[0] + nb[1] * d[1]) > OBROUND_PERP_TOL * math.hypot(*nb) * length:
+                continue
+            if (a.mid[0] - a.c[0]) * d[0] + (a.mid[1] - a.c[1]) * d[1] >= 0:
+                continue
+            if (b.mid[0] - b.c[0]) * d[0] + (b.mid[1] - b.c[1]) * d[1] <= 0:
+                continue
+            if ends is None:
+                ends = _Index(cell)
+                for s in segs:
+                    ends.add(s.a, s)
+                    ends.add(s.b, s)
+            tol = OBROUND_END_TOL * a.r
+            ok = True
+            for p in (a.p1, a.p2):
+                q = (p[0] + d[0], p[1] + d[1])
+                near = {id(s): s for s in ends.near(p, tol + 1e-9) if s.space == a.space}
+                if not any(_joins(s, p, q, tol) for s in near.values()):
+                    ok = False
+                    break
+            if not ok:
+                continue
+            used.update((i, j))
+            centre = ((a.c[0] + b.c[0]) / 2, (a.c[1] + b.c[1]) / 2)
+            out.append(_Circle(centre, length / 2 + a.r, a.space, a.block_path))
+            break
+    return out
 
 
 def _find_bubbles(circles: list[_Circle], entries: list[dict[str, Any]], ctx: _Ctx):
@@ -1545,7 +1649,8 @@ def extract_grids(
         SheetLocator(sheets_result),
     )
     walker = Walker(doc, bool(text_index["file"]["handles_reliable"]))
-    segs, circles, dims = _collect(doc, walker, ctx)
+    segs, circles, caps, dims = _collect(doc, walker, ctx)
+    circles += _obround_circles(caps, segs)
     found = _find_bubbles(circles, text_index["entries"], ctx)
     bubbles, ambiguous, other_text, empty, unreadable, blocked = found
     axes, unpaired = _pair(bubbles, segs, ctx)
@@ -1572,7 +1677,14 @@ def extract_grids(
     cross = _cross_checks(all_fams, ctx, _Copies(sheets_result, text_index))
 
     unit = ctx.units["name"]
-    all_spacings = [s for _, f in all_fams for s in f.spacings if s > 0]
+    # the units evidence is the median over VIEWS of each view's median spacing: a key plan drawn small on one
+    # sheet (EVAL-4 180: spacings about 300 beside plans of 8000) outvoted by every real plan, not by the
+    # number of its spacings
+    view_medians = [
+        statistics.median(s for f in g.families for s in f.spacings if s > 0)
+        for g in groups
+        if any(s > 0 for f in g.families for s in f.spacings)
+    ]
     families_found = [f for _, f in all_fams if len(f.axes) >= 2]
     if not families_found:
         ctx.ask(
@@ -1603,7 +1715,7 @@ def extract_grids(
             listed(f.fid for f in families_found),
             f"{len(families_found)} family(ies) in {len(groups)} view(s)",
         )
-        median = statistics.median(all_spacings) if all_spacings else 0.0
+        median = statistics.median(view_medians) if view_medians else 0.0
         factor = _METRES.get(unit)
         metres = median * factor if factor else None
         if metres is None or not (PLAUSIBLE_SPACING_M[0] <= metres <= PLAUSIBLE_SPACING_M[1]):
@@ -1614,8 +1726,8 @@ def extract_grids(
                 "(--value unit=...): the declared drawing unit makes the grid spacings implausible for a "
                 "building (or no unit is declared).",
                 "header $INSUNITS",
-                f"median spacing {rnum(median)} drawing units, declared unit '{unit}'"
-                + (f" = {rnum(metres)} m" if metres is not None else ""),
+                f"median spacing {rnum(median)} drawing units (median of {len(view_medians)} view medians), "
+                f"declared unit '{unit}'" + (f" = {rnum(metres)} m" if metres is not None else ""),
             )
     groups_json: list[dict[str, Any]] = []
     for g in groups:

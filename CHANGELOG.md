@@ -749,6 +749,13 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
       and its layer off / frozen / plot 0, read from the DXF). An entity on layer 0 inside a block and the
       contents of an invisible INSERT stay (Autodesk does not settle them). What was left out is counted
       in `warnings` (the grids schema has no counter field).
+    - Obround bubbles (two straight LINEs and two semicircular ARCs of one radius around the label) count as
+      bubbles, with half the overall length as radius (EVAL-4 180: 0 of its framing-plan bubbles were found).
+    - The grid-spacing units evidence uses plan systems only: `files[].grid_spacing_median` of
+      `grid-systems.json` is the median spacing of the file's systems with two or more independent views
+      (a single-source key plan never decides; a file with only single-source systems takes the median of
+      its systems' medians), so a small key plan no longer raises `units_answer_contradicts_evidence`
+      (EVAL-4 180, Q-199). `grid_units_doubt` in `grids.json` takes the median of the views' medians.
 
 ### Changed
 - Question lifecycle (tool wave 2, EVAL-2 fix 5):
