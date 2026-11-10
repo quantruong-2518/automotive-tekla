@@ -758,6 +758,10 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
       (EVAL-4 180, Q-199). `grid_units_doubt` in `grids.json` takes the median of the views' medians.
     - A line or circle on a layer that has no LAYER table row is read as a plain printing layer (a
       line there was dropped before, counted in `walk_skipped`).
+    - A bubble pairs with the axis line of its sheet's axis style (the layer and linetype most axes of the
+      sheet are on, when one clearly leads) before a nearer line of another style: another end candidate
+      of the style, or a line of the style drawn through the bubbles at both of its ends (EVAL-3 285:
+      the end bubbles took wall lines 110 outside their axes; spacings 3240 / 4700 become 3130 / 4590).
 
 ### Changed
 - Question lifecycle (tool wave 2, EVAL-2 fix 5):

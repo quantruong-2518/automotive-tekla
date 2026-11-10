@@ -554,3 +554,104 @@ def test_lines_and_circles_on_an_undefined_layer_are_still_a_grid(tmp_path):
     result = run_with(_plain(tmp_path, fn))
     assert family(result, "unknown", "1 2 3")["proposal"]["coordinates"] == "0 2*6000"
     assert not result["summary"]["walk_skipped"]
+
+
+# --- item 4 (R-a): a bubble pairs with the axis line of the family style --------------------------
+
+TOP = 13132.0  # where the top bubbles sit; the bottom ones sit at 0 (EVAL-3 285 model#01)
+XS = (0.0, 3130.0, 6670.0, 10190.0, 14780.0)
+
+
+def _styled_grid(msp, *, off: float = 110.0, bubble_on_wall: bool = False, wall_layer: str = "0"):
+    """EVAL-3 285: five vertical axes on layer TRUC / DASHED2, each with a bubble at both ends and the line
+    running on past both. Beside the two end axes a short continuous wall line (`wall_layer`) sits `off`
+    outside, its end 7 radii from the bottom bubble. With `bubble_on_wall` the end bubbles are centred on the
+    wall line instead of on their axis."""
+    radius = 340.0
+    msp.doc.linetypes.add("DASHED2", pattern=[0.5, 0.25, -0.25])
+    msp.doc.layers.add("TRUC", linetype="DASHED2")
+
+    def bubble(c, label):
+        msp.add_circle(c, radius)
+        msp.add_text(label, height=0.9 * radius).set_placement(c, align=TextEntityAlignment.MIDDLE_CENTER)
+
+    for k, (x, label) in enumerate(zip(XS, "12345", strict=True)):
+        msp.add_line((x, -4704), (x, TOP + 3495), dxfattribs={"layer": "TRUC"})
+        wall_x = x - off if k == 0 else x + off
+        end = k in (0, 4)
+        if end:
+            msp.add_line((wall_x, 2460), (wall_x, 7440), dxfattribs={"layer": wall_layer})
+        bx = wall_x if end and bubble_on_wall else x
+        bubble((bx, 0.0), label)
+        bubble((bx, TOP), label)
+    for y, label in ((4000.0, "a"), (9000.0, "b")):
+        msp.add_line((-3500, y), (XS[-1] + 3500, y), dxfattribs={"layer": "TRUC"})
+        bubble((-1500.0, y), label)
+        bubble((XS[-1] + 1500.0, y), label)
+
+
+def test_a_bubble_pairs_with_the_axis_line_of_the_family_style(tmp_path):
+    """EVAL-3 285: the bubble at the foot of axes 1 and 5 ended a layer-0 wall line 110 away while its own
+    TRUC / DASHED2 axis ran on past both bubbles: spacings 3240 / 4700 instead of 3130 / 4590."""
+    result = run_with(_plain(tmp_path, _styled_grid))
+    numbers = family(result, "unknown", "1 2 3 4 5")
+    assert numbers["proposal"]["coordinates"] == "0 3130 3540 3520 4590"
+    assert {(a["line"]["layer"], a["line"]["linetype"]) for a in numbers["axes"]} == {("TRUC", "DASHED2")}
+    assert [len(a["bubbles"]) for a in numbers["axes"]] == [2] * 5
+    assert not questions(result, "grid_axis_layer_mismatch")
+    assert result["unpaired_bubbles"]["count"] == 0
+
+
+def test_the_wall_line_under_the_bubble_stays_when_the_axis_is_off_its_centre(tmp_path):
+    """The family-style axis passes 200 from the end bubbles' centres (> 0.35 radius): not through them, so
+    the wall line they sit on stays their pair."""
+    result = run_with(_plain(tmp_path, lambda m: _styled_grid(m, off=200.0, bubble_on_wall=True)))
+    layers = {a["line"]["layer"] for a in family(result, "unknown", "1 2 3 4 5")["axes"]}
+    assert layers == {"0", "TRUC"}
+
+
+def test_an_end_bubble_takes_the_style_line_it_ends_before_a_nearer_wall_line(tmp_path):
+    """Both lines end near the bubble; the wall line starts nearer, the axis passes through the centre."""
+
+    def fn(msp):
+        msp.doc.linetypes.add("DASHED2", pattern=[0.5, 0.25, -0.25])
+        msp.doc.layers.add("TRUC", linetype="DASHED2")
+        for k, (x, label) in enumerate(zip((0.0, 3000.0, 6000.0, 9000.0), "1234", strict=True)):
+            msp.add_line((x, 0), (x, 8000), dxfattribs={"layer": "TRUC"})
+            wall = k == 0
+            if wall:  # a wall line 100 outside the first axis, starting nearer the bubble
+                msp.add_line((x - 100.0, -200), (x - 100.0, 8000), dxfattribs={"layer": "0"})
+            bx = x - 100.0 if wall else x
+            msp.add_circle((bx, -340), 340)
+            msp.add_text(label, height=300).set_placement((bx, -340), align=TextEntityAlignment.MIDDLE_CENTER)
+        for y, label in ((2000.0, "a"), (6000.0, "b")):
+            msp.add_line((-1500, y), (10500, y), dxfattribs={"layer": "TRUC"})
+            msp.add_circle((-1500 - 340, y), 340)
+            msp.add_text(label, height=300).set_placement(
+                (-1500 - 340, y), align=TextEntityAlignment.MIDDLE_CENTER
+            )
+
+    result = run_with(_plain(tmp_path, fn))
+    assert family(result, "unknown", "1 2 3 4")["proposal"]["coordinates"] == "0 3*3000"
+
+
+def test_the_nearer_line_still_wins_without_a_style_majority(tmp_path):
+    def fn(msp):
+        # two bubbles only, on different styles: nothing to prefer
+        msp.doc.layers.add("A")
+        msp.doc.layers.add("B")
+        msp.add_line((0, 0), (0, 8000), dxfattribs={"layer": "A"})
+        msp.add_line((3000, 0), (3000, 8000), dxfattribs={"layer": "B"})
+        for x, label in ((0.0, "1"), (3000.0, "2")):
+            msp.add_circle((x, -340), 340)
+            msp.add_text(label, height=300).set_placement((x, -340), align=TextEntityAlignment.MIDDLE_CENTER)
+        for y, label in ((2000.0, "a"), (6000.0, "b")):
+            msp.add_line((-1500, y), (4500, y), dxfattribs={"layer": "A"})
+            msp.add_circle((-1500 - 340, y), 340)
+            msp.add_text(label, height=300).set_placement(
+                (-1500 - 340, y), align=TextEntityAlignment.MIDDLE_CENTER
+            )
+
+    result = run_with(_plain(tmp_path, fn))
+    numbers = family(result, "unknown", "1 2")
+    assert [a["line"]["layer"] for a in numbers["axes"]] == ["A", "B"]

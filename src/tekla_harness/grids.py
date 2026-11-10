@@ -815,6 +815,24 @@ def _find_bubbles(circles: list[_Circle], entries: list[dict[str, Any]], ctx: _C
     return bubbles, ambiguous, other_text, empty, unreadable, blocked_list
 
 
+def _style(seg: _Seg) -> tuple[str, str]:
+    return (seg.layer, seg.linetype)
+
+
+def _sheet_styles(axes: list[_Axis]) -> dict[tuple[str, str], tuple[str, str]]:
+    """(space, sheet) -> the (layer, linetype) most axes of that sheet are drawn on, when one style has more
+    axes than any other and at least two (a clear majority); sheets without one are absent."""
+    counts: dict[tuple[str, str], Counter[tuple[str, str]]] = defaultdict(Counter)
+    for a in axes:
+        counts[(a.space, a.sheet)][_style(a.seg)] += 1
+    out: dict[tuple[str, str], tuple[str, str]] = {}
+    for key, counter in counts.items():
+        top = counter.most_common(2)
+        if top[0][1] >= 2 and (len(top) == 1 or top[0][1] > top[1][1]):
+            out[key] = top[0][0]
+    return out
+
+
 def _pair(bubbles: list[_Bubble], segs: list[_Seg], ctx: _Ctx) -> tuple[list[_Axis], list[_Bubble]]:
     if not bubbles:
         return [], []
@@ -825,9 +843,11 @@ def _pair(bubbles: list[_Bubble], segs: list[_Seg], ctx: _Ctx) -> tuple[list[_Ax
         by_space[s.space].add(s.b, s)
     axes: list[_Axis] = []
     unpaired: list[_Bubble] = []
+    # every line a bubble could end: nearest end first (half-radius steps), then the longest line
+    candidates: dict[int, list[_Seg]] = {}
     for b in bubbles:
         c, r = b.circle.c, b.circle.r
-        best: tuple[tuple[float, float, int], _Seg] | None = None
+        found: list[tuple[tuple[float, float, int], _Seg]] = []
         for s in by_space[b.circle.space].near(c, END_NEAR_BUBBLE * r):
             if s.length < MIN_AXIS_LENGTH * r:
                 continue
@@ -835,20 +855,66 @@ def _pair(bubbles: list[_Bubble], segs: list[_Seg], ctx: _Ctx) -> tuple[list[_Ax
                 continue
             if _dist_to_line(c, s.a, s.b) > LINE_THROUGH_CENTRE * r:
                 continue
-            # nearest end first (half-radius steps), then the longest line
-            key = (round(2 * min(math.dist(c, s.a), math.dist(c, s.b)) / r), -s.length, s.sid)
-            if best is None or key < best[0]:
-                best = (key, s)
-        if best is None:
+            found.append(((round(2 * min(math.dist(c, s.a), math.dist(c, s.b)) / r), -s.length, s.sid), s))
+        candidates[id(b)] = [s for _, s in sorted(found, key=lambda t: t[0])]
+    for b in bubbles:
+        options = candidates[id(b)]
+        if not options:
             unpaired.append(b)
             continue
-        seg = best[1]
-        sheet = ctx.locator.locate(seg.space, *seg.mid)
-        axes.append(_Axis(seg, [b], "line", sheet if sheet != SHEET_UNKNOWN else b.sheet, seg.space))
+        sheet = ctx.locator.locate(options[0].space, *options[0].mid)
+        axes.append(
+            _Axis(options[0], [b], "line", sheet if sheet != SHEET_UNKNOWN else b.sheet, options[0].space)
+        )
     through, unpaired = _pair_through(unpaired, segs)
     for seg, ends in through:
         sheet = ctx.locator.locate(seg.space, *seg.mid)
         axes.append(_Axis(seg, ends, "line", sheet if sheet != SHEET_UNKNOWN else ends[0].sheet, seg.space))
+    # A line of the sheet's axis style through a bubble's centre beats a nearer line of another style it was
+    # paired with (EVAL-3 285: the bubbles at the foot of axes 1 and 5 ended wall lines 110 away while their
+    # own axes ran on past them). First another end candidate of the style; else a line of the style drawn
+    # through the bubbles at both of its ends.
+    styles = _sheet_styles(axes)
+    off = [
+        a
+        for a in axes
+        if len(a.bubbles) == 1
+        and a.pairing == "line"
+        and styles.get((a.space, a.sheet), _style(a.seg)) != _style(a.seg)
+    ]
+    pool: dict[tuple[str, str], list[_Bubble]] = defaultdict(list)
+    for a in off:
+        style = styles[(a.space, a.sheet)]
+        b = a.bubbles[0]
+        better = next((s for s in candidates[id(b)] if _style(s) == style), None)
+        if better is not None:
+            a.seg = better
+        else:
+            pool[(a.space, a.sheet)].append(b)
+    for b in unpaired:
+        key = (b.circle.space, b.sheet)
+        if key in styles:
+            pool[key].append(b)
+    seg_sheet: dict[int, str] = {}  # sheet of a line's midpoint, looked up once
+    for (space, sheet), members in pool.items():
+        style = styles[(space, sheet)]
+        r_min = min(b.circle.r for b in members)
+        mine = [
+            s
+            for s in segs
+            if s.space == space
+            and s.length >= MIN_AXIS_LENGTH * r_min
+            and _style(s) == style
+            and seg_sheet.setdefault(s.sid, ctx.locator.locate(s.space, *s.mid)) == sheet
+        ]
+        for seg, ends in _pair_through(members, mine)[0]:
+            gone = {id(x) for x in ends}
+            axes = [a for a in axes if not any(id(x) in gone for x in a.bubbles)]
+            unpaired = [x for x in unpaired if id(x) not in gone]
+            where = ctx.locator.locate(seg.space, *seg.mid)
+            axes.append(
+                _Axis(seg, ends, "line", where if where != SHEET_UNKNOWN else ends[0].sheet, seg.space)
+            )
     return _merge_same_line(axes, ctx), unpaired
 
 
