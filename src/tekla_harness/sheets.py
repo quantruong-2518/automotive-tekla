@@ -32,7 +32,10 @@ Algorithm (deterministic, every threshold is a named constant below):
    (`attrib_tag`, medium at most) and that sits on the title block (the frame's own INSERT, an INSERT
    carrying ATTRIBs of two or more fields, or within TITLE_REGION_MARGIN text heights of a title-field
    label: a section callout's SHEET_NO is not), a text 'label: value' (`inline_label`, medium at most),
-   a value text right of or below a label text (`adjacent_label`, low), or, for the sheet number only
+   a value text right of or below a label text (`adjacent_label`, low; `_pair_labels`: the value lies in the
+   label's title-block cell, the box between the nearest drawn lines around it, or, with no such cell or an
+   empty one, on the label's row to its right or just below it; one value per label and one label per
+   value, nearest first), or, for the sheet number only
    and only when nothing else was found, a sheet-code-looking text in the title-block corner
    (`pattern`, low; TCVN 5571 places the title block at the lower right): the last CORNER_U of the
    frame along the text's reading direction and the lowest CORNER_V across it. A portrait frame is
@@ -43,7 +46,9 @@ Algorithm (deterministic, every threshold is a named constant below):
    corners wins, then the tallest. A code whose position repeats in no other sheet's corner is never
    taken (nothing backs it; a one-sheet file has nothing to back it with). Ties stay a conflict, and
    every corner code not taken is a warning.
-   Constant text of the frame's own block is template text and never a value. A text that does not print
+   The job / contract number (labels `JOB NO.`, `SỐ HĐ`, `MÃ CÔNG TRÌNH`) is a title field of its own
+   (`title_block.job_number`, null when absent); its value is never a sheet number, not even as a corner
+   code. Constant text of the frame's own block is template text and never a value. A text that does not print
    (`printed: false`, tool wave 4) is no label, no value, no title evidence and no corner code: it keeps its
    sheet in `text_ids`, and one warning counts such texts. A field value is chosen
    only when ALL its candidates agree; any disagreement is a title_field_conflict question (blocking
@@ -103,6 +108,13 @@ CORNER_U = 0.25
 CORNER_V = 0.20
 CORNER_POS_TOL = 0.03  # frame shares: two corner codes at 'the same position' on different sheets
 SHEET_GAP_MAX_RUN = 9  # missing numbers in a row asked as a gap; a longer run is a numbering jump
+# Title-block cells (tool wave 4, V3). A label's cell is the box of the nearest drawn lines around the label
+# centre; its value is a text inside that cell, right of or below the label. Distances are in label heights.
+CELL_MAX_HEIGHT = 12.0  # a taller box between lines is a table or a drawing area, not a field cell
+CELL_MAX_WIDTH = 60.0
+CELL_SPAN_SLACK = 0.5  # a line spans a point when it extends to within this of it
+AXIS_LINE_TOL = 1e-3  # relative: a segment this close to horizontal / vertical is a cell line
+CELL_MAX_VERTICES = 12  # polylines with more vertices are not cell outlines
 
 _CONF_ORDER = {"low": 0, "medium": 1, "high": 2}
 _BUILDING_UNITS = {"mm", "cm", "m", "in", "ft"}
@@ -411,6 +423,26 @@ def rect_of(entity: Any) -> tuple[float, float, float, float] | None:
     return None
 
 
+def _collect_segments(entity: Any, lines: _CellLines) -> None:
+    """Add the straight edges of a LINE or of a small polyline to the cell-line index."""
+    kind = entity.dxftype()
+    if kind == "LINE":
+        a, b = entity.dxf.start, entity.dxf.end
+        lines.add((a.x, a.y), (b.x, b.y))
+    elif kind == "LWPOLYLINE" and len(entity) <= CELL_MAX_VERTICES:
+        if any(abs(bulge) > 1e-12 for *_xy, bulge in entity.get_points("xyb")):
+            return
+        pts = [(v.x, v.y) for v in entity.vertices_in_wcs()]
+        for a, b in zip(pts, pts[1:] + (pts[:1] if entity.closed else []), strict=False):
+            lines.add(a, b)
+    elif kind == "POLYLINE" and entity.is_2d_polyline and len(entity.vertices) <= CELL_MAX_VERTICES:
+        if any(abs(v.dxf.get("bulge", 0.0)) > 1e-12 for v in entity.vertices):
+            return
+        pts = [(v.x, v.y) for v in entity.points_in_wcs()]
+        for a, b in zip(pts, pts[1:] + (pts[:1] if entity.is_closed else []), strict=False):
+            lines.add(a, b)
+
+
 class _TextGrid:
     """Text centres of one space sorted by x, for 'which texts are inside this box' queries."""
 
@@ -667,6 +699,17 @@ FIELD_LABELS: dict[str, tuple[str, ...]] = {
     "scale": ("scale", "ty le", "ti le"),
     "date": ("date", "ngay", "ngay thang"),
     "project": ("project", "cong trinh", "du an"),
+    # the contract / job number of the title block (tool wave 4): never a sheet number
+    "job_number": (
+        "job no",
+        "job no.",
+        "job number",
+        "job num",
+        "so hd",
+        "so hop dong",
+        "ma cong trinh",
+        "ma hop dong",
+    ),
 }
 # ATTRIB tags, folded and stripped of everything but letters and digits.
 FIELD_TAGS: dict[str, tuple[str, ...]] = {
@@ -688,6 +731,7 @@ FIELD_TAGS: dict[str, tuple[str, ...]] = {
     "scale": ("scale", "tyle", "tile"),
     "date": ("date", "ngay"),
     "project": ("project", "projectname", "congtrinh", "duan"),
+    "job_number": ("jobno", "jobnumber", "jobnum", "sohd", "sohopdong", "macongtrinh", "mahopdong"),
 }
 _LABEL_LOOKUP = {label: f for f, labels in FIELD_LABELS.items() for label in labels}
 _TAG_LOOKUP = {tag: f for f, tags in FIELD_TAGS.items() for tag in tags}
@@ -736,6 +780,73 @@ def _anchor_field(entry: dict[str, Any]) -> str | None:
     return None
 
 
+class _CellLines:
+    """Axis-aligned drawn segments of one space (LINEs and straight polyline edges, INSERTs expanded).
+
+    `cell(box, height)` answers which title-block cell a label sits in: the rectangle bounded by the
+    nearest horizontal line above and below the label centre and the nearest vertical line right and left
+    of it, each line spanning the centre. None when a side has no line within the reach or the rectangle
+    is too large to be a field cell (CELL_MAX_HEIGHT / CELL_MAX_WIDTH label heights)."""
+
+    def __init__(self) -> None:
+        self._h: list[tuple[float, float, float]] = []  # (y, x0, x1)
+        self._v: list[tuple[float, float, float]] = []  # (x, y0, y1)
+        self._ready = False
+
+    def add(self, a: tuple[float, float], b: tuple[float, float]) -> None:
+        dx, dy = abs(b[0] - a[0]), abs(b[1] - a[1])
+        length = max(dx, dy)
+        if length <= 0:
+            return
+        if dy <= AXIS_LINE_TOL * length:
+            self._h.append(((a[1] + b[1]) / 2, min(a[0], b[0]), max(a[0], b[0])))
+        elif dx <= AXIS_LINE_TOL * length:
+            self._v.append(((a[0] + b[0]) / 2, min(a[1], b[1]), max(a[1], b[1])))
+
+    def _prepare(self) -> None:
+        if not self._ready:
+            self._h.sort()
+            self._v.sort()
+            self._hk = [t[0] for t in self._h]
+            self._vk = [t[0] for t in self._v]
+            self._ready = True
+
+    def cell(
+        self, box: tuple[float, float, float, float], height: float
+    ) -> tuple[float, float, float, float] | None:
+        if height <= 0 or not (self._h and self._v):
+            return None
+        self._prepare()
+        cx, cy = box_center(box)
+        slack, ry, rx = CELL_SPAN_SLACK * height, CELL_MAX_HEIGHT * height, CELL_MAX_WIDTH * height
+
+        def nearest(
+            segs: list[tuple[float, float, float]],
+            keys: list[float],
+            at: float,
+            span: float,
+            reach: float,
+            up: bool,
+        ) -> float | None:
+            if up:
+                rng = range(bisect.bisect_right(keys, at), bisect.bisect_right(keys, at + reach))
+            else:
+                rng = range(bisect.bisect_left(keys, at) - 1, bisect.bisect_left(keys, at - reach) - 1, -1)
+            for i in rng:
+                key, lo, hi = segs[i]
+                if lo - slack <= span <= hi + slack:
+                    return key
+            return None
+
+        top = nearest(self._h, self._hk, cy, cx, ry, True)
+        bottom = nearest(self._h, self._hk, cy, cx, ry, False)
+        right = nearest(self._v, self._vk, cx, cy, rx, True)
+        left = nearest(self._v, self._vk, cx, cy, rx, False)
+        if top is None or bottom is None or right is None or left is None:
+            return None
+        return (left, bottom, right, top)
+
+
 def _entry_conf(entry: dict[str, Any], cap: str) -> str:
     conf = min_conf(entry["confidence"], cap, "medium")
     flags = set(entry["flags"])
@@ -750,6 +861,7 @@ class _SheetCtx:
     box: tuple[float, float, float, float]
     template: Callable[[dict[str, Any]], bool]
     own_insert: Callable[[dict[str, Any]], bool] = lambda e: False  # ATTRIB of the frame's own INSERT
+    lines: _CellLines | None = None  # drawn cell lines of the sheet's space (None: no line data)
 
 
 def _insert_key(entry: dict[str, Any]) -> tuple[Any, ...]:
@@ -888,38 +1000,93 @@ def _title_candidates(
         if box:
             values.append((e, box))
 
-    for lentry, fld, lbox in labels:
-        lh = lentry.get("height") or (lbox[3] - lbox[1]) or 0.0
+    for lentry, fld, vpicked in _pair_labels(labels, values, ctx.lines):
+        add(
+            fld,
+            vpicked["display_text"],
+            "adjacent_label",
+            lentry["display_text"].strip(),
+            vpicked,
+            lentry,
+            "low",
+        )
+
+    return out
+
+
+Box = tuple[float, float, float, float]
+
+
+def _label_height(entry: dict[str, Any], box: Box) -> float:
+    return entry.get("height") or (box[3] - box[1]) or 0.0
+
+
+def _in_cell(cell: Box, lbox: Box, vbox: Box, lh: float) -> bool:
+    """Is the value inside the label's cell, right of or below the label (its top not above the label's)?"""
+    vcx, vcy = box_center(vbox)
+    return (
+        cell[0] <= vcx <= cell[2]
+        and cell[1] <= vcy <= cell[3]
+        and vbox[3] <= lbox[3] + 0.5 * lh
+        and vcx >= lbox[0] - 0.5 * lh
+    )
+
+
+def _beside_label(lbox: Box, vbox: Box, lh: float) -> bool:
+    """Reading-direction test without cell lines: the value starts right of the label end on the label's row
+    (its box overlaps the label's rows), or lies just below the label and overlaps it in x."""
+    right = vbox[1] < lbox[3] and vbox[3] > lbox[1] and 0 < vbox[0] - lbox[2] + 0.5 * lh <= 30 * lh
+    below = (
+        vbox[0] < lbox[2]
+        and vbox[2] > lbox[0]
+        and 0 < lbox[1] - vbox[3] + 0.5 * lh <= 4 * lh
+        and box_center(vbox)[1] < box_center(lbox)[1]
+    )
+    return right or below
+
+
+def _pair_labels(
+    labels: list[tuple[dict[str, Any], str, Box]],
+    values: list[tuple[dict[str, Any], Box]],
+    lines: _CellLines | None,
+) -> list[tuple[dict[str, Any], str, dict[str, Any]]]:
+    """(label entry, field, value entry) pairs, each label with at most one value and each value with at
+    most one label (tool wave 4, V3).
+
+    A label whose cell (drawn lines around it) holds values takes the nearest of them, right of or below the
+    label. A label with no cell, or an empty cell, uses the reading-direction test of `_beside_label`. All
+    cell pairs are settled before any other, nearest first, and a value taken by one label is not offered to
+    another: a title block with a job cell above a drawing-number cell never lets the job value answer the
+    drawing-number label."""
+    options: list[tuple[int, float, str, str, int, int]] = []  # (tier, distance, value id, label id, l, v)
+    for li, (lentry, _fld, lbox) in enumerate(labels):
+        lh = _label_height(lentry, lbox)
         if lh <= 0:
             continue
         lcx, lcy = box_center(lbox)
-        best: tuple[float, str, dict[str, Any]] | None = None
-        for ventry, vbox in values:
+        cell = lines.cell(lbox, lh) if lines is not None else None
+        inside = [
+            vi for vi, (_v, vbox) in enumerate(values) if cell is not None and _in_cell(cell, lbox, vbox, lh)
+        ]
+        tier = 0
+        if not inside:
+            tier = 1
+            inside = [vi for vi, (_v, vbox) in enumerate(values) if _beside_label(lbox, vbox, lh)]
+        for vi in inside:
+            ventry, vbox = values[vi]
             vcx, vcy = box_center(vbox)
-            right = abs(vcy - lcy) <= 0.6 * lh and 0 < vbox[0] - lbox[2] + 0.5 * lh <= 30 * lh
-            below = (
-                vbox[0] < lbox[2]
-                and vbox[2] > lbox[0]
-                and 0 < lbox[1] - vbox[3] + 0.5 * lh <= 4 * lh
-                and vcy < lcy
-            )
-            if not (right or below):
-                continue
-            dist = math.hypot(vcx - lcx, vcy - lcy)
-            key = (dist, ventry["id"])
-            if best is None or key < (best[0], best[1]):
-                best = (dist, ventry["id"], ventry)
-        if best is not None:
-            add(
-                fld,
-                best[2]["display_text"],
-                "adjacent_label",
-                lentry["display_text"].strip(),
-                best[2],
-                lentry,
-                "low",
-            )
-
+            options.append((tier, math.hypot(vcx - lcx, vcy - lcy), ventry["id"], lentry["id"], li, vi))
+    options.sort()
+    taken_l: set[int] = set()
+    taken_v: set[int] = set()
+    out: list[tuple[dict[str, Any], str, dict[str, Any]]] = []
+    for _tier, _dist, _vid, _lid, li, vi in options:
+        if li in taken_l or vi in taken_v:
+            continue
+        taken_l.add(li)
+        taken_v.add(vi)
+        out.append((labels[li][0], labels[li][1], values[vi][0]))
+    out.sort(key=lambda t: t[0]["id"])
     return out
 
 
@@ -1212,6 +1379,7 @@ def extract_sheets(dxf_path: str | Path, text_index: dict[str, Any], *, doc: Dra
     rejected_total = 0
     frame_sources: dict[str, _Rect] = {}
     entry_by_id = {e["id"]: e for e in entries}
+    cell_lines: dict[str, _CellLines] = defaultdict(_CellLines)  # drawn lines per space, for title cells
 
     def title_evidence(ids: list[str]) -> bool:
         return any(
@@ -1221,8 +1389,10 @@ def extract_sheets(dxf_path: str | Path, text_index: dict[str, Any], *, doc: Dra
     def build_frame_sheets(space: str, layout_name: str, frame: str, layout: Any) -> list[dict[str, Any]]:
         nonlocal rejected_total
         rects: list[_Rect] = []
-        for p in walker.walk(layout, space, frozenset({"LWPOLYLINE", "POLYLINE"})):
+        lines = cell_lines[space]
+        for p in walker.walk(layout, space, frozenset({"LINE", "LWPOLYLINE", "POLYLINE"})):
             try:
+                _collect_segments(p.entity, lines)
                 box = rect_of(p.entity)
             except Exception:
                 walker.skipped[f"rect_error:{p.entity.dxftype()}"] += 1
@@ -1314,7 +1484,12 @@ def extract_sheets(dxf_path: str | Path, text_index: dict[str, Any], *, doc: Dra
                     },
                     "model_windows": [],
                     "text_ids": [],
-                    "title_block": {"sheet_number": None, "revision": None, "candidates": []},
+                    "title_block": {
+                        "sheet_number": None,
+                        "job_number": None,
+                        "revision": None,
+                        "candidates": [],
+                    },
                     "duplicate_of": None,
                 }
             )
@@ -1380,7 +1555,12 @@ def extract_sheets(dxf_path: str | Path, text_index: dict[str, Any], *, doc: Dra
                             },
                             "model_windows": [],
                             "text_ids": [],
-                            "title_block": {"sheet_number": None, "revision": None, "candidates": []},
+                            "title_block": {
+                                "sheet_number": None,
+                                "job_number": None,
+                                "revision": None,
+                                "candidates": [],
+                            },
                             "duplicate_of": None,
                             "_other": other,
                         }
@@ -1496,10 +1676,16 @@ def extract_sheets(dxf_path: str | Path, text_index: dict[str, Any], *, doc: Dra
                 return src.top_handle in firsts
             return e["block_name"] == src.block_path[0] or e["block_path"][:1] == [src.block_path[0]]
 
-        ctx = _SheetCtx(s["sheet_id"], tuple(s["bbox"]), is_template, own_insert)  # type: ignore[arg-type]
+        box = tuple(s["bbox"])
+        ctx = _SheetCtx(s["sheet_id"], box, is_template, own_insert, cell_lines.get(s["space"]))  # type: ignore[arg-type]
         mine = [entry_by_id[t] for t in s["text_ids"] if is_printed(entry_by_id[t])]
-        title_cands[s["sheet_id"]] = _title_candidates(mine, ctx, file_path, cap)
-        corner[s["sheet_id"]], body[s["sheet_id"]] = _corner_scan(mine, ctx)
+        cands = title_cands[s["sheet_id"]] = _title_candidates(mine, ctx, file_path, cap)
+        # a value taken as the job number is never a sheet number: a label pairs with one value only, so the
+        # only other road to the sheet number is the corner code, which leaves these texts out
+        job_ids = {c["evidence"]["value_text_id"] for c in cands if c["field"] == "job_number"}
+        corner[s["sheet_id"]], body[s["sheet_id"]] = _corner_scan(
+            [e for e in mine if e["id"] not in job_ids], ctx
+        )
     on_sheets = {t for s in sheets for t in s["text_ids"]}
     unplaced = Counter(
         _code_key(e["display_text"])
@@ -1529,7 +1715,13 @@ def extract_sheets(dxf_path: str | Path, text_index: dict[str, Any], *, doc: Dra
         cands.sort(key=_candidate_order)
         number, _ = _choose(cands, "sheet_number")
         revision, _ = _choose(cands, "revision")
-        s["title_block"] = {"sheet_number": number, "revision": revision, "candidates": cands}
+        job, _ = _choose(cands, "job_number")
+        s["title_block"] = {
+            "sheet_number": number,
+            "job_number": job,
+            "revision": revision,
+            "candidates": cands,
+        }
         for fld in sorted({c["field"] for c in cands}):
             values = sorted({c["value"] for c in cands if c["field"] == fld})
             if len(values) > 1:

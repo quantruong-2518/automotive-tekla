@@ -752,6 +752,19 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
       Measured with the 271 hidden set emulated from DXF group 60 (232 texts): the phantom levels
       +3.850, +3.450 and +3.050 (86 candidates) leave `levels.json`; the real `printed` field shows only
       once package T lands.
+    - Sheet numbers by label (V3): a title-field label pairs with its value inside its title-block cell
+      (the box between the nearest drawn lines; a label with no cell or an empty one keeps a reading-direction
+      test: on its row to the right, with the value's box overlapping the label's rows, or just below it),
+      one value per label and one label per value, nearest first. The old test (value centre within
+      0.6 label heights of the label centre) missed values set larger than their label. New title field
+      `job_number` (labels `JOB NO.`, `SỐ HĐ`, `MÃ CÔNG TRÌNH`, tags `JOBNO` ...): `title_block.job_number`
+      (null when absent), a non-blocking `title_field_conflict` when its candidates disagree; its value is
+      never a sheet number, not even as a corner code (180 `J-01` had become the number of 3D-1/3D-2).
+      Known drawings: 180 numbers 2/8 -> 8/8 detected (P-01, P-01A, P-01B, P-02A, P-02B, P-04, 3D-1, 3D-2),
+      its `sheet_number_duplicate` and six blocking sheet-number `title_field_conflict` questions leave; 264 gains
+      `job_number` 08/2008 VKH; 278 gains low `title` candidates; 271, 285, 286, 290, 161, 267, 433 and
+      Steel_01: no change. For marks, the entry ids of the number and job values are
+      `title_block.candidates[].evidence.value_text_id` (fields `sheet_number`, `job_number`).
 
 ### Changed
 - Question lifecycle (tool wave 2, EVAL-2 fix 5):
