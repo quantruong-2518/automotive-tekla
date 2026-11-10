@@ -12,7 +12,8 @@ Claude Code (orchestrator, main session)
  ├── planner     ── tekla-cli info|validate (read-only)
  ├── builder     ── tekla-cli build|update|rollback|export ── Tekla model copy   ← only writer
  ├── verifier    ── tekla-cli query|export, compare scripts
- └── reporter    ── report scripts
+ ├── reporter    ── report scripts
+ └── executor    ── code, tests, scripts in the repo (decided packages)
 ```
 
 ## Agents
@@ -25,6 +26,7 @@ Claude Code (orchestrator, main session)
 | `builder` | Build, update, roll back per lot | `build`, `update`, `rollback`, `export` | model lot n, build log | sonnet / medium |
 | `verifier` | Compare model to spec, independent of builder | `query`, `export` | `lots/n/issues.json` | opus / high |
 | `reporter` | Lot and phase reports, feedback intake | none | `report.md`, `requests-to-improve.md` | sonnet / medium |
+| `executor` | One decided package from a brief: code, tests, fixes, source gathering; no spawning, max 100 turns | none | working-tree changes, short report | sonnet / medium; per spawn sonnet or haiku, never xhigh/max (`guard_agent_tier` hook) |
 
 Tiers follow the `delegating-work` skill: Opus reasons, plans and reviews (the verifier is a
 review); Sonnet executes. These are starting points; the benchmark decides.
