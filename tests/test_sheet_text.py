@@ -1099,3 +1099,59 @@ def test_list_sheets_counts_the_blocked_text_of_the_whole_file(work, loose, dama
     (damaged / STRUCTURE_DIR / f"{REL}.sheets.json").unlink()
     skipped = list_sheets(damaged)["files"][0]
     assert skipped["status"] == "skipped" and skipped["blocked_text_count"] is None
+
+
+# --- V7 (tool wave 4): the find-text note tells the truth about what an answer unblocks -------------------
+
+
+def _only_legacy_blocked(damaged: Path) -> None:
+    """Every blocked entry becomes plain Unicode, then two ASCII entries are flagged legacy_ascii_suspect, and
+    the file gets a live legacy_ascii_text question (Q-095) next to its encoding questions."""
+    path = damaged / "text" / f"{REL}.json"
+    index = load(path)
+    for e in index["entries"]:
+        if meaning_block_reason(e) is not None:
+            e["flags"] = []
+            e["decode"]["encoding_used"] = "unicode"
+    ascii_entries = [e for e in index["entries"] if e["raw_text"].isascii()][:2]
+    for e in ascii_entries:
+        e["flags"] = ["legacy_ascii_suspect"]
+    assert len(ascii_entries) == 2
+    path.write_text(json.dumps(index, ensure_ascii=False), encoding="utf-8")
+    registry_path = damaged / "question-registry.json"
+    registry = load(registry_path)
+    registry["questions"]["a" * 16] = {
+        "id": "Q-095", "code": "legacy_ascii_text", "file": REL, "producer": "intake", "status": "open",
+        "first_seen_run": 1, "last_seen_run": 1,
+    }  # fmt: skip
+    registry_path.write_text(json.dumps(registry), encoding="utf-8")
+
+
+def test_the_note_does_not_ask_for_a_font_row_when_only_legacy_ascii_text_is_blocked(damaged):
+    _only_legacy_blocked(damaged)
+    doc = find_text(damaged, "zzz-no-such-text")
+    assert doc["counts"]["blocked_in_scope"] == 2
+    (note,) = doc["notes"]
+    assert "approve the font row" not in note and "Q-003" not in note
+    assert "Q-095" in note and "legacy_ascii_text" in note and "unblock nothing" in note
+    assert "incomplete" in note and "never matched" in note
+
+
+def test_the_note_asks_for_a_font_row_when_an_encoding_reason_is_blocked(work):
+    (note,) = find_text(work, "zzz-no-such-text")["notes"]
+    assert (
+        "approve the font row" in note and "legacy_ascii_text" not in note and "unblock nothing" not in note
+    )
+
+
+def test_the_note_says_both_when_both_kinds_are_blocked(damaged):
+    _only_legacy_blocked(damaged)
+    path = damaged / "text" / f"{REL}.json"
+    index = load(path)
+    victim = next(e for e in index["entries"] if e["raw_text"].isascii() and not e["flags"])
+    victim["decode"]["encoding_used"] = "unknown"
+    victim["raw_text"] = "b\xb6n"  # non-ASCII of unknown encoding: blocked as encoding_unknown
+    victim["flags"] = ["encoding_unknown_non_ascii"]
+    path.write_text(json.dumps(index, ensure_ascii=False), encoding="utf-8")
+    (note,) = find_text(damaged, "zzz-no-such-text")["notes"]
+    assert "approve the font row" in note and "Q-095" in note and "unblock nothing" in note

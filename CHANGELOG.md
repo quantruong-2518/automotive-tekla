@@ -758,6 +758,10 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
     one non-blocking `text_visibility_uncertain` question of a file that has printed entries with
     `print_uncertain_reasons` (a ref per reason with its entry count, then five example entry ids; `count` is
     the number of entries). Intake does not call it yet: that hook-up is in a file outside package T.
+  - Tool wave 4, package T (text), wording: the `harness find-text` note no longer tells the engineer to
+    approve the font row for `legacy_ascii_suspect` entries. It names the `legacy_ascii_text` questions as
+    recording a reading that unblocks nothing, and mentions the font row (with its questions) only for
+    entries blocked by an encoding reason.
 
 ### Changed
 - Question lifecycle (tool wave 2, EVAL-2 fix 5):
