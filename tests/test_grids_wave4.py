@@ -1078,6 +1078,31 @@ def test_a_two_direction_system_of_two_axes_is_no_main_system(tmp_path, example)
     assert len(doc["systems"]) == 2 and not doc["unassigned_families"]
 
 
+def test_one_direction_systems_alone_are_not_a_main_system_for_each_other(tmp_path, example):
+    """Two one-direction systems seen once each: neither is the file's grid, so neither is a stray."""
+    w = Work(tmp_path, example)
+    w.add_file(
+        "plans.dxf",
+        [_stray(labels=("A", "B", "C")), _stray("V010", "model#10", labels=("P", "Q", "R"), fid="F010")],
+    )
+    doc = build_grid_systems(w.finish(), answers=[])
+    assert len(doc["systems"]) == 2 and not doc["unassigned_families"]
+
+
+def test_a_two_direction_system_needs_three_axes_in_each_direction_to_be_main(tmp_path, example):
+    """Two lettered axes by three numbered ones: one direction is too short, so the family seen once stays."""
+    w = Work(tmp_path, example)
+    uneven = view(
+        "V002",
+        "model#03",
+        fam("F003", ["A", "B"], [6000.0], angle=0.0),
+        fam("F004", ["1", "2", "3"], [6000.0, 6000.0]),
+    )
+    w.add_file("plans.dxf", [uneven, _stray(labels=("x", "y", "z"))])
+    doc = build_grid_systems(w.finish(), answers=[])
+    assert len(doc["systems"]) == 2 and not doc["unassigned_families"]
+
+
 def test_a_three_axis_family_seen_on_two_sheets_is_kept(tmp_path, example):
     extra = [_stray(labels=("x", "y", "z")), _stray("V010", "model#10", labels=("x", "y", "z"), fid="F010")]
     doc = build_grid_systems(_plans_work(tmp_path, example, extra), answers=[])
@@ -1295,3 +1320,28 @@ def test_the_grid_system_stdout_labels_answered_and_open_counts(tmp_path, exampl
     (work / "answers.json").write_text(json.dumps(doc), encoding="utf-8")
     third = run_grid_systems(work, svg=False).summary
     assert third["blocking_without_engineer_answer"] == first["blocking_without_engineer_answer"] - 1
+
+
+def test_a_family_is_never_set_aside_down_to_fewer_than_two_axes():
+    """Radii 100 100 200 300 300 (median 200: four are 50 % off), blocks Y Y X X X, lines A A A B B: four of
+    the five axes differ in two ways, and only the guard keeps the family (independent review, m2)."""
+    from tekla_harness import grids as g
+
+    class Ctx:
+        def __init__(self) -> None:
+            self.warnings: list[str] = []
+
+    def axis(i, r, block, layer):
+        seg = g._Seg(i, (i * 1000.0, 0.0), (i * 1000.0, 9000.0), "model", layer, "CENTER", None, ())
+        circle = g._Circle((i * 1000.0, 9500.0), r, "model", (block,))
+        entry = {"display_text": str(i + 1), "height": r * 0.8, "entity_type": "TEXT", "block_path": []}
+        return g._Axis(seg, [g._Bubble(circle, entry, "S1")], "line", "S1", "model")
+
+    spec = [(100, "Y", "A"), (100, "Y", "A"), (200, "X", "A"), (300, "X", "B"), (300, "X", "B")]
+    axes = [axis(i, *s) for i, s in enumerate(spec)]
+    dev = g._axis_deviations(axes)
+    assert sorted(k for k, why in dev.items() if len(why) >= g.FAMILY_MIN_DEVIATIONS) == [0, 1, 3, 4]
+    fam = g._Family("F001", list(axes), 0.0, (0.0, 1.0), (1.0, 0.0))
+    group = g._Group("V001", "S1", "model", list(axes), [fam])
+    assert g._set_aside(group, Ctx()) == []  # type: ignore[arg-type]
+    assert len(fam.axes) == 5
