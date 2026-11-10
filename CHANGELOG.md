@@ -743,6 +743,15 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
     row in `harness questions-md`, raised by package T); flag `--include-hidden` on `harness sheet-text`
     and `harness find-text` (also show entries that do not print, marked), exit 3 with nothing run until
     package T lands. A synthetic R2018 (AC1032) DXF is tested through intake and read-structure.
+  - Tool wave 4, package S (sheets and levels):
+    - Texts that do not print (`printed: false`, written by package T) give no sheet number, title field
+      or level: `harness sheets` leaves them out of every label, value, title-block evidence, corner code
+      and mark count (they keep their sheet in `text_ids`); `harness levels` gives no candidate and no
+      storey name from them. Each file gets one warning counting them (and, for levels, the level-shaped
+      values in them). An index written before `printed` existed still lowers confidence by `flags`.
+      Measured with the 271 hidden set emulated from DXF group 60 (232 texts): the phantom levels
+      +3.850, +3.450 and +3.050 (86 candidates) leave `levels.json`; the real `printed` field shows only
+      once package T lands.
 
 ### Changed
 - Question lifecycle (tool wave 2, EVAL-2 fix 5):

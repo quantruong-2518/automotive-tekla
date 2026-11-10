@@ -43,7 +43,9 @@ Algorithm (deterministic, every threshold is a named constant below):
    corners wins, then the tallest. A code whose position repeats in no other sheet's corner is never
    taken (nothing backs it; a one-sheet file has nothing to back it with). Ties stay a conflict, and
    every corner code not taken is a warning.
-   Constant text of the frame's own block is template text and never a value. A field value is chosen
+   Constant text of the frame's own block is template text and never a value. A text that does not print
+   (`printed: false`, tool wave 4) is no label, no value, no title evidence and no corner code: it keeps its
+   sheet in `text_ids`, and one warning counts such texts. A field value is chosen
    only when ALL its candidates agree; any disagreement is a title_field_conflict question (blocking
    for sheet_number and revision).
 5. Number gaps. One non-blocking sheet_number_gap question per file lists the numbers that a letter
@@ -76,6 +78,7 @@ from ezdxf.filemanagement import readfile
 
 from tekla_harness.detect import sha256_file
 from tekla_harness.questions import SHEET_GAP_CODE
+from tekla_harness.visibility import is_printed
 
 SCHEMA_VERSION = "0.1"
 SHEET_UNKNOWN = "unknown"  # provenance.sheet when a value lies on no detected sheet
@@ -1211,7 +1214,9 @@ def extract_sheets(dxf_path: str | Path, text_index: dict[str, Any], *, doc: Dra
     entry_by_id = {e["id"]: e for e in entries}
 
     def title_evidence(ids: list[str]) -> bool:
-        return any(_anchor_field(entry_by_id[t]) for t in ids if t in entry_by_id)
+        return any(
+            _anchor_field(entry_by_id[t]) for t in ids if t in entry_by_id and is_printed(entry_by_id[t])
+        )
 
     def build_frame_sheets(space: str, layout_name: str, frame: str, layout: Any) -> list[dict[str, Any]]:
         nonlocal rejected_total
@@ -1492,14 +1497,14 @@ def extract_sheets(dxf_path: str | Path, text_index: dict[str, Any], *, doc: Dra
             return e["block_name"] == src.block_path[0] or e["block_path"][:1] == [src.block_path[0]]
 
         ctx = _SheetCtx(s["sheet_id"], tuple(s["bbox"]), is_template, own_insert)  # type: ignore[arg-type]
-        mine = [entry_by_id[t] for t in s["text_ids"]]
+        mine = [entry_by_id[t] for t in s["text_ids"] if is_printed(entry_by_id[t])]
         title_cands[s["sheet_id"]] = _title_candidates(mine, ctx, file_path, cap)
         corner[s["sheet_id"]], body[s["sheet_id"]] = _corner_scan(mine, ctx)
     on_sheets = {t for s in sheets for t in s["text_ids"]}
     unplaced = Counter(
         _code_key(e["display_text"])
         for e in entries
-        if e["id"] not in on_sheets and _SHEET_CODE_RE.match(e["display_text"].strip())
+        if e["id"] not in on_sheets and is_printed(e) and _SHEET_CODE_RE.match(e["display_text"].strip())
     )
     need = {sid for sid, cands in title_cands.items() if not any(c["field"] == "sheet_number" for c in cands)}
     picks, corner_warnings = _pick_corner_numbers(corner, body, unplaced, need)
@@ -1651,6 +1656,12 @@ def extract_sheets(dxf_path: str | Path, text_index: dict[str, Any], *, doc: Dra
         )
     for reason, n in sorted(walker.skipped.items()):
         warnings.append(f"{n} block entit(ies)/insert(s) not expanded while looking for frames: {reason}.")
+    not_printed = sum(1 for e in entries if not is_printed(e))
+    if not_printed:
+        warnings.append(
+            f"{not_printed} of {len(entries)} indexed texts are not printed (printed: false) and are left "
+            "out of every title-block value; they keep their sheet in text_ids."
+        )
 
     assigned = sum(len(s["text_ids"]) for s in sheets)
     return {
