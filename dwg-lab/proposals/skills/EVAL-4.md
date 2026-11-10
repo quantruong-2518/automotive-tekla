@@ -12,13 +12,19 @@ The H arm fails criteria 1 and 2.
 - **Criterion 1.** Both judges put R1 far below 95 %: 82.5 % and 85.7 %, mean 84.1 %. H · J2 counts 6
   consequential wrong claims; H · J1 counts 0.
 - **Criterion 2.** M2 = 5. Both judges confirm the `marks` producer stores five blocked header cells of
-  the 271 bar schedules in `tables[].header[]`, outside a `blocked*` list.
+  the 271 bar schedules in `tables[].header[]`, outside a `blocked*` list. It fails by the letter of
+  the frozen metric, not because blocked meaning reached a value: each cell carries `meaning: blocked`,
+  the table has `header_blocked: true`, and no value is derived from it. The defects behind it are two:
+  the font gate over-blocked the plain-Unicode word `KÍNH`, and `marks` keeps blocked header ids where
+  M2 counts them (fix 4).
 
 Criteria 3–6 and 8 hold. Criterion 7 fails on H · J2's count (2 no-route gaps; H · J1 counts 0). Both
 traps were caught blind, and no document opened or claimed gate 1.
 
 The R arm shows the EVAL-3 fixes landed. No criterion is lower than in EVAL-3 H. R1 rose from 91.4 % to
-95.9 % (mean). The M arm holds.
+95.9 % (mean). The R arm fails criterion 7 on R · J2's count, for the same two build-side gaps
+(research §11 R1/R8). They predate wave 3, and the EVAL-3 judges did not count them, so this is not a
+regression. The M arm holds.
 
 Why it fails: the held-out set hit tool gaps that wave 3 never saw.
 - The text extractor reads invisible text. In 271, 232 hidden entries became levels, marks and titles.
@@ -160,8 +166,11 @@ EVAL-3.
 3. **Level extractor:** accept `+  0.000` (space after the sign). 278's ten storey levels were lost and a
    false "no datum" question followed. — tool.
 4. **Marks and callouts.**
-   - The font gate blocked the plain-Unicode word `KÍNH` (arial_3.ttf) in 271's schedule headers. That one
-     word voids 5 schedules (53 rows); it is also the M2 = 5.
+      - The font gate blocked the plain-Unicode word `KÍNH` (arial_3.ttf) in 271's schedule headers. That one
+     word voids 5 schedules (53 rows).
+   - `marks` keeps the blocked header ids in `tables[].header[]`, outside a `blocked*` list, which is
+     the M2 = 5. Move them to a blocked list, or have M2 read `meaning: blocked`; decide which before
+     EVAL-5.
    - Bar diameters, spacings and sheet or job numbers are counted as member marks.
    - 290 `dẦm d-n` plan labels are filed as detail headings.
    - 286 `dẦm d2-7(sl= 01)` is not read.
