@@ -534,3 +534,23 @@ def test_a_file_of_single_source_systems_counts_each_system_once(tmp_path, examp
     doc = build_grid_systems(w.finish(), answers=[_mm()])
     assert "units_answer_contradicts_evidence" not in codes(doc)
     assert doc["files"][0]["grid_spacing_median"] == {"value": 4150.0, "count": 18}
+
+
+def test_lines_and_circles_on_an_undefined_layer_are_still_a_grid(tmp_path):
+    """A layer that is used but has no LAYER table row is a plain, printing layer: nothing is dropped."""
+
+    def fn(msp):
+        for x, label in ((0.0, "1"), (6000.0, "2"), (12000.0, "3")):
+            msp.add_line((x, 0), (x, 12000), dxfattribs={"layer": "NOLAYERROW"})
+            msp.add_circle((x, -R), R, dxfattribs={"layer": "NOLAYERROW"})
+            msp.add_text(label, height=TH).set_placement((x, -R), align=TextEntityAlignment.MIDDLE_CENTER)
+        for y, label in ((2000.0, "A"), (8000.0, "B")):
+            msp.add_line((-2000, y), (14000, y), dxfattribs={"layer": "NOLAYERROW"})
+            msp.add_circle((-2000 - R, y), R, dxfattribs={"layer": "NOLAYERROW"})
+            msp.add_text(label, height=TH).set_placement(
+                (-2000 - R, y), align=TextEntityAlignment.MIDDLE_CENTER
+            )
+
+    result = run_with(_plain(tmp_path, fn))
+    assert family(result, "unknown", "1 2 3")["proposal"]["coordinates"] == "0 2*6000"
+    assert not result["summary"]["walk_skipped"]

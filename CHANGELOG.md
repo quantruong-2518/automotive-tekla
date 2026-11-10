@@ -756,6 +756,8 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
       (a single-source key plan never decides; a file with only single-source systems takes the median of
       its systems' medians), so a small key plan no longer raises `units_answer_contradicts_evidence`
       (EVAL-4 180, Q-199). `grid_units_doubt` in `grids.json` takes the median of the views' medians.
+    - A line or circle on a layer that has no LAYER table row is read as a plain printing layer (a
+      line there was dropped before, counted in `walk_skipped`).
 
 ### Changed
 - Question lifecycle (tool wave 2, EVAL-2 fix 5):

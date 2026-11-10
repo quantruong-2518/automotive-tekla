@@ -362,7 +362,8 @@ class _Group:
 def _effective_linetype(doc: Drawing, entity: Any) -> str:
     lt = str(entity.dxf.get("linetype", "BYLAYER"))
     if lt.upper() == "BYLAYER":
-        layer = doc.layers.get(str(entity.dxf.get("layer", "0")))
+        name = str(entity.dxf.get("layer", "0"))
+        layer = doc.layers.get(name) if doc.layers.has_entry(name) else None  # an undefined layer is plain
         return str(layer.dxf.get("linetype", "CONTINUOUS")) if layer is not None else "BYLAYER"
     return lt
 
@@ -382,7 +383,7 @@ def _geometry_not_printed(
     if in_block and name == "0":
         return None
     if name not in layers:
-        layer = doc.layers.get(name)
+        layer = doc.layers.get(name) if doc.layers.has_entry(name) else None  # an undefined layer is plain
         reason = None
         if layer is not None:
             if layer.is_off():
