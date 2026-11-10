@@ -9,10 +9,12 @@ frame, instead of one sheet per layout. Every later value needs a real sheet in 
 Algorithm (deterministic, every threshold is a named constant below):
 
 1. Frames. In model space and in every layout, collect axis-aligned closed rectangles (LWPOLYLINE,
-   2D POLYLINE), at top level and inside INSERTs (recursively, world/paper coordinates, so a frame
-   block whose geometry sits far from its base point is still placed right). A rectangle is a frame
-   when its long/short side ratio is within FRAME_RATIO (paper sheets: A-series is 1.414), it holds
-   >= FRAME_MIN_TEXTS text entries, and its short side is >= FRAME_MIN_SIDE_IN_TEXT_HEIGHTS x the median
+   2D POLYLINE; edges within FRAME_AXIS_TOL of the axes, so a frame block scaled and turned by a few
+   thousandths of a degree still counts), at top level and inside INSERTs (recursively, world/paper
+   coordinates, so a frame block whose geometry sits far from its base point is still placed right). A
+   rectangle is a frame when its long/short side ratio is within FRAME_RATIO (paper sheets: A-series is
+   1.414), it holds >= FRAME_MIN_TEXTS text entries, and its short side is >=
+   FRAME_MIN_SIDE_IN_TEXT_HEIGHTS x the median
    height of the text inside it (a detail box is small compared with its text, a sheet is not); without
    title-block evidence inside (a title-field label or field ATTRIB) it must reach
    FRAME_MIN_SIDE_NO_TITLE heights or have the size of an accepted frame (a schedule table is not a
@@ -35,7 +37,8 @@ Algorithm (deterministic, every threshold is a named constant below):
    a value text right of or below a label text (`adjacent_label`, low; `_pair_labels`: the value lies in the
    label's title-block cell, the box between the nearest drawn lines around it, or, with no such cell or an
    empty one, on the label's row to its right or just below it; one value per label and one label per
-   value, nearest first), or, for the sheet number only
+   value, nearest first; a sheet-number label whose value heads a column of two or more further sheet codes
+   is a drawing-list header and gives nothing), or, for the sheet number only
    and only when nothing else was found, a sheet-code-looking text in the title-block corner
    (`pattern`, low; TCVN 5571 places the title block at the lower right): the last CORNER_U of the
    frame along the text's reading direction and the lowest CORNER_V across it. A portrait frame is
@@ -115,6 +118,12 @@ CELL_MAX_WIDTH = 60.0
 CELL_SPAN_SLACK = 0.5  # a line spans a point when it extends to within this of it
 AXIS_LINE_TOL = 1e-3  # relative: a segment this close to horizontal / vertical is a cell line
 CELL_MAX_VERTICES = 12  # polylines with more vertices are not cell outlines
+# A frame drawn in a block that was scaled and turned by a hair (271: 0.002 degrees, so the edges miss the
+# axes by a few units over 51 000) is still a frame. Relative to the rectangle's long side: 1e-3 is 0.06
+# degrees.
+FRAME_AXIS_TOL = 1e-3
+# A sheet-number label over a column of this many further sheet codes heads a drawing list, not a title block.
+TABLE_COLUMN_MIN_ROWS = 2
 
 _CONF_ORDER = {"low": 0, "medium": 1, "high": 2}
 _BUILDING_UNITS = {"mm", "cm", "m", "in", "ft"}
@@ -389,7 +398,7 @@ def _axis_aligned_rect(points: list[tuple[float, float]]) -> tuple[float, float,
     size = max(x1 - x0, y1 - y0)
     if size <= 0 or min(x1 - x0, y1 - y0) <= 0:
         return None
-    tol = 1e-6 * size
+    tol = FRAME_AXIS_TOL * size
     for (ax, ay), (bx, by) in zip(pts, pts[1:] + pts[:1], strict=True):
         if not (abs(ax - bx) <= tol or abs(ay - by) <= tol):
             return None
@@ -940,10 +949,30 @@ def _candidate(
     }
 
 
+def _heads_code_column(value: dict[str, Any], vbox: Box, values: list[tuple[dict[str, Any], Box]]) -> int:
+    """How many further sheet-code texts are stacked below this value in its column (overlapping it in x)?"""
+    return sum(
+        1
+        for other, obox in values
+        if other is not value
+        and _SHEET_CODE_RE.match(other["display_text"].strip())
+        and obox[3] <= vbox[1]
+        and obox[0] < vbox[2]
+        and obox[2] > vbox[0]
+    )
+
+
 def _title_candidates(
-    entries: list[dict[str, Any]], ctx: _SheetCtx, file_path: str, cap: str
+    entries: list[dict[str, Any]],
+    ctx: _SheetCtx,
+    file_path: str,
+    cap: str,
+    warnings: list[str] | None = None,
 ) -> list[dict[str, Any]]:
-    """Candidates from field ATTRIBs and labels; the sheet-code pattern is `_pick_corner_numbers`."""
+    """Candidates from field ATTRIBs and labels; the sheet-code pattern is `_pick_corner_numbers`.
+
+    A sheet-number label whose value heads a column of further sheet codes is the header of a drawing list (a
+    table of the set's sheets), not a title-block field: no candidate, one warning in `warnings`."""
     out: list[dict[str, Any]] = []
 
     def add(
@@ -1000,7 +1029,17 @@ def _title_candidates(
         if box:
             values.append((e, box))
 
+    boxes = {v["id"]: b for v, b in values}
     for lentry, fld, vpicked in _pair_labels(labels, values, ctx.lines):
+        rows = _heads_code_column(vpicked, boxes[vpicked["id"]], values) if fld == "sheet_number" else 0
+        if rows >= TABLE_COLUMN_MIN_ROWS:
+            if warnings is not None:
+                warnings.append(
+                    f"{ctx.sheet_id}: label '{lentry['display_text'].strip()}' ({lentry['id']}) heads a "
+                    f"column of {rows + 1} sheet codes (a drawing list): '{vpicked['display_text'].strip()}' "
+                    f"({vpicked['id']}) is not read as this sheet's number."
+                )
+            continue
         add(
             fld,
             vpicked["display_text"],
@@ -1679,7 +1718,7 @@ def extract_sheets(dxf_path: str | Path, text_index: dict[str, Any], *, doc: Dra
         box = tuple(s["bbox"])
         ctx = _SheetCtx(s["sheet_id"], box, is_template, own_insert, cell_lines.get(s["space"]))  # type: ignore[arg-type]
         mine = [entry_by_id[t] for t in s["text_ids"] if is_printed(entry_by_id[t])]
-        cands = title_cands[s["sheet_id"]] = _title_candidates(mine, ctx, file_path, cap)
+        cands = title_cands[s["sheet_id"]] = _title_candidates(mine, ctx, file_path, cap, warnings)
         # a value taken as the job number is never a sheet number: a label pairs with one value only, so the
         # only other road to the sheet number is the corner code, which leaves these texts out
         job_ids = {c["evidence"]["value_text_id"] for c in cands if c["field"] == "job_number"}

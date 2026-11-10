@@ -765,6 +765,14 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
       `job_number` 08/2008 VKH; 278 gains low `title` candidates; 271, 285, 286, 290, 161, 267, 433 and
       Steel_01: no change. For marks, the entry ids of the number and job values are
       `title_block.candidates[].evidence.value_text_id` (fields `sheet_number`, `job_number`).
+    - Title-block frame turned by a hair, drawing-list header (F6): a closed rectangle whose edges miss the
+      axes by up to 1e-3 of its length (0.06 degrees; was 1e-6) is a frame, so a title-block INSERT scaled and
+      turned by 0.002 degrees is a sheet (271 KC-00, bbox 164846 234376 215925 270497: 34 -> 35 sheets, the
+      sheet ids after it shift by one). A sheet-number label whose value heads a column of two or more
+      further sheet codes is the header of a drawing list: no candidate, one warning (271 `drawing no` over
+      `dm-00`, `kc-00` ...: the drawing-list sheet now reads `kc - 01` from its own title block, and the
+      blocking `title_field_conflict` becomes a blocking `sheet_number_duplicate` with the foundation plan,
+      which prints the same number). Other known drawings: no change.
 
 ### Changed
 - Question lifecycle (tool wave 2, EVAL-2 fix 5):
