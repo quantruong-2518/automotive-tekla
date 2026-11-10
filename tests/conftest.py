@@ -10,6 +10,8 @@ import pytest
 REPO = Path(__file__).resolve().parents[1]
 HOOKS = REPO / ".claude" / "hooks"
 EXAMPLES = REPO / "schemas" / "examples"
+# A Windows console without UTF-8: the hooks' own stdin, stdout and stderr must not depend on it.
+LEGACY_CONSOLE_ENV = {"PYTHONIOENCODING": "cp1252", "PYTHONUTF8": "0"}
 
 
 def load_hook(name: str) -> ModuleType:
