@@ -567,13 +567,28 @@ def _detail_entries(*items: tuple[str, str, str, bool]) -> tuple[list[dict[str, 
     return entries, sheet_of
 
 
-@pytest.mark.parametrize(
-    "heading",
-    ["DETAIL - A1", "detail A1", "Detail: a1", "CHI TIẾT A1", "chi tiết - A 1", "MẶT CẮT A1", "SECTION A1"],
-)
+@pytest.mark.parametrize("heading", ["DETAIL - A1", "detail A1", "Detail: a1", "DETAIL-A 1"])
 def test_detail_heading_forms(heading):
     entries, sheet_of = _detail_entries(("T000001", heading, "s1", True), ("T000002", "A1", "s1", True))
     assert detail_label_ids(entries, sheet_of) == {"T000002"}
+
+
+@pytest.mark.parametrize(
+    ("heading", "label"),
+    [
+        ("CHI TIẾT A1", "A1"),
+        ("MẶT CẮT DT1", "DT1"),
+        ("SECTION A1", "A1"),
+        ("DETAIL OF A1", "A1"),
+        ("DETAIL - A1 x", "A1"),
+        ("DETAIL - A1", "A2"),  # another id
+    ],
+)
+def test_other_headings_make_no_detail_id(heading, label):
+    """A Vietnamese `chi tiết` / `mặt cắt` heading names a member or a cut (290 `MẶT CẮT DT1` heads the
+    section of the member DT1): the text on that sheet stays a member."""
+    entries, sheet_of = _detail_entries(("T000001", heading, "s1", True), ("T000002", label, "s1", True))
+    assert detail_label_ids(entries, sheet_of) == set()
 
 
 def test_detail_labels_need_a_printed_heading_of_their_own_sheet():

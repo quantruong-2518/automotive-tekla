@@ -696,14 +696,12 @@ def callout_part_ids(entries: list[dict[str, Any]]) -> set[str]:
     return out
 
 
-# F4c: a detail names itself with a heading (`DETAIL - A1`) and a bubble with the same id on its sheet. A
-# mark-shaped text equal to the id of a detail heading of its sheet is that bubble, not a member, when every
-# mark-shaped text of its prefix on the sheet is such an id (a family with other members, C1 C2 C3 next to a
-# heading `DETAIL - C1`, stays).
-_DETAIL_HEADING = re.compile(
-    r"^(?:detail|chi\s+ti\u1ebft|section|m\u1eb7t\s+c\u1eaft)\s*[-:]?\s*(?P<id>[A-Za-z]{1,2}\s?\d{1,2})$",
-    re.IGNORECASE,
-)
+# F4c: a detail names itself with an English heading (`DETAIL - A1`) and a bubble with the same id on its
+# sheet. A mark-shaped text equal to the id of a detail heading of its sheet is that bubble, not a member,
+# when every mark-shaped text of its prefix on the sheet is such an id (a family with other members, C1 C2 C3
+# next to a heading `DETAIL - C1`, stays). Vietnamese headings (`chi tiết`, `mặt cắt`) name a member or a
+# cut: 290 `MẶT CẮT DT1` heads the section of the member DT1, so they make no detail id.
+_DETAIL_HEADING = re.compile(r"^detail\s*[-:]?\s*(?P<id>[A-Za-z]{1,2}\s?\d{1,2})$", re.IGNORECASE)
 
 
 def _label_key(text: str) -> str:

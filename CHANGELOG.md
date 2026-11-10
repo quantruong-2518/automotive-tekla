@@ -761,7 +761,8 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
       (`SH thep` blocks).
     - `marks` and `callouts` (EVAL-4 A4c): a steel profile (`HEB-650`, `IPE 300`, `UC 254`: series letters
       and a depth of 50 or more) and a detail label (`DET-2`; the bubble `A1` of a `DETAIL - A1` heading on
-      the same sheet, when every mark-shaped text of its prefix on that sheet is such an id) are not marks
+      the same sheet, when every mark-shaped text of its prefix on that sheet is such an id; English
+      `DETAIL` headings only) are not marks
       (`steel_profile`, `detail_label` in `callouts.json` `rejected`; a warning in `marks.json`). A
       `job_number` title-block candidate is claimed by the title block even when found by shape alone, so
       `J-01` is never a mark next to J-02, J-03. Repro 180 (`HEB-650`, `A1` x16, `DET-2`).
