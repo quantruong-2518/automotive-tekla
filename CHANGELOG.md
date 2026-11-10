@@ -762,6 +762,12 @@ Harness releases are tagged with their benchmark score (see `benchmark/README.md
       sheet are on, when one clearly leads) before a nearer line of another style: another end candidate
       of the style, or a line of the style drawn through the bubbles at both of its ends (EVAL-3 285:
       the end bubbles took wall lines 110 outside their axes; spacings 3240 / 4700 become 3130 / 4590).
+    - An axis that differs from its family in two of three things is no axis: its size (bubble radius or
+      label height more than 20 % from the family median), its block (the circle's outermost block name) or
+      its line (layer + linetype); for block and line the family value is the one more than half of the
+      axes share, and a family needs three axes (EVAL-4 264 `5` / `4` on a HIDDEN line, 278 section marker
+      `T`, 271 rebar bubbles `12` / `14` / `20`). The bubbles are listed as unpaired bubbles and the
+      warnings of `grids.json` name each axis and what differs.
 
 ### Changed
 - Question lifecycle (tool wave 2, EVAL-2 fix 5):

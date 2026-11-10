@@ -102,6 +102,14 @@ OBROUND_RADIUS_TOL = 0.02
 OBROUND_PERP_TOL = 0.05
 OBROUND_END_TOL = 0.05
 OBROUND_MAX_LENGTH = 12.0
+# Heuristics, family consistency (F2b): in a family of FAMILY_MIN_AXES or more axes an axis is set aside when
+# it differs from the family in at least FAMILY_MIN_DEVIATIONS of three things: its size (bubble radius or
+# label height more than FAMILY_SIZE_TOL of the family median away; the two scale together, so they count
+# once), its block (the circle's outermost block name) or its line (layer + linetype). For the last two the
+# family value is the one more than half of the family's axes share.
+FAMILY_MIN_AXES = 3
+FAMILY_MIN_DEVIATIONS = 2
+FAMILY_SIZE_TOL = 0.20
 DIM_POINT_TOL = 0.05  # x r: a dimension extension point lies on an axis
 SCALE_TOL = 1e-3  # relative: two spacing sets differ by one ratio
 # Heuristic (not a standard): two views whose spacing differs by at most this fraction of the spacing
@@ -1178,6 +1186,67 @@ def _families(group: _Group, next_id: list[int]) -> None:
         group.families.append(_Family(f"F{next_id[0]:03d}", members, theta, d, n))
 
 
+def _label_height(a: _Axis) -> float | None:
+    for b in a.bubbles:
+        if b.entry is not None and b.entry.get("height"):
+            return float(b.entry["height"])
+    return None
+
+
+def _axis_deviations(axes: list[_Axis]) -> dict[int, list[str]]:
+    """axis index -> the things (size, block, line) in which it differs from its family (see FAMILY_*);
+    deviating axes only."""
+    n = len(axes)
+    out: dict[int, list[str]] = defaultdict(list)
+    if n < FAMILY_MIN_AXES:
+        return out
+    off_size: set[int] = set()
+    for values in ([a.r for a in axes], [_label_height(a) for a in axes]):
+        known = [v for v in values if v]
+        if len(known) < FAMILY_MIN_AXES:
+            continue
+        med = statistics.median(known)
+        off_size |= {k for k, v in enumerate(values) if v and abs(v - med) > FAMILY_SIZE_TOL * med}
+    for k in sorted(off_size):
+        out[k].append("size")
+    for name, keys in (
+        ("block", [a.bubbles[0].circle.block_path[:1] for a in axes]),
+        ("line", [_style(a.seg) if a.pairing == "line" else None for a in axes]),
+    ):
+        counts = Counter(k for k in keys if k is not None)
+        top = counts.most_common(1)
+        if top and top[0][1] * 2 > sum(counts.values()):
+            for k, key in enumerate(keys):
+                if key is not None and key != top[0][0]:
+                    out[k].append(name)
+    return out
+
+
+def _set_aside(group: _Group, ctx: _Ctx) -> list[_Bubble]:
+    """Remove from the families of `group` the axes that differ from their family in at least
+    FAMILY_MIN_DEVIATIONS attributes (a section marker, a rebar bubble, a bar mark drawn like a grid bubble);
+    returns their bubbles for the unpaired list and says in the warnings which axes and why. An axis is
+    never set aside from a family left with fewer than two others."""
+    aside: list[_Bubble] = []
+    notes: list[str] = []
+    for fam in group.families:
+        dev = _axis_deviations(fam.axes)
+        gone = [k for k, why in dev.items() if len(why) >= FAMILY_MIN_DEVIATIONS]
+        if not gone or len(fam.axes) - len(gone) < 2:
+            continue
+        for k in sorted(gone, reverse=True):
+            axis = fam.axes.pop(k)
+            group.axes.remove(axis)
+            aside.extend(axis.bubbles)
+            notes.append(f"{axis.label or '?'} ({', '.join(dev[k])})")
+    if notes:
+        ctx.warnings.append(
+            f"{group.gid} on {group.sheet}: set aside {len(notes)} axis(es) that differ from the rest of "
+            f"their family (listed as unpaired bubbles): {'; '.join(notes[:20])}."
+        )
+    return aside
+
+
 def _check_family(fam: _Family, group: _Group, ctx: _Ctx) -> None:
     sheet = group.sheet
     labels = fam.labels()
@@ -1724,11 +1793,16 @@ def extract_grids(
     views, isolated = _views(axes)
     groups: list[_Group] = []
     fam_counter = [0]
+    aside: list[_Bubble] = []  # axes set aside as no member of their family: unpaired, never dropped silently
     for k, comp in enumerate(views, start=1):
         g = _Group(f"V{k:03d}", comp[0].sheet, comp[0].space, comp)
         _families(g, fam_counter)
         groups.append(g)
     unpaired = _two_bubble_axes(groups, unpaired, ctx, [0])
+    for g in groups:
+        aside.extend(_set_aside(g, ctx))
+        g.families = [f for f in g.families if f.axes]
+    unpaired = unpaired + aside
     axis_no = 0
     for g in groups:
         for fam in g.families:

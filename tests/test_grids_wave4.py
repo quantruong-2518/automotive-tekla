@@ -655,3 +655,174 @@ def test_the_nearer_line_still_wins_without_a_style_majority(tmp_path):
     result = run_with(_plain(tmp_path, fn))
     numbers = family(result, "unknown", "1 2")
     assert [a["line"]["layer"] for a in numbers["axes"]] == ["A", "B"]
+
+
+# --- item 3 (F2b): axes that do not match their family are no axes ------------------------------------
+
+
+def _odd_family(
+    msp,
+    *,
+    odd_r=False,
+    odd_h=False,
+    odd_block=False,
+    odd_style=False,
+    n=5,
+    n_odd=1,
+    odd_radius=250.0,
+    two_bubbles=False,
+):
+    """`n` axes 1 2 3 .. of one family: bubbles of radius 350 from block KY, label height 315, lines on layer
+    CEN. The last `n_odd` axes deviate in the attributes asked for: radius `odd_radius` (still from KY,
+    scaled), label height 190 (at most 1.2 radius), a loose circle instead of block KY, a line on layer DUT
+    (another linetype). `two_bubbles`: the odd axis has no line, only two bubbles facing each other."""
+    doc = msp.doc
+    doc.linetypes.add("CENTER2", pattern=[0.5, 0.25, -0.25])
+    doc.linetypes.add("HIDDEN2", pattern=[0.3, 0.15, -0.15])
+    doc.layers.add("CEN", linetype="CENTER2")
+    doc.layers.add("DUT", linetype="HIDDEN2")
+    doc.blocks.new("KY").add_circle((0, 0), 350)
+    xs = [6000.0 * k for k in range(n)]
+    first_odd = n - n_odd
+    for k, (x, label) in enumerate(zip(xs, "123456", strict=False)):
+        odd = k >= first_odd
+        r = odd_radius if odd and odd_r else 350.0
+        h = min(190.0 if odd and odd_h else 315.0, 1.2 * r)
+        layer = "DUT" if odd and odd_style else "CEN"
+        if not (odd and two_bubbles):
+            msp.add_line((x, 0), (x, 20000 if odd else 12000), dxfattribs={"layer": layer})
+        for c in ((x, -350.0), (x, 12350.0)) if odd and two_bubbles else ((x, -350.0),):
+            if odd and odd_block:
+                msp.add_circle(c, r)
+            else:
+                msp.add_blockref("KY", c, dxfattribs={"xscale": r / 350.0, "yscale": r / 350.0})
+            msp.add_text(label, height=h).set_placement(c, align=TextEntityAlignment.MIDDLE_CENTER)
+    for y, label in ((2000.0, "A"), (8000.0, "B")):
+        msp.add_line((-2000, y), (xs[-1] + 2000, y), dxfattribs={"layer": "CEN"})
+        msp.add_blockref("KY", (-2000 - 350.0, y))
+        msp.add_text(label, height=315.0).set_placement(
+            (-2000 - 350.0, y), align=TextEntityAlignment.MIDDLE_CENTER
+        )
+
+
+def _numbers(result) -> list[str]:
+    return [lbl for lbls in _axes_labels(result) for lbl in lbls if lbl.isdigit()]
+
+
+@pytest.mark.parametrize(
+    "kw",
+    [
+        {"odd_r": True, "odd_block": True},
+        {"odd_h": True, "odd_style": True},
+        {"odd_block": True, "odd_style": True},
+        {"odd_r": True, "odd_style": True},
+        {"odd_r": True, "odd_h": True, "odd_block": True},
+    ],
+)
+def test_an_axis_that_differs_from_its_family_in_two_ways_is_no_axis(tmp_path, kw):
+    """EVAL-4 264 / 271 / 278: a r 250 bubble on a HIDDEN line among r 350 axes on CENTER lines; a section
+    marker among the grid bubbles: two or more of size, block and line differ."""
+    result = run_with(_plain(tmp_path, lambda m: _odd_family(m, **kw)))
+    assert _numbers(result) == ["1", "2", "3", "4"]
+    assert family(result, "unknown", "1 2 3 4")["proposal"]["coordinates"] == "0 3*6000"
+    # not dropped silently: the bubble is listed as unpaired and the warnings say why
+    assert [b["label"] for b in result["unpaired_bubbles"]["listed"]] == ["5"]
+    assert "set aside" in _warnings(result) and "5" in _warnings(result)
+    assert result["groups"][0]["bbox"][3] == 12000.0  # the view no longer spans the taller axis set aside
+
+
+@pytest.mark.parametrize(
+    "kw",
+    [{"odd_r": True}, {"odd_h": True}, {"odd_block": True}, {"odd_style": True}],
+    ids=lambda kw: next(iter(kw)),
+)
+def test_an_axis_that_differs_in_one_way_only_stays(tmp_path, kw):
+    result = run_with(_plain(tmp_path, lambda m: _odd_family(m, **kw)))
+    assert _numbers(result) == ["1", "2", "3", "4", "5"]
+
+
+def test_two_odd_axes_of_six_are_both_set_aside(tmp_path):
+    kw = {"odd_r": True, "odd_block": True, "n": 6, "n_odd": 2}
+    result = run_with(_plain(tmp_path, lambda m: _odd_family(m, **kw)))
+    assert _numbers(result) == ["1", "2", "3", "4"]
+    assert sorted(b["label"] for b in result["unpaired_bubbles"]["listed"]) == ["5", "6"]
+
+
+def test_without_a_majority_nothing_is_set_aside(tmp_path):
+    """Two axes of each kind in a family of four: neither is the family."""
+    kw = {"odd_r": True, "odd_block": True, "n": 4, "n_odd": 2}
+    result = run_with(_plain(tmp_path, lambda m: _odd_family(m, **kw)))
+    assert _numbers(result) == ["1", "2", "3", "4"]
+    assert "set aside" not in _warnings(result)
+
+
+def test_a_family_of_two_is_never_judged(tmp_path):
+    def fn(msp):
+        doc = msp.doc
+        doc.blocks.new("KY").add_circle((0, 0), 350)
+        msp.add_line((0, 0), (0, 12000))
+        msp.add_line((6000, 0), (6000, 12000))
+        msp.add_blockref("KY", (0, -350.0))
+        msp.add_text("1", height=315.0).set_placement((0, -350.0), align=TextEntityAlignment.MIDDLE_CENTER)
+        msp.add_circle((6000, -250.0), 250.0)
+        msp.add_text("2", height=190.0).set_placement((6000, -250.0), align=TextEntityAlignment.MIDDLE_CENTER)
+        for y, label in ((2000.0, "A"), (8000.0, "B")):
+            msp.add_line((-2000, y), (8000, y))
+            _bubble(msp, (-2000 - R, y), label)
+
+    result = run_with(_plain(tmp_path, fn))
+    assert _numbers(result) == ["1", "2"]
+
+
+def test_obround_bubbles_of_a_family_with_different_label_lengths_stay(tmp_path):
+    """Obrounds of one family differ in length with the label (EVAL-4 180: letters 811 to 1011): within 20 %
+    of the family median the radius is no deviation."""
+
+    def fn(msp):
+        for x, label, half in (
+            (0.0, "1", 328.0),
+            (6000.0, "2", 328.0),
+            (12000.0, "3", 400.0),
+            (18000.0, "4", 328.0),
+        ):
+            msp.add_line((x, 0), (x, 12000))
+            _obround(msp, (x, -(half + RHO)), label, half=half)
+        for y, label in ((2000.0, "A"), (8000.0, "B")):
+            msp.add_line((-2000, y), (20000, y))
+            _obround(msp, (-2000 - R_EQ, y), label)
+
+    result = run_with(_plain(tmp_path, fn))
+    assert _numbers(result) == ["1", "2", "3", "4"]
+
+
+def test_a_family_of_three_is_judged(tmp_path):
+    kw = {"odd_r": True, "odd_block": True, "n": 3, "n_odd": 1}
+    result = run_with(_plain(tmp_path, lambda m: _odd_family(m, **kw)))
+    assert _numbers(result) == ["1", "2"]
+
+
+@pytest.mark.parametrize(
+    ("radius", "set_aside"), [(297.5, False), (245.0, True), (455.0, True), (420.0, False)]
+)
+def test_the_size_tolerance_is_twenty_percent_of_the_family_median(tmp_path, radius, set_aside):
+    """With the block also off, the axis goes only when its radius is more than 20 % from the median (350)."""
+    kw = {"odd_r": True, "odd_block": True, "odd_radius": radius}
+    result = run_with(_plain(tmp_path, lambda m: _odd_family(m, **kw)))
+    assert (_numbers(result) == ["1", "2", "3", "4"]) is set_aside
+
+
+def test_a_tie_in_the_block_is_not_a_majority(tmp_path):
+    """Two axes with one block and two with another: neither block is the family's, so the block is no
+    deviation, even when the size of all four is far from their median."""
+    kw = {"odd_r": True, "odd_block": True, "n": 4, "n_odd": 2, "odd_radius": 100.0}
+    result = run_with(_plain(tmp_path, lambda m: _odd_family(m, **kw)))
+    assert _numbers(result) == ["1", "2", "3", "4"]
+    assert "set aside" not in _warnings(result)
+
+
+def test_an_axis_without_a_line_has_no_line_deviation(tmp_path):
+    """A two-bubble axis (no line between its bubbles) differs in size only: it stays."""
+    kw = {"odd_r": True, "two_bubbles": True}
+    result = run_with(_plain(tmp_path, lambda m: _odd_family(m, **kw)))
+    assert _numbers(result) == ["1", "2", "3", "4", "5"]
+    assert "set aside" not in _warnings(result)
