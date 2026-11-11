@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
-"""PreToolUse guard: the `executor` subagent stays on the execution tier.
+"""PreToolUse guard: executor stays on the execution tier; generic spawns name a model.
 
 Reads the Claude Code hook payload on stdin. When an Agent (older Claude Code: Task) call
 spawns `executor`, an explicit `model` outside EXECUTOR_MODELS or an explicit `effort` in
 BANNED_EFFORTS is denied. A missing model or effort is allowed: the agent's frontmatter
-(sonnet, medium) then applies. Every other subagent and every other tool is not touched.
+(sonnet, medium) then applies. A generic agent (GENERIC_AGENTS; a missing or blank
+`subagent_type` counts as general-purpose) spawned without a non-empty `model` is denied,
+because it would inherit the session's model. Agent names match after strip() and lower().
+Every other subagent and every other tool is not touched.
 
 Exit 0 with no output  -> no decision; the normal permission flow applies.
 Exit 0 with JSON deny  -> the tool call is blocked and the reason is shown to Claude.
@@ -23,6 +26,7 @@ AGENT_TOOLS = frozenset({"Agent", "Task"})
 GUARDED_AGENT = "executor"
 EXECUTOR_MODELS = frozenset({"sonnet", "haiku"})
 BANNED_EFFORTS = frozenset({"xhigh", "max"})
+GENERIC_AGENTS = frozenset({"general-purpose", "claude"})
 
 
 def _deny(reason: str) -> dict:
@@ -42,7 +46,22 @@ def decide(payload: dict) -> dict | None:
     tool_input = payload.get("tool_input")
     if not isinstance(tool_input, dict):
         raise ValueError(f"tool_input must be a JSON object, got {type(tool_input).__name__}")
-    if tool_input.get("subagent_type") != GUARDED_AGENT:
+    agent = tool_input.get("subagent_type")
+    if agent is not None and not isinstance(agent, str):
+        raise ValueError(f"subagent_type must be a string, got {type(agent).__name__}")
+    agent = (agent or "").strip().lower() or "general-purpose"
+    if agent in GENERIC_AGENTS:
+        model = tool_input.get("model")
+        if model is not None and not isinstance(model, str):
+            raise ValueError(f"model must be a string, got {type(model).__name__}")
+        if model is not None and model.strip():
+            return None
+        return _deny(
+            f"Blocked: a {agent} spawn without `model` inherits the session's model. "
+            "Set `model` (and effort) on every spawn: sonnet or haiku for execution, opus "
+            "only for judgement work (delegating-work skill)."
+        )
+    if agent != GUARDED_AGENT:
         return None
     problems: list[str] = []
     model = tool_input.get("model")
