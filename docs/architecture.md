@@ -30,6 +30,9 @@ Claude Code (orchestrator, main session)
 
 Tiers follow the `delegating-work` skill: Opus reasons, plans and reviews (the verifier is a
 review); Sonnet executes. These are starting points; the benchmark decides.
+The `guard_agent_tier` hook also denies a generic (`general-purpose`, `claude` or untyped)
+spawn without a non-empty `model`, since it would inherit the session's model; any named
+model is allowed.
 
 ## Safety layers
 
