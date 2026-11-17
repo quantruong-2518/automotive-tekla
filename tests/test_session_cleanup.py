@@ -1086,7 +1086,7 @@ def test_unreadable_mention_folder_keeps_the_worktree_and_the_branch(cleanup_mod
     folder = repo / ".handoff" if where == ".handoff" else repo.parent / ".coord"
     folder.mkdir()
     (folder / "x.md").write_text("nothing", encoding="utf-8")
-    if not hasattr(os, "geteuid") or os.geteuid() == 0:
+    if sys.platform == "win32" or os.geteuid() == 0:
         pytest.skip("permissions are not enforced here (root or Windows)")
     folder.chmod(0)
     try:
@@ -1254,7 +1254,7 @@ def test_unreadable_mention_subfolder_keeps_the_worktree_and_the_branch(cleanup_
     sub = mention_folder(repo, where) / "tracks"
     sub.mkdir(parents=True)
     (sub / "x.md").write_text("nothing", encoding="utf-8")
-    if not hasattr(os, "geteuid") or os.geteuid() == 0:
+    if sys.platform == "win32" or os.geteuid() == 0:
         pytest.skip("permissions are not enforced here (root or Windows)")
     sub.chmod(0)
     try:
