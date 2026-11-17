@@ -66,13 +66,22 @@ The repository also gathers stale state. On 2026-11-10 it held 25 worktrees and 
      - it is not the main worktree, the session's own directory (stdin `cwd`, process cwd or
        `CLAUDE_PROJECT_DIR`) or the cwd of a live Claude session (best effort, from the
        undocumented `~/.claude/sessions/*.json`; this check can only add keeps);
+     - no live session and no session directory of its own runs in a folder above it (a coordinator
+       spawning agents), except one in the main checkout outside every linked worktree, which never
+       keeps worktrees nested in it;
      - it is not locked or prunable, and `git worktree prune` is never run;
      - `git status --porcelain --ignored` shows only regenerable caches;
      - its HEAD is merged into `master`, `origin/master` or a `feat/*` branch other than its own;
      - it has been idle for 24 hours;
-     - no `.handoff/*.md` file names it.
+     - no mention source names it: a `*.md` file anywhere under `.handoff/` of the main checkout, or
+       under the `.coord/` folder in the parent of the main checkout (subfolders are walked;
+       linked folders (symlinks, junctions) are followed once; a loop is skipped). An unreadable
+       mention source keeps the worktree; only a missing folder counts as empty.
    - **Branches:** a local branch is deleted only with `git branch -d`, only when it is merged into
-     `master`, and only when it is not checked out, not `feat/*` and not named in a handoff file.
+     `master`, and only when it is not checked out, not `feat/*` and not named in a mention source.
+   - A dry run lists at most 9,000 characters. Only when the list is cut does it end with a footer
+     giving the same command with `--full` (the repository path shell-quoted), which prints the
+     whole list.
    - Every action is logged to `.git/claude-session-cleanup.jsonl`. Anything else that looks stale
      is listed for the engineer, never removed.
 5. **`statusline.py`** is registered as `statusLine` (main session) and as `subagentStatusLine`

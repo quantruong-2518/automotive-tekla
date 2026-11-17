@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import ntpath
 import os
+import shlex
 import subprocess
 import sys
 import time
@@ -293,6 +294,18 @@ def test_worktree_inside_a_non_main_current_directory_is_kept(cleanup_mod, repo,
     report = clean(cleanup_mod, repo, tmp_path, current=outer)
     assert inner.exists() and outer.exists()
     assert "current" in kept_for(report, "nested")["reason"]
+
+
+def test_current_directory_inside_a_linked_worktree_keeps_the_worktrees_nested_below_it(
+    cleanup_mod, repo, tmp_path
+):
+    outer = repo / ".claude" / "worktrees" / "A"
+    git(repo, "worktree", "add", "-q", "-b", "A", str(outer))
+    inner = outer / ".claude" / "worktrees" / "B"
+    git(repo, "worktree", "add", "-q", "-b", "B", str(inner))
+    report = clean(cleanup_mod, repo, tmp_path, current=outer)
+    assert inner.exists()
+    assert kept_for(report, "B")["reason"] == "current session directory"
 
 
 def test_running_from_the_main_checkout_still_cleans_nested_worktrees(cleanup_mod, repo, tmp_path):
@@ -647,11 +660,53 @@ def test_unreadable_handoff_file_keeps_the_worktree_and_the_branch(cleanup_mod, 
     wt = add_worktree(repo, tmp_path, "w1")
     git(repo, "branch", "fix/old")
     (repo / ".handoff").mkdir()
-    (repo / ".handoff" / "broken.md").mkdir()  # reading a directory raises OSError
+    try:  # a dangling symlink is listed as a file, and reading it raises OSError
+        (repo / ".handoff" / "broken.md").symlink_to(tmp_path / "missing-target")
+    except OSError:
+        pytest.skip("symlinks are not available here")
     report = clean(cleanup_mod, repo, tmp_path)
     assert wt.exists()
-    assert "handoff unreadable" in kept_for(report, "w1")["reason"]
-    assert "handoff unreadable" in kept_for(report, "fix/old")["reason"]
+    assert "unreadable: .handoff/broken.md" in kept_for(report, "w1")["reason"]
+    assert "unreadable: .handoff/broken.md" in kept_for(report, "fix/old")["reason"]
+    assert report["deleted_branches"] == []
+
+
+def test_handoff_file_with_an_upper_case_extension_is_a_mention_source(cleanup_mod, repo, tmp_path):
+    wt = add_worktree(repo, tmp_path, "w1")
+    write_handoff(repo, "Topic.MD", "resume fix/w1 later")
+    report = clean(cleanup_mod, repo, tmp_path)
+    assert wt.exists()
+    assert kept_for(report, "w1")["reason"] == "mentioned in .handoff/Topic.MD"
+
+
+@pytest.mark.parametrize("where", [".handoff", ".coord"])
+def test_dangling_symlink_as_a_mention_folder_keeps_the_worktree_and_the_branch(
+    cleanup_mod, repo, tmp_path, where
+):
+    wt = add_worktree(repo, tmp_path, "w1")
+    git(repo, "branch", "fix/old")
+    folder = repo / ".handoff" if where == ".handoff" else repo.parent / ".coord"
+    try:
+        folder.symlink_to(tmp_path / "nowhere")
+    except OSError:
+        pytest.skip("symlinks are not available here")
+    report = clean(cleanup_mod, repo, tmp_path)
+    assert wt.exists()
+    assert f"unreadable: {where}" in kept_for(report, "w1")["reason"]
+    assert f"unreadable: {where}" in kept_for(report, "fix/old")["reason"]
+    assert report["deleted_branches"] == []
+
+
+@pytest.mark.parametrize("where", [".handoff", ".coord"])
+def test_a_regular_file_in_place_of_a_mention_folder_keeps_the_worktree(cleanup_mod, repo, tmp_path, where):
+    wt = add_worktree(repo, tmp_path, "w1")
+    git(repo, "branch", "fix/old")
+    folder = repo / ".handoff" if where == ".handoff" else repo.parent / ".coord"
+    folder.write_text("not a folder", encoding="utf-8")
+    report = clean(cleanup_mod, repo, tmp_path)
+    assert wt.exists()
+    assert f"unreadable: {where}" in kept_for(report, "w1")["reason"]
+    assert f"unreadable: {where}" in kept_for(report, "fix/old")["reason"]
     assert report["deleted_branches"] == []
 
 
@@ -905,6 +960,449 @@ def test_dry_run_message_says_would(cleanup_mod):
         out["systemMessage"]
         == "Cleanup: would remove 1 worktree(s), would delete 1 branch(es); 0 kept for review."
     )
+
+
+# --- review fixes ported from the frontend: ancestors, unreadable folders, named sources, capped dry-run --
+
+
+def write_handoff(repo: Path, name: str, text: str) -> None:
+    (repo / ".handoff").mkdir(exist_ok=True)
+    (repo / ".handoff" / name).write_text(text, encoding="utf-8")
+
+
+def write_coord(repo: Path, name: str, text: str) -> None:
+    """The coordinator folder sits next to the main checkout: `<parent of the main checkout>/.coord/`."""
+    (repo.parent / ".coord").mkdir(exist_ok=True)
+    (repo.parent / ".coord" / name).write_text(text, encoding="utf-8")
+
+
+def test_live_session_in_the_parent_of_the_worktrees_keeps_them(cleanup_mod, repo, tmp_path):
+    """A coordinator started in the folder above `wts/` spawns its agents into the worktrees below it."""
+    wt = add_worktree(repo, tmp_path, "w1")
+    sessions = tmp_path / "sessions"
+    write_session(sessions, "coord.json", {"pid": os.getpid(), "cwd": str(wt.parent)})
+    report = clean(cleanup_mod, repo, tmp_path, sessions_dir=sessions)
+    assert wt.exists()
+    assert kept_for(report, "w1")["reason"] == "live session"
+
+
+def test_dead_session_in_the_parent_of_the_worktrees_does_not_keep_them(cleanup_mod, repo, tmp_path):
+    wt = add_worktree(repo, tmp_path, "w1")
+    dead = subprocess.Popen([sys.executable, "-c", "pass"])
+    dead.wait()
+    sessions = tmp_path / "sessions"
+    write_session(sessions, "coord.json", {"pid": dead.pid, "cwd": str(wt.parent)})
+    report = clean(cleanup_mod, repo, tmp_path, sessions_dir=sessions)
+    assert removed_names(report) == ["w1"]
+
+
+@pytest.mark.parametrize("session_dir", ["", ".claude", ".claude/worktrees"])
+def test_live_session_in_the_main_checkout_does_not_keep_nested_worktrees(
+    cleanup_mod, repo, tmp_path, session_dir
+):
+    """Every session starts in the main checkout; it must not pin `.claude/worktrees/*` forever."""
+    nested = repo / ".claude" / "worktrees" / "w1"
+    git(repo, "worktree", "add", "-q", "-b", "w1", str(nested))
+    folder = repo / session_dir
+    sessions = tmp_path / "sessions"
+    write_session(sessions, "main.json", {"pid": os.getpid(), "cwd": str(folder)})
+    report = clean(cleanup_mod, repo, tmp_path, sessions_dir=sessions)
+    assert removed_names(report) == ["w1"]
+
+
+def test_live_session_below_a_nested_worktree_keeps_it(cleanup_mod, repo, tmp_path):
+    """Only a session in the main checkout OUTSIDE any worktree is ignored; one inside the worktree counts."""
+    nested = repo / ".claude" / "worktrees" / "w1"
+    git(repo, "worktree", "add", "-q", "-b", "w1", str(nested))
+    (nested / "sub").mkdir()
+    sessions = tmp_path / "sessions"
+    write_session(sessions, "a.json", {"pid": os.getpid(), "cwd": str(nested / "sub")})
+    report = clean(cleanup_mod, repo, tmp_path, sessions_dir=sessions)
+    assert nested.exists()
+    assert kept_for(report, "w1")["reason"] == "live session"
+
+
+def test_live_session_inside_a_linked_worktree_keeps_the_worktrees_nested_below_it(
+    cleanup_mod, repo, tmp_path
+):
+    """The main-checkout exception stops at a worktree: a session in `A` pins `A/.claude/worktrees/B`."""
+    outer = repo / ".claude" / "worktrees" / "A"
+    git(repo, "worktree", "add", "-q", "-b", "A", str(outer))
+    inner = outer / ".claude" / "worktrees" / "B"
+    git(repo, "worktree", "add", "-q", "-b", "B", str(inner))
+    sessions = tmp_path / "sessions"
+    write_session(sessions, "a.json", {"pid": os.getpid(), "cwd": str(outer)})
+    report = clean(cleanup_mod, repo, tmp_path, sessions_dir=sessions)
+    assert inner.exists()
+    assert kept_for(report, "B")["reason"] == "live session"
+
+
+def test_keep_reasons_name_where_the_mention_came_from(cleanup_mod, repo, tmp_path):
+    handoff_wt = add_worktree(repo, tmp_path, "w-handoff", branch="feat/in-handoff")
+    coord_wt = add_worktree(repo, tmp_path, "w-coord", branch="feat/in-coord")
+    write_handoff(repo, "x.md", "resume feat/in-handoff")
+    write_coord(repo, "agents.md", "live: feat/in-coord")
+    git(repo, "branch", "fix/old-handoff")
+    git(repo, "branch", "fix/old-coord")
+    write_handoff(repo, "y.md", "branch fix/old-handoff")
+    write_coord(repo, "branches.md", "branch fix/old-coord")
+    report = clean(cleanup_mod, repo, tmp_path)
+    assert handoff_wt.exists() and coord_wt.exists()
+    assert kept_for(report, "w-handoff")["reason"] == "mentioned in .handoff/x.md"
+    assert kept_for(report, "w-coord")["reason"] == "mentioned in .coord/agents.md"
+    assert kept_for(report, "fix/old-handoff")["reason"] == "mentioned in .handoff/y.md"
+    assert kept_for(report, "fix/old-coord")["reason"] == "mentioned in .coord/branches.md"
+
+
+def test_the_coordinator_ledger_keeps_the_worktree_and_the_branch(cleanup_mod, repo, tmp_path):
+    wt = add_worktree(repo, tmp_path, "w1-dirname")
+    git(repo, "branch", "fix/old")
+    write_coord(repo, "agents.md", "see worktree w1-dirname and fix/old")
+    report = clean(cleanup_mod, repo, tmp_path)
+    assert wt.exists()
+    assert report["deleted_branches"] == []
+
+
+def test_a_coordinator_ledger_that_names_nothing_keeps_nothing(cleanup_mod, repo, tmp_path):
+    wt = add_worktree(repo, tmp_path, "w1")
+    write_coord(repo, "agents.md", "nothing relevant")
+    report = clean(cleanup_mod, repo, tmp_path)
+    assert removed_names(report) == ["w1"]
+    assert not wt.exists()
+
+
+def test_missing_mention_folders_are_fine(cleanup_mod, repo, tmp_path):
+    wt = add_worktree(repo, tmp_path, "w1")
+    assert not (repo / ".handoff").exists() and not (repo.parent / ".coord").exists()
+    report = clean(cleanup_mod, repo, tmp_path)
+    assert removed_names(report) == ["w1"]
+    assert not wt.exists()
+
+
+@pytest.mark.parametrize("where", [".handoff", ".coord"])
+def test_unreadable_mention_folder_keeps_the_worktree_and_the_branch(cleanup_mod, repo, tmp_path, where):
+    wt = add_worktree(repo, tmp_path, "w1")
+    git(repo, "branch", "fix/old")
+    folder = repo / ".handoff" if where == ".handoff" else repo.parent / ".coord"
+    folder.mkdir()
+    (folder / "x.md").write_text("nothing", encoding="utf-8")
+    if not hasattr(os, "geteuid") or os.geteuid() == 0:
+        pytest.skip("permissions are not enforced here (root or Windows)")
+    folder.chmod(0)
+    try:
+        try:
+            list(folder.iterdir())
+        except PermissionError:
+            pass
+        else:
+            pytest.skip("chmod 000 did not make the folder unreadable here")
+        report = clean(cleanup_mod, repo, tmp_path)
+    finally:
+        folder.chmod(0o755)
+    assert wt.exists()
+    assert f"unreadable: {where}" in kept_for(report, "w1")["reason"]
+    assert f"unreadable: {where}" in kept_for(report, "fix/old")["reason"]
+    assert report["deleted_branches"] == []
+
+
+def mention_folder(repo: Path, where: str) -> Path:
+    return repo / ".handoff" if where == ".handoff" else repo.parent / ".coord"
+
+
+@pytest.mark.parametrize("where", [".handoff", ".coord"])
+def test_a_mention_in_a_subfolder_keeps_the_worktree_and_the_branch(cleanup_mod, repo, tmp_path, where):
+    wt = add_worktree(repo, tmp_path, "w1-dirname")
+    git(repo, "branch", "fix/old")
+    nested = mention_folder(repo, where) / "tracks" / "deeper"
+    nested.mkdir(parents=True)
+    (nested / "T1.MD").write_text("worktree w1-dirname and fix/old", encoding="utf-8")
+    report = clean(cleanup_mod, repo, tmp_path)
+    assert wt.exists()
+    assert kept_for(report, "w1-dirname")["reason"] == f"mentioned in {where}/tracks/deeper/T1.MD"
+    assert report["deleted_branches"] == []
+
+
+def test_a_coord_subfolder_that_names_nothing_keeps_nothing(cleanup_mod, repo, tmp_path):
+    wt = add_worktree(repo, tmp_path, "w1")
+    (repo.parent / ".coord" / "tracks").mkdir(parents=True)
+    (repo.parent / ".coord" / "tracks" / "t1.md").write_text("nothing relevant", encoding="utf-8")
+    report = clean(cleanup_mod, repo, tmp_path)
+    assert removed_names(report) == ["w1"]
+    assert not wt.exists()
+
+
+def symlink_dir(link: Path, target: Path) -> None:
+    try:
+        link.symlink_to(target, target_is_directory=True)
+    except OSError:
+        pytest.skip("symlinks are not available here")
+
+
+@pytest.mark.parametrize("where", [".handoff", ".coord"])
+def test_a_mention_behind_a_symlinked_subfolder_keeps_the_worktree_and_the_branch(
+    cleanup_mod, repo, tmp_path, where
+):
+    wt = add_worktree(repo, tmp_path, "w1-dirname")
+    git(repo, "branch", "fix/old")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "x.md").write_text("worktree w1-dirname and fix/old", encoding="utf-8")
+    folder = mention_folder(repo, where)
+    folder.mkdir(exist_ok=True)
+    symlink_dir(folder / "link", outside)
+    report = clean(cleanup_mod, repo, tmp_path)
+    assert wt.exists()
+    assert kept_for(report, "w1-dirname")["reason"] == f"mentioned in {where}/link/x.md"
+    assert report["deleted_branches"] == []
+
+
+def guard_scandir(monkeypatch, limit: int = 200) -> list[str]:
+    """Count `os.scandir` calls; past `limit` fail the test instead of looping on."""
+    calls: list[str] = []
+    real = os.scandir
+
+    def counted(path):
+        calls.append(str(path))
+        assert len(calls) <= limit, "the mention walk does not terminate"
+        return real(path)
+
+    monkeypatch.setattr(os, "scandir", counted)
+    return calls
+
+
+@pytest.mark.parametrize("where", [".handoff", ".coord"])
+def test_a_symlink_loop_in_a_mention_folder_ends_and_a_mention_elsewhere_still_keeps(
+    cleanup_mod, repo, tmp_path, monkeypatch, where
+):
+    wt = add_worktree(repo, tmp_path, "w1")
+    folder = mention_folder(repo, where)
+    (folder / "a").mkdir(parents=True)
+    symlink_dir(folder / "a" / "loop", folder)
+    (folder / "z.md").write_text("w1", encoding="utf-8")
+    guard_scandir(monkeypatch)
+    report = clean(cleanup_mod, repo, tmp_path)
+    assert wt.exists()
+    assert kept_for(report, "w1")["reason"] == f"mentioned in {where}/z.md"
+
+
+@pytest.mark.parametrize("where", [".handoff", ".coord"])
+def test_a_symlink_loop_in_a_mention_folder_with_no_mention_hits_nothing(
+    cleanup_mod, repo, tmp_path, monkeypatch, where
+):
+    wt = add_worktree(repo, tmp_path, "w1")
+    folder = mention_folder(repo, where)
+    (folder / "a").mkdir(parents=True)
+    symlink_dir(folder / "a" / "loop", folder)
+    (folder / "a" / "t.md").write_text("nothing relevant", encoding="utf-8")
+    guard_scandir(monkeypatch)
+    report = clean(cleanup_mod, repo, tmp_path)
+    assert removed_names(report) == ["w1"]
+    assert not wt.exists()
+
+
+def test_a_dangling_symlink_in_a_mention_subfolder_keeps_the_worktree(cleanup_mod, repo, tmp_path):
+    wt = add_worktree(repo, tmp_path, "w1")
+    (repo.parent / ".coord").mkdir()
+    symlink_dir(repo.parent / ".coord" / "link", tmp_path / "nowhere")
+    report = clean(cleanup_mod, repo, tmp_path)
+    assert wt.exists()
+    assert kept_for(report, "w1")["reason"] == "mention source unreadable: .coord/link"
+
+
+@pytest.mark.parametrize("where", [".handoff", ".coord"])
+def test_a_subfolder_that_vanishes_mid_walk_keeps_the_worktree_and_the_branch(
+    cleanup_mod, repo, tmp_path, monkeypatch, where
+):
+    wt = add_worktree(repo, tmp_path, "w1")
+    git(repo, "branch", "fix/old")
+    sub = mention_folder(repo, where) / "tracks"
+    sub.mkdir(parents=True)
+    (sub / "x.md").write_text("nothing", encoding="utf-8")
+    real = os.scandir
+
+    def vanishing(path):
+        if Path(path) == sub:  # listed in its parent, gone when opened
+            raise FileNotFoundError(2, "gone", str(path))
+        return real(path)
+
+    monkeypatch.setattr(os, "scandir", vanishing)
+    report = clean(cleanup_mod, repo, tmp_path)
+    assert wt.exists()
+    assert kept_for(report, "w1")["reason"] == f"mention source unreadable: {where}/tracks"
+    assert kept_for(report, "fix/old")["reason"] == f"mention source unreadable: {where}/tracks"
+    assert report["deleted_branches"] == []
+
+
+def test_the_mention_sources_are_walked_once_per_run(cleanup_mod, repo, tmp_path, monkeypatch):
+    add_worktree(repo, tmp_path, "w1")
+    add_worktree(repo, tmp_path, "w2")
+    git(repo, "branch", "fix/old")
+    git(repo, "branch", "fix/older")
+    write_handoff(repo, "t.md", "nothing relevant")
+    write_coord(repo, "t.md", "nothing relevant")
+    calls = guard_scandir(monkeypatch)
+    report = clean(cleanup_mod, repo, tmp_path)
+    assert removed_names(report) == ["w1", "w2"]
+    assert len(report["deleted_branches"]) == 4  # fix/w1, fix/w2, fix/old, fix/older
+    assert sorted(Path(c).name for c in calls) == [".coord", ".handoff"]
+
+
+@pytest.mark.parametrize("where", [".handoff", ".coord"])
+def test_unreadable_mention_subfolder_keeps_the_worktree_and_the_branch(cleanup_mod, repo, tmp_path, where):
+    wt = add_worktree(repo, tmp_path, "w1")
+    git(repo, "branch", "fix/old")
+    sub = mention_folder(repo, where) / "tracks"
+    sub.mkdir(parents=True)
+    (sub / "x.md").write_text("nothing", encoding="utf-8")
+    if not hasattr(os, "geteuid") or os.geteuid() == 0:
+        pytest.skip("permissions are not enforced here (root or Windows)")
+    sub.chmod(0)
+    try:
+        try:
+            list(sub.iterdir())
+        except PermissionError:
+            pass
+        else:
+            pytest.skip("chmod 000 did not make the folder unreadable here")
+        report = clean(cleanup_mod, repo, tmp_path)
+    finally:
+        sub.chmod(0o755)
+    assert wt.exists()
+    assert f"unreadable: {where}/tracks" in kept_for(report, "w1")["reason"]
+    assert f"unreadable: {where}/tracks" in kept_for(report, "fix/old")["reason"]
+    assert report["deleted_branches"] == []
+
+
+def kept_item(i: int, reason: str = "not merged") -> dict:
+    return {
+        "kind": "branch",
+        "target": f"fix/b{i:04d}",
+        "reason": reason,
+        "head": "h",
+        "review": True,
+        "idle": True,
+    }
+
+
+def test_dry_run_lists_every_kept_item_without_pointing_at_a_log(cleanup_mod):
+    report = {"removed_worktrees": [], "deleted_branches": [], "kept": [kept_item(i) for i in range(30)]}
+    out = cleanup_mod.build_output(report, dry_run=True, main_path="/srv/repo")
+    assert out is not None
+    text = out["hookSpecificOutput"]["additionalContext"]
+    assert all(f"fix/b{i:04d}:" in text for i in range(30))
+    assert "cleanup log" not in text and "more; full list" not in text
+
+
+def quote_path(path: str) -> str:
+    return shlex.quote(path) if os.name != "nt" else subprocess.list2cmdline([path])
+
+
+def unquote_path(text: str) -> str:
+    return shlex.split(text)[0] if os.name != "nt" else text.strip().strip('"')
+
+
+def test_dry_run_footer_quotes_the_repo_path_even_without_a_space(cleanup_mod):
+    kept = [kept_item(i, "not merged " * 6) for i in range(300)]
+    report = {"removed_worktrees": [], "deleted_branches": [], "kept": kept}
+    tricky = "/srv/it's;$HOME"
+    out = cleanup_mod.build_output(report, dry_run=True, main_path=tricky)
+    assert out is not None
+    footer = out["hookSpecificOutput"]["additionalContext"].split("\n\n")[0].splitlines()[-1]
+    assert footer.endswith(f"--repo {quote_path(tricky)}")
+    if os.name != "nt":
+        assert unquote_path(footer.split("--repo ", 1)[1]) == tricky
+
+
+def test_dry_run_caps_the_listing_and_points_at_the_full_command(cleanup_mod):
+    kept = [kept_item(i, "not merged " * 6) for i in range(300)]
+    report = {"removed_worktrees": [], "deleted_branches": [], "kept": kept}
+    out = cleanup_mod.build_output(report, dry_run=True, main_path="/srv/my repo")
+    assert out is not None
+    text = out["hookSpecificOutput"]["additionalContext"]
+    assert len(text) < 10_000
+    assert "fix/b0000:" in text and "fix/b0299:" not in text
+    assert "cleanup log" not in text
+    shown = sum(1 for i in range(300) if f"fix/b{i:04d}:" in text)
+    listing = text.split("\n\n")[0]
+    assert listing.splitlines()[-1] == (
+        f"\u2026 {300 - shown} more; full list: "
+        f"python .claude/hooks/session_cleanup.py --dry-run --full --repo {quote_path('/srv/my repo')}"
+    )
+    assert len(listing) <= cleanup_mod.DRY_RUN_LIST_LIMIT  # the footer fits inside the cap
+    assert text.endswith(cleanup_mod.REVIEW_REMINDER)
+    assert out["systemMessage"].endswith("300 kept for review.")  # the summary still counts every item
+
+
+def test_dry_run_full_flag_lists_everything_without_a_footer(cleanup_mod):
+    kept = [kept_item(i, "not merged " * 6) for i in range(300)]
+    report = {"removed_worktrees": [], "deleted_branches": [], "kept": kept}
+    out = cleanup_mod.build_output(report, dry_run=True, main_path="/r", full=True)
+    assert out is not None
+    text = out["hookSpecificOutput"]["additionalContext"]
+    assert all(f"fix/b{i:04d}:" in text for i in range(300))
+    assert "more; full list" not in text
+    assert cleanup_mod.parse_args(["--dry-run", "--full", "--repo", "/r"]) == (True, "/r", True)
+    assert cleanup_mod.parse_args(["--dry-run"]) == (True, None, False)
+
+
+def test_full_does_not_change_a_real_run_which_still_shortens_and_points_at_the_log(cleanup_mod):
+    report = {"removed_worktrees": [], "deleted_branches": [], "kept": [kept_item(i) for i in range(30)]}
+    out = cleanup_mod.build_output(report, dry_run=False, full=True)
+    assert out is not None
+    text = out["hookSpecificOutput"]["additionalContext"]
+    assert "see the cleanup log in .git" in text
+    assert "fix/b0029:" not in text and "full list" not in text
+
+
+def test_dry_run_keeps_removals_ahead_of_kept_items_when_it_cuts(cleanup_mod):
+    removed = [{"target": f"/x/w{i}", "reason": "r", "head": "h", "branch": f"fix/w{i}"} for i in range(3)]
+    kept = [kept_item(i, "not merged " * 6) for i in range(300)]
+    report = {"removed_worktrees": removed, "deleted_branches": [], "kept": kept}
+    out = cleanup_mod.build_output(report, dry_run=True, main_path="/r")
+    assert out is not None
+    text = out["hookSpecificOutput"]["additionalContext"]
+    assert all(f"worktree would be removed: /x/w{i}" in text for i in range(3))
+
+
+def test_non_dry_run_truncation_still_points_at_the_log(cleanup_mod):
+    report = {"removed_worktrees": [], "deleted_branches": [], "kept": [kept_item(i) for i in range(30)]}
+    out = cleanup_mod.build_output(report, dry_run=False)
+    assert out is not None
+    text = out["hookSpecificOutput"]["additionalContext"]
+    assert "see the cleanup log in .git" in text and "session_cleanup.py --dry-run" not in text
+
+
+def test_the_hook_prints_the_full_list_command_with_the_main_checkout(
+    cleanup_mod, repo, tmp_path, monkeypatch
+):
+    """End to end: the footer carries the main checkout, even when the hook runs from a worktree."""
+    monkeypatch.setenv("GIT_COMMITTER_DATE", "2020-01-01T00:00:00")
+    commit(repo, "old.txt")  # branches at this commit are idle
+    monkeypatch.delenv("GIT_COMMITTER_DATE")
+    names = [f"fix/a-fairly-long-branch-name-to-fill-the-listing-{i:04d}" for i in range(400)]
+    for name in names:
+        git(repo, "branch", name)
+    wt = add_worktree(repo, tmp_path, "w1")
+    # the branches are merged; a handoff keeps each one, so the listing is all "kept for review"
+    write_handoff(repo, "all.md", "\n".join(names))
+    proc = run_hook_in(somewhere_else(tmp_path), wt, "{}", "--dry-run")
+    assert proc.returncode == 0 and proc.stderr == ""
+    text = json.loads(proc.stdout)["hookSpecificOutput"]["additionalContext"]
+    assert len(text) < 10_000
+    footer = next(line for line in text.splitlines() if "full list: " in line)
+    command = footer.split("session_cleanup.py ", 1)[1]
+    flags, shown_repo = command.split("--repo ", 1)
+    # git prints `C:/x` where `str(Path)` is `C:\\x` on Windows, so compare folded keys
+    assert cleanup_mod.path_key(unquote_path(shown_repo)) == cleanup_mod.path_key(repo)
+    assert "--dry-run" in flags.split() and "--full" in flags.split()
+    # the printed command really lists everything: no cap, no footer
+    again = run_hook_in(
+        somewhere_else(tmp_path), wt, "{}", *flags.split(), "--repo", unquote_path(shown_repo)
+    )
+    assert again.returncode == 0 and again.stderr == ""
+    full = json.loads(again.stdout)["hookSpecificOutput"]["additionalContext"]
+    assert "more; full list" not in full
+    assert all(f"{name}:" in full for name in names)
 
 
 # --- Windows: path spelling, process liveness, console encoding --------------------------------
