@@ -19,9 +19,18 @@ designations"):
   * `display_text` has `%%c` already expanded to U+00D8 by the text index; the diameter sign set is the
     research's (U+2300 is NOT in it). A literal diameter sign in a non-Unicode text is flagged
     (`diameter_sign_literal_non_unicode`): U+00D8 is also byte 0xD8 of single-byte code pages.
+  * Tool wave 3, W1b (docs/research/diameter-glyph-u-grave.md): a character in diameter position that is
+    not a verified diameter sign (`2ù20`, `ù14a150`, `2Þ16`, U+2300, U+2205) is an unparsed rebar callout
+    with `unparsed_code` symbol_glyph_unverified, never decoded (`_GLYPH` says which shapes count). Such
+    callouts joined by '+' or '/' (`2ù20+2ù18`, `2ù20/2ù18`) are ONE such candidate (review M2). A glyph
+    before or between digits that no shape reads (bare `ù12`, `ù8@150`, a mark letter `Ô1`) is listed in
+    `rejected` (`diameter_glyph_no_notation`): never a candidate, so a slab panel `Ô1` raises no question.
   * Precedence on a line (a character belongs to one candidate): ambiguous rebar forms, verified rebar
-    forms, `L=`, grades, steel sections, plates, bolts, loose diameter-sign forms. A line with no candidate
-    whose whole text looks like a member mark is a `member_mark` (practice only, never verified).
+    forms, `L=`, grades, steel sections, plates, bolts, loose diameter-sign forms, glyphs. A line with no
+    candidate whose whole text looks like a member mark is a `member_mark` (practice only, never verified).
+  * Every unparsed candidate names its reason family in `unparsed_code`. Nothing that matched is dropped
+    silently: a diameter sign no pattern reads, a mark-shaped sheet code and a mark-shaped text another
+    extractor took are listed in `rejected` with a `reason_code`.
   * Confidence: min(rule cap, the text entry's own confidence). Caps: verified grammar from a grade-B source
     'medium'; unparsed, ambiguous and member marks 'low'. Any of
     these also forces 'low': case_uncertain text, unmapped characters, NFD damage, flags
@@ -37,14 +46,17 @@ designations"):
     marks. Provenance: `method` 'derived', `derived_from` the text entry's provenance, `file` the inventory
     path (relative to the input folder), `sheet` the printed sheet number or 'unknown'.
 
-Questions. `callouts.json` holds no questions, only `question_counts` (per code: ambiguous notations, member
-mark prefixes, 1 for legacy grades). `run_callouts` (`harness callouts <work_dir>`) writes
-`callouts-questions.json`: `callout_ambiguous`, `member_mark_prefix_meaning` (blocking) and
-`grade_legacy_mapping` (blocking) as ONE question per (code, blocking flag, file) with a stable key, a
-registry id and the engineer's answer (questions.py, intake schema kind 'questions'). Inside one question
-`subjects` lists the notations (callout_ambiguous) or the member mark prefixes
-(member_mark_prefix_meaning, whose answer maps each prefix to its meaning). A changed drawing gives new
-keys, so these questions are asked again.
+Questions. `callouts.json` holds no questions, only `question_counts` (per code: ambiguous notations, 1 for
+legacy grades). `run_callouts` (`harness callouts <work_dir>`) writes `callouts-questions.json`:
+`callout_ambiguous` and `grade_legacy_mapping` (blocking) as ONE question per (code, blocking flag, file)
+with a stable key, a registry id and the engineer's answer (questions.py, intake schema kind 'questions').
+Inside a `callout_ambiguous` question `subjects` lists the notations. A changed drawing gives new keys, so
+these questions are asked again. Member mark prefixes (`member_mark_prefix_meaning`) are asked by
+`harness marks` since tool wave 2 (fix 1b): an answer given to the question callouts raised before goes
+stale once, at the next callouts run. Tool wave 3: `callout_unparsed` (blocking: lot specs cannot use the
+texts) is ONE question per (file, unparsed_code) over the unparsed candidates no other question covers
+(no ambiguity, no member mark, no legacy grade group); its subject names the code, its refs give the first
+five examples in scan order and one `sheets` ref with the count per sheet, `count` is the true total.
 
 Not covered (research ambiguous list): 5 circled bar marks, 8-10 sheet prefixes / axes / levels (other
 extractors), 15 weld symbols, 17 laps and hooks; welds and electrodes are not detected at all.
@@ -53,6 +65,7 @@ extractors), 15 weld symbols, 17 laps and hooks; welds and electrodes are not de
 from __future__ import annotations
 
 import re
+import unicodedata
 from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -61,6 +74,7 @@ from typing import Any
 
 from tekla_harness.detect import sha256_file
 from tekla_harness.questions import (
+    CALLOUT_UNPARSED_CODE,
     QuestionsError,
     dump_json,
     load_ledger,
@@ -87,10 +101,10 @@ from tekla_harness.sheet_text import (
 )
 from tekla_harness.sheets import text_box
 from tekla_harness.text_gate import meaning_block_reason
+from tekla_harness.visibility import is_printed, not_printed_reasons
 
 MAX_REFS = 50  # refs listed per question; `count` is always the true total
 MAX_PREFIX_REFS = 10
-MAX_EXAMPLES = 5
 REF_TEXT_CHARS = 80
 LINE_CHARS = 200
 
@@ -137,6 +151,47 @@ _DIA_SPACING = re.compile(_L + DIA + r"\s*(?P<d>\d{1,2})\s*a\s*(?P<s1>\d{2,3})(?
 _COUNT_DIA = re.compile(_L + r"(?P<n>\d{1,3})\s*" + DIA + r"\s*(?P<d>\d{1,2})" + _R)
 _LEN_EQ = re.compile(r"(?<![\w])L\s*=\s*\d+(?:[.,]\d+)?(?!\w)")
 _LOOSE_DIA = re.compile(_L + r"(?:\d{1,3}\s*)?" + DIA + r"\s*\d{1,3}(?:\s*[aAsS@]\s*\d{1,4}(?:/\d{1,4})?)?")
+# W1b (docs/research/diameter-glyph-u-grave.md): a character in diameter position that is not a verified
+# diameter sign. A non-ASCII letter (not a diameter sign, not the mark letter Đ/đ) counts only in the two
+# callout shapes, count + diameter or diameter + spacing (`2ù20`, `ù14a150`, `2Þ16`): a lone letter + number
+# (`Ô1`) is no callout. The diameter-like symbols U+2300 and U+2205 (AutoCAD's Unicode for %%c, not in the
+# research's verified set) count in any of those shapes or alone with a number.
+_GLYPH_LETTER = r"(?=[^\x00-\x7f])(?![" + DIA_CHARS + r"Đđ])[^\W\d_]"
+_GLYPH_SYMBOL = r"[⌀∅]"
+_GLYPH_ANY = "(?:" + _GLYPH_LETTER + "|" + _GLYPH_SYMBOL + ")"
+_GLYPH_SPACING = r"\s*a\s*\d{2,3}(?:/\d{2,3})?"
+_GLYPH = re.compile(
+    _L
+    + r"(?:\d{1,3}\s*(?P<g1>"
+    + _GLYPH_ANY
+    + r")\s*\d{1,2}(?:"
+    + _GLYPH_SPACING
+    + r")?|(?P<g2>"
+    + _GLYPH_ANY
+    + r")\s*\d{1,2}"
+    + _GLYPH_SPACING
+    + r"|(?P<g3>"
+    + _GLYPH_SYMBOL
+    + r")\s*\d{1,2})"
+    + _R
+)
+# review M2: glyph callouts joined by '+' or '/' (`2ù20+2ù18`, `2ù20/2ù18`), one candidate as their Ø twins
+# (`_PLUS_JOIN`); each part has one of the `_GLYPH` shapes
+_GLYPH_PART = (
+    r"(?:\d{1,3}\s*"
+    + _GLYPH_ANY
+    + r"\s*\d{1,2}(?:"
+    + _GLYPH_SPACING
+    + r")?|"
+    + _GLYPH_ANY
+    + r"\s*\d{1,2}"
+    + _GLYPH_SPACING
+    + r"|"
+    + _GLYPH_SYMBOL
+    + r"\s*\d{1,2})"
+)
+_GLYPH_JOIN = re.compile(_L + _GLYPH_PART + r"(?:\s*[+/]\s*" + _GLYPH_PART + r")+(?![\w/@=])")
+_GLYPH_CHAR = re.compile(_GLYPH_ANY)
 
 _REBAR_GRADE = re.compile(r"\bCB(?P<ys>240|300|400|500|600)-?(?P<surf>[TV])\b")
 _LEGACY = re.compile(r"\b(?P<p>C|A-?)(?P<g>I{1,3}|IV)\b")
@@ -174,11 +229,19 @@ _BOLT_CLASS = re.compile(r"(?<![\d.])(?:4\.6|5\.6|5\.8|8\.8|10\.9|12\.9)(?![\d.]
 _BOLT_WORD = re.compile(r"(?i:\bbolts?\b|\bbu\s*-?\s*l[o\u00f4]ng\b|\bbulong\b)")
 _HOLE = re.compile(r"(?<!\w)(?i:l[o\u1ed7])\s*" + DIA + r"\s*\d{2}(?!\w)")
 
-_MARK = re.compile(r"^(?P<prefix>[A-Z\u0110]{1,3})\s?-?\s?(?P<number>\d{1,3})(?P<suffix>[a-z']?)$")
+_MARK = re.compile(r"^(?P<prefix>[A-Z\u0110]{1,3})(?P<sep>\s?-?\s?)(?P<number>\d{1,3})(?P<suffix>[a-z']?)$")
 _MARK_CI = re.compile(_MARK.pattern, re.IGNORECASE)
 _SHEET_CODE = re.compile(r"^(?P<disc>KT|KC|\u0110|N|TCXD)\s*-?\s*\d{1,3}(?:\s*/\s*\d{1,3})?$")
 
 _CITE = "docs/research/vn-structural-drawing-conventions.md"
+
+# unparsed_code (tool wave 3): the reason family of an unparsed candidate (callouts schema)
+AMBIGUOUS = "ambiguous_notation"
+GRADE_UNVERIFIED = "grade_unverified"
+NOTATION_UNVERIFIED = "notation_unverified"
+CONFLICTING = "conflicting_values"
+MARK_UNDEFINED = "member_mark_undefined"
+SYMBOL_GLYPH = "symbol_glyph_unverified"
 
 # ambiguity id -> (blocking, notation text, message)
 AMBIGUITIES: dict[str, tuple[bool, str]] = {
@@ -231,6 +294,35 @@ AMBIGUITIES: dict[str, tuple[bool, str]] = {
     ),
 }
 
+# member-type words of a detail title (matched case-insensitively on NFC text); marks builds its title
+# grammar from them and numbered_run_labels asks for one in the heading that names a run
+MEMBER_WORDS = (
+    "giằng móng",
+    "dầm móng",
+    "đài cọc",
+    "đài móng",
+    "đài",
+    "lanh tô",
+    "dầm",
+    "cột",
+    "giằng",
+    "móng",
+    "sàn",
+    "vách",
+    "cọc",
+    "tie beam",
+    "pile cap",
+    "footing",
+    "column",
+    "purlin",
+    "rafter",
+    "girder",
+    "brace",
+    "beam",
+    "slab",
+    "wall",
+)
+
 # --- candidate hits ----------------------------------------------------------------------------------
 
 
@@ -247,6 +339,7 @@ class _Hit:
     family: str | None = None
     lexical: dict[str, str] | None = None
     derived_flags: tuple[str, ...] = ()
+    code: str | None = None  # unparsed_code (UNPARSED_CODES) of an unparsed hit; None when parsed
 
 
 class _Line:
@@ -274,8 +367,10 @@ def _cite(pattern: str, where: str) -> str:
     return f"{pattern} ({_CITE}: {where})"
 
 
-def _unparsed(kind: str, m: re.Match[str], rule: str, reason: str, ambiguity: str | None = None) -> _Hit:
-    return _Hit(kind, m.start(), m.end(), rule, "low", None, reason, ambiguity)
+def _unparsed(
+    kind: str, m: re.Match[str], rule: str, reason: str, code: str, ambiguity: str | None = None
+) -> _Hit:
+    return _Hit(kind, m.start(), m.end(), rule, "low", None, reason, ambiguity, code=code)
 
 
 def _parsed(kind: str, m: re.Match[str], rule: str, cap: str, parsed: dict[str, Any], **extra: Any) -> _Hit:
@@ -289,7 +384,7 @@ _Maker = Callable[[re.Match[str]], _Hit | None]
 def _ambiguous_rebar(amb: str, item: int) -> _Maker:
     def make(m: re.Match[str]) -> _Hit:
         rule = _cite(f"AMBIG_{amb.upper()}", f"Ambiguous notations, #{item}")
-        return _unparsed("rebar_callout", m, rule, f"ambiguous notation, not parsed: {amb}", amb)
+        return _unparsed("rebar_callout", m, rule, f"ambiguous notation, not parsed: {amb}", AMBIGUOUS, amb)
 
     return make
 
@@ -316,7 +411,7 @@ def _rebar_grade(m: re.Match[str]) -> _Hit:
     rule = _cite("REBAR_GRADE", "Parsing patterns 2, section 1.3")
     if (m["surf"], int(m["ys"])) not in _GRADES:
         reason = "this strength class and surface letter pair is not in the verified grade list (section 1.3)"
-        return _Hit("rebar_grade", m.start(), m.end(), rule, "low", None, reason)
+        return _Hit("rebar_grade", m.start(), m.end(), rule, "low", None, reason, code=GRADE_UNVERIFIED)
     parsed = {
         "form": "rebar_grade",
         "yield_class_mpa": int(m["ys"]),
@@ -332,7 +427,7 @@ def _legacy(m: re.Match[str]) -> _Hit:
     )
     if m["p"] == "A":
         reason = "spelling without a hyphen (AI, AII, AIII) is in no standard (section 1.3)"
-        return _Hit("rebar_grade", m.start(), m.end(), rule, "low", None, reason)
+        return _Hit("rebar_grade", m.start(), m.end(), rule, "low", None, reason, code=GRADE_UNVERIFIED)
     family = "CI..CIV (TCVN 1651:1985)" if m["p"] == "C" else "A-I..A-IV (imported Russian groups)"
     return _parsed(
         "rebar_grade", m, rule, "medium", {"form": "legacy_group", "family": family, "group": m["g"]}
@@ -344,7 +439,9 @@ def _steel_vn(m: re.Match[str]) -> _Hit:
     prefix, number = m["prefix"], m["n"]
     if prefix == "CCT" and number == "52":
         reason = "CCT52 is not in the verified list (CCT34, CCT38, CCT42)"
-        return _Hit("steel_grade", m.start(), m.end(), rule, "low", None, reason, family=prefix)
+        return _Hit(
+            "steel_grade", m.start(), m.end(), rule, "low", None, reason, family=prefix, code=GRADE_UNVERIFIED
+        )
     parsed = {
         "form": "steel_grade_vn",
         "prefix": prefix,
@@ -358,7 +455,10 @@ def _steel_vn(m: re.Match[str]) -> _Hit:
 def _steel_vn_near_miss(m: re.Match[str]) -> _Hit:
     rule = _cite("STEEL_VN", "Parsing patterns 5, section 5.4")
     reason = "CCT/XCT followed by a number outside the verified list (CCT34/38/42, XCT34/38/42/52)"
-    return _Hit("steel_grade", m.start(), m.end(), rule, "low", None, reason, family=m.group(0)[:3])
+    family = m.group(0)[:3]
+    return _Hit(
+        "steel_grade", m.start(), m.end(), rule, "low", None, reason, family=family, code=GRADE_UNVERIFIED
+    )
 
 
 def _steel_foreign(m: re.Match[str]) -> _Hit:
@@ -397,7 +497,7 @@ def _qty_angle(m: re.Match[str]) -> _Hit:
 def _section_unverified(rule_id: str, why: str) -> _Maker:
     def make(m: re.Match[str]) -> _Hit:
         rule = _cite(rule_id, "section 5.2, NOTES.md 'Section designations', ambiguous #12")
-        return _unparsed("section_label", m, rule, why, "section_designation")
+        return _unparsed("section_label", m, rule, why, NOTATION_UNVERIFIED, "section_designation")
 
     return make
 
@@ -408,19 +508,49 @@ def _plate(m: re.Match[str]) -> _Hit:
     else:
         why = "plate tag with a number (mark or thickness): no verified form"
     rule = _cite("PLATE_TAG", "section 5.2, NOTES.md 'Plates', ambiguous #13")
-    return _unparsed("plate", m, rule, why, "plate_designation")
+    return _unparsed("plate", m, rule, why, NOTATION_UNVERIFIED, "plate_designation")
 
 
 def _loose_dia(m: re.Match[str]) -> _Hit:
     rule = _cite("LOOSE_DIAMETER", "Parsing patterns 1: no verified form matches")
     why = "diameter sign with a number, outside the verified forms (count + diameter, diameter + spacing)"
-    return _unparsed("rebar_callout", m, rule, why)
+    return _unparsed("rebar_callout", m, rule, why, NOTATION_UNVERIFIED)
+
+
+def _glyph(m: re.Match[str]) -> _Hit:
+    glyph = m["g1"] or m["g2"] or m["g3"]
+    rule = (
+        "SYMBOL_GLYPH (docs/research/diameter-glyph-u-grave.md: a character that is not a verified diameter "
+        "sign stands in diameter position; never decoded)"
+    )
+    why = (
+        f"the character '{glyph}' (U+{ord(glyph):04X}) stands where a diameter sign stands (count + diameter "
+        "or diameter + spacing), but it is not \u00d8 or %%c: never decoded, the meaning depends on a font "
+        "nobody verified (research note diameter-glyph-u-grave.md)"
+    )
+    return _unparsed("rebar_callout", m, rule, why, SYMBOL_GLYPH)
+
+
+def _glyph_join(m: re.Match[str]) -> _Hit:
+    found = _GLYPH_CHAR.search(m.group(0))
+    assert found is not None  # every part holds a glyph
+    glyph = found.group(0)
+    rule = (
+        "SYMBOL_GLYPH_JOIN (docs/research/diameter-glyph-u-grave.md: bar groups joined by '+' or '/' with a "
+        "character that is not a verified diameter sign in diameter position; never decoded)"
+    )
+    why = (
+        f"bar groups joined by '+' or '/' where the character '{glyph}' (U+{ord(glyph):04X}) stands where a "
+        "diameter sign stands, but it is not Ø or %%c: never decoded, the meaning depends on a font "
+        "nobody verified (research note diameter-glyph-u-grave.md); with Ø the join itself is ambiguous"
+    )
+    return _unparsed("rebar_callout", m, rule, why, SYMBOL_GLYPH)
 
 
 def _hole(m: re.Match[str]) -> _Hit:
     rule = _cite("BOLT_HOLE", "section 5.3, ambiguous #14")
     why = "hole diameter notation ('lỗ Ø22'): hole size, standard or oversize unverified"
-    return _unparsed("bolt", m, rule, why, "bolt_label_hole")
+    return _unparsed("bolt", m, rule, why, NOTATION_UNVERIFIED, "bolt_label_hole")
 
 
 def _pattern(rx: re.Pattern[str], make: _Maker, fold: bool = False) -> Callable[[str, _Line], None]:
@@ -455,11 +585,12 @@ def _bolts(text: str, acc: _Line) -> None:
             acc.add(_Hit("bolt", start, end, rule, "medium", parsed))
         else:
             why = f"several strength classes on one line: {', '.join(values)}"
-            acc.add(_Hit("bolt", start, end, rule, "low", None, why, "bolt_label_hole"))
+            acc.add(_Hit("bolt", start, end, rule, "low", None, why, "bolt_label_hole", code=CONFLICTING))
     elif sizes:
         rule = _cite("BOLT_M_LABEL", "section 5.3, ambiguous #14")
         why = "bolt diameter label (M20...) without a verified strength class on the line"
-        acc.add(_Hit("bolt", sizes[0].start(), sizes[-1].end(), rule, "low", None, why, "bolt_label_hole"))
+        start, end = sizes[0].start(), sizes[-1].end()
+        acc.add(_Hit("bolt", start, end, rule, "low", None, why, "bolt_label_hole", code=NOTATION_UNVERIFIED))
     _pattern(_HOLE, _hole)(text, acc)
 
 
@@ -513,6 +644,8 @@ _SCANNERS: tuple[Callable[[str, _Line], None], ...] = (
     _pattern(_PLATE, _plate),
     _bolts,
     _pattern(_LOOSE_DIA, _loose_dia),
+    _pattern(_GLYPH_JOIN, _glyph_join),
+    _pattern(_GLYPH, _glyph),
 )
 
 
@@ -525,21 +658,194 @@ def scan_line(line: str, case_uncertain: bool = False) -> list[_Hit]:
     return sorted(acc.hits, key=lambda h: (h.start, h.end))
 
 
+# Tool wave 4 (F4a): texts with a mark's shape that are not marks. A strength class (`RB 500`, `CB 400`):
+# a rebar-grade prefix and a three-digit yield class of the verified grade list (`_REBAR_GRADE`). A signed
+# level (`cos -300`): letters, a blank, then a minus glued to the digits.
+GRADE_TOKEN = "grade_token"
+LEVEL_TOKEN = "level_token"
+GRADE_PREFIXES = frozenset({"rb", "cb", "sd", "sr", "gr"})
+YIELD_CLASSES = frozenset({"240", "300", "400", "500", "600"})
+_LEVEL_SEP = re.compile(r"\s-")
+# F4c: a steel profile (series letters and a section depth: `HEB-650`, `IPE 300`, `UC 254`; no section depth
+# below 50 exists in the catalogues, so `UC1` stays a member) and a detail label (`DET-2`)
+STEEL_PROFILE = "steel_profile"
+DETAIL_LABEL = "detail_label"
+PROFILE_PREFIXES = frozenset({"hea", "heb", "hem", "ipe", "ipea", "ipn", "upn", "ub", "uc"})
+MIN_PROFILE_DEPTH = 50
+DETAIL_PREFIXES = frozenset({"det"})
+
+
+def token_reason(prefix: str, sep: str, number: str, has_second_number: bool = False) -> str | None:
+    """`grade_token`, `level_token`, `steel_profile` or `detail_label` when a mark-shaped text (prefix,
+    separator, first number) is one of those, else None."""
+    if prefix.casefold() in DETAIL_PREFIXES:
+        return DETAIL_LABEL
+    if has_second_number:
+        return None
+    if prefix.casefold() in GRADE_PREFIXES and number in YIELD_CLASSES:
+        return GRADE_TOKEN
+    if prefix.casefold() in PROFILE_PREFIXES and int(number) >= MIN_PROFILE_DEPTH:
+        return STEEL_PROFILE
+    if _LEVEL_SEP.fullmatch(sep):
+        return LEVEL_TOKEN
+    return None
+
+
+def not_member_token(line: str, case_uncertain: bool) -> str | None:
+    """The `token_reason` of a whole line that has a member mark's shape, else None."""
+    m = (_MARK_CI if case_uncertain else _MARK).match(line.strip())
+    return None if m is None else token_reason(m["prefix"], m["sep"], m["number"])
+
+
+# Tool wave 4 (F4a): the ATTRIBs of one INSERT are parts of a rebar callout when the block carries a spacing
+# value (a whole `a150`, `A200`, `a100/200`, `a600x600`) or a bar tag (`THEP` steel, `KHOANGCACH` spacing).
+# The tag names are knowledge; the spacing value is the structural rule that makes the block a callout.
+CALLOUT_PART = "callout_part"
+CALLOUT_BLOCK_TAGS = frozenset({"thep", "khoangcach"})
+_SPACING_VALUE = re.compile(r"^[aA]\s?\d{2,3}(?:\s?[/xX]\s?\d{2,3})?$")
+
+
+def callout_part_ids(entries: list[dict[str, Any]]) -> set[str]:
+    """Ids of the ATTRIB entries that belong to a rebar-callout block (see `CALLOUT_PART`): every ATTRIB of
+    an INSERT (told apart by space, layout, outer insert chain and its own handle) one of whose ATTRIBs has
+    a spacing value or a bar tag. ATTRIBs without an insert handle are not grouped."""
+    groups: dict[tuple[Any, ...], list[dict[str, Any]]] = {}
+    for e in entries:
+        if e["entity_type"] == "ATTRIB" and e.get("insert_handle"):
+            key = (e["space"], e["layout"], tuple(e.get("insert_handles") or ()), e["insert_handle"])
+            groups.setdefault(key, []).append(e)
+    out: set[str] = set()
+    for group in groups.values():
+        if any(
+            (e.get("tag") or "").casefold() in CALLOUT_BLOCK_TAGS
+            or _SPACING_VALUE.match(" ".join(e["display_text"].split()))
+            for e in group
+        ):
+            out.update(e["id"] for e in group)
+    return out
+
+
+# F4c: a detail names itself with an English heading (`DETAIL - A1`) and a bubble with the same id on its
+# sheet. A mark-shaped text equal to the id of a detail heading of its sheet is that bubble, not a member,
+# when every mark-shaped text of its prefix on the sheet is such an id (a family with other members, C1 C2 C3
+# next to a heading `DETAIL - C1`, stays). Vietnamese headings (`chi tiết`, `mặt cắt`) name a member or a
+# cut: 290 `MẶT CẮT DT1` heads the section of the member DT1, so they make no detail id.
+_DETAIL_HEADING = re.compile(r"^detail\s*[-:]?\s*(?P<id>[A-Za-z]{1,2}\s?\d{1,2})$", re.IGNORECASE)
+
+
+def _label_key(text: str) -> str:
+    return "".join(unicodedata.normalize("NFC", text).split()).casefold()
+
+
+def detail_label_ids(entries: list[dict[str, Any]], sheet_of: dict[str, dict[str, Any]]) -> set[str]:
+    """Ids of the printed texts that are the reference bubble of a detail heading of their sheet (see
+    `DETAIL_LABEL`)."""
+    heading_ids: dict[str | None, set[str]] = {}
+    labels: dict[tuple[str | None, str], list[tuple[str, str]]] = {}
+    for e in entries:
+        if not is_printed(e):
+            continue
+        sheet = sheet_of.get(e["id"])
+        sheet_id = None if sheet is None else sheet["sheet_id"]
+        for line in e["display_text"].split("\n"):
+            heading = _DETAIL_HEADING.match(" ".join(line.split()))
+            if heading is not None:
+                heading_ids.setdefault(sheet_id, set()).add(_label_key(heading["id"]))
+        family = _FAMILY.match(e["display_text"].strip())
+        if family is not None:
+            key = (sheet_id, family["prefix"].casefold())
+            labels.setdefault(key, []).append((e["id"], _label_key(e["display_text"])))
+    out: set[str] = set()
+    for (sheet_id, _), items in labels.items():
+        ids = heading_ids.get(sheet_id)
+        if ids and all(key in ids for _, key in items):
+            out.update(entry_id for entry_id, _ in items)
+    return out
+
+
 def member_mark(line: str, case_uncertain: bool) -> _Hit | None:
     text = line.strip()
     m = (_MARK_CI if case_uncertain else _MARK).match(text)
-    if m is None:
-        return None
-    code = _SHEET_CODE.match(text.upper() if case_uncertain else text)
-    if code and (code["disc"] in ("KT", "KC", "TCXD") or "-" in text or "/" in text):
-        return None  # a sheet code (research parsing pattern 3), not a member
+    if m is None or is_sheet_code(text, case_uncertain):
+        return None  # a sheet code (research parsing pattern 3) is not a member
+    if token_reason(m["prefix"], m["sep"], m["number"]) is not None:
+        return None  # a strength class or a signed level, not a member (F4a)
     lexical = {"prefix": m["prefix"].upper(), "number": m["number"], "suffix": m["suffix"]}
     rule = _cite("MEMBER_MARK_SHAPE", "section 4: practice only, no standard defines the letters")
     why = "member mark letters are not defined by any standard or by this drawing's legend yet (section 4)"
-    return _Hit("member_mark", 0, len(line), rule, "low", None, why, lexical=lexical)
+    return _Hit("member_mark", 0, len(line), rule, "low", None, why, lexical=lexical, code=MARK_UNDEFINED)
+
+
+def is_sheet_code(line: str, case_uncertain: bool) -> bool:
+    """The whole line has a member mark's shape but is a sheet code (research parsing pattern 3)."""
+    text = line.strip()
+    if (_MARK_CI if case_uncertain else _MARK).match(text) is None:
+        return False
+    code = _SHEET_CODE.match(text.upper() if case_uncertain else text)
+    return bool(code and (code["disc"] in ("KT", "KC", "TCXD") or "-" in text or "/" in text))
 
 
 # --- one text entry -----------------------------------------------------------------------------------
+
+# rejected[] reason codes: text that matched a candidate pattern and is no candidate (callouts schema)
+NO_NOTATION = "diameter_sign_no_notation"
+GLYPH_NO_NOTATION = "diameter_glyph_no_notation"
+SHEET_CODE = "sheet_code"
+REJECT_REASONS = {
+    NO_NOTATION: "a diameter sign that no callout pattern reads: no number right after it, or glued to the "
+    "token before or after it",
+    GLYPH_NO_NOTATION: "a character that is not a verified diameter sign stands in diameter position (a "
+    "letter alone before a number or between numbers, U+2300 / U+2205 anywhere) but no callout shape reads "
+    "it (bare 'ù12', 'ù8@150'; or a mark letter such as 'Ô1'): never decoded (research note "
+    "diameter-glyph-u-grave.md)",
+    SHEET_CODE: "the whole text is a sheet code (research parsing pattern 3), not a member mark",
+    "claimed_by_title_block": "the title-block extractor took this text as a field value or label",
+    "claimed_by_grids": "the grid extractor took this text (a grid bubble label)",
+    "claimed_by_levels": "the level extractor took this text (a level value)",
+    CALLOUT_PART: "an ATTRIB of a rebar-callout block (the block carries a spacing value or a bar tag): a "
+    "part of a callout, not a member mark",
+    STEEL_PROFILE: "a steel profile (series letters and a section depth, e.g. HEB-650), not a member mark",
+    DETAIL_LABEL: "a detail label (DET-2, or the bubble of a 'DETAIL - A1' heading of its sheet), not a "
+    "member mark",
+    GRADE_TOKEN: "a rebar strength class (grade prefix and yield class, e.g. RB 500), not a member mark",
+    LEVEL_TOKEN: "a signed level (letters, a blank, a minus glued to the digits, e.g. cos -300), not a "
+    "member mark",
+}
+_DIA_SIGN = re.compile("[" + DIA_CHARS + "]")
+_TOKEN = re.compile(r"\S+")
+
+
+def _uncovered_signs(line: str, hits: list[_Hit]) -> list[str]:
+    """The line's tokens (whitespace-separated) holding a diameter sign that no hit covers, in order."""
+    out = []
+    for tok in _TOKEN.finditer(line):
+        for sign in _DIA_SIGN.finditer(line, tok.start(), tok.end()):
+            if not any(h.start <= sign.start() < h.end for h in hits):
+                out.append(tok.group(0))
+                break
+    return out
+
+
+# a glyph letter with no letter before it (not the end of a word: 'là 20', 'lÀ9' stay out; a letter after
+# it is ruled out by the digit `_uncovered_glyphs` asks for)
+_LONE_GLYPH = re.compile(r"(?<![^\W\d_])(?:" + _GLYPH_LETTER + r")|" + _GLYPH_SYMBOL)
+
+
+def _uncovered_glyphs(line: str, hits: list[_Hit]) -> list[str]:
+    """Review M2: the line's tokens holding a glyph in diameter position that no hit covers, in order. A
+    glyph letter counts when a digit follows it directly ('ù12'), or a digit precedes it directly and one
+    follows after optional blanks ('2ù 20'); U+2300 / U+2205 count anywhere (as a diameter sign)."""
+    out = []
+    for tok in _TOKEN.finditer(line):
+        for g in _LONE_GLYPH.finditer(line, tok.start(), tok.end()):
+            i = g.start()
+            symbol = g.group(0) in "⌀∅"
+            follows = line[i + 1 : i + 2].isdigit()
+            between = i > 0 and line[i - 1].isdigit() and line[i + 1 :].lstrip()[:1].isdigit()
+            if (symbol or follows or between) and not any(h.start <= i < h.end for h in hits):
+                out.append(tok.group(0))
+                break
+    return out
 
 
 def _confidence(cap: str, entry: dict[str, Any], extra_flags: tuple[str, ...]) -> str:
@@ -555,45 +861,211 @@ def _confidence(cap: str, entry: dict[str, Any], extra_flags: tuple[str, ...]) -
     return "low" if low else conf
 
 
-def _entry_hits(entry: dict[str, Any], mark_allowed: bool) -> list[tuple[str, _Hit]]:
-    """(line, hit) for every candidate of the entry, lines in order."""
+def not_printed_warning(rel: str, entries: list[dict[str, Any]]) -> str | None:
+    """Tool wave 4 (V1): the warning that says how many text entries of a file do not print and are left
+    out of every mark and callout, with the count per reason (`visibility`); None when all print. The
+    documents have no counter field, so the count is told here."""
+    hidden = [e for e in entries if not is_printed(e)]
+    if not hidden:
+        return None
+    reasons = Counter(r for e in hidden for r in not_printed_reasons(e))
+    n = len(hidden)
+    noun = "text entry that does not print" if n == 1 else "text entries that do not print"
+    detail = ", ".join(f"{r} {k}" for r, k in sorted(reasons.items())) or "no reason recorded"
+    return f"{rel}: {n} {noun} (not_printed_reasons: {detail}) left out of marks and callouts"
+
+
+_BARE_M = re.compile(r"^M(?P<n>\d{1,2})$")
+
+
+def footing_m_labels(entries: list[dict[str, Any]], sheet_of: dict[str, dict[str, Any]]) -> set[str]:
+    """Ids of texts that are a whole `M<n>` with a bolt size n (which the bolt pattern reads as a bolt
+    label) but stand in a family of `M` marks: the same sheet (or, for texts on no sheet, the same no-sheet
+    group) holds a whole `M<n-1>` or `M<n+1>` that is no bolt size, in the same text style and height.
+    EVAL-3 R arm, 433 model#01: footings M1..M7 and T000555 `M8`. Such a text is a member mark."""
+    groups: dict[tuple[str | None, str | None, float | None], dict[int, list[str]]] = {}
+    bolt: dict[int, bool] = {}
+    for e in entries:
+        m = _BARE_M.match(e["display_text"].strip())
+        if m is None:
+            continue
+        sheet = sheet_of.get(e["id"])
+        key = (None if sheet is None else sheet["sheet_id"], e["style"], e["height"])
+        n = int(m["n"])
+        bolt[n] = bolt.get(n, False) or _M_SIZE.fullmatch("M" + m["n"]) is not None
+        groups.setdefault(key, {}).setdefault(n, []).append(e["id"])
+    out: set[str] = set()
+    for numbers in groups.values():
+        for n, ids in numbers.items():
+            if bolt[n] and any(k in numbers and not bolt[k] for k in (n - 1, n + 1)):
+                out.update(ids)
+    return out | numbered_run_labels(entries, sheet_of)
+
+
+# 271 `bm-1` .. `bm-7` (footings, two sheets): the plate pattern reads `BM<n>` as a plate tag. A whole text
+# `<letters><n>` that a callout pattern claims but that stands in a run of at least three consecutive numbers
+# of the same prefix, text style and height on one sheet is a family of marks when the file also names that
+# prefix in a member-word heading (271 `bẢn mÓng bm-3`). Without the heading it is a run of plates: bản mã
+# (`BM`) and `PL` plates are numbered 1, 2, 3 in connection details (review M3).
+_RUN_TEXT = re.compile(r"^(?P<prefix>[A-Za-z]{1,3})\s?-?\s?(?P<n>\d{1,3})$")
+_HEADING_END = re.compile(r"(?<=\s)(?P<prefix>[A-Za-z]{1,3})\s?-?\s?\d{1,3}$")
+_MEMBER_WORD = re.compile(
+    r"(?<!\w)(?:" + "|".join(re.escape(w) for w in sorted(MEMBER_WORDS, key=len, reverse=True)) + r")(?!\w)"
+)
+MIN_RUN = 3
+
+
+def member_heading_prefixes(entries: list[dict[str, Any]]) -> set[str]:
+    """Prefixes (casefolded) that a printed text of the file names in a member-word heading: a line that
+    ends with `<letters><n>` and has a member word (`MEMBER_WORDS`) before it."""
+    out: set[str] = set()
+    for e in entries:
+        if not is_printed(e):
+            continue
+        for line in e["display_text"].split("\n"):
+            text = " ".join(unicodedata.normalize("NFC", line).split())
+            m = _HEADING_END.search(text)
+            if m is not None and _MEMBER_WORD.search(text[: m.start()].casefold()):
+                out.add(m["prefix"].casefold())
+    return out
+
+
+def numbered_run_labels(entries: list[dict[str, Any]], sheet_of: dict[str, dict[str, Any]]) -> set[str]:
+    """Ids of the printed texts that are a whole `<letters><n>`, claimed by a callout pattern, and in a run of
+    `MIN_RUN` consecutive numbers of one prefix, style and height on one sheet, for a prefix a member-word
+    heading of the file names (see above)."""
+    named = member_heading_prefixes(entries)
+    groups: dict[tuple[str | None, str, str | None, float | None], dict[int, list[str]]] = {}
+    for e in entries:
+        text = e["display_text"].strip()
+        m = _RUN_TEXT.match(text)
+        if (
+            m is None
+            or m["prefix"].casefold() not in named
+            or not is_printed(e)
+            or not scan_line(text, e.get("decode", {}).get("case_uncertain", False))
+        ):
+            continue
+        sheet = sheet_of.get(e["id"])
+        key = (None if sheet is None else sheet["sheet_id"], m["prefix"].casefold(), e["style"], e["height"])
+        groups.setdefault(key, {}).setdefault(int(m["n"]), []).append(e["id"])
+    out: set[str] = set()
+    for numbers in groups.values():
+        for n, ids in numbers.items():
+            if any(all(k in numbers for k in range(a, a + MIN_RUN)) for a in range(n - MIN_RUN + 1, n + 1)):
+                out.update(ids)
+    return out
+
+
+def _entry_hits(
+    entry: dict[str, Any], claimed_by: str | None, as_mark: bool = False, left_out: str | None = None
+) -> tuple[list[tuple[str, _Hit]], list[tuple[str, str, str]]]:
+    """(line, hit) for every candidate of the entry, lines in order, and what matched but is no candidate:
+    (text, kind, reason code). `claimed_by`: the extractor that took the text (title_block, grids, levels);
+    such a text is never a member mark. `as_mark`: a bolt-size `M<n>` of a footing family
+    (`footing_m_labels`), read as a member mark only. `left_out`: the reason code (`CALLOUT_PART`,
+    `DETAIL_LABEL`) for which a text of this entry is never a member mark."""
     out: list[tuple[str, _Hit]] = []
+    rejects: list[tuple[str, str, str]] = []
     dec = entry["decode"]
+    cu = dec["case_uncertain"]
     literal_sign_unsafe = dec["encoding_used"] != "unicode" and "%%c" not in entry["special_codes"]
     for line in entry["display_text"].split("\n"):
-        hits = scan_line(line, dec["case_uncertain"])
-        if not hits and mark_allowed:
-            mark = member_mark(line, dec["case_uncertain"])
-            if mark is not None:
+        hits = [] if as_mark and member_mark(line, cu) is not None else scan_line(line, cu)
+        if not hits:
+            mark = member_mark(line, cu)
+            if mark is not None and claimed_by is not None:
+                rejects.append((line.strip(), "member_mark", f"claimed_by_{claimed_by}"))
+            elif mark is not None and left_out is not None:
+                rejects.append((line.strip(), "member_mark", left_out))
+            elif mark is not None:
                 hits = [mark]
+            elif is_sheet_code(line, cu):
+                rejects.append((line.strip(), "member_mark", SHEET_CODE))
+            elif (token := not_member_token(line, cu)) is not None:
+                rejects.append((line.strip(), "member_mark", token))
+        rejects.extend((tok, "rebar_callout", NO_NOTATION) for tok in _uncovered_signs(line, hits))
+        rejects.extend((tok, "rebar_callout", GLYPH_NO_NOTATION) for tok in _uncovered_glyphs(line, hits))
         for hit in hits:
             if literal_sign_unsafe and re.search("[" + DIA_CHARS + "]", line[hit.start : hit.end]):
                 hit.derived_flags += ("diameter_sign_literal_non_unicode",)
             out.append((line, hit))
+    return out, rejects
+
+
+# the prefix of a mark-shaped text (marks.py's grammar, without the section): `gĐ-3`, `Đn - 05`, `GM1`
+_FAMILY = re.compile(r"^(?P<prefix>[A-Za-zĐđ]{1,4})\s?-?\s?\d{1,3}(?:[.\-]\d{1,3})?[A-Za-z']?$")
+
+
+def _family_key(entry: dict[str, Any]) -> tuple[str, str | None, float | None] | None:
+    """(prefix casefolded, style, height) of a text whose whole text has a mark's shape, else None."""
+    m = _FAMILY.match(entry["display_text"].strip())
+    return None if m is None else (m["prefix"].casefold(), entry["style"], entry["height"])
+
+
+def _released_pattern_values(loaded: LoadedFile) -> set[str]:
+    """Value texts of title-block candidates found by shape alone (evidence kind `pattern`: the lower-right
+    sheet-code fallback, no tag and no label) that belong to a mark family drawn on the same sheet: another
+    text of the sheet that no title-block candidate took has the same prefix, style and height and a mark's
+    shape (EVAL-3 286 model#04: `gĐ-3` next to `gĐ-1`, `gĐ-2`). Such a text is a member mark, not the sheet
+    number, so it is not claimed. A printed sheet number found the same way (461 `Đn-05`, one per sheet)
+    has no such family and stays claimed. Review (tie): when a sheet's `pattern` candidates of one field
+    have two values or more, none of them is the field's value (sheets raises a blocking
+    title_field_conflict, nothing is chosen), so none is claimed either: a mark among them stays a mark."""
+    if loaded.sheets is None or loaded.text_index is None:
+        return set()
+    entries = {e["id"]: e for e in loaded.text_index["entries"]}
+    out: set[str] = set()
+    for sh in loaded.sheets["sheets"]:
+        cands = sh["title_block"]["candidates"]
+        taken = {c["evidence"]["value_text_id"] for c in cands} | {
+            c["evidence"]["label_text_id"] for c in cands if c["evidence"]["label_text_id"]
+        }
+        families = {
+            _family_key(entries[t])
+            for t in sh["text_ids"]
+            if t in entries and t not in taken and is_printed(entries[t])
+        }
+        families.discard(None)
+        values: dict[str, set[str]] = {}
+        for c in cands:
+            if c["evidence"]["kind"] == "pattern":
+                values.setdefault(c["field"], set()).add(c["value"])
+        tied = {fld for fld, vs in values.items() if len(vs) > 1}
+        for c in cands:
+            value = entries.get(c["evidence"]["value_text_id"])
+            if c["evidence"]["kind"] != "pattern" or value is None or c["field"] == "job_number":
+                continue  # a job number is never a member mark, whatever stands next to it (F4c)
+            if c["field"] in tied or _family_key(value) in families:
+                out.add(value["id"])
     return out
 
 
-def _claimed_text_ids(inv_work: Path, loaded: LoadedFile, warnings: list[str]) -> set[str]:
-    """Text ids that title-block, grid and level extraction already used."""
-    ids: set[str] = set()
+def _claimed_text_ids(inv_work: Path, loaded: LoadedFile, warnings: list[str]) -> dict[str, str]:
+    """Text ids that title-block, grid and level extraction already used, each with the extractor that
+    took it first (title_block, grids, levels). A shape-only title-block candidate that belongs to a mark
+    family is not claimed (`_released_pattern_values`)."""
+    ids: dict[str, str] = {}
+    released = _released_pattern_values(loaded)
     if loaded.sheets is not None:
         for sh in loaded.sheets["sheets"]:
             for cand in sh["title_block"]["candidates"]:
                 ev = cand["evidence"]
-                ids.add(ev["value_text_id"])
+                if ev["value_text_id"] not in released:
+                    ids.setdefault(ev["value_text_id"], "title_block")
                 if ev["label_text_id"]:
-                    ids.add(ev["label_text_id"])
+                    ids.setdefault(ev["label_text_id"], "title_block")
 
-    def walk(node: Any) -> None:
+    def walk(node: Any, kind: str) -> None:
         if isinstance(node, dict):
             for key, value in node.items():
                 if key == "text_id" and isinstance(value, str):
-                    ids.add(value)
+                    ids.setdefault(value, kind)
                 else:
-                    walk(value)
+                    walk(value, kind)
         elif isinstance(node, list):
             for item in node:
-                walk(item)
+                walk(item, kind)
 
     for kind in ("grids", "levels"):
         rel = f"{STRUCTURE_DIR}/{loaded.rel}.{kind}.json"
@@ -601,7 +1073,7 @@ def _claimed_text_ids(inv_work: Path, loaded: LoadedFile, warnings: list[str]) -
         if not path.is_file():
             warnings.append(f"{loaded.rel}: {rel} is missing: its texts are not excluded from member marks")
             continue
-        walk(read_json(path, f"{loaded.rel}: {rel}"))  # not schema-checked: only text_id keys are read
+        walk(read_json(path, f"{loaded.rel}: {rel}"), kind)  # not schema-checked: only text_id keys read
     return ids
 
 
@@ -643,13 +1115,10 @@ LEGACY_GRADE_MESSAGE = (
 
 def question_counts(candidates: list[dict[str, Any]]) -> dict[str, int]:
     """Questions per code over the whole project: one `callout_ambiguous` per ambiguous notation, one
-    `member_mark_prefix_meaning` per member mark prefix, one `grade_legacy_mapping` when legacy grade groups
-    appear. (`callouts-questions.json` splits them per file; this is the project-wide number asked.)"""
+    `grade_legacy_mapping` when legacy grade groups appear. (`callouts-questions.json` splits them per file;
+    this is the project-wide number asked.) Member mark prefixes are asked by `harness marks`."""
     counts = {
         "callout_ambiguous": len({c["ambiguity"] for c in candidates if c["ambiguity"]}),
-        "member_mark_prefix_meaning": len(
-            {c["lexical"]["prefix"] for c in candidates if c["kind"] == "member_mark"}
-        ),
         "grade_legacy_mapping": int(
             any(
                 (c["parsed"] and c["parsed"]["form"] == "legacy_group")
@@ -657,8 +1126,23 @@ def question_counts(candidates: list[dict[str, Any]]) -> dict[str, int]:
                 for c in candidates
             )
         ),
+        CALLOUT_UNPARSED_CODE: len(
+            {(c["file"], c["unparsed_code"]) for c in candidates if _asked_unparsed(c)}
+        ),
     }
     return {code: n for code, n in counts.items() if n}
+
+
+def _asked_unparsed(c: dict[str, Any]) -> bool:
+    """An unparsed candidate no other question covers, so callout_unparsed asks it: not an ambiguous
+    notation (callout_ambiguous), not a member mark (member_mark_prefix_meaning, harness marks), not a
+    legacy grade group (grade_legacy_mapping)."""
+    return (
+        c["parsed"] is None
+        and c["ambiguity"] is None
+        and c["kind"] != "member_mark"
+        and not c["rule"].startswith("LEGACY_GROUP")
+    )
 
 
 def _check(doc: dict[str, Any]) -> dict[str, Any]:
@@ -669,7 +1153,10 @@ def _check(doc: dict[str, Any]) -> dict[str, Any]:
 
 
 def _summary(
-    candidates: list[dict[str, Any]], files: list[dict[str, Any]], blocked: list[dict[str, Any]]
+    candidates: list[dict[str, Any]],
+    files: list[dict[str, Any]],
+    blocked: list[dict[str, Any]],
+    rejected: list[dict[str, Any]],
 ) -> dict[str, Any]:
     by_file: dict[str, Counter[str]] = {}
     by_sheet: dict[tuple[str, str | None], tuple[dict[str, str] | None, Counter[str]]] = {}
@@ -698,6 +1185,14 @@ def _summary(
             for f, s in sorted(by_sheet, key=lambda k: (k[0], k[1] is None, k[1] or ""))
         ],
         "member_mark_prefixes": len({c["lexical"]["prefix"] for c in candidates if c.get("lexical")}),
+        "unparsed_by_reason": dict(
+            sorted(Counter(c["unparsed_reason"] for c in candidates if c["parsed"] is None).items())
+        ),
+        "unparsed_by_code": dict(
+            sorted(Counter(c["unparsed_code"] for c in candidates if c["parsed"] is None).items())
+        ),
+        "rejected": len(rejected),
+        "rejected_by_reason": dict(sorted(Counter(r["reason_code"] for r in rejected).items())),
         "files_scanned": sum(1 for f in files if f["status"] == "scanned"),
         "files_skipped": sum(1 for f in files if f["status"] == "skipped"),
         "blocked_entries": len(blocked),
@@ -717,6 +1212,7 @@ def extract_callouts(work_dir: Path | str, *, check_inputs: bool = False) -> dic
     skipped_sheets: list[dict[str, Any]] = []
     candidates: list[dict[str, Any]] = []
     blocked: list[dict[str, Any]] = []
+    rejected: list[dict[str, Any]] = []
     for row in sorted(inv.doc["files"], key=lambda r: r["path"]):
         if row["format"] not in ("dwg", "dxf"):
             continue
@@ -753,12 +1249,22 @@ def extract_callouts(work_dir: Path | str, *, check_inputs: bool = False) -> dic
                 else:
                     sheet_of.update({tid: sh for tid in sh["text_ids"]})
         claimed_ids = _claimed_text_ids(inv.work, loaded, warnings)
+        if (warning := not_printed_warning(loaded.rel, entries)) is not None:
+            warnings.append(warning)
+        as_marks = footing_m_labels(
+            [e for e in entries if e["id"] not in duplicate_ids and is_printed(e)], sheet_of
+        )
+        live = [e for e in entries if e["id"] not in duplicate_ids]
+        left_out = {e_id: DETAIL_LABEL for e_id in detail_label_ids(live, sheet_of)}
+        left_out.update(dict.fromkeys(callout_part_ids(entries), CALLOUT_PART))
         for entry in entries:
-            if entry["id"] in duplicate_ids:
+            if entry["id"] in duplicate_ids or not is_printed(entry):
                 continue
             info["scanned"] += 1
             sheet = sheet_of.get(entry["id"])
-            hits = _entry_hits(entry, entry["id"] not in claimed_ids)
+            hits, rejects = _entry_hits(
+                entry, claimed_ids.get(entry["id"]), entry["id"] in as_marks, left_out.get(entry["id"])
+            )
             reason = meaning_block_reason(entry)
             if reason is not None:  # legacy-font gate: no meaning from this text, only a verbatim listing
                 if hits:
@@ -772,6 +1278,18 @@ def extract_callouts(work_dir: Path | str, *, check_inputs: bool = False) -> dic
                         }
                     )
                 continue
+            for text, kind, code in rejects:
+                rejected.append(
+                    {
+                        "file": loaded.rel,
+                        "sheet": None if sheet is None else sheet["sheet_id"],
+                        "entry_id": entry["id"],
+                        "display_text": text[:LINE_CHARS],
+                        "kind": kind,
+                        "reason_code": code,
+                        "reason": REJECT_REASONS[code],
+                    }
+                )
             for line, hit in hits:
                 span = line[hit.start : hit.end]
                 flags = list(entry["flags"])
@@ -798,6 +1316,9 @@ def extract_callouts(work_dir: Path | str, *, check_inputs: bool = False) -> dic
                     "flags": flags,
                     "provenance": _provenance(loaded.rel, sheet, entry),
                 }
+                if hit.parsed is None:
+                    assert hit.code is not None, hit.rule  # every unparsed hit names its reason family
+                    cand["unparsed_code"] = hit.code
                 if hit.family is not None:
                     cand["_family"] = hit.family
                 if span.strip() != line.strip():
@@ -816,8 +1337,9 @@ def extract_callouts(work_dir: Path | str, *, check_inputs: bool = False) -> dic
         "skipped_sheets": skipped_sheets,
         "candidates": candidates,
         "blocked_entries": blocked,
+        "rejected": rejected,
         "question_counts": question_counts(candidates),
-        "summary": _summary(candidates, files, blocked),
+        "summary": _summary(candidates, files, blocked, rejected),
         "warnings": warnings,
     }
     return _check(doc)
@@ -844,12 +1366,6 @@ AMBIGUOUS_GROUP_MESSAGE = (
     "These texts match a notation that has more than one reading (research, ambiguous list). Each notation "
     "listed in `subjects` is a question of its own: its wording is the `message` of its first reference. "
     "Answer in words, per notation."
-)
-PREFIX_GROUP_MESSAGE = (
-    "What does each member mark prefix listed in `subjects` mean in this project (column, beam, slab, "
-    "footing, tie beam, steel member...)? No standard defines the letters; use the drawing legend or the "
-    "member schedule. Answer with one value per prefix, e.g. --value C=column. (research, section 4 and "
-    "ambiguous #11)"
 )
 
 
@@ -896,34 +1412,47 @@ def _legacy_question(file: str, cands: list[dict[str, Any]]) -> list[dict[str, A
     return [question_group("grade_legacy_mapping", True, LEGACY_GRADE_MESSAGE, refs, MAX_REFS, file=file)]
 
 
-def _prefix_question(file: str, cands: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    by_prefix: dict[str, list[dict[str, Any]]] = {}
+UNPARSED_EXAMPLES = 5  # example candidates quoted per callout_unparsed question; count stays true
+UNPARSED_MESSAGE = (
+    "These texts look like a callout but are not read into values; the subject names the reason family "
+    "({code}: {why}). The refs give up to five examples (text entry ids, verbatim) and the sheets that hold "
+    "them, with counts. Look at the examples on the drawing: what does the notation mean, and must these "
+    "texts be read? Lot specs cannot use them until this is answered."
+)
+UNPARSED_WHY = {
+    NOTATION_UNVERIFIED: "a diameter, section, plate, hole or bolt form outside the verified notations",
+    GRADE_UNVERIFIED: "a grade spelling or number outside the verified grade list",
+    CONFLICTING: "one line gives several values",
+    SYMBOL_GLYPH: "a character that is not Ø or %%c stands in diameter position; it is never decoded",
+}
+
+
+def _unparsed_questions(file: str, cands: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """One blocking callout_unparsed per reason family (unparsed_code) of the file's asked candidates:
+    the first UNPARSED_EXAMPLES in scan order, then one ref listing the sheets with counts."""
+    by_code: dict[str, list[dict[str, Any]]] = {}
     for c in cands:
-        if c["kind"] == "member_mark":
-            assert c["lexical"] is not None
-            by_prefix.setdefault(c["lexical"]["prefix"], []).append(c)
-    if not by_prefix:
-        return []
-    refs: list[dict[str, Any]] = []
-    subjects = []
-    for prefix in sorted(by_prefix):
-        group = by_prefix[prefix]
-        marks = Counter(c["display_text"].strip() for c in group)
-        examples = [
-            {"mark": mark, "count": n}
-            for mark, n in sorted(marks.items(), key=lambda kv: (-kv[1], kv[0]))[:MAX_EXAMPLES]
-        ]
-        subjects.append({"name": prefix, "count": len(group), "examples": examples})
-        refs.extend(
-            _qref(c, f"prefix {prefix}, text entry {c['text_ref']['entry_id']}")
-            for c in group[:MAX_PREFIX_REFS]
+        if _asked_unparsed(c):
+            by_code.setdefault(c["unparsed_code"], []).append(c)
+    out = []
+    for code in sorted(by_code):
+        group = by_code[code]
+        refs = [_qref(c, f"text entry {c['text_ref']['entry_id']}") for c in group[:UNPARSED_EXAMPLES]]
+        per_sheet = Counter(c["sheet"] or "no sheet" for c in group)
+        sheets = ", ".join(f"{sheet} ({n})" for sheet, n in sorted(per_sheet.items()))
+        refs.append({"file": file, "where": "sheets", "found": sheets})
+        message = UNPARSED_MESSAGE.format(code=code, why=UNPARSED_WHY[code])
+        q = question_group(
+            CALLOUT_UNPARSED_CODE,
+            True,
+            message,
+            refs,
+            file=file,
+            subjects=[{"name": code, "count": len(group)}],
         )
-    total = sum(s["count"] for s in subjects)
-    q = question_group(
-        "member_mark_prefix_meaning", True, PREFIX_GROUP_MESSAGE, refs, file=file, subjects=subjects
-    )
-    q["count"], q["truncated"] = total, len(refs) < total
-    return [q]
+        q["count"], q["truncated"] = len(group), len(group) > UNPARSED_EXAMPLES
+        out.append(q)
+    return out
 
 
 def callout_questions(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -935,7 +1464,9 @@ def callout_questions(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for file in sorted(by_file):
         mine = by_file[file]
-        out += _ambiguous_questions(file, mine) + _legacy_question(file, mine) + _prefix_question(file, mine)
+        out += (
+            _ambiguous_questions(file, mine) + _legacy_question(file, mine) + _unparsed_questions(file, mine)
+        )
     return sorted(out, key=lambda q: (not q["blocking"], q["code"], q["file"]))
 
 

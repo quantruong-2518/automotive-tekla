@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import shutil
 from pathlib import Path
@@ -11,10 +12,18 @@ import pytest
 
 from _dxf_fixtures import build_set
 from tekla_harness.answers import record_answer
-from tekla_harness.ask import ask_question, reader_key, static_owner, withdraw_question
+from tekla_harness.ask import amend_question, ask_question, reader_key, static_owner, withdraw_question
 from tekla_harness.cli import main
 from tekla_harness.intake import run_intake
-from tekla_harness.questions import QuestionsError
+from tekla_harness.questions import (
+    CALLOUT_UNPARSED_CODE,
+    GRID_CONTRADICTS_CODE,
+    GRID_MISSING_CODE,
+    LEGACY_ASCII_CODE,
+    SHEET_GAP_CODE,
+    QuestionsError,
+)
+from tekla_harness.questions_md import render_questions_md
 from tekla_harness.schemas import validate
 from tekla_harness.status import build_status
 from tekla_harness.structure import read_structure
@@ -140,6 +149,14 @@ def test_unknown_file_is_refused_with_exit_1_and_writes_nothing(world, capsys):
         ("mark_unmatched", "marks"),
         ("units_answer_contradicts_evidence", "grid-system"),  # exact code beats intake's units_ prefix
         ("schedule_row_unparsed", "marks"),
+        ("member_mark_prefix_meaning", "marks"),  # tool wave 2: marks raises it, callouts no longer does
+        ("file_set_relation", "intake"),  # tool wave 2: intake's project-level file-set question
+        # tool wave 3 codes, with the producer that raises each (questions.py)
+        (SHEET_GAP_CODE, "structure"),
+        (CALLOUT_UNPARSED_CODE, "callouts"),
+        (LEGACY_ASCII_CODE, "intake"),  # read-dxf at intake: no prefix covers it
+        (GRID_MISSING_CODE, "grid-system"),
+        (GRID_CONTRADICTS_CODE, "grid-system"),  # exact code beats read-structure's grid_ prefix
     ],
 )
 def test_a_code_owned_by_another_producer_is_refused_with_exit_2(world, capsys, code, owner):
@@ -237,7 +254,7 @@ def test_withdraw_refusals(world, capsys):
 def test_withdrawing_an_answered_question_stales_its_answer(world):
     _, work = world
     q = ask(work, blocking=True)
-    record_answer(work, q["id"], "It is A.", "eng")
+    record_answer(work, q["id"], "It is A.", "eng", role="engineer")
     withdraw_question(work, q["id"], "moot")
     (answer,) = [a for a in load(work / "answers.json")["answers"] if a["key"] == q["key"]]
     assert answer["status"] == "stale"
@@ -266,7 +283,7 @@ def test_status_counts_reader_questions_and_gate1_waits_for_blocking_ones(world)
         r.startswith("reader: 1 blocking question(s) open") and hard["id"] in r
         for r in status["gate1"]["reasons"]
     )
-    record_answer(work, hard["id"], "B", "eng")
+    record_answer(work, hard["id"], "B", "eng", role="engineer")
     reader = {p["producer"]: p for p in build_status(work)["producers"]}["reader"]
     assert reader["questions"]["blocking_open"] == 0 and reader["questions"]["answered"] == 1
     withdraw_question(work, soft["id"], "r")
@@ -278,7 +295,9 @@ def test_status_counts_reader_questions_and_gate1_waits_for_blocking_ones(world)
 def test_an_answer_to_a_reader_question_is_recorded_and_shown_in_the_document(world, capsys):
     _, work = world
     q = ask(work, blocking=True)
-    rc, out, _ = run_cli(capsys, "answer", str(work), q["id"], "--text", "It is A.", "--by", "eng")
+    rc, out, _ = run_cli(
+        capsys, "answer", str(work), q["id"], "--text", "It is A.", "--by", "eng", "--role", "engineer"
+    )
     assert rc == 0 and "reader-questions.json" in out["refreshed"]
     doc = load(work / "reader-questions.json")
     assert doc["questions"][0]["answer"]["answer_text"] == "It is A."
@@ -329,3 +348,277 @@ def test_key_depends_on_code_blocking_file_hash_and_where_only():
         reader_key("c", False, None, None, "w"),
     ):
         assert other != base
+
+
+# --- harness ask --amend (tool wave 3, package C) ---------------------------------------------------
+
+
+def reader_doc(work: Path) -> dict[str, Any]:
+    doc = load(work / "reader-questions.json")
+    assert validate("reader-questions", doc) == []
+    return doc
+
+
+def the_question(work: Path, qid: str) -> dict[str, Any]:
+    return next(q for q in reader_doc(work)["questions"] if q["id"] == qid)
+
+
+def test_amend_text_keeps_id_key_and_ref_and_records_what_it_replaced(world):
+    _, work = world
+    q = ask(work, blocking=True)
+    runs = load(work / "question-registry.json")["runs"]
+    before = the_question(work, q["id"])
+    assert amend_question(work, q["id"], text="Nhãn này là A hay 4?") == {**q, "status": "amended"}
+    after = the_question(work, q["id"])
+    assert after["message"] == "Nhãn này là A hay 4?"
+    assert after["amendments"] == [{"at": runs + 1, "text": before["message"]}]
+    assert "places" not in after  # only what was given changes
+    assert {k: v for k, v in after.items() if k not in ("message", "amendments")} == {
+        k: v for k, v in before.items() if k != "message"
+    }
+    registry = load(work / "question-registry.json")
+    assert registry["runs"] == runs + 1 and registry["questions"][q["key"]]["status"] == "open"
+    assert registry["questions"][q["key"]]["id"] == q["id"]
+    # the identity is the place: asking the same place again is still the same, amended, question
+    assert ask(work, blocking=True) == {**q, "status": "already_asked"}
+
+
+def test_amend_places_records_the_previous_list_and_successive_amendments_stack(world):
+    _, work = world
+    q = ask(work)
+    amend_question(work, q["id"], places=["model#05 axis 3-4", "model#07"])
+    assert the_question(work, q["id"])["places"] == ["model#05 axis 3-4", "model#07"]
+    amend_question(work, q["id"], text="câu mới", places=["model#07"])
+    after = the_question(work, q["id"])
+    assert after["message"] == "câu mới" and after["places"] == ["model#07"]
+    first, second = after["amendments"]
+    assert set(first) == {"at", "places"} and first["places"] == []  # there were none
+    assert second == {
+        "at": first["at"] + 1,
+        "text": "Is this label A or 4?",
+        "places": ["model#05 axis 3-4", "model#07"],
+    }
+
+
+def test_amend_with_the_current_values_changes_nothing(world):
+    _, work = world
+    q = ask(work)
+    amend_question(work, q["id"], places=["model#05"])
+    snapshot = (work / "reader-questions.json").read_bytes(), (work / "question-registry.json").read_bytes()
+    result = amend_question(work, q["id"], text="Is this label A or 4?", places=["model#05"])
+    assert result == {**q, "status": "unchanged"}
+    assert (work / "reader-questions.json").read_bytes() == snapshot[0]
+    assert (work / "question-registry.json").read_bytes() == snapshot[1]
+    # only the changed part is recorded
+    amend_question(work, q["id"], text="Is this label A or 4?", places=["model#06"])
+    assert the_question(work, q["id"])["amendments"][-1] == {
+        "at": load(work / "question-registry.json")["runs"],
+        "places": ["model#05"],
+    }
+
+
+def test_amend_other_questions_of_the_document_are_untouched(world):
+    _, work = world
+    a, b = ask(work), ask(work, where="grid B")
+    other = the_question(work, a["id"])
+    amend_question(work, b["id"], text="mới")  # the second one: the right question is found by its key
+    assert the_question(work, a["id"]) == other and the_question(work, b["id"])["message"] == "mới"
+    assert [q["id"] for q in reader_doc(work)["questions"]] == [a["id"], b["id"]]
+
+
+def test_amend_refusals_exit_2_and_write_nothing(world, capsys):
+    _, work = world
+    other = next(
+        e["id"]
+        for e in load(work / "question-registry.json")["questions"].values()
+        if e["producer"] == "intake"
+    )
+    answered, withdrawn, live = ask(work, blocking=True), ask(work, where="grid B"), ask(work, where="grid C")
+    record_answer(work, answered["id"], "It is A.", "eng", role="engineer")
+    withdraw_question(work, withdrawn["id"], "moot")
+    snapshot = {p.name: p.read_bytes() for p in work.glob("*.json")}
+    for qid, words in (
+        ("Q-999", "unknown"),
+        (other, "not the reader"),
+        (withdrawn["id"], "withdrawn"),
+        (answered["id"], "answered"),
+    ):
+        rc, out, err = run_cli(capsys, "ask", str(work), "--amend", qid, "--text", "mới")
+        assert rc == 2 and out is None and words in err, (qid, err)
+    cases: list[dict[str, Any]] = [{}, {"text": " "}, {"places": []}, {"places": ["a", " "]}]
+    for kwargs in cases:
+        with pytest.raises(QuestionsError) as caught:
+            amend_question(work, live["id"], **kwargs)
+        assert caught.value.exit_code == 2, kwargs
+    assert {p.name: p.read_bytes() for p in work.glob("*.json")} == snapshot
+
+
+def test_amend_a_question_answered_by_a_simulated_role_is_refused_too(world):
+    _, work = world
+    q = ask(work)
+    record_answer(work, q["id"], "A", "agent", role="simulated")
+    with pytest.raises(QuestionsError) as caught:
+        amend_question(work, q["id"], text="mới")
+    assert caught.value.exit_code == 2 and "answered" in str(caught.value)
+
+
+def test_amend_after_a_stale_answer_is_allowed(world):
+    """An answer that went stale no longer answers the question: it is live and unanswered again."""
+    _, work = world
+    q = ask(work)
+    record_answer(work, q["id"], "A", "eng", role="engineer")
+    answers = load(work / "answers.json")
+    for a in answers["answers"]:
+        if a["key"] == q["key"]:
+            a["status"], a["stale_reason"] = "stale", "test"
+    (work / "answers.json").write_text(json.dumps(answers), encoding="utf-8")
+    registry = load(work / "question-registry.json")
+    registry["questions"][q["key"]]["status"] = "open"
+    (work / "question-registry.json").write_text(json.dumps(registry), encoding="utf-8")
+    assert amend_question(work, q["id"], text="mới")["status"] == "amended"
+
+
+def test_amend_a_question_missing_from_the_document_is_an_inconsistency(world):
+    _, work = world
+    q = ask(work)
+    doc = load(work / "reader-questions.json")
+    doc["questions"] = []
+    doc["summary"] = {"questions": 0, "blocking_questions": 0, "answered": 0, "blocking_open": 0}
+    (work / "reader-questions.json").write_text(json.dumps(doc), encoding="utf-8")
+    with pytest.raises(QuestionsError) as caught:
+        amend_question(work, q["id"], text="mới")
+    assert caught.value.exit_code == 1 and "reader-questions.json" in str(caught.value)
+
+
+def test_a_reader_document_that_breaks_the_reader_rules_is_refused_when_read(world):
+    """A question with two refs is a valid intake question but not a reader one: every mode of harness ask
+    refuses the document (exit 1) and writes nothing."""
+    _, work = world
+    q = ask(work)
+    doc = load(work / "reader-questions.json")
+    doc["questions"][0]["refs"].append({"file": FILE, "where": "grid Z", "found": "f"})
+    (work / "reader-questions.json").write_text(json.dumps(doc), encoding="utf-8")
+    snapshot = (work / "question-registry.json").read_bytes()
+    for run in (
+        lambda: amend_question(work, q["id"], text="mới"),
+        lambda: ask(work, where="grid Y"),
+        lambda: withdraw_question(work, q["id"], "r"),
+    ):
+        with pytest.raises(QuestionsError) as caught:
+            run()
+        # the document on disk is at fault, not the command: it is refused when read
+        assert caught.value.exit_code == 1 and "reader-questions.json is invalid" in str(caught.value)
+    assert (work / "question-registry.json").read_bytes() == snapshot
+
+
+def test_cli_amend_prints_the_documented_json(world, capsys):
+    _, work = world
+    q = ask(work)
+    argv = ["ask", str(work), "--amend", q["id"], "--places", "model#05 axis 3-4", "model#07"]
+    rc, out, _ = run_cli(capsys, *argv)
+    assert rc == 0 and out == {**q, "status": "amended"}
+    assert the_question(work, q["id"])["places"] == ["model#05 axis 3-4", "model#07"]
+
+
+def test_questions_md_shows_the_amended_text(world):
+    _, work = world
+    q = ask(work, blocking=True, text="Câu hỏi cũ về nhãn trục")
+    amend_question(work, q["id"], text="Câu hỏi mới về nhãn trục")
+    text = render_questions_md(work).text
+    assert "Câu hỏi mới về nhãn trục" in text and "Câu hỏi cũ về nhãn trục" not in text
+
+
+# --- harness validate reader-questions on real-shaped documents ----------------------------------------
+
+# The shape of the EVAL-3 reader documents (projects/_evals/eval3-2026-11-09, arms H and R: 31 and 22
+# questions, all with exactly these keys), cut down to two questions with short stand-in text: a .dwg file,
+# a blocking and a non-blocking question, no sheet, an empty `found`, no answer.
+EVAL3_SHAPE: dict[str, Any] = {
+    "schema_version": "0.1",
+    "kind": "questions",
+    "project_id": "eval3-r",
+    "questions": [
+        {
+            "id": "Q-075",
+            "key": "4ea02907ca0c8032",
+            "code": "reader_drawing_list_missing",
+            "blocking": True,
+            "file": "267_4-story_house_complete_project.dwg",
+            "message": "Không tìm thấy danh mục bản vẽ trong file.",
+            "count": 1,
+            "truncated": False,
+            "refs": [
+                {
+                    "file": "267_4-story_house_complete_project.dwg",
+                    "where": "cả file (65 tờ, model#01…model#65)",
+                    "found": "find-text 'danh mục': 0 kết quả",
+                }
+            ],
+            "answer": None,
+        },
+        {
+            "id": "Q-117",
+            "key": "86b2fa3ad2caba14",
+            "code": "reader_level_storey_selection",
+            "blocking": False,
+            "file": "161_complete_steel_building.dwg",
+            "message": "Cao độ nào là cao độ tầng?",
+            "count": 1,
+            "truncated": False,
+            "refs": [{"file": "161_complete_steel_building.dwg", "where": "tờ Layout2#01", "found": ""}],
+            "answer": None,
+        },
+    ],
+    "summary": {"questions": 2, "blocking_questions": 1, "answered": 0, "blocking_open": 1},
+}
+
+
+def _validate_cli(capsys, path: Path, doc: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+    path.write_text(json.dumps(doc, ensure_ascii=False), encoding="utf-8")
+    rc = main(["validate", "reader-questions", str(path)])
+    return rc, json.loads(capsys.readouterr().out)
+
+
+def test_validate_reader_questions_accepts_the_eval3_shape_and_an_amended_question(tmp_path, capsys):
+    rc, out = _validate_cli(capsys, tmp_path / "rq.json", EVAL3_SHAPE)
+    assert rc == 0 and out["results"][0]["valid"] is True
+    amended = copy.deepcopy(EVAL3_SHAPE)
+    amended["questions"][0].update(
+        message="mới",
+        places=["model#05 axis 3-4"],
+        amendments=[{"at": 7, "places": []}, {"at": 9, "text": "cũ", "places": ["model#05"]}],
+    )
+    rc, out = _validate_cli(capsys, tmp_path / "rq.json", amended)
+    assert rc == 0, out
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda q: q["refs"].append({"file": q["file"], "where": "w2", "found": "f"}),  # one ref only
+        lambda q: q.update(count=2),
+        lambda q: q.update(truncated=True),
+        lambda q: q.update(closed_by={"question_id": "Q-001", "reason": "not_selected"}),
+        lambda q: q.update(subjects=[{"name": "dir1"}]),
+        lambda q: q.update(amendments=[{"at": 3}]),  # an amendment records what it replaced
+        lambda q: q.update(amendments=[]),
+        lambda q: q.update(places=[" "]),
+        lambda q: q.update(places=[]),
+        lambda q: q.update(amendments=[{"at": 0, "text": "cũ"}]),
+    ],
+)
+def test_validate_reader_questions_refuses_what_a_reader_question_cannot_be(tmp_path, capsys, mutate):
+    bad = copy.deepcopy(EVAL3_SHAPE)
+    mutate(bad["questions"][1])
+    rc, out = _validate_cli(capsys, tmp_path / "rq.json", bad)
+    assert rc == 1 and out["results"][0]["valid"] is False
+
+
+def test_an_answer_keeps_the_amendments(world):
+    _, work = world
+    q = ask(work)
+    amend_question(work, q["id"], text="mới", places=["model#05"])
+    record_answer(work, q["id"], "A", "eng", role="engineer")
+    after = the_question(work, q["id"])
+    assert after["message"] == "mới" and after["places"] == ["model#05"] and len(after["amendments"]) == 1
+    assert after["answer"]["answer_text"] == "A"

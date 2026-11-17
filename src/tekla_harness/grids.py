@@ -12,9 +12,10 @@ question is intake's units_confirm_all of the file; this one is evidence for it)
 Algorithm (deterministic; thresholds are the named constants below):
 
 1. Walk model space and every layout, expanding INSERTs (sheets.Walker), collecting CIRCLEs (and
-   circular ELLIPSEs from scaled blocks), straight segments (LINE, 2-vertex open polylines) and linear
-   DIMENSIONs, all in world / paper coordinates. A bubble is therefore found by its CIRCLE centre,
-   whatever the block's base point or mirroring.
+   ARCs or circular ELLIPSEs from scaled blocks whose sweep is a full turn within FULL_ARC_GAP_DEG: a
+   bubble drawn as an arc from 90.00006 to 90.0000031 degrees is a circle, a door swing is not), straight
+   segments (LINE, 2-vertex open polylines) and linear DIMENSIONs, all in world / paper coordinates. A
+   bubble is therefore found by its circle centre, whatever the block's base point or mirroring.
 2. Bubble = circle whose centre (within BUBBLE_TEXT_RADIUS x r) holds exactly one distinct axis-label
    text from the text index (ATTRIB, text inside a block, or loose TEXT), of height 0.15 r .. 1.6 r,
    and no other text. Two different label texts in one circle: ambiguous; a label plus other text (a
@@ -50,6 +51,7 @@ Algorithm (deterministic; thresholds are the named constants below):
 
 from __future__ import annotations
 
+import copy
 import math
 import re
 import statistics
@@ -77,6 +79,8 @@ from tekla_harness.sheets import (
     text_box,
     text_center,
 )
+from tekla_harness.text_gate import meaning_block_reason
+from tekla_harness.visibility import is_printed
 
 SCHEMA_VERSION = "0.1"
 BUBBLE_TEXT_RADIUS = 0.9  # label centre within this x r of the circle centre
@@ -85,7 +89,28 @@ LINE_THROUGH_CENTRE = 0.35  # the line passes within this x r of the centre
 END_NEAR_BUBBLE = 8.0  # the nearer line end lies within this x r of the centre (bubbles often sit past a gap)
 SAME_LINE_TOL = 0.1  # x r: two collinear axes are the same line
 FAMILY_ANGLE_TOL = 0.5  # degrees
+# Heuristic: an ARC (or a ratio-1 ELLIPSE) whose sweep falls short of a full turn by at most this many degrees
+# is drawn as a circle (EVAL-3 285/286: block SADF, an arc from 90.00006 to 90.0000031 degrees)
+FULL_ARC_GAP_DEG = 1.0
 ORTHO_TOL = 0.1  # degrees
+# Heuristics for an obround bubble (two LINEs and two semicircular ARCs around the label; EVAL-4 180): the
+# caps have one radius within OBROUND_RADIUS_TOL (x radius), their diameters are perpendicular to the line
+# between their centres within OBROUND_PERP_TOL (|cos|), the two LINEs join their ends within
+# OBROUND_END_TOL (x radius), and the straight part is at most OBROUND_MAX_LENGTH radii long. The bubble's
+# radius is half the overall length (straight part + both caps), so a label as tall as the stadium is wide
+# still fits the label-height test (0.15 r .. 1.6 r).
+OBROUND_RADIUS_TOL = 0.02
+OBROUND_PERP_TOL = 0.05
+OBROUND_END_TOL = 0.05
+OBROUND_MAX_LENGTH = 12.0
+# Heuristics, family consistency (F2b): in a family of FAMILY_MIN_AXES or more axes an axis is set aside when
+# it differs from the family in at least FAMILY_MIN_DEVIATIONS of three things: its size (bubble radius or
+# label height more than FAMILY_SIZE_TOL of the family median away; the two scale together, so they count
+# once), its block (the circle's outermost block name) or its line (layer + linetype). For the last two the
+# family value is the one more than half of the family's axes share.
+FAMILY_MIN_AXES = 3
+FAMILY_MIN_DEVIATIONS = 2
+FAMILY_SIZE_TOL = 0.20
 DIM_POINT_TOL = 0.05  # x r: a dimension extension point lies on an axis
 SCALE_TOL = 1e-3  # relative: two spacing sets differ by one ratio
 # Heuristic (not a standard): two views whose spacing differs by at most this fraction of the spacing
@@ -119,13 +144,62 @@ def implausible_spacing(median: dict[str, Any] | None, unit: str) -> str | None:
     )
 
 
+# --- the grid families a question cites (tool wave 2: lifecycle closes a question only when every family it
+# cites belongs to an unselected grid system). Read back from this module's own `where` formats: the grids
+# schema has no field for them on a question.
+
+# codes whose `where` starts with "<view>/<family>[,<family>]" (and, for cross-checks, " vs <view>/<family>")
+FAMILY_WHERE_CODES = frozenset(
+    {
+        "grid_axis_label_conflict",  # "line <handle> on layer ..." before families exist: no family
+        "grid_label_duplicate",
+        "grid_axis_not_parallel",
+        "grid_axis_layer_mismatch",
+        "grid_label_kind_mixed",
+        "grid_label_order_nonmonotonic",
+        "grid_label_sequence_gap",
+        "grid_rotated",
+        "grid_axis_skewed",
+        "grid_non_orthogonal",
+        "grid_label_missing",
+        "grid_axis_unlabelled",
+        "grid_two_bubble_axis",
+        "grid_label_order_mismatch",
+        "grid_scale_differs",
+        "grid_spacing_cross_sheet_mismatch",
+        "grid_spacing_drafting_tolerance",
+        "grid_dimension_override_mismatch",
+    }
+)
+# codes about every family of two or more axes (their `where` is listed(), which truncates)
+ALL_FAMILIES_CODES = frozenset({"grid_family_axis_assignment", "grid_gate1_confirmation"})
+_WHERE_FAMILIES = re.compile(r"(?:^| vs )V\d{3,}/(F\d{3,}(?:,F\d{3,})*)")
+
+
+def question_families(question: dict[str, Any], doc: dict[str, Any]) -> list[str] | None:
+    """Sorted family ids (F001..) a grids question of `doc` is about; None when it cites no family (or one
+    the document does not have: never guess)."""
+    code = question["code"]
+    known = {f["family_id"]: len(f["axes"]) for g in doc["groups"] for f in g["families"]}
+    if code in ALL_FAMILIES_CODES:
+        found = [fid for fid, n in known.items() if n >= 2]
+    elif code in FAMILY_WHERE_CODES:
+        found = [fid for m in _WHERE_FAMILIES.finditer(question["where"]) for fid in m.group(1).split(",")]
+    else:
+        return None
+    if not found or any(fid not in known for fid in found):
+        return None
+    return sorted(set(found))
+
+
 _LABEL_RE = re.compile(
-    r"^(?:[A-Za-z]{1,2}[a-z]?|\d{1,3}[A-Za-z]?|[A-Za-z]\d{1,2}[a-z]?)(?:'{1,2}|\u2032)?$"
+    r"^(?:[A-Za-z]{1,2}[a-z]?|\d{1,3}[A-Za-z]?|[A-Za-z]\d{1,2}[a-z]?)(?:'{1,2}|\u2032)?\*?$"
     r"|^[A-Za-z0-9]{1,3}/[A-Za-z0-9]{1,3}$"
 )
 _LABEL_TOKEN_RE = re.compile(r"\d+|[A-Za-z]+|['\u2032]+|/")
 _NUMBER_RE = re.compile(r"^\s*[-+]?\d+(?:\.\d+)?\s*$")
-_GEOMETRY = frozenset({"LINE", "LWPOLYLINE", "POLYLINE", "CIRCLE", "ELLIPSE", "DIMENSION"})
+_GEOMETRY = frozenset({"LINE", "LWPOLYLINE", "POLYLINE", "CIRCLE", "ARC", "ELLIPSE", "DIMENSION"})
+_GEOMETRY_NAME = {"CIRCLE": "circle", "ARC": "circle", "ELLIPSE": "circle", "DIMENSION": "dimension"}
 
 
 # --- primitives --------------------------------------------------------------------------------
@@ -178,6 +252,22 @@ class _Circle:
     r: float
     space: str
     block_path: tuple[str, ...]
+
+
+@dataclass
+class _Arc:
+    """A semicircular ARC, in world coordinates: the cap of a possible obround bubble."""
+
+    p1: tuple[float, float]
+    p2: tuple[float, float]
+    mid: tuple[float, float]  # the point halfway along the arc
+    r: float
+    space: str
+    block_path: tuple[str, ...]
+
+    @property
+    def c(self) -> tuple[float, float]:
+        return ((self.p1[0] + self.p2[0]) / 2, (self.p1[1] + self.p2[1]) / 2)
 
 
 @dataclass
@@ -281,9 +371,38 @@ class _Group:
 def _effective_linetype(doc: Drawing, entity: Any) -> str:
     lt = str(entity.dxf.get("linetype", "BYLAYER"))
     if lt.upper() == "BYLAYER":
-        layer = doc.layers.get(str(entity.dxf.get("layer", "0")))
+        name = str(entity.dxf.get("layer", "0"))
+        layer = doc.layers.get(name) if doc.layers.has_entry(name) else None  # an undefined layer is plain
         return str(layer.dxf.get("linetype", "CONTINUOUS")) if layer is not None else "BYLAYER"
     return lt
+
+
+def _geometry_not_printed(
+    doc: Drawing, entity: Any, in_block: bool, layers: dict[str, str | None]
+) -> str | None:
+    """Why a line, circle or dimension does not print, else None (docs/research/dxf-invisible-text.md).
+
+    Its own group 60, or its layer off (colour < 0), frozen, or with the plot flag 0. An entity on layer '0'
+    inside a block takes the INSERT's layer, and whether AutoCAD then hides it is not settled (research
+    note, section 7), so only its own group 60 counts. An INSERT's own group 60 over its contents is not
+    settled either (section 2): the contents are kept."""
+    if int(entity.dxf.get("invisible", 0) or 0) == 1:
+        return "entity_invisible"
+    name = str(entity.dxf.get("layer", "0"))
+    if in_block and name == "0":
+        return None
+    if name not in layers:
+        layer = doc.layers.get(name) if doc.layers.has_entry(name) else None  # an undefined layer is plain
+        reason = None
+        if layer is not None:
+            if layer.is_off():
+                reason = "layer_off"
+            elif layer.is_frozen():
+                reason = "layer_frozen"
+            elif int(layer.dxf.get("plot", 1)) == 0:
+                reason = "layer_no_plot"
+        layers[name] = reason
+    return layers[name]
 
 
 def _segments_of(entity: Any) -> list[tuple[tuple[float, float], tuple[float, float]]]:
@@ -449,6 +568,8 @@ class _Ctx:
     questions: list[dict[str, Any]] = field(default_factory=list)
     q_counts: Counter[str] = field(default_factory=Counter)
     warnings: list[str] = field(default_factory=list)
+    not_printed_text: int = 0  # text entries the index marks printed: false, left out of every bubble
+    not_printed_geometry: Counter[str] = field(default_factory=Counter)  # "<kind>:<reason>" -> count
 
     def ask(self, code: str, blocking: bool, message: str, where: str, found: str, sheet: str | None = None):
         self.q_counts[code] += 1
@@ -469,21 +590,38 @@ class _Ctx:
 def _collect(doc: Drawing, walker: Walker, ctx: _Ctx):
     segs: list[_Seg] = []
     circles: list[_Circle] = []
+    caps: list[_Arc] = []
     dims: list[_Dim] = []
+    layers: dict[str, str | None] = {}
     for space, layout, _ in layout_spaces(doc):
         for p in walker.walk(layout, space, _GEOMETRY):
             e = p.entity
             kind = e.dxftype()
             handle = walker.handle(e) if not p.block_path else p.top_handle
             try:
+                hidden = _geometry_not_printed(doc, e, bool(p.block_path), layers)
+                if hidden is not None:
+                    ctx.not_printed_geometry[f"{_GEOMETRY_NAME.get(kind, 'line')}:{hidden}"] += 1
+                    continue
                 if kind == "CIRCLE":
                     c = e.dxf.center
                     if e.dxf.get("extrusion", (0, 0, 1))[2] < 0:
                         c = e.ocs().to_wcs(c)
                     if e.dxf.radius > 0:
                         circles.append(_Circle((c.x, c.y), float(e.dxf.radius), space, p.block_path))
+                elif kind == "ARC":
+                    sweep = (float(e.dxf.end_angle) - float(e.dxf.start_angle)) % 360.0
+                    if e.dxf.radius > 0 and sweep >= 360.0 - FULL_ARC_GAP_DEG:
+                        c = e.dxf.center
+                        if e.dxf.get("extrusion", (0, 0, 1))[2] < 0:
+                            c = e.ocs().to_wcs(c)
+                        circles.append(_Circle((c.x, c.y), float(e.dxf.radius), space, p.block_path))
+                    elif e.dxf.radius > 0 and abs(sweep - 180.0) <= FULL_ARC_GAP_DEG:
+                        caps.append(_cap(e, space, p.block_path))
                 elif kind == "ELLIPSE":
-                    if abs(float(e.dxf.ratio) - 1.0) < 1e-3:
+                    span = math.degrees((float(e.dxf.end_param) - float(e.dxf.start_param)) % math.tau)
+                    full = span >= 360.0 - FULL_ARC_GAP_DEG or span == 0.0  # 0 and 2 pi: a whole ellipse
+                    if abs(float(e.dxf.ratio) - 1.0) < 1e-3 and full:
                         c, major = e.dxf.center, e.dxf.major_axis
                         circles.append(_Circle((c.x, c.y), math.hypot(major.x, major.y), space, p.block_path))
                 elif kind == "DIMENSION":
@@ -507,7 +645,15 @@ def _collect(doc: Drawing, walker: Walker, ctx: _Ctx):
                             )
             except Exception as exc:
                 walker.skipped[f"read_error:{kind}:{type(exc).__name__}"] += 1
-    return segs, circles, dims
+    return segs, circles, caps, dims
+
+
+def _cap(e: Any, space: str, block_path: tuple[str, ...]) -> _Arc:
+    start, end = float(e.dxf.start_angle), float(e.dxf.end_angle)
+    sweep = (end - start) % 360.0
+    p1, p2 = e.start_point, e.end_point
+    (m,) = e.vertices([start + sweep / 2.0])
+    return _Arc((p1.x, p1.y), (p2.x, p2.y), (m.x, m.y), float(e.dxf.radius), space, block_path)
 
 
 def _dimension(e: Any, handle: str | None, space: str, ctx: _Ctx) -> _Dim | None:
@@ -544,17 +690,90 @@ def _dimension(e: Any, handle: str | None, space: str, ctx: _Ctx) -> _Dim | None
     )
 
 
+def _joins(seg: _Seg, p: tuple[float, float], q: tuple[float, float], tol: float) -> bool:
+    """The segment runs from p to q (either way) within `tol`."""
+    return (math.dist(seg.a, p) <= tol and math.dist(seg.b, q) <= tol) or (
+        math.dist(seg.a, q) <= tol and math.dist(seg.b, p) <= tol
+    )
+
+
+def _obround_circles(caps: list[_Arc], segs: list[_Seg]) -> list[_Circle]:
+    """Bubbles drawn as an obround (stadium): two semicircular ARCs of one radius facing away from each other,
+    their ends joined by two LINEs (EVAL-4 180 framing plans: 0 of the labelled bubbles were circles). Each is
+    returned as a circle at the middle of the stadium with half its overall length as radius (see
+    OBROUND_*). Nothing is taken from the layer or the label: the geometry alone decides."""
+    if len(caps) < 2:
+        return []
+    cell = statistics.median(a.r for a in caps) * 4
+    by_space: dict[str, _Index] = defaultdict(lambda: _Index(cell))
+    for k, a in enumerate(caps):
+        by_space[a.space].add(a.c, (k, a))
+    ends: _Index | None = None
+    out: list[_Circle] = []
+    used: set[int] = set()
+    for i, a in enumerate(caps):
+        if i in used:
+            continue
+        nx, ny = a.p2[0] - a.p1[0], a.p2[1] - a.p1[1]
+        norm = math.hypot(nx, ny)
+        if norm == 0:
+            continue
+        for j, b in sorted(by_space[a.space].near(a.c, OBROUND_MAX_LENGTH * a.r), key=lambda t: t[0]):
+            if j <= i or j in used or abs(b.r - a.r) > OBROUND_RADIUS_TOL * a.r:
+                continue
+            d = (b.c[0] - a.c[0], b.c[1] - a.c[1])
+            length = math.hypot(*d)
+            if not 0.1 * a.r <= length <= OBROUND_MAX_LENGTH * a.r:
+                continue
+            # both diameters are perpendicular to d, and the caps bulge away from each other
+            nb = (b.p2[0] - b.p1[0], b.p2[1] - b.p1[1])
+            if abs(nx * d[0] + ny * d[1]) > OBROUND_PERP_TOL * norm * length:
+                continue
+            if abs(nb[0] * d[0] + nb[1] * d[1]) > OBROUND_PERP_TOL * math.hypot(*nb) * length:
+                continue
+            if (a.mid[0] - a.c[0]) * d[0] + (a.mid[1] - a.c[1]) * d[1] >= 0:
+                continue
+            if (b.mid[0] - b.c[0]) * d[0] + (b.mid[1] - b.c[1]) * d[1] <= 0:
+                continue
+            if ends is None:
+                ends = _Index(cell)
+                for s in segs:
+                    ends.add(s.a, s)
+                    ends.add(s.b, s)
+            tol = OBROUND_END_TOL * a.r
+            ok = True
+            for p in (a.p1, a.p2):
+                q = (p[0] + d[0], p[1] + d[1])
+                near = {id(s): s for s in ends.near(p, tol + 1e-9) if s.space == a.space}
+                if not any(_joins(s, p, q, tol) for s in near.values()):
+                    ok = False
+                    break
+            if not ok:
+                continue
+            used.update((i, j))
+            centre = ((a.c[0] + b.c[0]) / 2, (a.c[1] + b.c[1]) / 2)
+            out.append(_Circle(centre, length / 2 + a.r, a.space, a.block_path))
+            break
+    return out
+
+
 def _find_bubbles(circles: list[_Circle], entries: list[dict[str, Any]], ctx: _Ctx):
-    """(bubbles, circles with two labels, circles with a label and other text, empty circles).
+    """(bubbles, circles with two labels, circles with a label and other text, empty circles, circles whose
+    only label the legacy-font gate blocks, the blocked label entries with their circle's sheet).
 
     A circle holding any text besides its one label (a section or detail callout: number + sheet) is
-    not a bubble; a repeat of the label's own text is not 'other text'.
+    not a bubble; a repeat of the label's own text is not 'other text'. A label-shaped text whose meaning
+    `text_gate.meaning_block_reason` blocks is never a label ('4/g14' in a TCVN3 style is a rebar callout):
+    it is listed, and its circle is a bubble without a readable label (not empty, not other text).
     """
     texts_by_space: dict[str, _Index] = {}
     cell_r = statistics.median(c.r for c in circles) if circles else 1.0
     for e in entries:
         text = e["display_text"].strip()
         if not text:
+            continue
+        if not is_printed(e):  # tool wave 4: text that does not print is no label and no other text
+            ctx.not_printed_text += 1
             continue
         c = text_center(e)
         if c is None:
@@ -565,9 +784,12 @@ def _find_bubbles(circles: list[_Circle], entries: list[dict[str, Any]], ctx: _C
     ambiguous = 0
     other_text = 0
     empty: list[_Circle] = []
+    unreadable: list[_Circle] = []
+    blocked: dict[str, tuple[dict[str, Any], str, str]] = {}  # entry id -> (entry, reason, sheet)
     for circle in circles:
         idx = texts_by_space.get(circle.space)
         hits: list[dict[str, Any]] = []
+        blocked_here: list[dict[str, Any]] = []
         inside_texts: set[str] = set()
         if idx is not None:
             for c, e, is_label in idx.near(circle.c, circle.r):
@@ -576,9 +798,17 @@ def _find_bubbles(circles: list[_Circle], entries: list[dict[str, Any]], ctx: _C
                 inside_texts.add(e["display_text"].strip())
                 h = e.get("height")
                 if is_label and (h is None or 0.15 * circle.r <= h <= 1.6 * circle.r):
-                    hits.append(e)
+                    reason = meaning_block_reason(e)
+                    if reason is None:
+                        hits.append(e)
+                    else:
+                        blocked_here.append(e)
+                        sheet = ctx.locator.locate(circle.space, *circle.c)
+                        blocked.setdefault(e["id"], (e, reason, sheet))
         labels = {e["display_text"].strip() for e in hits}
-        if not inside_texts:
+        if blocked_here and inside_texts == {e["display_text"].strip() for e in blocked_here}:
+            unreadable.append(circle)
+        elif not inside_texts:
             empty.append(circle)
         elif len(labels) > 1:
             ambiguous += 1
@@ -587,7 +817,29 @@ def _find_bubbles(circles: list[_Circle], entries: list[dict[str, Any]], ctx: _C
         elif hits:
             entry = min(hits, key=lambda e: e["id"])
             bubbles.append(_Bubble(circle, entry, ctx.locator.locate(circle.space, *circle.c)))
-    return bubbles, ambiguous, other_text, empty
+    blocked_list = [
+        {"entry_id": e["id"], "value_text": e["display_text"].strip(), "reason": reason, "sheet": sheet}
+        for e, reason, sheet in sorted(blocked.values(), key=lambda t: t[0]["id"])
+    ]
+    return bubbles, ambiguous, other_text, empty, unreadable, blocked_list
+
+
+def _style(seg: _Seg) -> tuple[str, str]:
+    return (seg.layer, seg.linetype)
+
+
+def _sheet_styles(axes: list[_Axis]) -> dict[tuple[str, str], tuple[str, str]]:
+    """(space, sheet) -> the (layer, linetype) most axes of that sheet are drawn on, when one style has more
+    axes than any other and at least two (a clear majority); sheets without one are absent."""
+    counts: dict[tuple[str, str], Counter[tuple[str, str]]] = defaultdict(Counter)
+    for a in axes:
+        counts[(a.space, a.sheet)][_style(a.seg)] += 1
+    out: dict[tuple[str, str], tuple[str, str]] = {}
+    for key, counter in counts.items():
+        top = counter.most_common(2)
+        if top[0][1] >= 2 and (len(top) == 1 or top[0][1] > top[1][1]):
+            out[key] = top[0][0]
+    return out
 
 
 def _pair(bubbles: list[_Bubble], segs: list[_Seg], ctx: _Ctx) -> tuple[list[_Axis], list[_Bubble]]:
@@ -600,9 +852,11 @@ def _pair(bubbles: list[_Bubble], segs: list[_Seg], ctx: _Ctx) -> tuple[list[_Ax
         by_space[s.space].add(s.b, s)
     axes: list[_Axis] = []
     unpaired: list[_Bubble] = []
+    # every line a bubble could end: nearest end first (half-radius steps), then the longest line
+    candidates: dict[int, list[_Seg]] = {}
     for b in bubbles:
         c, r = b.circle.c, b.circle.r
-        best: tuple[tuple[float, float, int], _Seg] | None = None
+        found: list[tuple[tuple[float, float, int], _Seg]] = []
         for s in by_space[b.circle.space].near(c, END_NEAR_BUBBLE * r):
             if s.length < MIN_AXIS_LENGTH * r:
                 continue
@@ -610,17 +864,135 @@ def _pair(bubbles: list[_Bubble], segs: list[_Seg], ctx: _Ctx) -> tuple[list[_Ax
                 continue
             if _dist_to_line(c, s.a, s.b) > LINE_THROUGH_CENTRE * r:
                 continue
-            # nearest end first (half-radius steps), then the longest line
-            key = (round(2 * min(math.dist(c, s.a), math.dist(c, s.b)) / r), -s.length, s.sid)
-            if best is None or key < best[0]:
-                best = (key, s)
-        if best is None:
+            found.append(((round(2 * min(math.dist(c, s.a), math.dist(c, s.b)) / r), -s.length, s.sid), s))
+        candidates[id(b)] = [s for _, s in sorted(found, key=lambda t: t[0])]
+    for b in bubbles:
+        options = candidates[id(b)]
+        if not options:
             unpaired.append(b)
             continue
-        seg = best[1]
+        sheet = ctx.locator.locate(options[0].space, *options[0].mid)
+        axes.append(
+            _Axis(options[0], [b], "line", sheet if sheet != SHEET_UNKNOWN else b.sheet, options[0].space)
+        )
+    through, unpaired = _pair_through(unpaired, segs)
+    for seg, ends in through:
         sheet = ctx.locator.locate(seg.space, *seg.mid)
-        axes.append(_Axis(seg, [b], "line", sheet if sheet != SHEET_UNKNOWN else b.sheet, seg.space))
+        axes.append(_Axis(seg, ends, "line", sheet if sheet != SHEET_UNKNOWN else ends[0].sheet, seg.space))
+    # A line of the sheet's axis style through a bubble's centre beats a nearer line of another style it was
+    # paired with (EVAL-3 285: the bubbles at the foot of axes 1 and 5 ended wall lines 110 away while their
+    # own axes ran on past them). First another end candidate of the style; else a line of the style drawn
+    # through the bubbles at both of its ends.
+    styles = _sheet_styles(axes)
+    off = [
+        a
+        for a in axes
+        if len(a.bubbles) == 1
+        and a.pairing == "line"
+        and styles.get((a.space, a.sheet), _style(a.seg)) != _style(a.seg)
+    ]
+    pool: dict[tuple[str, str], list[_Bubble]] = defaultdict(list)
+    for a in off:
+        style = styles[(a.space, a.sheet)]
+        b = a.bubbles[0]
+        better = next((s for s in candidates[id(b)] if _style(s) == style), None)
+        if better is not None:
+            a.seg = better
+        else:
+            pool[(a.space, a.sheet)].append(b)
+    for b in unpaired:
+        key = (b.circle.space, b.sheet)
+        if key in styles:
+            pool[key].append(b)
+    seg_sheet: dict[int, str] = {}  # sheet of a line's midpoint, looked up once
+    for (space, sheet), members in pool.items():
+        style = styles[(space, sheet)]
+        r_min = min(b.circle.r for b in members)
+        mine = [
+            s
+            for s in segs
+            if s.space == space
+            and s.length >= MIN_AXIS_LENGTH * r_min
+            and _style(s) == style
+            and seg_sheet.setdefault(s.sid, ctx.locator.locate(s.space, *s.mid)) == sheet
+        ]
+        # a bubble already on a line of the style may be the other end of the line one of `members` lies on
+        own = {id(b) for b in members}
+        partners = [
+            a.bubbles[0]
+            for a in axes
+            if len(a.bubbles) == 1 and (a.space, a.sheet) == (space, sheet) and _style(a.seg) == style
+        ]
+        for seg, ends in _pair_through(members + partners, mine)[0]:
+            if not any(id(x) in own for x in ends):
+                continue
+            gone = {id(x) for x in ends}
+            axes = [a for a in axes if not any(id(x) in gone for x in a.bubbles)]
+            unpaired = [x for x in unpaired if id(x) not in gone]
+            where = ctx.locator.locate(seg.space, *seg.mid)
+            axes.append(
+                _Axis(seg, ends, "line", where if where != SHEET_UNKNOWN else ends[0].sheet, seg.space)
+            )
     return _merge_same_line(axes, ctx), unpaired
+
+
+def _on_segment(c: tuple[float, float], s: _Seg, r: float) -> bool:
+    """The line of `s` passes within LINE_THROUGH_CENTRE x r of `c`, and `c` projects inside the segment."""
+    if _dist_to_line(c, s.a, s.b) > LINE_THROUGH_CENTRE * r:
+        return False
+    t = ((c[0] - s.a[0]) * (s.b[0] - s.a[0]) + (c[1] - s.a[1]) * (s.b[1] - s.a[1])) / (s.length**2)
+    return 0.0 <= t <= 1.0
+
+
+def _pair_through(
+    bubbles: list[_Bubble], segs: list[_Seg]
+) -> tuple[list[tuple[_Seg, list[_Bubble]]], list[_Bubble]]:
+    """Bubbles no line END reaches (step 3): a grid line drawn through the bubbles at both of its ends and on
+    to the frame (EVAL-3 286). Two bubbles of one label, at least MIN_AXIS_LENGTH radii apart, whose centres
+    both lie on one segment make that segment their axis (the longest such segment); a line through one
+    bubble alone (a wall through a mark) pairs nothing. Returns (segment, bubbles) pairs and the rest."""
+    if not bubbles:
+        return [], []
+    r_min = min(b.circle.r for b in bubbles)
+    step = 4 * statistics.median(b.circle.r for b in bubbles)
+    index: dict[str, _Index] = defaultdict(lambda: _Index(step))
+    for s in segs:
+        if s.length < MIN_AXIS_LENGTH * r_min:
+            continue
+        n = math.ceil(s.length / step)
+        for k in range(n + 1):
+            t = k / n
+            index[s.space].add((s.a[0] + t * (s.b[0] - s.a[0]), s.a[1] + t * (s.b[1] - s.a[1])), s)
+    by_label: dict[tuple[str, str], list[_Bubble]] = defaultdict(list)
+    for b in bubbles:
+        if b.label:
+            by_label[(b.circle.space, b.label)].append(b)
+    used: set[int] = set()
+    out: list[tuple[_Seg, list[_Bubble]]] = []
+    for b in bubbles:
+        if id(b) in used or not b.label:
+            continue
+        c, r = b.circle.c, b.circle.r
+        found = {s.sid: s for s in index[b.circle.space].near(c, step)}
+        # a segment through both centres, MIN_AXIS_LENGTH radii apart, is at least that long
+        candidates = sorted(
+            (s for s in found.values() if _on_segment(c, s, r)), key=lambda s: (-s.length, s.sid)
+        )
+        for s in candidates:
+            ends = [
+                o
+                for o in by_label[(b.circle.space, b.label)]
+                if o is not b
+                and id(o) not in used
+                and math.dist(o.circle.c, c) >= MIN_AXIS_LENGTH * max(r, o.circle.r)
+                and _on_segment(o.circle.c, s, o.circle.r)
+            ]
+            if ends:
+                pair = [b, *ends]
+                used.update(id(x) for x in pair)
+                out.append((s, pair))
+                break
+    return out, [b for b in bubbles if id(b) not in used]
 
 
 def _merge_same_line(axes: list[_Axis], ctx: _Ctx) -> list[_Axis]:
@@ -822,6 +1194,155 @@ def _families(group: _Group, next_id: list[int]) -> None:
         members.sort(key=lambda m: (m.offset, m.seg.sid))
         next_id[0] += 1
         group.families.append(_Family(f"F{next_id[0]:03d}", members, theta, d, n))
+
+
+def _label_height(a: _Axis) -> float | None:
+    for b in a.bubbles:
+        if b.entry is not None and b.entry.get("height"):
+            return float(b.entry["height"])
+    return None
+
+
+def _axis_deviations(axes: list[_Axis]) -> dict[int, list[str]]:
+    """axis index -> the things (size, block, line) in which it differs from its family (see FAMILY_*);
+    deviating axes only."""
+    n = len(axes)
+    out: dict[int, list[str]] = defaultdict(list)
+    if n < FAMILY_MIN_AXES:
+        return out
+    off_size: set[int] = set()
+    for values in ([a.r for a in axes], [_label_height(a) for a in axes]):
+        known = [v for v in values if v]
+        if len(known) < FAMILY_MIN_AXES:
+            continue
+        med = statistics.median(known)
+        off_size |= {k for k, v in enumerate(values) if v and abs(v - med) > FAMILY_SIZE_TOL * med}
+    for k in sorted(off_size):
+        out[k].append("size")
+    for name, keys in (
+        ("block", [a.bubbles[0].circle.block_path[:1] for a in axes]),
+        ("line", [_style(a.seg) if a.pairing == "line" else None for a in axes]),
+    ):
+        counts = Counter(k for k in keys if k is not None)
+        top = counts.most_common(1)
+        if top and top[0][1] * 2 > sum(counts.values()):
+            for k, key in enumerate(keys):
+                if key is not None and key != top[0][0]:
+                    out[k].append(name)
+    return out
+
+
+def _set_aside(group: _Group, ctx: _Ctx) -> list[_Bubble]:
+    """Remove from the families of `group` the axes that differ from their family in at least
+    FAMILY_MIN_DEVIATIONS attributes (a section marker, a rebar bubble, a bar mark drawn like a grid bubble);
+    returns their bubbles for the unpaired list and says in the warnings which axes and why. An axis is
+    never set aside from a family left with fewer than two others."""
+    aside: list[_Bubble] = []
+    notes: list[str] = []
+    for fam in group.families:
+        dev = _axis_deviations(fam.axes)
+        gone = [k for k, why in dev.items() if len(why) >= FAMILY_MIN_DEVIATIONS]
+        if not gone or len(fam.axes) - len(gone) < 2:
+            continue
+        for k in sorted(gone, reverse=True):
+            axis = fam.axes.pop(k)
+            group.axes.remove(axis)
+            aside.extend(axis.bubbles)
+            notes.append(f"{axis.label or '?'} ({', '.join(dev[k])})")
+    if notes:
+        ctx.warnings.append(
+            f"{group.gid} on {group.sheet}: set aside {len(notes)} axis(es) that differ from the rest of "
+            f"their family (listed as unpaired bubbles): {'; '.join(notes[:20])}."
+        )
+    return aside
+
+
+def _runs(axes: list[_Axis]) -> list[list[_Axis]]:
+    """`axes` (in offset order) cut into runs without a repeated label: a b a b -> [a b] [a b]."""
+    runs: list[list[_Axis]] = []
+    for a in axes:
+        if not runs or a.label in {x.label for x in runs[-1]}:
+            runs.append([])
+        runs[-1].append(a)
+    return runs
+
+
+def _split_stacked(view: list[_Axis]) -> list[list[_Axis]]:
+    """Two or more plans stacked on one sheet share the axes drawn through all of them (their labels are
+    printed once): the other direction then reads as one family with repeated labels, 'a b a b' (EVAL-4 278
+    KC-01). When exactly one family of the view repeats its labels in runs of at least two axes, all alike
+    (a b | a b, never 1 2 2 or 1 2 | 1 3), the view is cut into one view per run; every other axis of the
+    view belongs to each of them (copies; the bubbles are shared). Otherwise the view stays whole."""
+    probe = _Group("", view[0].sheet, view[0].space, list(view))
+    _families(probe, [0])
+    repeating = [f for f in probe.families if len({a.label for a in f.axes}) < len(f.axes)]
+    if len(repeating) != 1:
+        return [view]
+    fam = repeating[0]
+    runs = _runs(fam.axes)
+    if len(runs) < 2 or any(len(run) < 2 for run in runs):
+        return [view]
+    if len({tuple(a.label for a in run) for run in runs}) != 1:  # two plans repeat the same labels
+        return [view]
+    fam_ids = {id(a) for a in fam.axes}
+    shared = [a for a in view if id(a) not in fam_ids]
+    parts = []
+    for k, run in enumerate(runs):
+        parts.append(run + [shared_axis if k == 0 else copy.copy(shared_axis) for shared_axis in shared])
+    return parts
+
+
+def _agree(fa: _Family, fb: _Family) -> bool | None:
+    """Whether two families give the labels they share the same order and spacings (None: fewer than two
+    shared labels, or a repeated label, so nothing to compare). The test of `_cross_checks`, without its
+    scale and drafting-tolerance statuses: anything but equal spacings is 'no'."""
+    la, lb = fa.labels(), fb.labels()
+    if len(set(la)) != len(la) or len(set(lb)) != len(lb):
+        return None
+    pa, pb = dict(zip(la, fa.rel_offsets, strict=True)), dict(zip(lb, fb.rel_offsets, strict=True))
+    common = [lbl for lbl in la if lbl and lbl in pb]
+    if len(common) < 2:
+        return None
+    seq = [pb[lbl] for lbl in common]
+    if not (all(q > p for p, q in pairwise(seq)) or all(q < p for p, q in pairwise(seq))):
+        return False
+    step = max(rounding_step(fa.spacings), rounding_step(fb.spacings))
+    return all(
+        abs(abs(pa[q] - pa[p]) - abs(pb[q] - pb[p])) <= max(step / 2, DRAFTING_TOL * abs(pa[q] - pa[p]))
+        for p, q in pairwise(common)
+    )
+
+
+def _set_aside_elevations(groups: list[_Group], ctx: _Ctx) -> tuple[list[_Group], list[_Bubble]]:
+    """(the groups that stay, the bubbles of the ones set aside).
+
+    A view of ONE direction (one family of two or more axes, nothing across it) whose shared labels contradict
+    every other family that shares at least two of them, while two or more of those families agree with each
+    other, shows the file's grid at another scale or in another place: a column elevation, a section (EVAL-4
+    278 KT-08: 1 2 4 at 10107 / 5192 against 1 2 2* 3 4 at 5850 / 2060 / 2940 / 4150 on 25 plans). It is no
+    grid system of its own and no cross-check partner; its bubbles are listed as unpaired and the warnings say
+    why. A plan (two directions) is never set aside: its disagreement is a question for the engineer."""
+    wide = [(g, f) for g in groups for f in g.families if len(f.axes) >= 2]
+    keep, bubbles = [], []
+    for g in groups:
+        big = [f for f in g.families if len(f.axes) >= 2]
+        if len(big) != 1:
+            keep.append(g)
+            continue
+        fam = big[0]
+        verdicts = [(o, _agree(fam, o)) for og, o in wide if og is not g]
+        others = [o for o, v in verdicts if v is not None]
+        mutual = any(_agree(a, b) for i, a in enumerate(others) for b in others[i + 1 :])
+        if len(others) >= 2 and mutual and all(v is False for _, v in verdicts if v is not None):
+            bubbles.extend(b for a in fam.axes for b in a.bubbles)
+            ctx.warnings.append(
+                f"{g.gid} on {g.sheet}: set aside, its axes {' '.join(lbl or '?' for lbl in fam.labels())} "
+                f"contradict {len(others)} other views of the same labels that agree with each other "
+                "(an elevation or a section?); listed as unpaired bubbles."
+            )
+        else:
+            keep.append(g)
+    return keep, bubbles
 
 
 def _check_family(fam: _Family, group: _Group, ctx: _Ctx) -> None:
@@ -1362,33 +1883,52 @@ def extract_grids(
         SheetLocator(sheets_result),
     )
     walker = Walker(doc, bool(text_index["file"]["handles_reliable"]))
-    segs, circles, dims = _collect(doc, walker, ctx)
-    bubbles, ambiguous, other_text, empty = _find_bubbles(circles, text_index["entries"], ctx)
+    segs, circles, caps, dims = _collect(doc, walker, ctx)
+    circles += _obround_circles(caps, segs)
+    found = _find_bubbles(circles, text_index["entries"], ctx)
+    bubbles, ambiguous, other_text, empty, unreadable, blocked = found
     axes, unpaired = _pair(bubbles, segs, ctx)
     views, isolated = _views(axes)
+    views = [part for view in views for part in _split_stacked(view)]
     groups: list[_Group] = []
     fam_counter = [0]
+    aside: list[_Bubble] = []  # axes set aside as no member of their family: unpaired, never dropped silently
     for k, comp in enumerate(views, start=1):
         g = _Group(f"V{k:03d}", comp[0].sheet, comp[0].space, comp)
         _families(g, fam_counter)
         groups.append(g)
     unpaired = _two_bubble_axes(groups, unpaired, ctx, [0])
+    for g in groups:
+        aside.extend(_set_aside(g, ctx))
+        g.families = [f for f in g.families if f.axes]
+    unpaired = unpaired + aside
+    for g in groups:
+        for fam in g.families:
+            fam.spacings = [b.offset - a.offset for a, b in zip(fam.axes, fam.axes[1:], strict=False)]
+    groups, elevation_bubbles = _set_aside_elevations(groups, ctx)
+    unpaired = unpaired + elevation_bubbles
     axis_no = 0
     for g in groups:
         for fam in g.families:
             for a in fam.axes:
                 axis_no += 1
                 a.aid = f"G{axis_no:04d}"
-            fam.spacings = [b.offset - a.offset for a, b in zip(fam.axes, fam.axes[1:], strict=False)]
             _check_family(fam, g, ctx)
         _check_view(g, ctx)
-    _unlabelled(groups, segs, empty, ctx)
+    _unlabelled(groups, segs, empty + unreadable, ctx)  # a blocked label is a missing label for the line
     matched = _match_dimensions(groups, dims)
     all_fams = [(g, f) for g in groups for f in g.families]
     cross = _cross_checks(all_fams, ctx, _Copies(sheets_result, text_index))
 
     unit = ctx.units["name"]
-    all_spacings = [s for _, f in all_fams for s in f.spacings if s > 0]
+    # the units evidence is the median over VIEWS of each view's median spacing: a key plan drawn small on one
+    # sheet (EVAL-4 180: spacings about 300 beside plans of 8000) outvoted by every real plan, not by the
+    # number of its spacings
+    view_medians = [
+        statistics.median(s for f in g.families for s in f.spacings if s > 0)
+        for g in groups
+        if any(s > 0 for f in g.families for s in f.spacings)
+    ]
     families_found = [f for _, f in all_fams if len(f.axes) >= 2]
     if not families_found:
         ctx.ask(
@@ -1419,7 +1959,7 @@ def extract_grids(
             listed(f.fid for f in families_found),
             f"{len(families_found)} family(ies) in {len(groups)} view(s)",
         )
-        median = statistics.median(all_spacings) if all_spacings else 0.0
+        median = statistics.median(view_medians) if view_medians else 0.0
         factor = _METRES.get(unit)
         metres = median * factor if factor else None
         if metres is None or not (PLAUSIBLE_SPACING_M[0] <= metres <= PLAUSIBLE_SPACING_M[1]):
@@ -1430,8 +1970,8 @@ def extract_grids(
                 "(--value unit=...): the declared drawing unit makes the grid spacings implausible for a "
                 "building (or no unit is declared).",
                 "header $INSUNITS",
-                f"median spacing {rnum(median)} drawing units, declared unit '{unit}'"
-                + (f" = {rnum(metres)} m" if metres is not None else ""),
+                f"median spacing {rnum(median)} drawing units (median of {len(view_medians)} view medians), "
+                f"declared unit '{unit}'" + (f" = {rnum(metres)} m" if metres is not None else ""),
             )
     groups_json: list[dict[str, Any]] = []
     for g in groups:
@@ -1456,6 +1996,7 @@ def extract_grids(
             )
     for reason, n in sorted(walker.skipped.items()):
         ctx.warnings.append(f"{n} entit(ies)/insert(s) not read while walking the drawing: {reason}.")
+    ctx.warnings.extend(_not_printed_warnings(ctx))
 
     unpaired_sorted = sorted(unpaired, key=lambda b: (b.circle.space, b.sheet, b.circle.c))
     return {
@@ -1472,12 +2013,15 @@ def extract_grids(
             "count": len(unpaired),
             "listed": [b.as_json() for b in unpaired_sorted[:MAX_UNPAIRED_LISTED]],
         },
+        "blocked_candidates": blocked,
         "summary": {
             "circles": len(circles),
             "bubbles_labelled": len(bubbles),
             "bubbles_ambiguous_label": ambiguous,
             "bubbles_other_text": other_text,
-            "bubbles_paired": sum(len(a.bubbles) for g in groups for f in g.families for a in f.axes),
+            "bubbles_paired": len(
+                {id(b) for g in groups for f in g.families for a in f.axes for b in a.bubbles}
+            ),
             "axes": axis_no,
             "groups": len(groups),
             "families": len(all_fams),
@@ -1485,11 +2029,33 @@ def extract_grids(
             "dimensions_linear": len(dims),
             "dimensions_matched": matched,
             "walk_skipped": dict(sorted(walker.skipped.items())),
+            "blocked_candidates": len(blocked),
         },
         "questions": ctx.questions,
         "question_counts": dict(sorted(ctx.q_counts.items())),
         "warnings": ctx.warnings,
     }
+
+
+def _not_printed_warnings(ctx: _Ctx) -> list[str]:
+    """What was left out because it does not print (counted apart; the grids schema has no counter field)."""
+    out = []
+    if ctx.not_printed_text:
+        out.append(
+            f"{ctx.not_printed_text} text(s) not printed (text index printed: false): left out of every "
+            "bubble label."
+        )
+    for kind in ("line", "circle", "dimension"):
+        parts = {
+            k.split(":", 1)[1]: n for k, n in ctx.not_printed_geometry.items() if k.startswith(f"{kind}:")
+        }
+        if parts:
+            detail = ", ".join(f"{r} {n}" for r, n in sorted(parts.items()))
+            out.append(
+                f"{sum(parts.values())} {kind}(s) not printed ({detail}): left out of bubbles, axes and "
+                "dimension evidence."
+            )
+    return out
 
 
 def _label_json(a: _Axis, ctx: _Ctx) -> dict[str, Any] | None:

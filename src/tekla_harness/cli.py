@@ -9,12 +9,13 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import math
 import sys
 from pathlib import Path
 
-from tekla_harness import __version__, findings, marks, questions_md
+from tekla_harness import __version__, dimensions, findings, marks, questions_md
 from tekla_harness.answers import parse_values, record_answer
-from tekla_harness.ask import ask_question, withdraw_question
+from tekla_harness.ask import amend_question, ask_question, withdraw_question
 from tekla_harness.cache import ReadCache
 from tekla_harness.callouts import run_callouts
 from tekla_harness.convert import DEFAULT_TIMEOUT_S, NoConverterError, dwg_to_dxf
@@ -23,7 +24,7 @@ from tekla_harness.extract_text import extract_text
 from tekla_harness.grid_system import GridSystemError, run_grid_systems
 from tekla_harness.intake import IntakeError, run_intake
 from tekla_harness.knowledge import KnowledgeError
-from tekla_harness.questions import QuestionsError
+from tekla_harness.questions import ROLES, QuestionsError
 from tekla_harness.read_dxf import CONVERTER_CAPS, probe_dxf
 from tekla_harness.receipt import ReceiptError, receipt_path, write_receipt
 from tekla_harness.schemas import SCHEMA_NAMES, validate
@@ -32,14 +33,35 @@ from tekla_harness.sheet_text import (
     ReaderError,
     find_text,
     list_sheets,
+    sheet_region,
     sheet_text,
     truncation_warning,
 )
 from tekla_harness.status import StatusError, build_status
 from tekla_harness.strict_json import MAX_BYTES, StrictJsonError, loads_strict
 from tekla_harness.structure import StructureError, read_structure, run_extractor
+from tekla_harness.supplements import add_supplement, withdraw_supplement
+from tekla_harness.worklock import WorkLockError, work_lock
 
 EXIT_OK, EXIT_INVALID, EXIT_USAGE, EXIT_ENV = 0, 1, 2, 3
+# Commands that write a work folder hold its lock for their whole run (ADR-0011). intake takes it itself,
+# inside run_intake, after its usage checks; `finding` locks only for add and withdraw.
+LOCKED_COMMANDS = frozenset(
+    {"read-structure", "callouts", "marks", "grid-system", "answer", "ask", "questions-md"}
+)
+LOCKED_ACTIONS = {"finding": frozenset({"add", "withdraw"})}
+SELF_LOCKING_COMMAND = "intake"
+# Every other command, on purpose (a test checks that each subcommand is on exactly one list): they only
+# read a work folder, or they take explicit paths and never write the registry or answers.
+UNLOCKED_COMMANDS = frozenset(
+    {
+        # read-only on a work folder
+        "status", "list-sheets", "sheet-text", "find-text", "dimensions",
+        # explicit input/output paths, no registry or answers (ADR-0011 decision 5)
+        "validate", "detect", "dwg2dxf", "read-dxf", "extract-text", "extract-sheets", "extract-grids",
+        "extract-levels", "env-check",
+    }
+)  # fmt: skip
 _ENV_HOOK = Path(__file__).resolve().parents[2] / ".claude" / "hooks" / "session_env_check.py"
 
 
@@ -331,11 +353,52 @@ def _cmd_list_sheets(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
-def _cmd_sheet_text(args: argparse.Namespace) -> int:
+def _not_implemented(exc: NotImplementedError) -> int:
+    """A seam stub that its package has not replaced yet (tool wave 3): exit 3, nothing run or written.
+    Only the stub calls are wrapped, so any other NotImplementedError still surfaces as a bug."""
+    print(f"{exc}: nothing was run or written", file=sys.stderr)
+    return EXIT_ENV
+
+
+def _region(text: str) -> tuple[float, float, float, float]:
+    """`--region x0,y0,x1,y1`: four finite numbers with x0 < x1 and y0 < y1 (argparse type)."""
+    parts = text.split(",")
     try:
-        doc = sheet_text(
-            Path(args.work_dir), args.file, args.sheet_id, contains=args.contains, max_entries=args.max
-        )
+        x0, y0, x1, y1 = (float(p) for p in parts)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"'{text}' is not four numbers x0,y0,x1,y1") from None
+    if not all(math.isfinite(v) for v in (x0, y0, x1, y1)):
+        raise argparse.ArgumentTypeError(f"'{text}': every coordinate must be a finite number")
+    if not (x0 < x1 and y0 < y1):
+        raise argparse.ArgumentTypeError(f"'{text}': need x0 < x1 and y0 < y1 (the box's corners)")
+    return x0, y0, x1, y1
+
+
+def _cmd_sheet_text(args: argparse.Namespace) -> int:
+    if args.region is not None and (args.sheet_id is None or args.unassigned):
+        print("--region reads a box of ONE sheet: give its sheet id, without --unassigned", file=sys.stderr)
+        return EXIT_USAGE
+    try:
+        if args.region is not None:
+            doc = sheet_region(
+                Path(args.work_dir),
+                args.file,
+                args.sheet_id,
+                args.region,
+                contains=args.contains,
+                max_entries=args.max,
+                include_hidden=args.include_hidden,
+            )
+        else:
+            doc = sheet_text(
+                Path(args.work_dir),
+                args.file,
+                args.sheet_id,
+                contains=args.contains,
+                max_entries=args.max,
+                unassigned=args.unassigned,
+                include_hidden=args.include_hidden,
+            )
     except ReaderError as exc:
         print(str(exc), file=sys.stderr)
         return exc.exit_code
@@ -348,7 +411,14 @@ def _cmd_sheet_text(args: argparse.Namespace) -> int:
 
 def _cmd_find_text(args: argparse.Namespace) -> int:
     try:
-        doc = find_text(Path(args.work_dir), args.contains, file_rel=args.file, max_hits=args.max)
+        doc = find_text(
+            Path(args.work_dir),
+            args.contains,
+            file_rel=args.file,
+            max_hits=args.max,
+            unassigned=args.unassigned,
+            include_hidden=args.include_hidden,
+        )
     except ReaderError as exc:
         print(str(exc), file=sys.stderr)
         return exc.exit_code
@@ -359,7 +429,13 @@ def _cmd_find_text(args: argparse.Namespace) -> int:
             f"rerun with --max {counts['hits']} (or without --max) to get all of them",
             file=sys.stderr,
         )
-    if counts["blocked_entries_not_searchable"]:
+    if counts.get("blocked_in_scope"):  # W4 (package T): blocked entries are never matched
+        print(
+            f"find-text: {counts['blocked_in_scope']} blocked (legacy-font) entries in the searched scope "
+            "are never matched: the search is incomplete over them; read them by entry id or with sheet-text",
+            file=sys.stderr,
+        )
+    elif counts.get("blocked_entries_not_searchable"):  # deprecated count, until package T lands
         print(
             f"find-text: {counts['blocked_entries_not_searchable']} blocked (legacy-font) entries were "
             "matched on their stored text only: the search is incomplete over them",
@@ -402,7 +478,12 @@ def _cmd_status(args: argparse.Namespace) -> int:
 def _cmd_answer(args: argparse.Namespace) -> int:
     try:
         result = record_answer(
-            Path(args.work_dir), args.question_id, args.text, args.by, parse_values(args.value)
+            Path(args.work_dir),
+            args.question_id,
+            args.text,
+            args.by,
+            parse_values(args.value),
+            role=args.role,
         )
     except QuestionsError as exc:
         print(str(exc), file=sys.stderr)
@@ -414,18 +495,63 @@ def _cmd_answer(args: argparse.Namespace) -> int:
 
 
 def _cmd_ask(args: argparse.Namespace) -> int:
+    question_fields = ("code", "file", "sheet", "where", "found", "text")
     try:
-        if args.withdraw is not None:
-            extra = [
-                f"--{name}"
-                for name in ("code", "file", "sheet", "where", "found", "text")
-                if getattr(args, name) is not None
-            ] + (["--blocking"] if args.blocking else [])
-            if extra or args.reason is None:
+        modes = [
+            f"--{name.replace('_', '-')}"
+            for name in ("withdraw", "supplement", "withdraw_supplement", "amend")
+            if getattr(args, name) is not None
+        ]
+        if len(modes) > 1:
+            raise QuestionsError(2, f"{' and '.join(modes)} cannot be combined")
+        if args.places is not None and args.amend is None:
+            raise QuestionsError(2, "--places goes with --amend only")
+        given = [f"--{name}" for name in question_fields if getattr(args, name) is not None] + (
+            ["--blocking"] if args.blocking else []
+        )
+        if args.amend is not None:
+            wrong = [f for f in given if f != "--text"] + (["--reason"] if args.reason is not None else [])
+            if wrong:
+                raise QuestionsError(2, f"--amend takes only --text and --places (got {', '.join(wrong)})")
+            if args.text is None and args.places is None:
+                raise QuestionsError(2, "--amend needs --text, --places or both: what to change")
+            if args.text is not None and not args.text.strip():
+                raise QuestionsError(2, "--text is empty: write the amended question in Vietnamese")
+            if args.places is not None and not all(p.strip() for p in args.places):
+                raise QuestionsError(2, "--places: a place is empty")
+            try:
+                result = amend_question(Path(args.work_dir), args.amend, text=args.text, places=args.places)
+            except NotImplementedError as exc:  # the seam stub only (package C)
+                return _not_implemented(exc)
+        elif args.withdraw is not None or args.withdraw_supplement is not None:
+            flag = "--withdraw" if args.withdraw is not None else "--withdraw-supplement"
+            if given or args.reason is None:
                 raise QuestionsError(
-                    2, "--withdraw takes only --reason" + (f" (got {', '.join(extra)})" if extra else "")
+                    2, f"{flag} takes only --reason" + (f" (got {', '.join(given)})" if given else "")
                 )
-            result = withdraw_question(Path(args.work_dir), args.withdraw, args.reason)
+            if args.withdraw is not None:
+                result = withdraw_question(Path(args.work_dir), args.withdraw, args.reason)
+            else:
+                result = withdraw_supplement(Path(args.work_dir), args.withdraw_supplement, args.reason)
+        elif args.supplement is not None:
+            wrong = [f for f in given if f in ("--code", "--blocking")]
+            wrong += ["--reason"] if args.reason is not None else []
+            missing = [f"--{name}" for name in ("where", "found", "text") if getattr(args, name) is None]
+            if wrong or missing:
+                raise QuestionsError(
+                    2,
+                    "--supplement adds evidence to another producer's question: "
+                    + (f"it takes no {', '.join(wrong)}" if wrong else f"missing {', '.join(missing)}"),
+                )
+            result = add_supplement(
+                Path(args.work_dir),
+                target_id=args.supplement,
+                where=args.where,
+                found=args.found,
+                text=args.text,
+                file=args.file,
+                sheet=args.sheet,
+            )
         else:
             missing = [
                 f"--{name}" for name in ("code", "where", "found", "text") if getattr(args, name) is None
@@ -450,6 +576,8 @@ def _cmd_ask(args: argparse.Namespace) -> int:
         return exc.exit_code
     if result["status"] == "already_asked":
         print(f"{result['id']}: already asked", file=sys.stderr)
+    elif result["status"] == "already_supplemented":
+        print(f"{result['key']}: already supplemented", file=sys.stderr)
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return EXIT_OK
 
@@ -565,13 +693,35 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_st.add_argument("work_dir")
     p_st.add_argument("file", help="input-relative path of the drawing, as in inventory.json")
-    p_st.add_argument("sheet_id", help="detector sheet id from list-sheets, e.g. model#01")
+    p_st.add_argument(
+        "sheet_id", nargs="?", default=None, help="detector sheet id from list-sheets, e.g. model#01"
+    )
+    p_st.add_argument(
+        "--unassigned",
+        action="store_true",
+        help="instead of a sheet id: the entries on no sheet or on several (sheet id 'unassigned'); "
+        "the way to read a file on which list-sheets finds no sheet",
+    )
+    p_st.add_argument(
+        "--region",
+        type=_region,
+        metavar="X0,Y0,X1,Y1",
+        help="with a sheet id: only the entries inside this box (coordinates of the sheet's space, as in "
+        "list-sheets' frame), grouped into rows and cells, e.g. to read one notes-table cell. Write it "
+        "with '=' (--region=-5000,-178000,0,-176000): a value starting with '-' after a space is taken "
+        "for an option",
+    )
     p_st.add_argument("--contains", help="keep only entries whose text contains this (NFC, case-insensitive)")
     p_st.add_argument(
         "--max",
         type=int,
         default=None,
         help=f"entries returned at most (default {DEFAULT_MAX_ENTRIES}; unbounded with --contains)",
+    )
+    p_st.add_argument(
+        "--include-hidden",
+        action="store_true",
+        help="also show entries that do not print (marked)",
     )
     p_st.set_defaults(func=_cmd_sheet_text)
 
@@ -587,6 +737,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_ft.add_argument("--file", help="search only this drawing (input-relative path, as in inventory.json)")
     p_ft.add_argument("--max", type=int, default=None, help="hits returned at most (default: all)")
+    p_ft.add_argument(
+        "--unassigned",
+        action="store_true",
+        help="search only the entries on no sheet or on several (hits carry sheet_id 'unassigned')",
+    )
+    p_ft.add_argument(
+        "--include-hidden",
+        action="store_true",
+        help="also show entries that do not print (marked)",
+    )
     p_ft.set_defaults(func=_cmd_find_text)
 
     p_cal = sub.add_parser(
@@ -636,19 +796,35 @@ def build_parser() -> argparse.ArgumentParser:
             "the unit already answered (to confirm it; else re-answer units_confirm_all); "
             "grid_system_axis_unassigned takes one value per direction named in the question, "
             "dir1=X|Y and dir2=X|Y, distinct; grid_family_axis_assignment takes <family_id>=X|Y; "
-            "member_mark_prefix_meaning takes <prefix>=<meaning>; grid_system_select takes optional "
+            "member_mark_prefix_meaning takes <prefix>=<meaning>; file_set_relation takes set1=a.dwg,b.dwg "
+            "(and set2=..., every file of the question exactly once); grid_system_select takes optional "
             "systems=S001,S002 (the systems the project uses) and separate=S001,S002 (selected systems "
             "that are different buildings, which closes their conflict); grid_system_conflict cannot be "
-            "answered: answer grid_system_select instead; every other question takes no value. Rerun "
+            "answered: answer grid_system_select instead; grid_system_missing (ADR-0013) takes the grid "
+            "the engineer reads off the drawing, both directions, drawing units: dir1_labels=1,2,3 "
+            "dir1_spacings=3130,3540 dir2_labels=A,B dir2_spacings=4250 (one spacing fewer than labels) "
+            "and optional sheet=model#05, and only an engineer-role answer builds a grid system; or "
+            "no_grid=yes, alone, when the file holds no plan that needs a grid (notes, details or sections "
+            "only): it builds nothing, and only the engineer's closes the question; "
+            "grid_answer_contradicts_drawing takes no value; every other question takes no value. Rerun "
             "harness grid-system after a units, select or axis answer. A question whose file changed since "
-            "it was raised is refused: rerun the command that raised it. Exit codes: 1 invalid values or "
-            "changed file, 2 unknown or obsolete question, blank text or name."
+            "it was raised is refused: rerun the command that raised it. --role is required: engineer for "
+            "the engineer's own answer, simulated for an agent standing in for the engineer (gate 1 does "
+            "not open on a simulated answer). Exit codes: 1 invalid values or changed file, 2 unknown or "
+            "obsolete question, blank text or name, no --role."
         ),
     )
     p_ans.add_argument("work_dir", help="the --out folder of `harness intake`")
     p_ans.add_argument("question_id", help="e.g. Q-003, from a questions document")
     p_ans.add_argument("--text", required=True, help="the engineer's answer, verbatim")
     p_ans.add_argument("--by", required=True, help="who answered")
+    p_ans.add_argument(
+        "--role",
+        required=True,
+        choices=ROLES,
+        help="engineer: the engineer's own words; simulated: an agent standing in for the engineer "
+        "(gate 1 counts the engineer's answers only)",
+    )
     p_ans.add_argument(
         "--value", action="append", default=[], metavar="K=V", help="structured value, repeatable (see above)"
     )
@@ -663,7 +839,8 @@ def build_parser() -> argparse.ArgumentParser:
             "--file is an inventory path (omit it for a project-level question); --code is your own "
             "lowercase snake_case code (not one a producer owns, exit 2); --text is the question in "
             "Vietnamese, printed verbatim in questions.md. "
-            "--withdraw Q-id --reason '...' retires a reader question. Questions go to "
+            "--withdraw Q-id --reason '...' retires a reader question; --amend Q-id [--text '...'] "
+            "[--places P ...] changes its wording or places without a new id. Questions go to "
             "reader-questions.json; answer them with `harness answer`. Exit codes: 1 file not in the "
             "inventory or invalid documents, 2 usage or a code owned by a producer."
         ),
@@ -677,11 +854,34 @@ def build_parser() -> argparse.ArgumentParser:
     p_ask.add_argument("--text", help="the question, in Vietnamese (printed verbatim in questions.md)")
     p_ask.add_argument("--blocking", action="store_true", help="the question blocks gate 1 until answered")
     p_ask.add_argument("--withdraw", metavar="Q-ID", help="retire this reader question (needs --reason)")
-    p_ask.add_argument("--reason", help="why the question is withdrawn")
+    p_ask.add_argument(
+        "--supplement",
+        metavar="Q-ID",
+        help="add evidence (--where, --found, --text, optional --file, --sheet) to a PRODUCER's question "
+        "instead of asking it again; never changes its blocking flag or answer",
+    )
+    p_ask.add_argument(
+        "--withdraw-supplement", metavar="KEY", help="withdraw a supplement by its key (needs --reason)"
+    )
+    p_ask.add_argument("--reason", help="why the question or supplement is withdrawn")
+    p_ask.add_argument(
+        "--amend",
+        metavar="Q-ID",
+        help="amend a live reader question in place (same id; history kept in its `amendments`): "
+        "with --text (new wording) and/or --places; refused for obsolete, withdrawn, answered or "
+        "producer questions",
+    )
+    p_ask.add_argument(
+        "--places",
+        nargs="+",
+        metavar="PLACE",
+        help="with --amend: every place the question applies to (e.g. 'model#05 axis 3-4' 'model#07'), "
+        "replacing the previous list",
+    )
     p_ask.set_defaults(func=_cmd_ask)
 
     # Commands whose module owns its arguments and its run (add_arguments / run / COMMAND / HELP).
-    for module in (marks, questions_md, findings):
+    for module in (marks, questions_md, findings, dimensions):
         p_mod = sub.add_parser(module.COMMAND, help=module.HELP)
         module.add_arguments(p_mod)
         p_mod.set_defaults(func=module.run)
@@ -697,7 +897,28 @@ def main(argv: list[str] | None = None) -> int:
         args = parser.parse_args(argv)
     except SystemExit as exc:  # argparse exits 2 on usage errors, 0 on --help/--version
         return int(exc.code or 0)
-    return args.func(args)
+    try:
+        target = _lock_target(args)
+        if target is None:
+            return args.func(args)
+        if not target.is_dir():  # never run a writer unlocked, even if the folder appears meanwhile
+            print(f"{target} is not a folder: nothing was run or written", file=sys.stderr)
+            return EXIT_USAGE
+        command = " ".join([args.command, *([args.action] if args.command in LOCKED_ACTIONS else [])])
+        with work_lock(target, command):
+            return args.func(args)
+    except WorkLockError as exc:
+        print(str(exc), file=sys.stderr)
+        return exc.exit_code
+
+
+def _lock_target(args: argparse.Namespace) -> Path | None:
+    """The work folder this command must lock (it may not exist: main then refuses it), or None for a
+    command that does not lock here (UNLOCKED_COMMANDS; intake locks inside run_intake)."""
+    action = getattr(args, "action", None)
+    if args.command not in LOCKED_COMMANDS and action not in LOCKED_ACTIONS.get(args.command, ()):
+        return None
+    return Path(args.work_dir)
 
 
 if __name__ == "__main__":

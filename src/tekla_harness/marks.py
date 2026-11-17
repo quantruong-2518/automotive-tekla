@@ -5,30 +5,52 @@
 from a mark beyond comparing text: no quantity, length, weight or unit conversion.
 
 Split with `callouts.py`. callouts lists a text whose WHOLE line is a bare mark (`C1`, `GM2`, `DC-3a`,
-upper-case prefix) as a `member_mark` candidate and owns the `member_mark_prefix_meaning` question.
-This module never raises that question and never gives a prefix a meaning. It extends the mark grammar
-(`in_callouts` says when callouts also lists the text):
+upper-case prefix) as a `member_mark` candidate. Since tool wave 2 (fix 1b) this module owns the
+`member_mark_prefix_meaning` question: one blocking question per file, one subject per prefix of its plan
+marks (upper-cased), whatever grammar found them; it never gives a prefix a meaning itself. An answer given
+to the question callouts raised before goes stale once (its key is no longer raised) and is asked again
+here. It extends the mark grammar (`in_callouts` says when callouts also lists the text):
 
   * sub-numbered marks `D1.1`, `D1-1` (numbers kept as written), letter suffixes in either case
     (`D1a`, `D1.9A`), lower-case prefixes (`gm1`; a lone lower-case `a` or `s` is the spacing letter of a
     bar callout, never a mark), and a section in brackets `D1.1(220X350)`, `C1 (220x220)`: `b` and `h`
-    are the two numbers as written, in drawing units, never converted (separator x, X or U+00D7);
+    are the two numbers as written, in drawing units, never converted (separator x, X or U+00D7); a
+    length in brackets instead, `LT1(L=4700)` (tool wave 3), stays in `display_text` only (no size);
   * a member-type word in front of the mark, as in a detail title (`DẦM D1.1`, `CỘT C1`, `ĐÀI CỌC DC1`,
     `GIẰNG MÓNG GM1`, `BEAM B1`, `COLUMN C1`): recorded as `title_member_word` evidence (confidence at
     most medium). It is NOT a prefix meaning: prefix meanings come only from `member_mark_prefix_meaning`
-    answers (callouts);
+    answers;
   * schedule tables and the matching of schedule rows to plan marks (below).
 
 A mark is never taken from a line that a callouts pattern claims (`I300`, `M20`, `BM12`...), from a
 sheet code (`KC-01`), from texts the title block, grid or level extractors claimed, from a dimension, or
 from a sheet that duplicates an earlier one.
+Tool wave 4 (F4a): nor from the ATTRIBs of a rebar-callout block (an INSERT one of whose ATTRIBs is a spacing
+value `a150` / `A200` or carries a bar tag `THEP` / `KHOANGCACH`: `callouts.callout_part_ids`), nor from a
+strength class (`RB 500`) or a signed level (`cos -300`, `callouts.token_reason`). A text with a mark's shape
+that is left out for such a reason is not dropped silently: one warning per file gives the count per
+reason and the first examples.
+Tool wave 4 (F4c): nor from a steel profile (`HEB-650`, `IPE 300`, `UC 254`: series letters and a section
+depth of 50 or more), a detail label (`DET-2`, or the bubble `A1` of a `DETAIL - A1` heading of the same sheet
+when every mark-shaped text of its prefix on that sheet is such an id: `callouts.detail_label_ids`), or a
+title-block value (the claim by the sheets document also covers a `job_number` found by shape alone), nor
+from a section-cut label (letters, a blank, `n-n` with the same number twice: `mc 1-1`). A heading may be
+glued to a bracket (`dẦm d2-7(sl= 01)`) and may start with the pile-cap word `đài` (`ĐÀi dm 1`).
 
 Legacy-font gate (`text_gate.meaning_block_reason`). Only an entry whose meaning is allowed can be a plan
-mark, a header keyword or a matchable schedule mark. A table whose header holds no allowed keyword but
-blocked text is reported with `header_blocked: true`; every cell of it carries `meaning: blocked`, and
-its mark-shaped cells are listed in `blocked_marks` (verbatim, with the entry id and the reason), never
-matched and never part of a notation variant. A blocked cell in the mark column of an allowed table is
-listed the same way. No question paraphrases blocked text.
+mark, a header keyword or a matchable schedule mark. The gate works per column (tool wave 2, fix 8): only
+the mark column's header can block a table. A table whose mark column is not named by an allowed keyword
+and whose seed column cannot be taken as its mark column (see below) is reported with `header_blocked:
+true`; every cell of it carries `meaning: blocked`, and its mark-shaped cells are listed in
+`blocked_marks` (verbatim, with the entry id and the reason), never matched and never part of a notation
+variant. Any other blocked
+header cell is listed in the table's `blocked_columns`: its column gets no role, the rest of the table is
+read (cells keep their own meaning). A blocked cell in the mark column of an allowed table is listed in
+`blocked_marks` the same way. No question paraphrases blocked text.
+Tool wave 4 (EVAL-4 M2): every blocked header cell keeps only a placeholder in `header[]` (`entry_id` null,
+the verbatim text and the reason stay); its id is listed in the table's `blocked_header_entries`, so no
+blocked id is cited outside a `blocked*` list. A table whose header cells are all blocked is still
+reported, with `header_blocked`.
 
 Schedule tables, per sheet and per space of the texts (a paper sheet shows model-space texts through its
 viewports: the table is in the texts' own coordinates, `space` says which):
@@ -52,27 +74,51 @@ viewports: the table is in the texts' own coordinates, `space` says which):
     their centres differ by at most `ROW_TOL` x h; a row needs a cell in the mark column and (with two
     header columns or more) a second cell, and lies at most `ROW_PITCH` x h below the previous row.
     Rotated texts and dimensions are never cells in this mode.
-  * blocked headers are found from the line grid only: a mark-shaped text in a grid cell whose topmost
-    band holds blocked text in at least two columns, no allowed keyword and no mark-shaped text, with at
-    least two data bands holding a mark-shaped cell in the seed's column. Without a grid such a table is
-    not detected (a known miss). A grid of mark-shaped cells whose header has neither a keyword nor
-    blocked text is not reported either: on a plan it is as likely the space between drawn lines.
+  * headers without an allowed keyword are found from the line grid only: a mark-shaped text (the seed)
+    in a grid cell whose topmost band spans at least two columns, holds blocked text, no allowed keyword
+    and no mark-shaped text, with at least two data bands holding a mark-shaped cell in the seed's
+    column. The table is read on the seed's column, with confidence low (no keyword names it), only
+    when that column's header cell holds no text at all and at most half of the column's allowed
+    cells are integers; then only its mark-shaped cells are schedule marks. Otherwise (the header cell
+    holds blocked text, or allowed text that is no keyword such as 'STT', or a data row read as the
+    header; or the column holds row numbers) the table is header-blocked (review F2). Without a grid
+    such a table is not detected (a known miss). A grid of mark-shaped cells whose header has neither a
+    keyword nor blocked text is not reported either: on a plan it is as likely the space between drawn
+    lines.
   * a keyword whose table has fewer than two data rows with a mark cell is listed in `unparsed_tables`
     and asked as a non-blocking `schedule_table_unparsed` question; texts inside the part of it that was
-    found (line grid) are not plan marks.
+    found (line grid) are not plan marks. Tool wave 4 (R-c): a line-grid table with ONE data row is a table
+    when that row's mark cell is allowed text with a mark's shape and the row has a second cell (161's
+    crane-beam table); without lines two rows are still needed.
 
 Matching, per file, only between allowed plan marks and allowed mark-column cells of tables whose header
-is not blocked. Keys: NFC + casefold + all whitespace removed. Equal keys match; nothing else ever does.
+is not blocked, and (tool wave 3, a4) RC detail headings as a second source: a title-form plan mark
+(`DẦM D1 (SL= 02)`, `ĐÀI CỌC ĐC2`) and an English `DETAIL OF/ON <mark>` line are headings, never the plan
+side of the comparison. A heading list (`DẦM D1, D2`, `DETAIL OF CP1 & CP2`) is one heading per mark when
+every item is a whole mark of the same family; a list in shorthand (`dẦm d2-4, 5`) names no mark and is
+listed in `warnings` (review C1). `compared_with` says what matched or was compared (schedule when a row
+exists, else detail_heading), `detail_headings` lists the headings of a key and
+`matching[].detail_headings` counts them. Keys: NFC + casefold + all whitespace removed. Equal keys
+match; nothing else ever does.
 Two keys with the same structure (prefix, the numbers as integers, suffix, compared case-insensitively)
 but different keys, e.g. `D1.1` / `D1-1` or `C-01` / `C1`, are a `notation_variant`: never merged, asked
 once per file as `mark_notation_equivalence` (blocking for lot specs). A matched plan mark with a section
 `(b x h)` and a schedule row whose size columns (b / h, or a combined `b x h` column) hold numbers is
-compared; a difference is a blocking `mark_size_conflict` quoting both entry ids. `plan_only` is listed
-only for a file with at least one matchable schedule.
+compared; a difference is a blocking `mark_size_conflict` quoting both entry ids. Every matched key says
+`size_compared` (true when at least one plan mark and row pair had both sizes) and otherwise
+`size_not_compared_reason`: the plan marks have no size, or per row the table has no size column, the
+header cells that could name one are blocked (a blocked column whose readable cells are numbers or
+`b x h` values, or none of whose cells is readable), the size cells are blocked, they are not numbers,
+or the row has no size cells (`summary.size_comparisons` counts both). A blocked header cell in no
+column is not listed in `blocked_columns`. A match through headings only is not size-compared
+(NO_SCHEDULE_ROW). `plan_only` is listed only for a file with at least one matchable schedule or detail
+heading: a file with neither is not compared, and its plan marks are no finding (`compared_with` none is
+never written). `summary.by_sheet` counts plan marks, tables, rows, unparsed tables and blocked marks
+per detector sheet (sheet null: on no sheet).
 
 Confidence is never high: plan marks, titles and tables are at most medium (callouts' rule: min(cap,
 entry confidence), low for case-uncertain text, unmapped characters or unknown-encoding flags); a
-header-blocked table is low.
+header-blocked table, and a table whose mark column no keyword names, is low.
 
 Exit codes as `harness callouts`: 0 ok, 1 inconsistent work folder or invalid output, 2 usage, 3 cannot
 write. A DXF that cannot be opened for its lines (native DXF without `--input-dir`, read error) is not an
@@ -99,13 +145,21 @@ from ezdxf.lldxf.const import DXFError
 
 from tekla_harness.callouts import (
     _SHEET_CODE,
+    CALLOUT_PART,
+    DETAIL_LABEL,
+    MEMBER_WORDS,
     _check_input_dir,
     _claimed_text_ids,
     _confidence,
     _num,
     _provenance,
+    callout_part_ids,
+    detail_label_ids,
+    footing_m_labels,
     member_mark,
+    not_printed_warning,
     scan_line,
+    token_reason,
 )
 from tekla_harness.questions import (
     QuestionsError,
@@ -132,6 +186,7 @@ from tekla_harness.sheet_text import (
 )
 from tekla_harness.sheets import Walker, layout_spaces, open_checked, text_box
 from tekla_harness.text_gate import meaning_block_reason
+from tekla_harness.visibility import is_printed
 
 COMMAND = "marks"
 HELP = "member marks and schedule tables, plan-to-schedule matching: marks.json, marks-questions.json"
@@ -147,6 +202,8 @@ ROW_PITCH = 4.0  # text alignment: a data row at most this far below the previou
 LINE_CHARS = 200
 MAX_REFS = 50
 MAX_FOUND = 8  # occurrences quoted in one question ref
+MAX_PREFIX_REFS = 10  # refs per prefix in member_mark_prefix_meaning (count stays true)
+MAX_EXAMPLES = 5  # marks as written, per prefix subject
 
 CELL_TYPES = frozenset({"TEXT", "MTEXT", "ATTRIB"})
 _LINE_TYPES = frozenset({"LINE", "LWPOLYLINE", "POLYLINE"})
@@ -159,36 +216,12 @@ _BODY = (
     r"(?P<prefix>[A-Za-zĐđ]{1,4})(?P<sep1>\s?-?\s?)(?P<n1>\d{1,3})"
     r"(?:(?P<sep2>[.\-])(?P<n2>\d{1,3}))?(?P<suffix>[A-Za-z']?)"
 )
-_MARK = re.compile("^" + _BODY + _SIZE + "$")
-_MARK_HEAD = re.compile("^" + _BODY + _SIZE + r"(?=$|[\s,;:])")
+# a length in brackets after a lintel mark, `LT1(L=4700)` (267): kept only in display_text, never a size
+_LENGTH = r"\s*\(\s*L\s*=\s*\d+(?:[.,]\d+)?\s*\)"
+_MARK = re.compile("^" + _BODY + "(?:" + _SIZE + "|(?P<length>" + _LENGTH + "))$")
+_MARK_HEAD = re.compile("^" + _BODY + _SIZE + r"(?=$|[\s,;:(])")
 _SPACING_LETTERS = frozenset({"a", "s"})  # Ø8a150: a lone lower-case a / s is a spacing, not a mark
 
-# member-type words of a detail title (matched case-insensitively on NFC text), longest first
-MEMBER_WORDS = (
-    "giằng móng",
-    "dầm móng",
-    "đài cọc",
-    "đài móng",
-    "lanh tô",
-    "dầm",
-    "cột",
-    "giằng",
-    "móng",
-    "sàn",
-    "vách",
-    "cọc",
-    "tie beam",
-    "pile cap",
-    "footing",
-    "column",
-    "purlin",
-    "rafter",
-    "girder",
-    "brace",
-    "beam",
-    "slab",
-    "wall",
-)
 _TITLE = re.compile(
     r"^(?:(?:chi tiết|mặt cắt|detail of|detail|section)\s+)?(?P<word>"
     + "|".join(re.escape(w) for w in sorted(MEMBER_WORDS, key=len, reverse=True))
@@ -221,8 +254,17 @@ SIZE_KEYWORDS = {
     "size": "bxh",
     "section": "bxh",
 }
+# why a matched mark's size was not compared (marks.json matched[].size_not_compared_reason)
+NO_PLAN_SIZE = "the plan mark has no size"
+NO_SIZE_COLUMN = "the schedule table has no size column"
+SIZE_HEADER_BLOCKED = "the schedule header cells that could name a size column are blocked"
+SIZE_CELLS_BLOCKED = "the schedule size cells are blocked"
+SIZE_NOT_NUMBERS = "the schedule size cells are not numbers"
+SIZE_CELLS_MISSING = "the schedule row has no size cells"
+NO_SCHEDULE_ROW = "matched through detail headings only: no schedule row to compare"
 _SIZE_VALUE = re.compile(r"^\s*(\d+(?:[.,]\d+)?)\s*[xX\u00d7]\s*(\d+(?:[.,]\d+)?)\s*$")
 _NUMBER = re.compile(r"^\s*(\d+(?:[.,]\d+)?)\s*$")
+_INTEGER = re.compile(r"^\s*\d+\s*$")
 
 
 @dataclass
@@ -255,9 +297,24 @@ def mark_key(text: str) -> str:
     return "".join(normalize(text).split())
 
 
+SECTION_LABEL = "section_label"
+
+
+def _shape_reason(m: re.Match[str]) -> str | None:
+    """Why a text of a mark's shape is no member: a strength class, a signed level, a steel profile or a
+    detail label (`callouts.token_reason`), or a section-cut label (letters, a blank, then `n-n` with the same
+    number twice: `mc 1-1`, `MC 2-2`, R-k); else None."""
+    why = token_reason(m["prefix"], m["sep1"], m["n1"], bool(m["n2"]))
+    if why is None and m["sep1"] == " " and m["sep2"] == "-" and int(m["n1"]) == int(m["n2"]):
+        return SECTION_LABEL
+    return why
+
+
 def _mark_from(m: re.Match[str], text: str) -> Mark | None:
     if m["prefix"] in _SPACING_LETTERS:
         return None
+    if _shape_reason(m) is not None:
+        return None  # not a member: see `_shape_reason` (F4a, F4c, R-k)
     mark_text = text[: m.end("suffix")].strip()
     code = _SHEET_CODE.match(mark_text.upper())
     if code and (code["disc"] in ("KT", "KC", "TCXD") or "-" in mark_text or "/" in mark_text):
@@ -270,27 +327,102 @@ def _mark_from(m: re.Match[str], text: str) -> Mark | None:
     return Mark(mark_text, mark_key(mark_text), m["prefix"], numbers, separators, m["suffix"], size)
 
 
-def parse_mark(text: str, case_uncertain: bool = False) -> Mark | None:
-    """The mark when the WHOLE text (one line) is a mark, optionally with a section; else None."""
+def parse_mark(text: str, case_uncertain: bool = False, *, footing_m: bool = False) -> Mark | None:
+    """The mark when the WHOLE text (one line) is a mark, optionally with a section; else None.
+    `footing_m`: the text is a bolt-size `M<n>` of a footing family (callouts.footing_m_labels), so the
+    bolt label the callouts patterns see in it does not stop it."""
     t = unicodedata.normalize("NFC", text).strip()
     m = _MARK.match(t)
-    if m is None or scan_line(t, case_uncertain):
+    # with a length only the mark itself is scanned: callouts reads 'L=4700' as a bar length
+    scanned = t[: m.start("length")] if m is not None and m["length"] else t
+    if m is None or (not footing_m and scan_line(scanned, case_uncertain)):
         return None
     return _mark_from(m, t)
 
 
-def parse_title(text: str, case_uncertain: bool = False) -> tuple[str, Mark] | None:
-    """(member word as written, mark) when the line is '<member word> <mark> ...'; else None."""
+def not_mark_reason(line: str) -> str | None:
+    """Why a whole line that has a member mark's shape is no mark (callouts.token_reason: `grade_token`,
+    `level_token`), else None; the reason a left-out line is reported with."""
+    m = _MARK.match(unicodedata.normalize("NFC", line).strip())
+    return None if m is None else _shape_reason(m)
+
+
+# review C1: a heading may name several marks, 'DẦM D1, D2', 'dẦm ct-1,ct-2', 'DETAIL OF CP1 & CP2'
+_LIST_SEP = re.compile(r"\s*[,&]\s*")
+# a list item: a whole mark (with an optional section); the last one may carry a tail such as '(sl= 07)'
+_LIST_ITEM = re.compile(_BODY + _SIZE + r"(?=$|[\s,;:&(])")
+
+
+def _heading_marks(rest: str, case_uncertain: bool) -> list[Mark] | None:
+    """The marks a heading names after its member word / 'DETAIL OF' (`rest`): None when it starts with no
+    mark; one mark, or a list read as written when every item after a ',' or '&' is a whole mark of the
+    same family (prefix, casefolded); [] for a list in shorthand ('d2-4, 5', 'd2, 3, 4', another family
+    in the list): never expanded, and its first mark is not taken either ('d2, 3' means no mark 'd2'). A
+    word after the comma that has no mark shape ('DẦM D1, TẦNG 2') ends the heading, not a list."""
+    head = _MARK_HEAD.match(rest)
+    if head is None or scan_line(rest[: head.end()], case_uncertain):
+        return None
+    first = _mark_from(head, rest[: head.end()])
+    if first is None:
+        return None
+    marks, pos = [first], head.end()
+    while (sep := _LIST_SEP.match(rest, pos)) is not None:
+        tail = rest[sep.end() :]
+        item = _LIST_ITEM.match(tail)
+        if item is None:
+            if tail[:1].isdigit():
+                return []  # shorthand: a bare number names a mark only by inference
+            break  # prose after the separator
+        mark = None if scan_line(tail[: item.end()], case_uncertain) else _mark_from(item, tail)
+        if mark is None or mark.prefix.casefold() != first.prefix.casefold():
+            return []
+        marks.append(mark)
+        pos = sep.end() + item.end()
+    return marks
+
+
+def heading_families(text: str) -> set[str]:
+    """Families (prefix, upper-cased) of the mark-shaped tokens of a heading line: what a shorthand list
+    may name."""
+    return {m["prefix"].upper() for m in _LIST_ITEM.finditer(text) if m["prefix"] not in _SPACING_LETTERS}
+
+
+def parse_title_marks(text: str, case_uncertain: bool = False) -> tuple[str, list[Mark]] | None:
+    """(member word as written, marks) when the line is '<member word> <mark> ...' (see `_heading_marks`:
+    [] for a list in shorthand); else None."""
     t = " ".join(unicodedata.normalize("NFC", text).split())
     m = _TITLE.match(t)
     if m is None:
         return None
-    rest = m["rest"]
-    head = _MARK_HEAD.match(rest)
-    if head is None or scan_line(rest[: head.end()], case_uncertain):
+    marks = _heading_marks(m["rest"], case_uncertain)
+    return None if marks is None else (m["word"], marks)
+
+
+def parse_title(text: str, case_uncertain: bool = False) -> tuple[str, Mark] | None:
+    """(member word as written, mark) when the line is '<member word> <mark> ...' naming exactly one mark;
+    else None (a heading list is read by `parse_title_marks`)."""
+    found = parse_title_marks(text, case_uncertain)
+    if found is None or len(found[1]) != 1:
         return None
-    mark = _mark_from(head, rest[: head.end()])
-    return None if mark is None else (m["word"], mark)
+    return found[0], found[1][0]
+
+
+# an English detail heading without a member word: 'DETAIL OF CP1', 'DETAIL ON AB-20B' (161)
+_DETAIL_OF = re.compile(r"^detail\s+(?:of|on)\s+(?P<rest>\S.*)$", re.IGNORECASE)
+
+
+def parse_detail_of_marks(text: str, case_uncertain: bool = False) -> list[Mark] | None:
+    """The marks of a 'DETAIL OF <mark> ...' / 'DETAIL ON <mark> ...' line (a list as `_heading_marks`);
+    else None. Only a heading (a second comparison source), never a plan mark: it has no member word."""
+    t = " ".join(unicodedata.normalize("NFC", text).split())
+    m = _DETAIL_OF.match(t)
+    return None if m is None else _heading_marks(m["rest"], case_uncertain)
+
+
+def parse_detail_of(text: str, case_uncertain: bool = False) -> Mark | None:
+    """The mark of a 'DETAIL OF <mark>' line naming exactly one mark; else None."""
+    marks = parse_detail_of_marks(text, case_uncertain)
+    return marks[0] if marks is not None and len(marks) == 1 else None
 
 
 def _header_text(text: str) -> str:
@@ -474,6 +606,7 @@ class _Table:
     header_blocked: bool
     anchor: _Text
     ids: set[str] = field(default_factory=set)
+    inferred: bool = False  # the mark column is the seed's column, not named by an allowed keyword
 
 
 def _column(columns: list[tuple[float, float]], x: float) -> int | None:
@@ -578,12 +711,36 @@ def _grid_table(lines: Lines, seed: _Text, pool: list[_Text], keyword: bool) -> 
                 ((x_lo, b_bottom, x_hi, b_top), sorted(cells, key=lambda c: (c[0] or 0, -c[1].cy, c[1].cx)))
             )
     mark_col = _mark_priority(header)
-    header_blocked = mark_col is None and any(t.block is not None for _, t in header)
-    if keyword and mark_col is None:
+    inferred = mark_col is None and not keyword
+    if mark_col is None:
         mark_col = _column(columns, seed.cx)
+    if mark_col is None:
+        return "the text it was found from lies in no column of the grid"
+    # only the mark column's header can block the table (fix 8); other blocked cells are blocked_columns.
+    # A seed's column is the mark column only when nothing contradicts it (review F2): otherwise the table
+    # is header-blocked as before wave 2 (it is kept only when its header holds blocked text, see
+    # _plausible_blocked_header).
+    header_blocked = inferred and not _inferred_mark_column_ok(header, rows, mark_col)
     table = _Table("line_grid", table_box, columns, header, rows, mark_col, header_blocked, seed)
     table.ids = {t.id for t in inside}
+    table.inferred = inferred
     return table
+
+
+def _inferred_mark_column_ok(
+    header: list[tuple[int | None, _Text]],
+    rows: list[tuple[Box, list[tuple[int | None, _Text]]]],
+    mark_col: int,
+) -> bool:
+    """A keyword-less table may be read on the seed's column only when that column's header cell holds no
+    text at all (an allowed non-keyword word such as 'STT' names another column, a blocked one cannot be
+    read, and on sample 461 a data row sat in the header band) and at most half of its allowed cells are
+    integers (row numbers, quantities)."""
+    if any(c == mark_col for c, _ in header):
+        return False
+    cells = [t for _, cells in rows for c, t in cells if c == mark_col and t.block is None]
+    integers = sum(1 for t in cells if _INTEGER.match(t.entry["display_text"]))
+    return 2 * integers <= len(cells)
 
 
 def _upright(entry: dict[str, Any]) -> bool:
@@ -668,6 +825,26 @@ def _cell_doc(col: int | None, t: _Text) -> dict[str, Any]:
     }
 
 
+def _data_cell_doc(col: int | None, t: _Text) -> dict[str, Any]:
+    """A data cell. When the legacy-font gate blocks its own text, `entry_id` is null and the id is listed in
+    the table's `blocked_cell_entries` (tool wave 4, SEAM-2), so no blocked id is cited outside a `blocked*`
+    list. The working key `_id` keeps the id for the blocked-marks listing; it is removed before output."""
+    doc = _cell_doc(col, t)
+    doc["_id"] = t.id
+    if t.block is not None:
+        doc["entry_id"] = None
+    return doc
+
+
+def _header_cell_doc(col: int | None, t: _Text) -> dict[str, Any]:
+    """A header cell. A blocked one keeps a placeholder: its entry id is null here and listed in the table's
+    `blocked_header_entries`, so no blocked id is cited outside a `blocked*` list (EVAL-4 M2)."""
+    doc = _cell_doc(col, t)
+    if t.block is not None:
+        doc["entry_id"] = None
+    return doc
+
+
 def _round_box(box: Box) -> list[float]:
     return [round(v, 3) for v in box]
 
@@ -682,12 +859,18 @@ class _FileOut:
     tables: list[dict[str, Any]] = field(default_factory=list)
     unparsed: list[dict[str, Any]] = field(default_factory=list)
     blocked: list[dict[str, Any]] = field(default_factory=list)
+    headings: list[dict[str, Any]] = field(default_factory=list)  # internal: detail headings (a4)
+    # internal (review C1): heading lists in shorthand, (entry id, line, families it may name)
+    shorthand: list[tuple[str, str, set[str]]] = field(default_factory=list)
+    blocked_text: bool = False  # internal (review C1): a plain text (no table cell) the gate blocks
+    # texts with a mark's shape that are no mark: (reason, entry id, text); told in a warning
+    not_marks: list[tuple[str, str, str]] = field(default_factory=list)
 
 
 def _space_tolerances(entries: list[dict[str, Any]]) -> dict[str, float]:
     heights: dict[str, list[float]] = {}
     for e in entries:
-        if e["height"] is not None and e["height"] > 0:
+        if is_printed(e) and e["height"] is not None and e["height"] > 0:
             heights.setdefault(e["space"], []).append(e["height"])
     return {space: LINE_TOL * statistics.median(hs) for space, hs in heights.items()}
 
@@ -743,6 +926,8 @@ def _load_lines(
 def _texts(entries: list[dict[str, Any]], claimed: set[str]) -> list[_Text]:
     out = []
     for e in entries:
+        if not is_printed(e):
+            continue  # tool wave 4 (V1): text that does not print is no mark, header or cell
         if e["id"] in claimed or e["entity_type"] == "DIMENSION" or not e["display_text"].strip():
             continue
         if e["height"] is None or e["height"] <= 0:
@@ -787,8 +972,8 @@ def _tables_of_group(
         if isinstance(result, str):
             unparsed.append((anchor, detection, result, None))
             continue
-        marked = sum(1 for _, cells in result.rows if any(c == result.mark_column for c, _ in cells))
-        if marked < 2:
+        marked = [cells for _, cells in result.rows if any(c == result.mark_column for c, _ in cells)]
+        if len(marked) < 2 and not _single_row_table(result, marked):
             unparsed.append(
                 (anchor, detection, "fewer than two data rows with a cell in the mark column", result.bbox)
             )
@@ -823,15 +1008,36 @@ def _tables_of_group(
             continue
         if any(_box_has(result.bbox, a) for a, _, _, _ in unparsed):
             continue  # the keyword pass already judged this table
-        if result.mark_column is not None or (result.header_blocked and _plausible_blocked_header(result)):
+        if not result.inferred or _plausible_blocked_header(result):
             seen_boxes.append(result.bbox)
             tables.append(result)
         # otherwise not a schedule: a plan region between drawn lines, or a table with no keyword (a miss)
     return tables, unparsed
 
 
+def _single_row_table(table: _Table, marked_rows: list[list[tuple[int | None, _Text]]]) -> bool:
+    """A schedule drawn with lines may have ONE data row (161's crane-beam table, CB-01): the grid fixes its
+    structure, so the row counts when its mark cell is allowed, has a mark's shape and the row has a second
+    cell. Without lines (text alignment) two rows are still needed: `_aligned_table` never returns a table
+    with fewer than two rows, so only line grids reach this check."""
+    if len(marked_rows) != 1 or len(marked_rows[0]) < 2:
+        return False
+    cells = [t for c, t in marked_rows[0] if c == table.mark_column]
+    return any(
+        t.block is None
+        and (
+            parse_mark(t.entry["display_text"], t.entry["decode"]["case_uncertain"]) is not None
+            or parse_title(t.entry["display_text"], t.entry["decode"]["case_uncertain"]) is not None
+        )
+        for t in cells
+    )
+
+
 def _plausible_blocked_header(table: _Table) -> bool:
-    """A blocked header row spans at least two columns and holds no mark-shaped text."""
+    """A header row without a keyword that still marks a schedule: it holds blocked text, spans at least
+    two columns and holds no mark-shaped text."""
+    if not any(t.block is not None for _, t in table.header):
+        return False
     cols = {c for c, _ in table.header if c is not None}
     marks_in_header = any(
         t.block is None
@@ -870,7 +1076,12 @@ def _scan_file(
                 sheet_of.update({tid: sh for tid in sh["text_ids"]})
                 order.append(sh)
     order.append(None)
-    claimed = _claimed_text_ids(inv_work, loaded, warnings) | duplicate_ids
+    live = [e for e in entries if e["id"] not in duplicate_ids]
+    left_out = {e_id: DETAIL_LABEL for e_id in detail_label_ids(live, sheet_of)}  # F4c
+    left_out.update(dict.fromkeys(callout_part_ids(entries), CALLOUT_PART))  # F4a: parts of a callout
+    claimed = set(_claimed_text_ids(inv_work, loaded, warnings)) | duplicate_ids | set(left_out)
+    if (warning := not_printed_warning(loaded.rel, entries)) is not None:
+        warnings.append(warning)
     lines_by_space, grid_info = _load_lines(inv_work, loaded, input_dir, warnings)
     texts = _texts(entries, claimed)
     groups: dict[tuple[str | None, str], list[_Text]] = {}
@@ -911,7 +1122,7 @@ def _scan_file(
             for cell in row["cells"]:
                 in_mark_col = cell["column"] is not None and cell["column"] == tdoc["mark_column"]
                 if tdoc["header_blocked"]:
-                    entry = by_id[cell["entry_id"]]
+                    entry = by_id[cell["_id"]]
                     if meaning_block_reason(entry) is not None:
                         continue  # blocked by its own text: shape unknown
                     if parse_mark(entry["display_text"], entry["decode"]["case_uncertain"]) is None:
@@ -928,61 +1139,197 @@ def _scan_file(
                         "table": "",
                         "_t": t_index,
                         "row": row["index"],
-                        "entry_id": cell["entry_id"],
+                        "entry_id": cell["_id"],
                         "display_text": cell["display_text"],
                         "reason": reason,
                     }
                 )
+    footing = footing_m_labels([t.entry for t in texts], sheet_of)
+    for e in entries:
+        if e["id"] in left_out and is_printed(e) and e["id"] not in duplicate_ids and _has_mark_shape(e):
+            out.not_marks.append(
+                (left_out[e["id"]], e["id"], " ".join(e["display_text"].split())[:LINE_CHARS])
+            )
     for t in texts:
-        if t.id in in_table or t.block is not None:
+        if t.id in in_table:
+            continue
+        if t.block is not None:
+            out.blocked_text = True  # may be a heading naming members of any family (`_mark_sets`)
             continue
         sh = sheet_of.get(t.id)
-        out.plan.extend(_plan_marks(loaded.rel, sh, t.entry))
+        found = _plan_marks(loaded.rel, sh, t.entry, t.id in footing, out.shorthand, out.not_marks)
+        out.plan.extend(found)
+        out.headings.extend(
+            _detail_of_headings(sh, t.entry, {p["display_text"] for p in found}, out.shorthand)
+        )
+    if out.not_marks:
+        warnings.append(_not_marks_warning(loaded.rel, out.not_marks))
+    _read_repeated_titles_as_plan_labels(loaded.rel, out.plan, warnings)
     return out, grid_info
 
 
-def _plan_marks(rel: str, sheet: dict[str, Any] | None, entry: dict[str, Any]) -> list[dict[str, Any]]:
+MAX_NOT_MARK_EXAMPLES = 5
+# one mark as a title-form text this often on a sheet: the sheet's labels, not headings
+MIN_PLAN_LABEL_REPEATS = 3
+# a detail heading carries the number of members it stands for: `(sl= 02)`, `SL: 2`, `số lượng 5 cái`
+_QUANTITY_TAIL = re.compile(r"\bsl\s*[=:]|số\s*lượng")
+
+
+def _read_repeated_titles_as_plan_labels(rel: str, plan: list[dict[str, Any]], warnings: list[str]) -> None:
+    """R-f (290 `dẦm d-n`): a framing plan may label its beams with the member word. A detail title stands
+    once on its sheet (twice for two views), a plan label repeats (`dẦm d-1` six times): when one mark of a
+    family (prefix) appears as a title-form text `MIN_PLAN_LABEL_REPEATS` times on a sheet and no title of
+    that family on the sheet carries a quantity tail (`_QUANTITY_TAIL`: a detail sheet heads one beam with its
+    count and labels its cross-sections with bare titles, 285 KC-17), every title-form text of that family
+    on the sheet is a plan label, so it loses its title form (and the member-word
+    evidence) and is no detail heading. One warning per file counts them per sheet."""
+    groups: dict[tuple[str | None, str], list[dict[str, Any]]] = {}
+    for p in plan:
+        if p["form"] == "title":
+            groups.setdefault((p["sheet"], p["lexical"]["prefix"].casefold()), []).append(p)
+    per_sheet: Counter[str] = Counter()
+    for (sheet, _), docs in groups.items():
+        if max(Counter(d["key"] for d in docs).values()) < MIN_PLAN_LABEL_REPEATS:
+            continue
+        if any(
+            _QUANTITY_TAIL.search(unicodedata.normalize("NFC", d["display_text"]).casefold()) for d in docs
+        ):
+            continue  # a count tail (`(sl= 02)`) makes the family's titles detail headings (285 KC-17)
+        for d in docs:
+            d["form"] = (
+                "with_size" if d["size"] else ("sub_number" if len(d["lexical"]["numbers"]) > 1 else "plain")
+            )
+            d["title_member_word"] = None
+        per_sheet[sheet or "no sheet"] += len(docs)
+    if per_sheet:
+        counts = ", ".join(f"{sheet}: {n} title-form labels" for sheet, n in sorted(per_sheet.items()))
+        warnings.append(
+            f"{rel}: texts with a member word read as plan labels, not detail headings, because a mark of "
+            f"their family repeats on the sheet ({counts})"
+        )
+
+
+def _has_mark_shape(entry: dict[str, Any]) -> bool:
+    """Some line of the entry would be a plan mark (or a member-word title with a mark) but for its source."""
+    cu = entry["decode"]["case_uncertain"]
+    return any(
+        parse_mark(line, cu) is not None or parse_title_marks(line, cu) not in (None, ("", []))
+        for line in entry["display_text"].split("\n")
+        if line.strip()
+    )
+
+
+def _not_marks_warning(rel: str, items: list[tuple[str, str, str]]) -> str:
+    """One warning per file for the texts with a mark's shape that are left out of the plan marks, so none
+    is dropped silently: the count per reason and the first examples with their entry ids."""
+    per_reason = Counter(reason for reason, _, _ in items)
+    counts = ", ".join(f"{reason} {n}" for reason, n in sorted(per_reason.items()))
+    shown = sorted(items, key=lambda item: item[1])[:MAX_NOT_MARK_EXAMPLES]
+    examples = ", ".join(f"'{text}' ({entry_id})" for _, entry_id, text in shown)
+    n = len(items)
+    noun = "text" if n == 1 else "texts"
+    return f"{rel}: {n} {noun} with a mark's shape left out of the plan marks ({counts}); e.g. {examples}"
+
+
+def _detail_of_headings(
+    sheet: dict[str, Any] | None,
+    entry: dict[str, Any],
+    plan_lines: set[str],
+    shorthand: list[tuple[str, str, set[str]]],
+) -> list[dict[str, Any]]:
+    """Detail headings of an entry that are no plan mark ('DETAIL OF CP1', every mark of 'DETAIL OF CP1 &
+    CP2'); title-form plan marks are headings too (`_match_file`). A list in shorthand goes to
+    `shorthand`."""
+    out = []
+    cu = entry["decode"]["case_uncertain"]
+    for line in entry["display_text"].split("\n"):
+        text = " ".join(line.split())[:LINE_CHARS]
+        if not text or text in plan_lines:
+            continue
+        marks = parse_detail_of_marks(line, cu)
+        if marks == []:
+            shorthand.append((entry["id"], text, heading_families(text)))
+        for mark in marks or ():
+            out.append(
+                {
+                    "key": mark.key,
+                    "mark": mark.text,
+                    "structure": mark.structure,
+                    "ref": {
+                        "entry_id": entry["id"],
+                        "sheet": None if sheet is None else sheet["sheet_id"],
+                        "text": text,
+                    },
+                    "confidence": _confidence("medium", entry, ()),
+                }
+            )
+    return out
+
+
+def _plan_marks(
+    rel: str,
+    sheet: dict[str, Any] | None,
+    entry: dict[str, Any],
+    footing_m: bool = False,
+    shorthand: list[tuple[str, str, set[str]]] | None = None,
+    not_marks: list[tuple[str, str, str]] | None = None,
+) -> list[dict[str, Any]]:
+    """Plan marks of an entry, one per line, and one per mark of a title list ('DẦM D1, D2'); a title list
+    in shorthand names no mark and goes to `shorthand`."""
     out = []
     cu = entry["decode"]["case_uncertain"]
     for line in entry["display_text"].split("\n"):
         if not line.strip():
             continue
         title = None
-        mark = parse_mark(line, cu)
+        mark = parse_mark(line, cu, footing_m=footing_m)
+        found_marks = [mark] if mark is not None else []
         if mark is None:
-            found = parse_title(line, cu)
+            found = parse_title_marks(line, cu)
             if found is None:
+                if not_marks is not None and (why := not_mark_reason(line)) is not None:
+                    not_marks.append((why, entry["id"], " ".join(line.split())[:LINE_CHARS]))
                 continue
-            title, mark = found
-        conf = _confidence("medium", entry, ())
-        flags = list(entry["flags"])
-        if cu:
-            flags.append("case_uncertain")
-        doc: dict[str, Any] = {
-            "id": "",
-            "file": rel,
-            "sheet": None if sheet is None else sheet["sheet_id"],
-            "sheet_number": None if sheet is None else printed_number(sheet),
-            "space": entry["space"],
-            "text_ref": {"file": rel, "entry_id": entry["id"]},
-            "display_text": " ".join(line.split())[:LINE_CHARS],
-            "position": {"x": entry["position"]["x"], "y": entry["position"]["y"]},
-            "mark": mark.text,
-            "key": mark.key,
-            "lexical": mark.lexical(),
-            "size": mark.size,
-            "form": "title"
-            if title
-            else ("with_size" if mark.size else ("sub_number" if len(mark.numbers) > 1 else "plain")),
-            "title_member_word": None if title is None else {"word": title, "confidence": conf},
-            "in_callouts": title is None and mark.size is None and member_mark(line, cu) is not None,
-            "confidence": conf,
-            "flags": flags,
-            "provenance": _provenance(rel, sheet, entry),
-        }
-        doc["_structure"] = mark.structure
-        out.append(doc)
+            title, found_marks = found
+            if not found_marks and shorthand is not None:
+                text = " ".join(line.split())[:LINE_CHARS]
+                shorthand.append((entry["id"], text, heading_families(text)))
+        out.extend(_plan_doc(rel, sheet, entry, line, m, title) for m in found_marks)
     return out
+
+
+def _plan_doc(
+    rel: str, sheet: dict[str, Any] | None, entry: dict[str, Any], line: str, mark: Mark, title: str | None
+) -> dict[str, Any]:
+    cu = entry["decode"]["case_uncertain"]
+    conf = _confidence("medium", entry, ())
+    flags = list(entry["flags"])
+    if cu:
+        flags.append("case_uncertain")
+    doc: dict[str, Any] = {
+        "id": "",
+        "file": rel,
+        "sheet": None if sheet is None else sheet["sheet_id"],
+        "sheet_number": None if sheet is None else printed_number(sheet),
+        "space": entry["space"],
+        "text_ref": {"file": rel, "entry_id": entry["id"]},
+        "display_text": " ".join(line.split())[:LINE_CHARS],
+        "position": {"x": entry["position"]["x"], "y": entry["position"]["y"]},
+        "mark": mark.text,
+        "key": mark.key,
+        "lexical": mark.lexical(),
+        "size": mark.size,
+        "form": "title"
+        if title
+        else ("with_size" if mark.size else ("sub_number" if len(mark.numbers) > 1 else "plain")),
+        "title_member_word": None if title is None else {"word": title, "confidence": conf},
+        "in_callouts": title is None and mark.size is None and member_mark(line, cu) is not None,
+        "confidence": conf,
+        "flags": flags,
+        "provenance": _provenance(rel, sheet, entry),
+    }
+    doc["_structure"] = mark.structure
+    return doc
 
 
 def _schedule_mark(cell: dict[str, Any], entry: dict[str, Any]) -> tuple[Mark | None, str]:
@@ -1001,11 +1348,18 @@ def _table_doc(rel: str, sheet: dict[str, Any] | None, space: str, tb: _Table) -
             role = size_role(t.entry["display_text"]) if t.block is None else None
             if col is not None and role is not None and col != tb.mark_column:
                 roles.setdefault(col, role)
-    conf = "low" if tb.header_blocked else _confidence("medium", tb.anchor.entry, ())
+    conf = "low" if tb.header_blocked or tb.inferred else _confidence("medium", tb.anchor.entry, ())
     header_reasons = sorted({t.block for _, t in tb.header if t.block is not None})
+    ordered_header = sorted(tb.header, key=lambda ct: (ct[1].cx, -ct[1].cy))
+    blocked_columns = [
+        {"column": c, "entry_id": t.id, "reason": t.block}
+        for c, t in ordered_header
+        if t.block is not None and not tb.header_blocked and c is not None and c != tb.mark_column
+    ]
+    size_header_blocked = _blocked_may_name_size(tb, roles, {b["column"] for b in blocked_columns})
     rows = []
     for index, (box, cells) in enumerate(tb.rows, start=1):
-        cell_docs = [_cell_doc(c, t) for c, t in cells]
+        cell_docs = [_data_cell_doc(c, t) for c, t in cells]
         if tb.header_blocked:
             for cd in cell_docs:
                 cd["meaning"] = "blocked"
@@ -1016,8 +1370,8 @@ def _table_doc(rel: str, sheet: dict[str, Any] | None, space: str, tb: _Table) -
                 if cd["column"] != tb.mark_column or cd["meaning"] != "allowed":
                     continue
                 mark, key = _schedule_mark(cd, t.entry)
-                if not key:
-                    continue
+                if not key or (tb.inferred and mark is None):
+                    continue  # no keyword names the column: only a mark-shaped cell is a mark (review F2)
                 marks.append(
                     {
                         "entry_id": t.id,
@@ -1028,13 +1382,15 @@ def _table_doc(rel: str, sheet: dict[str, Any] | None, space: str, tb: _Table) -
                         "_structure": None if mark is None else mark.structure,
                     }
                 )
+        size, size_reason = _row_size(cells, roles, size_header_blocked)
         rows.append(
             {
                 "index": index,
                 "bbox": _round_box(box),
                 "cells": cell_docs,
                 "marks": marks,
-                "size": _row_size(cells, roles),
+                "size": size,
+                "_size_reason": size_reason,
             }
         )
     columns = [
@@ -1046,7 +1402,7 @@ def _table_doc(rel: str, sheet: dict[str, Any] | None, space: str, tb: _Table) -
         }
         for i, (x0, x1) in enumerate(tb.columns)
     ]
-    header = [_cell_doc(c, t) for c, t in sorted(tb.header, key=lambda ct: (ct[1].cx, -ct[1].cy))]
+    header = [_header_cell_doc(c, t) for c, t in ordered_header]
     prov: dict[str, Any] = {
         "file": rel,
         "sheet": sheet_label(sheet),
@@ -1067,6 +1423,9 @@ def _table_doc(rel: str, sheet: dict[str, Any] | None, space: str, tb: _Table) -
         "anchor_entry_id": tb.anchor.id,
         "header_blocked": tb.header_blocked,
         "header_block_reasons": header_reasons if tb.header_blocked else [],
+        "blocked_columns": blocked_columns,
+        "blocked_header_entries": sorted(t.id for _, t in ordered_header if t.block is not None),
+        "blocked_cell_entries": sorted(t.id for _, cells in tb.rows for _, t in cells if t.block is not None),
         "header": header,
         "columns": columns,
         "mark_column": None if tb.header_blocked else tb.mark_column,
@@ -1076,34 +1435,98 @@ def _table_doc(rel: str, sheet: dict[str, Any] | None, space: str, tb: _Table) -
     }
 
 
-def _row_size(cells: list[tuple[int | None, _Text]], roles: dict[int, str]) -> dict[str, Any] | None:
+def _blocked_may_name_size(tb: _Table, roles: dict[int, str], blocked: set[int]) -> bool:
+    """True when the blocked header cells could name the size column(s) the readable header lacks: a
+    blocked column whose readable cells are `b x h` values gives both, one whose readable cells are numbers
+    gives one of b / h, one with no readable cell may give anything (review F2 item 3). Read only when the
+    readable header names no complete size (`_row_size`)."""
+    named = set(roles.values())
+    singles = 0
+    for col in blocked:
+        texts = [
+            " ".join(t.entry["display_text"].split())
+            for _, cells in tb.rows
+            for c, t in cells
+            if c == col and t.block is None
+        ]
+        if not texts or any(_SIZE_VALUE.match(x) for x in texts):
+            return True
+        singles += any(_NUMBER.match(x) for x in texts)
+    return singles >= len({"b", "h"} - named)
+
+
+def _row_size(
+    cells: list[tuple[int | None, _Text]], roles: dict[int, str], header_cells_blocked: bool
+) -> tuple[dict[str, Any] | None, str | None]:
+    """The row's (b, h) from its size columns, else None and why (a SIZE_* reason). `header_cells_blocked`:
+    blocked header cells may name the missing size column (`_blocked_may_name_size`)."""
+    named = set(roles.values())
+    if "bxh" not in named and not {"b", "h"} <= named:
+        return None, SIZE_HEADER_BLOCKED if header_cells_blocked else NO_SIZE_COLUMN
     found: dict[str, tuple[int | float, str]] = {}
+    blocked = unreadable = False
     for col, t in cells:
         role = roles.get(col) if col is not None else None
-        if role is None or t.block is not None:
+        if role is None:
+            continue
+        if t.block is not None:
+            blocked = True
             continue
         text = " ".join(t.entry["display_text"].split())
-        if role == "bxh":
-            m = _SIZE_VALUE.match(text)
-            if m:
-                found.setdefault("b", (_num(m[1]), t.id))
-                found.setdefault("h", (_num(m[2]), t.id))
+        m = (_SIZE_VALUE if role == "bxh" else _NUMBER).match(text)
+        if m is None:
+            unreadable = True
+        elif role == "bxh":
+            found.setdefault("b", (_num(m[1]), t.id))
+            found.setdefault("h", (_num(m[2]), t.id))
         else:
-            m = _NUMBER.match(text)
-            if m:
-                found.setdefault(role, (_num(m[1]), t.id))
+            found.setdefault(role, (_num(m[1]), t.id))
     if "b" not in found or "h" not in found:
-        return None
-    return {"b": found["b"][0], "h": found["h"][0], "entry_ids": sorted({found["b"][1], found["h"][1]})}
+        if blocked:
+            return None, SIZE_CELLS_BLOCKED
+        return None, SIZE_NOT_NUMBERS if unreadable else SIZE_CELLS_MISSING
+    size = {"b": found["b"][0], "h": found["h"][0], "entry_ids": sorted({found["b"][1], found["h"][1]})}
+    return size, None
 
 
 # --- matching -----------------------------------------------------------------------------------------
 
 
-def _match_file(file: str, plan: list[dict[str, Any]], tables: list[dict[str, Any]]) -> dict[str, Any]:
+def _match_file(
+    file: str, plan: list[dict[str, Any]], tables: list[dict[str, Any]], detail_of: list[dict[str, Any]]
+) -> dict[str, Any]:
+    """Plan marks against schedule rows and detail headings (a4). The plan side holds plan marks that are
+    no title; a title-form plan mark ('DẦM D3', 'ĐÀI CỌC ĐC2 (SL= 01)') and a 'DETAIL OF <mark>' line
+    (`detail_of`) are detail headings, the second source. A key with a plan mark and a schedule row or a
+    heading is matched (`compared_with` schedule when a row exists, else detail_heading); a key with a
+    source and no plan mark is schedule_only; a plan mark with neither is plan_only (`compared_with` what
+    it was compared with). The schedule comparison covers the whole file, as before: with a matchable
+    schedule every plan mark without a match is plan_only. The heading comparison covers only the families
+    (prefix, casefolded) that have both a plain plan mark and a heading: a family the heading sweep did not
+    reach (433's footings next to column headings only) or whose plan labels were not read (286's pile
+    caps) is not compared, so its marks are no plan_only / schedule_only finding."""
     plan_by_key: dict[str, list[dict[str, Any]]] = {}
+    heads_by_key: dict[str, list[dict[str, Any]]] = {}
     for p in plan:
-        plan_by_key.setdefault(p["key"], []).append(p)
+        if p["form"] == "title":
+            ref = {"entry_id": p["text_ref"]["entry_id"], "sheet": p["sheet"], "text": p["display_text"]}
+            heads_by_key.setdefault(p["key"], []).append(
+                {
+                    "key": p["key"],
+                    "mark": p["mark"],
+                    "structure": p["_structure"],
+                    "ref": ref,
+                    "confidence": p["confidence"],
+                }
+            )
+        else:
+            plan_by_key.setdefault(p["key"], []).append(p)
+    for h in detail_of:
+        heads_by_key.setdefault(h["key"], []).append(h)
+    # families the heading comparison covers: a plain plan mark and a heading of the same prefix
+    compared = {ps[0]["_structure"][0] for ps in plan_by_key.values()} & {
+        hs[0]["structure"][0] for hs in heads_by_key.values()
+    }
     sched_by_key: dict[str, list[tuple[dict[str, Any], dict[str, Any], dict[str, Any]]]] = {}
     matchable = [t for t in tables if not t["header_blocked"] and t["mark_column"] is not None]
     for t in matchable:
@@ -1114,7 +1537,9 @@ def _match_file(file: str, plan: list[dict[str, Any]], tables: list[dict[str, An
     def first_text(key: str) -> str:
         if key in sched_by_key:
             return sched_by_key[key][0][2]["text"]
-        return plan_by_key[key][0]["mark"]
+        if key in plan_by_key:
+            return plan_by_key[key][0]["mark"]
+        return heads_by_key[key][0]["mark"]
 
     def sched_refs(key: str) -> list[dict[str, Any]]:
         return [
@@ -1122,26 +1547,42 @@ def _match_file(file: str, plan: list[dict[str, Any]], tables: list[dict[str, An
             for t, row, m in sched_by_key[key]
         ]
 
+    def head_refs(key: str) -> dict[str, Any]:
+        hs = heads_by_key.get(key, [])
+        return {"detail_headings": [h["ref"] for h in hs]} if hs else {}
+
     matched, schedule_only, plan_only, conflicts = [], [], [], []
-    for key in sorted(set(plan_by_key) | set(sched_by_key)):
-        ps, ss = plan_by_key.get(key, []), sched_by_key.get(key, [])
-        if ps and ss:
-            conf = _min_conf(*(p["confidence"] for p in ps), *(m["confidence"] for _, _, m in ss))
-            matched.append(
-                {
-                    "key": key,
-                    "mark": first_text(key),
-                    "plan_marks": [p["id"] for p in ps],
-                    "schedule": sched_refs(key),
-                    "confidence": conf,
-                }
+    for key in sorted(set(plan_by_key) | set(sched_by_key) | set(heads_by_key)):
+        ps, ss, hs = plan_by_key.get(key, []), sched_by_key.get(key, []), heads_by_key.get(key, [])
+        source = "schedule" if ss else "detail_heading"
+        if ps and (ss or hs):
+            conf = _min_conf(
+                *(p["confidence"] for p in ps),
+                *(m["confidence"] for _, _, m in ss),
+                *(h["confidence"] for h in hs),
             )
+            match: dict[str, Any] = {
+                "key": key,
+                "mark": first_text(key),
+                "plan_marks": [p["id"] for p in ps],
+                "schedule": sched_refs(key) if ss else [],
+                "confidence": conf,
+                "size_compared": False,
+                "compared_with": source,
+                **head_refs(key),
+            }
+            matched.append(match)
+            row_reasons: set[str] = set()
             for p in ps:
                 if p["size"] is None:
                     continue
                 for t, row, m in ss:
                     size = row["size"]
-                    if size is None or (size["b"], size["h"]) == (p["size"]["b"], p["size"]["h"]):
+                    if size is None:
+                        row_reasons.add(row["_size_reason"])
+                        continue
+                    match["size_compared"] = True
+                    if (size["b"], size["h"]) == (p["size"]["b"], p["size"]["h"]):
                         continue
                     conflicts.append(
                         {
@@ -1157,10 +1598,28 @@ def _match_file(file: str, plan: list[dict[str, Any]], tables: list[dict[str, An
                             "schedule_size": size,
                         }
                     )
-        elif ss:
-            schedule_only.append({"key": key, "mark": first_text(key), "schedule": sched_refs(key)})
-        elif matchable:
-            plan_only.append({"key": key, "mark": first_text(key), "plan_marks": [p["id"] for p in ps]})
+            if not match["size_compared"]:
+                reasons = sorted(row_reasons) if row_reasons else [NO_PLAN_SIZE if ss else NO_SCHEDULE_ROW]
+                match["size_not_compared_reason"] = "; ".join(reasons)
+        elif ss or (hs and hs[0]["structure"][0] in compared):
+            schedule_only.append(
+                {
+                    "key": key,
+                    "mark": first_text(key),
+                    "schedule": sched_refs(key) if ss else [],
+                    "compared_with": source,
+                    **head_refs(key),
+                }
+            )
+        elif ps and (matchable or ps[0]["_structure"][0] in compared):
+            plan_only.append(
+                {
+                    "key": key,
+                    "mark": first_text(key),
+                    "plan_marks": [p["id"] for p in ps],
+                    "compared_with": "schedule" if matchable else "detail_heading",
+                }
+            )
     by_structure: dict[tuple[str, tuple[int, ...], str], set[str]] = {}
     for p in plan:
         by_structure.setdefault(p["_structure"], set()).add(p["key"])
@@ -1186,9 +1645,11 @@ def _match_file(file: str, plan: list[dict[str, Any]], tables: list[dict[str, An
                 ],
             }
         )
+    used = {x["key"] for x in matched + schedule_only}
     return {
         "file": file,
         "schedule_tables": len(matchable),
+        "detail_headings": sum(len(hs) for key, hs in heads_by_key.items() if key in used),
         "matched": matched,
         "schedule_only": schedule_only,
         "plan_only": plan_only,
@@ -1207,6 +1668,12 @@ VARIANT_MESSAGE = (
 SIZE_MESSAGE = (
     "A plan mark with a section in brackets (b x h) and the schedule row of the same mark give different "
     "sizes. Which size is right? Both texts are quoted with their entry ids."
+)
+PREFIX_MESSAGE = (
+    "What does each member mark prefix listed in `subjects` mean in this project (column, beam, slab, "
+    "footing, tie beam, lintel, steel member...)? No standard defines the letters; use the drawing legend or "
+    "the member schedule. A member word in a detail title is evidence, not the answer. Answer with one value "
+    "per prefix, e.g. --value C=column. (research, section 4 and ambiguous #11)"
 )
 UNPARSED_MESSAGE = (
     "A schedule table was found but its rows could not be read reliably (reason per ref). Read it from the "
@@ -1236,11 +1703,48 @@ def _occurrences(
     return sorted(found, key=lambda f: f.split("(", 1)[1])
 
 
+def _prefix_questions(plan: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """One blocking member_mark_prefix_meaning per file over its plan marks: one subject per prefix
+    (upper-cased, as callouts listed them), refs capped per prefix, counts true. The refs' wording differs
+    from the question callouts raised before wave 2, so the two keys never collide."""
+    by_file: dict[str, dict[str, list[dict[str, Any]]]] = {}
+    for p in plan:
+        by_file.setdefault(p["file"], {}).setdefault(p["lexical"]["prefix"].upper(), []).append(p)
+    out = []
+    for file in sorted(by_file):
+        refs: list[dict[str, Any]] = []
+        subjects = []
+        for prefix in sorted(by_file[file]):
+            group = by_file[file][prefix]
+            written = Counter(p["mark"] for p in group)
+            examples = [
+                {"mark": mark, "count": n}
+                for mark, n in sorted(written.items(), key=lambda kv: (-kv[1], kv[0]))[:MAX_EXAMPLES]
+            ]
+            subjects.append({"name": prefix, "count": len(group), "examples": examples})
+            for p in group[:MAX_PREFIX_REFS]:
+                ref = {
+                    "file": file,
+                    "where": f"plan mark prefix {prefix}, text entry {p['text_ref']['entry_id']}",
+                    "found": p["display_text"],
+                }
+                if p["sheet"] is not None:
+                    ref["sheet"] = p["sheet"]
+                refs.append(ref)
+        q = question_group(
+            "member_mark_prefix_meaning", True, PREFIX_MESSAGE, refs, file=file, subjects=subjects
+        )
+        q["count"] = sum(s["count"] for s in subjects)
+        q["truncated"] = len(refs) < q["count"]
+        out.append(q)
+    return out
+
+
 def marks_questions(doc: dict[str, Any]) -> list[dict[str, Any]]:
     """Raw questions of a marks document: one per (code, file). Refs are sorted, so keys are stable."""
     plan_by_id = {p["id"]: p for p in doc["plan_marks"]}
     tables_by_id = {t["id"]: t for t in doc["tables"]}
-    out: list[dict[str, Any]] = []
+    out: list[dict[str, Any]] = _prefix_questions(doc["plan_marks"])
     for match in doc["matching"]:
         file = match["file"]
         if match["notation_variants"]:
@@ -1307,10 +1811,17 @@ def marks_questions(doc: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def question_counts(questions: list[dict[str, Any]]) -> dict[str, int]:
-    """Per code, how many things are asked (variant groups, conflicts, unparsed tables)."""
+    """Per code, how many things are asked (variant groups, conflicts, unparsed tables; for prefixes the
+    number of distinct prefixes over the project, as callouts counted them)."""
     counts: Counter[str] = Counter()
+    prefixes: set[str] = set()
     for q in questions:
-        counts[q["code"]] += q["count"]
+        if q["code"] == "member_mark_prefix_meaning":
+            prefixes.update(s["name"] for s in q["subjects"])
+        else:
+            counts[q["code"]] += q["count"]
+    if prefixes:
+        counts["member_mark_prefix_meaning"] = len(prefixes)
     return dict(sorted(counts.items()))
 
 
@@ -1340,6 +1851,9 @@ def extract_marks(
     tables: list[dict[str, Any]] = []
     unparsed: list[dict[str, Any]] = []
     blocked: list[dict[str, Any]] = []
+    headings: dict[str, list[dict[str, Any]]] = {}
+    shorthand: dict[str, set[str]] = {}  # file -> families a heading list in shorthand may name
+    blocked_text: set[str] = set()  # files with a plain text the gate blocks
     for row in sorted(inv.doc["files"], key=lambda r: r["path"]):
         if row["format"] not in ("dwg", "dxf"):
             continue
@@ -1375,22 +1889,48 @@ def extract_marks(
         for b in out.blocked:
             b["table"] = out.tables[b.pop("_t")]["id"]
         plan.extend(out.plan)
+        headings[loaded.rel] = out.headings
+        shorthand[loaded.rel] = set()
+        for entry_id, text, families in out.shorthand:
+            shorthand[loaded.rel] |= families
+            warnings.append(
+                f"{loaded.rel}: {entry_id} '{text}': a heading list in shorthand (not every item is a whole "
+                f"mark of one family) is not expanded and names no mark; mark sets not complete: "
+                f"{', '.join(sorted(families))}"
+            )
+        if out.blocked_text:
+            blocked_text.add(loaded.rel)
         tables.extend(out.tables)
         unparsed.extend(out.unparsed)
         blocked.extend(out.blocked)
     for n, p in enumerate(plan, start=1):
         p["id"] = f"P{n:06d}"
     matching = []
+    mark_sets: list[dict[str, Any]] = []
     for f in files:
         if f["status"] != "scanned":
             continue
         mine_p = [p for p in plan if p["file"] == f["path"]]
         mine_t = [t for t in tables if t["file"] == f["path"]]
-        matching.append(_match_file(f["path"], mine_p, mine_t))
+        match = _match_file(f["path"], mine_p, mine_t, headings.get(f["path"], []))
+        matching.append(match)
+        uncertain = _may_hide_rows(f, mine_t) or f["path"] in blocked_text
+        mark_sets += _mark_sets(
+            f["path"],
+            mine_p,
+            mine_t,
+            headings.get(f["path"], []),
+            match,
+            uncertain,
+            shorthand.get(f["path"], set()),
+        )
     for p in plan:
         p.pop("_structure", None)
     for t in tables:
         for row in t["rows"]:
+            row.pop("_size_reason", None)
+            for cell in row["cells"]:
+                cell.pop("_id", None)
             for m in row["marks"]:
                 m.pop("_structure", None)
     doc: dict[str, Any] = {
@@ -1411,7 +1951,81 @@ def extract_marks(
     }
     doc["question_counts"] = question_counts(marks_questions(doc))
     doc["summary"] = _summary(doc)
+    doc["summary"]["mark_sets"] = mark_sets
     return _check(doc)
+
+
+SET_SOURCES = ("schedule", "detail_heading", "plan_marks")
+
+
+def _may_hide_rows(info: dict[str, Any], tables: list[dict[str, Any]]) -> bool:
+    """The file has a table whose rows were not read: an unparsed table, a header-blocked table or a
+    blocked mark. Such rows may belong to any family, so no mark set of the file is complete."""
+    return bool(info["unparsed_tables"] or info["blocked_marks"]) or any(t["header_blocked"] for t in tables)
+
+
+def _mark_sets(
+    file: str,
+    plan: list[dict[str, Any]],
+    tables: list[dict[str, Any]],
+    detail_of: list[dict[str, Any]],
+    match: dict[str, Any],
+    uncertain: bool,
+    shorthand: set[str],
+) -> list[dict[str, Any]]:
+    """W6: one set per mark family (prefix, upper-cased as in member_mark_prefix_meaning) of the file, for
+    the report to copy. `members`: one entry per key (the first text met: plan marks and titles in scan
+    order, then DETAIL OF headings, then schedule cells), in natural order (numbers as integers, then
+    suffix); a gap stays a gap. `source`: where the members come from. `complete` is true only when
+    (review C1) a parsed schedule lists the family, or its detail headings and its plain plan marks name
+    the same keys (a detail sweep lists the drawn details, not every member: headings alone never
+    complete a family), AND nothing says the list may be short: no plan mark of the family is plan_only,
+    the family has no notation variant and no heading list in shorthand (`shorthand`: families such a
+    list may name), and the file has no unparsed table, header-blocked table, blocked mark or blocked
+    plain text (`uncertain`: those may hide rows or headings of any family). Otherwise the report writes
+    'ít nhất' (at least)."""
+    found: dict[str, dict[str, tuple[str, tuple[str, tuple[int, ...], str], str]]] = {}
+    keys_by: dict[tuple[str, str], set[str]] = {}  # (family, source) -> keys
+
+    def add(structure: tuple[str, tuple[int, ...], str], key: str, text: str, source: str) -> None:
+        family = structure[0].upper()
+        found.setdefault(family, {}).setdefault(key, (text, structure, source))
+        sources.setdefault(family, set()).add(source)
+        keys_by.setdefault((family, source), set()).add(key)
+
+    sources: dict[str, set[str]] = {}
+    for p in plan:
+        add(p["_structure"], p["key"], p["mark"], "detail_heading" if p["form"] == "title" else "plan_marks")
+    for h in detail_of:
+        add(h["structure"], h["key"], h["mark"], "detail_heading")
+    for t in tables:
+        if t["header_blocked"] or t["mark_column"] is None:
+            continue
+        for row in t["rows"]:
+            for m in row["marks"]:
+                if m["_structure"] is not None:
+                    add(m["_structure"], m["key"], m["text"], "schedule")
+    plan_only = {x["key"] for x in match["plan_only"]}
+    variant_families = {v["structure"]["prefix"].upper() for v in match["notation_variants"]}
+    out = []
+    for family in sorted(found):
+        members = found[family]
+        heads, plain = keys_by.get((family, "detail_heading")), keys_by.get((family, "plan_marks"))
+        covered = "schedule" in sources[family] or heads == plain  # a family has a source: never both None
+        short = (
+            uncertain or family in variant_families or family in shorthand or bool(plan_only & set(members))
+        )
+        order = sorted(members, key=lambda k: (members[k][1][1], members[k][1][2], k))
+        out.append(
+            {
+                "file": file,
+                "family": family,
+                "members": [members[k][0] for k in order],
+                "complete": covered and not short,
+                "source": [s for s in SET_SOURCES if s in sources[family]],
+            }
+        )
+    return out
 
 
 def _summary(doc: dict[str, Any]) -> dict[str, Any]:
@@ -1453,7 +2067,46 @@ def _summary(doc: dict[str, Any]) -> dict[str, Any]:
     out["files_scanned"] = sum(1 for f in doc["files"] if f["status"] == "scanned")
     out["files_skipped"] = sum(1 for f in doc["files"] if f["status"] == "skipped")
     out["by_file"] = by_file
+    out["by_sheet"] = _by_sheet(doc)
+    matches = [m for f in doc["matching"] for m in f["matched"]]
+    out["size_comparisons"] = {
+        "compared": sum(1 for m in matches if m["size_compared"]),
+        "not_compared": sum(1 for m in matches if not m["size_compared"]),
+        "by_reason": dict(
+            sorted(Counter(m["size_not_compared_reason"] for m in matches if not m["size_compared"]).items())
+        ),
+    }
     return out
+
+
+_SHEET_COUNTS = ("plan_marks", "tables", "header_blocked_tables", "rows", "unparsed_tables", "blocked_marks")
+
+
+def _by_sheet(doc: dict[str, Any]) -> list[dict[str, Any]]:
+    """Counts per (file, detector sheet); sheet None = on no sheet. Only sheets with something to count."""
+    rows: dict[tuple[str, str | None], dict[str, Any]] = {}
+
+    def row(file: str, sheet: str | None, number: dict[str, str] | None) -> dict[str, Any]:
+        found = rows.get((file, sheet))
+        if found is None:
+            found = rows[(file, sheet)] = {"file": file, "sheet": sheet, "sheet_number": number}
+            found.update(dict.fromkeys(_SHEET_COUNTS, 0))
+        return found
+
+    for p in doc["plan_marks"]:
+        row(p["file"], p["sheet"], p["sheet_number"])["plan_marks"] += 1
+    tables = {t["id"]: t for t in doc["tables"]}
+    for t in doc["tables"]:
+        r = row(t["file"], t["sheet"], t["sheet_number"])
+        r["tables"] += 1
+        r["header_blocked_tables"] += t["header_blocked"]
+        r["rows"] += len(t["rows"])
+    for u in doc["unparsed_tables"]:
+        row(u["file"], u["sheet"], u["sheet_number"])["unparsed_tables"] += 1
+    for b in doc["blocked_marks"]:
+        t = tables[b["table"]]
+        row(t["file"], t["sheet"], t["sheet_number"])["blocked_marks"] += 1
+    return [rows[k] for k in sorted(rows, key=lambda k: (k[0], k[1] is None, k[1] or ""))]
 
 
 @dataclass
@@ -1504,7 +2157,7 @@ def run_marks(
     s = doc["summary"]
     summary = {
         "project_id": doc["project_id"],
-        **{k: v for k, v in s.items() if k != "by_file"},
+        **{k: v for k, v in s.items() if k not in ("by_file", "by_sheet")},
         **qdoc["summary"],
         "stale_answers": ledger.stale_answers(),
         "warnings": doc["warnings"],

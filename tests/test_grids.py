@@ -212,6 +212,143 @@ def test_bubbles_at_both_ends_make_one_axis(tmp_path):
     assert fam["proposal"]["coordinates"] == "0 2*6000"
 
 
+def _arc_grid(msp, start: float, end: float, scale: float = 1.0, mirror: bool = False):
+    """The 285/286 bubble (block SADF): an ARC whose sweep is a hair short of 360 degrees, off the block's
+    base point, in a block inserted at a uniform scale (mirrored: x scale negative), the label a loose
+    TEXT at its centre."""
+    blk = msp.doc.blocks.new("SADF")
+    off = (187.5, 250.0)  # the arc centre in the block, as in SADF
+    blk.add_arc(off, R / scale, start, end)
+    blk.add_line((off[0], off[1] + 1.5 * R / scale), (off[0], off[1] + 2 * R / scale))  # cross-hair tick
+    sx = -scale if mirror else scale
+
+    def bubble(c: tuple[float, float], label: str) -> None:
+        insert = (c[0] - sx * off[0], c[1] - scale * off[1])
+        msp.add_blockref("SADF", insert, dxfattribs={"xscale": sx, "yscale": scale})
+        msp.add_text(label, height=TH).set_placement(c, align=TextEntityAlignment.MIDDLE_CENTER)
+
+    for x, label in ((0.0, "1"), (6000.0, "2"), (12000.0, "3")):
+        msp.add_line((x, 0), (x, 12000))
+        bubble((x, -R), label)
+    for y, label in ((2000.0, "a"), (8000.0, "b")):
+        msp.add_line((-2000, y), (14000, y))
+        bubble((-2000 - R, y), label)
+
+
+@pytest.mark.parametrize(
+    ("start", "end", "mirror"),
+    [(90.00006, 90.0000031, False), (90.00006, 90.0000031, True), (90.0, 89.2, False), (90.0, 89.0, False)],
+)
+def test_a_bubble_drawn_as_an_almost_full_arc_is_a_bubble(tmp_path, start, end, mirror):
+    """EVAL-3 285 / 286: the grid bubble is block SADF, an ARC from 90.00006 to 90.0000031 degrees (a full
+    circle short by 0.00006 degrees), not a CIRCLE; 0 of the plan bubbles were found. A gap up to
+    FULL_ARC_GAP_DEG (1 degree) is still a circle; a mirrored insert puts the arc where it is drawn."""
+    result = run(_plain(tmp_path, lambda m: _arc_grid(m, start, end, scale=0.5436755, mirror=mirror)))
+    numbers = family(result, "unknown", "1 2 3")
+    assert numbers["proposal"]["coordinates"] == "0 2*6000"
+    assert family(result, "unknown", "a b")["proposal"]["coordinates"] == "0 6000"
+    assert numbers["axes"][0]["bubbles"][0]["radius"] == pytest.approx(R)
+    assert result["summary"]["bubbles_paired"] == 5
+
+
+@pytest.mark.parametrize(("start", "end"), [(0.0, 90.0), (90.0, 88.5), (45.0, 45.0)])
+def test_an_arc_short_of_a_full_circle_is_not_a_bubble(tmp_path, start, end):
+    """A door swing or any arc that is not (almost) a full circle never holds a grid label."""
+    result = run(_plain(tmp_path, lambda m: _arc_grid(m, start, end)))
+    assert result["summary"]["circles"] == 0 and result["groups"] == []
+
+
+def test_a_partial_ellipse_of_ratio_one_is_not_a_bubble(tmp_path):
+    """An ARC in a block scaled unevenly explodes into an ELLIPSE: only a full one is a circle."""
+
+    def fn(msp):
+        for x, label in ((0.0, "1"), (6000.0, "2"), (12000.0, "3")):
+            msp.add_line((x, 0), (x, 12000))
+            msp.add_ellipse((x, -R), major_axis=(R, 0), ratio=1.0, start_param=0.0, end_param=math.pi / 2)
+            msp.add_text(label, height=TH).set_placement((x, -R), align=TextEntityAlignment.MIDDLE_CENTER)
+        msp.add_ellipse((30000, 0), major_axis=(R, 0), ratio=1.0)  # a full one still counts
+        msp.add_arc((50000, 0), 0.0, 90.00006, 90.0000031)  # a point, not a circle
+
+    result = run(_plain(tmp_path, fn))
+    assert result["summary"]["circles"] == 1 and result["groups"] == []
+
+
+def _through_grid(msp, top: bool = True, gap: float = 15000.0, top_labels: tuple[str, ...] = ("1", "2", "3")):
+    """The 286 model#05 plan: every grid line runs from frame edge to frame edge, through the bubbles at both
+    of its ends, so no line END lies near a bubble."""
+    for x, label, other in zip((0.0, 3400.0, 7380.0), ("1", "2", "3"), top_labels, strict=True):
+        msp.add_line((x, -8000), (x, gap + 8000))
+        _bubble(msp, (x, 0), label)
+        if top:
+            _bubble(msp, (x, gap), other)
+    for y, label in ((2000.0, "A"), (6840.0, "B"), (11030.0, "C")):
+        msp.add_line((-9000, y), (16000, y))
+        _bubble(msp, (-3000, y), label)
+        if top:
+            _bubble(msp, (gap - 5000, y), label)
+
+
+def test_a_grid_line_through_two_bubbles_of_one_label_is_an_axis(tmp_path):
+    """EVAL-3 286 model#05: 1-2-3 = 3400/3980 and A-B-C = 4840/4190 were missed (lines drawn through)."""
+    result = run(_plain(tmp_path, _through_grid))
+    numbers = family(result, "unknown", "1 2 3")
+    assert numbers["proposal"]["coordinates"] == "0 3400 3980"
+    assert family(result, "unknown", "A B C")["proposal"]["coordinates"] == "0 4840 4190"
+    assert [len(a["bubbles"]) for a in numbers["axes"]] == [2, 2, 2]
+    assert {a["pairing"] for a in numbers["axes"]} == {"line"}
+    assert result["unpaired_bubbles"]["count"] == 0
+
+
+def test_the_longest_line_through_both_bubbles_is_the_axis(tmp_path):
+    def fn(msp):
+        _through_grid(msp)
+        msp.add_line((0, -5000), (0, 20000))  # a shorter line through the same two bubbles
+
+    result = run(_plain(tmp_path, fn))
+    axis = family(result, "unknown", "1 2 3")["axes"][0]
+    assert (axis["line"]["start"], axis["line"]["end"]) == ([0.0, -8000.0], [0.0, 23000.0])
+
+
+def test_one_bubble_on_a_line_that_runs_through_it_is_not_an_axis(tmp_path):
+    """A long line through a single bubble (a wall through a mark) proves nothing: both ends are needed. A
+    bubble of the same label beside the line (parallel offset), or past the line's end, is not its other
+    end."""
+
+    def fn(msp):
+        _through_grid(msp, top=False)
+        _bubble(msp, (1500, 15000), "1")  # beside line 1, within its length
+        _bubble(msp, (3400, 30000), "2")  # on line 2's extension, 7000 past its end (17.5 radii)
+
+    result = run(_plain(tmp_path, fn))
+    assert result["groups"] == [] and result["unpaired_bubbles"]["count"] == 8
+
+
+def test_bubbles_of_two_labels_on_one_line_are_not_an_axis(tmp_path):
+    result = run(_plain(tmp_path, lambda m: _through_grid(m, top_labels=("7", "8", "9"))))
+    assert not [f for f in families(result, "unknown") if f["proposal"] and "1" in f["proposal"]["labels"]]
+    assert family(result, "unknown", "A B C")["proposal"]["coordinates"] == "0 4840 4190"
+
+
+def test_a_bubble_ends_one_axis_only(tmp_path):
+    """The top bubble of axis 1 also sits on a long horizontal line through another '1' bubble: that line
+    does not take it again."""
+
+    def fn(msp):
+        _through_grid(msp)
+        msp.add_line((-9000, 15000), (40000, 15000))
+        _bubble(msp, (30000, 15000), "1")
+
+    result = run(_plain(tmp_path, fn))
+    assert [len(a["bubbles"]) for a in family(result, "unknown", "1 2 3")["axes"]] == [2, 2, 2]
+    assert [b["center"] for b in result["unpaired_bubbles"]["listed"]] == [[30000.0, 15000.0]]
+
+
+def test_two_bubbles_of_one_label_too_close_on_a_line_are_not_an_axis(tmp_path):
+    """Two same-label bubbles closer than MIN_AXIS_LENGTH radii on one long line are not an axis's ends."""
+    result = run(_plain(tmp_path, lambda m: _through_grid(m, gap=8 * R)))
+    assert result["groups"] == [] and result["unpaired_bubbles"]["count"] == 12
+
+
 def test_numbered_circle_on_a_short_leader_is_not_an_axis(tmp_path):
     def fn(msp):
         _simple_grid(msp)
@@ -455,6 +592,42 @@ def test_label_pattern(label, ok):
     assert bool(_LABEL_RE.match(label)) is ok
 
 
+def test_a_label_the_legacy_font_gate_blocks_makes_no_axis_and_is_listed(tmp_path):
+    # review of tool wave 2 (F1 item 3): grids took labels from blocked text. In a TCVN3 style '4/g14' and
+    # '2/G20' are rebar callouts written in ASCII ('legacy_ascii_suspect'), not sub-axes; '1/A' stays one.
+    def fn(msp):
+        msp.doc.styles.add(".VnTime", font="vntime.ttf")
+        for x, label in ((0.0, "1"), (6000.0, "1/A"), (12000.0, "4/g14"), (18000.0, "2/G20")):
+            msp.add_line((x, 0), (x, 12000))
+            msp.add_circle((x, -R), R)
+            msp.add_text(label, height=TH, dxfattribs={"style": ".VnTime"}).set_placement(
+                (x, -R), align=TextEntityAlignment.MIDDLE_CENTER
+            )
+        for y, label in ((2000.0, "A"), (8000.0, "B")):
+            msp.add_line((-2000, y), (20000, y))
+            _bubble(msp, (-2000 - R, y), label)
+
+    result = run(_plain(tmp_path, fn))
+    labels = [a["label"]["value"] for f in _all_families(result) for a in f["axes"] if a["label"]]
+    assert "1/A" in labels and "4/g14" not in labels and "2/G20" not in labels
+    blocked = result["blocked_candidates"]
+    assert [(b["value_text"], b["reason"]) for b in blocked] == [
+        ("4/g14", "legacy_ascii_suspect"),
+        ("2/G20", "legacy_ascii_suspect"),
+    ]
+    assert all(b["entry_id"].startswith("T") and b["sheet"] == "unknown" for b in blocked)
+    assert result["summary"]["blocked_candidates"] == 2
+    # a circle holding only a blocked label is neither a bubble, nor 'other text', nor unpaired
+    assert result["summary"]["bubbles_labelled"] == 4 and result["summary"]["bubbles_other_text"] == 0
+    assert result["unpaired_bubbles"]["count"] == 0
+    # its line ends in a bubble whose label cannot be read: asked as a missing label, never used (the line
+    # at 18000 is beyond the 1.5-spacing reach of the unlabelled-line check)
+    fam = family(result, "unknown", "1 1/A")
+    assert [(u["offset"], u["empty_bubble"]) for u in fam["unlabelled_lines"]] == [(12000.0, True)]
+    assert len(questions(result, "grid_label_missing")) == 1 and not questions(result, "grid_axis_unlabelled")
+    assert all("4/g14" not in q["found"] and "2/G20" not in q["found"] for q in result["questions"])
+
+
 def test_suffix_labels_are_axes_in_order(tmp_path):
     result = run(
         _plain(
@@ -535,3 +708,65 @@ def test_question_counts_are_true_counts_when_the_list_is_capped(tmp_path, monke
 
 def test_example_is_valid(example):
     assert validate("grids", example("grids")) == []
+
+
+# --- families a question cites (tool wave 2, fix 5b) ------------------------------------------------
+
+
+def _doc(*axes_per_family: int) -> dict[str, Any]:
+    """A grids document reduced to what question_families reads: families F001.. with n axes each."""
+    fams = [{"family_id": f"F{k:03d}", "axes": [{}] * n} for k, n in enumerate(axes_per_family, start=1)]
+    return {
+        "groups": [{"group_id": "V001", "families": fams[:2]}, {"group_id": "V002", "families": fams[2:]}]
+    }
+
+
+def _q(code: str, where: str) -> dict[str, Any]:
+    return {"code": code, "blocking": True, "message": "m", "where": where, "found": "f"}
+
+
+@pytest.mark.parametrize(
+    ("code", "where", "families"),
+    [
+        ("grid_label_duplicate", "V001/F001", ["F001"]),
+        ("grid_axis_not_parallel", "V001/F002 axis 3", ["F002"]),
+        ("grid_label_missing", "V002/F003 line 1A2", ["F003"]),
+        ("grid_dimension_override_mismatch", "V002/F003 dimension 2F", ["F003"]),
+        ("grid_non_orthogonal", "V001/F001,F002", ["F001", "F002"]),
+        (
+            "grid_spacing_cross_sheet_mismatch",
+            "V002/F003 (model#02) vs V001/F001 (model#01)",
+            ["F001", "F003"],
+        ),
+        ("grid_scale_differs", "V001/F002 vs V002/F003", ["F002", "F003"]),
+        # every family of two or more axes (the where lists them with listed(), which truncates)
+        ("grid_family_axis_assignment", "F001, F002 (+1 more)", ["F001", "F002", "F003"]),
+        ("grid_gate1_confirmation", "F001, F002 (+1 more)", ["F001", "F002", "F003"]),
+        # no family: before families exist, or about the whole file
+        ("grid_axis_label_conflict", "line 1A2 on layer 'S-GRID'", None),
+        ("grid_none_found", "plans/F001.dxf", None),
+        ("grid_units_doubt", "header $INSUNITS", None),
+        ("level_single_occurrence", "V001/F001", None),  # not a grids code
+        ("grid_label_duplicate", "V001/F009", None),  # a family the document does not have
+    ],
+)
+def test_question_families_reads_its_own_where_formats(code, where, families):
+    assert grids_mod.question_families(_q(code, where), _doc(3, 4, 2, 1)) == families
+
+
+def test_every_grids_question_code_is_classified_for_its_families():
+    """A new grids question code must say whether its where cites families (else lifecycle never closes it,
+    silently)."""
+    import re
+
+    source = Path(grids_mod.__file__).read_text(encoding="utf-8")
+    raised = set(re.findall(r'ctx\.ask\(\s*"(grid_[a-z0-9_]+)"', source))
+    without = {"grid_none_found", "grid_units_doubt"}  # about the whole file
+    assert raised == grids_mod.FAMILY_WHERE_CODES | grids_mod.ALL_FAMILIES_CODES | without
+
+
+def test_every_grids_question_cites_only_families_of_its_document(tmp_path):
+    result = run(_plain(tmp_path, lambda m: _rotated(m, -0.5, -0.5)))
+    ids = {f["family_id"] for g in result["groups"] for f in g["families"]}
+    cited = [grids_mod.question_families(q, result) for q in result["questions"]]
+    assert any(cited) and all(c is None or set(c) <= ids for c in cited)

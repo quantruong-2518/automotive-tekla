@@ -56,8 +56,32 @@ PRODUCER_CODES = (  # noqa: SIM905
     "level_decimals_nonstandard level_name_conflict level_value_out_of_range level_negative_storey "
     "level_single_occurrence "
     "callout_ambiguous grade_legacy_mapping member_mark_prefix_meaning "
-    "grid_system_select grid_system_conflict grid_system_units_unconfirmed grid_system_axis_unassigned"
+    "grid_system_select grid_system_conflict grid_system_units_unconfirmed grid_system_axis_unassigned "
+    "file_set_relation text_visibility_uncertain "
+    # tool wave 3 (raised once packages S, M, T and G land)
+    "sheet_number_gap callout_unparsed legacy_ascii_text grid_system_missing grid_answer_contradicts_drawing"
 ).split()
+
+
+def test_wave3_codes_are_shared_constants_with_their_topics():
+    from tekla_harness import questions
+
+    codes = {
+        questions.SHEET_GAP_CODE: "sheets",
+        questions.CALLOUT_UNPARSED_CODE: "marks",
+        questions.LEGACY_ASCII_CODE: "fonts",
+        questions.GRID_MISSING_CODE: "grids",
+        questions.GRID_CONTRADICTS_CODE: "grids",
+    }
+    assert set(codes) == set(PRODUCER_CODES[-5:])
+    assert {c: questions_md_vi.CODES[c][0] for c in codes} == codes
+
+
+def test_grid_system_missing_row_prints_the_answer_keys():
+    from tekla_harness.questions import GRID_ANSWER_KEYS
+
+    need = questions_md_vi.CODES["grid_system_missing"][1]
+    assert all(f"{key}=" in need for key in (*GRID_ANSWER_KEYS, "sheet"))
 
 
 def load(path: Path) -> Any:
@@ -257,7 +281,12 @@ def test_answered_question_moves_to_the_answered_section(world):
     before = sections(render(world))
     assert f"##### {victim['id']} " in before["2"]
     record_answer(
-        world, victim["id"], "Đơn vị là mm, theo kích thước 5000 trên tờ 1", "Kỹ sư A", {"unit": "mm"}
+        world,
+        victim["id"],
+        "Đơn vị là mm, theo kích thước 5000 trên tờ 1",
+        "Kỹ sư A",
+        {"unit": "mm"},
+        role="engineer",
     )
     after = sections(render(world))
     assert f"##### {victim['id']} " not in after["2"] + after["3"]
@@ -269,14 +298,14 @@ def test_answered_question_moves_to_the_answered_section(world):
 def test_multi_line_answer_is_kept_verbatim_in_a_block(world):
     victim = next(q for q in documents(world) if q["code"] == "units_confirm_all")
     text = "dòng một\ndòng hai"
-    record_answer(world, victim["id"], text, "A", {"unit": "mm"})
+    record_answer(world, victim["id"], text, "A", {"unit": "mm"}, role="engineer")
     body = sections(render(world))["4"]
     assert "  dòng một\n  dòng hai\n" in body
 
 
 def test_stale_answers_are_listed_with_their_reason(world):
     victim = next(q for q in documents(world) if q["code"] == "units_confirm_all")
-    record_answer(world, victim["id"], "mm", "A", {"unit": "mm"})
+    record_answer(world, victim["id"], "mm", "A", {"unit": "mm"}, role="engineer")
     answers = load(world / "answers.json")
     answers["answers"][0]["status"] = "stale"
     answers["answers"][0]["stale_reason"] = "the input file was changed since the answer was given"
@@ -305,11 +334,23 @@ def test_answer_templates_name_the_values_answers_py_requires(world):
         axes = iter("XYXY")  # distinct axes: a system's directions cannot take the same one
         for token in re.findall(r"(?<!\[)--value (\S+)", command):
             key, _, value = token.partition("=")
-            sample = {"<mm|cm|m|in|ft>": "mm", "<X|Y>": next(axes), "<meaning>": "column"}.get(value, value)
+            files = ",".join(r["file"] for r in q["refs"])  # file_set_relation: every file of the question
+            sample = {
+                "<mm|cm|m|in|ft>": "mm",
+                "<X|Y>": next(axes),
+                "<meaning>": "column",
+                "<file>,<file>": files,
+            }
+            sample = sample.get(value, value)
             values[key] = sample
         assert check_values(q["code"], values) == [], (command, questions[q["id"]]["code"])
         checked_codes.add(q["code"])
-    assert {"units_confirm_all", "grid_family_axis_assignment", SELECT_CODE} <= checked_codes
+    assert {
+        "units_confirm_all",
+        "grid_family_axis_assignment",
+        SELECT_CODE,
+        "file_set_relation",
+    } <= checked_codes
 
 
 def test_member_mark_prefix_template_names_every_subject():
@@ -485,6 +526,7 @@ def test_a_legacy_answer_to_a_conflict_question_leaves_it_open(world):
             "answer_text": "hai toà nhà khác nhau",
             "values": {},
             "answered_by": "A",
+            "answered_by_role": "engineer",
             "answered_on": "2026-11-07",
             "status": "active",
         }
@@ -509,3 +551,127 @@ def test_contradiction_template_offers_only_the_unit_already_answered():
     command = answer_command(item, "cm")
     assert command.endswith("--value unit=cm") and check_values(item.code, {"unit": "cm"}) == []
     assert "<mm|cm|m|in|ft>" in answer_command(item)  # no unit answered yet: the generic form
+
+
+# --- tool wave 2 seam: file sets, closures, supplements ----------------------------------------------
+
+
+def test_file_set_template_names_the_sets_answers_py_requires():
+    item = Item(
+        id="Q-060", key="f" * 16, code="file_set_relation", blocking=True, file=None,
+        message="m", count=2, truncated=False,
+        refs=[{"file": f, "where": f, "found": "x"} for f in ("a.dxf", "b.dxf")],
+        subjects=None, source="questions.json", producer="intake", topic="convert", answer=None,
+    )  # fmt: skip
+    command = answer_command(item)
+    assert command.endswith("--value set1=<file>,<file> [--value set2=<file>,...]")
+    assert check_values("file_set_relation", {"set1": "a.dxf,b.dxf"}) == []
+    assert questions_md_vi.topic_of("file_set_relation", "intake") == "convert"
+
+
+def test_grid_system_missing_template_names_the_adr_0013_keys():
+    item = Item(
+        id="Q-070", key="d" * 16, code="grid_system_missing", blocking=True, file="a.dxf",
+        message="m", count=1, truncated=False, refs=[{"file": "a.dxf", "where": "a.dxf", "found": "x"}],
+        subjects=None, source="grid-system-questions.json", producer="grid-system", topic="grids",
+        answer=None,
+    )  # fmt: skip
+    command = answer_command(item)
+    assert command.endswith(
+        "--value dir1_labels=<label>,<label>,... --value dir1_spacings=<spacing>,... "
+        "--value dir2_labels=<label>,<label>,... --value dir2_spacings=<spacing>,... "
+        "[--value sheet=<sheet id>]"
+    )
+    contradiction = Item(**{**item.__dict__, "code": "grid_answer_contradicts_drawing"})
+    assert "--value" not in answer_command(contradiction)
+
+
+def first_blocking_open(world: Path) -> dict[str, Any]:
+    return next(q for q in documents(world) if q["blocking"] and q["answer"] is None)
+
+
+def test_a_closed_question_leaves_the_open_sections(world, monkeypatch):
+    from tekla_harness import lifecycle
+    from tekla_harness.questions import Closure
+
+    # a closure keeps the contract (status.check_closures): a structure grid question, closed by rejected
+    # systems, naming the select question the engineer answered
+    select = next(q for q in documents(world) if q["code"] == SELECT_CODE)
+    record_answer(world, select["id"], "S001", "A", role="engineer")
+    target = next(q for q in documents(world) if q["blocking"] and q["code"] == "grid_label_missing")
+    before = render_questions_md(world)
+    for closure, closed in (
+        (Closure(None, "rejected_systems_only"), False),
+        (Closure(select["id"], "rejected_systems_only"), True),
+    ):
+        monkeypatch.setattr(lifecycle, "closures", lambda work, ledger, c=closure: {target["key"]: c})
+        rendered = render_questions_md(world)
+        body = sections(rendered.text)
+        assert (f"##### {target['id']} " in body["2"]) is not closed  # a refused closure leaves it open
+        lines = [ln for ln in body["4"].splitlines() if ln.startswith(f"- {target['id']} ")]
+        assert len(lines) == closed
+        assert rendered.summary["blocking_open"] == before.summary["blocking_open"] - closed
+        assert rendered.summary["blocking_open"] == sum(
+            p["questions"]["blocking_open"] for p in build_status(world)["producers"]
+        )
+    (line,) = lines
+    assert "đã đóng" in line and select["id"] in line and code_span("rejected_systems_only") in line
+
+
+def test_reader_supplements_show_under_their_question(world, monkeypatch):
+    from tekla_harness import supplements
+
+    target = first_blocking_open(world)
+    rows = [
+        {
+            "key": "1" * 16, "target_key": target["key"], "target_id": target["id"],
+            "target_code": target["code"], "target_producer": "intake", "file": None,
+            "file_sha256": None, "sheet": "model#01", "where": "góc phải", "found": "+3.850",
+            "text": "Ghi chú `đơn vị` là mm.", "status": "active",
+        },
+        {
+            "key": "2" * 16, "target_key": target["key"], "target_id": target["id"],
+            "target_code": target["code"], "target_producer": "intake", "file": None,
+            "file_sha256": None, "sheet": None, "where": "rút lại", "found": "",
+            "text": "không dùng", "status": "withdrawn", "withdrawn_reason": "sai",
+        },
+    ]  # fmt: skip
+    monkeypatch.setattr(supplements, "load_supplements", lambda work: rows)
+    body = sections(render(world))["2"]
+    block = re.split(r"\n#{2,5} ", body[body.index(f"##### {target['id']} ") :], maxsplit=1)[0]
+    assert "- **Bổ sung của người đọc:**" in block
+    assert code_span("Ghi chú `đơn vị` là mm.") in block and code_span("góc phải") in block
+    assert "tờ `model#01`" in block
+    assert code_span("rút lại") not in block
+
+
+# --- answer provenance (P3): the printed command names the engineer role -------------------------------
+
+
+ENGINEER_COMMAND = "- **Lệnh trả lời (kỹ sư tự chạy, tác tử không chạy thay):** "
+
+
+def test_every_printed_answer_command_names_the_engineer_role_once_after_by(world):
+    text = render(world)
+    commands = re.findall(re.escape(ENGINEER_COMMAND) + r"`([^`]+)`", text)
+    assert commands and len(commands) == text.count("uv run harness answer")
+    for c in commands:
+        assert c.count("--role") == 1, c
+        assert '--by "..." --role engineer' in c, c
+
+
+def test_a_refused_written_closure_shows_its_question_as_blocking(world):
+    """A non-blocking question whose document carries a closed_by outside the closure contract counts as
+    blocking, in questions.md as in harness status."""
+    doc = load(world / "structure-questions.json")
+    q = next(q for q in doc["questions"] if q["code"] == "grid_family_axis_assignment" and not q["blocking"])
+    assert f"##### {q['id']} " in sections(render(world))["3"]  # non-blocking, open
+    q["closed_by"] = {"question_id": None, "reason": "rejected_systems_only"}
+    (world / "structure-questions.json").write_text(json.dumps(doc), encoding="utf-8")
+    assert load(world / "question-registry.json")["questions"][q["key"]]["blocking"] is False
+    rendered = render_questions_md(world)
+    body = sections(rendered.text)
+    assert f"##### {q['id']} " in body["2"] and f"##### {q['id']} " not in body["3"]
+    assert rendered.summary["blocking_open"] == sum(
+        p["questions"]["blocking_open"] for p in build_status(world)["producers"]
+    )

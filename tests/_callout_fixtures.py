@@ -18,7 +18,15 @@ from ezdxf.filemanagement import readfile
 
 from _dxf_fixtures import build_set
 from tekla_harness.intake import dump_json, run_intake
+from tekla_harness.knowledge import FontEncodingRow, FontEncodingTable
 from tekla_harness.sheets import extract_sheets
+
+# The fixtures need a font whose non-ASCII text is blocked and which carries a proposed knowledge
+# row (vntimeh.shx). They pin this table instead of the shipped `knowledge/font-encodings.csv`, whose
+# rows the engineer approves over time: approving a row must not change what these fixtures test.
+PROPOSED_FONT_TABLE = FontEncodingTable(
+    (FontEncodingRow(2, "vntimeh.shx", "font_file", "tcvn3", None, "proposed", "test row", "tests", "", ""),)
+)
 
 REL = "plans/set.dxf"
 COLUMN_X = 62000.0
@@ -39,7 +47,7 @@ S1_TEXTS = [
     "%%c10",  # diameter sign + number only
     "%%c8a1",  # near miss: spacing needs 2-3 digits
     "A4%%c16",  # glued to a word: no candidate
-    "⌀16",  # diameter sign U+2300 is not in the verified set: no candidate
+    "⌀16",  # U+2300 is not in the verified set (since tool wave 3 an unparsed glyph; blocked in this style)
     "CB300-V",
     "CB400V",
     "CB240-T",
@@ -103,14 +111,16 @@ def build_work(
     styled: list[tuple[str, str]] | None = None,
     s2: list[str] | None = None,
     paper: list[str] | None = None,
+    extra_styles: list[tuple[str, str]] | None = None,
 ) -> Path:
     """Build `base/input` and `base/work`; returns the work folder. The text lists default to the
-    module constants (a smaller set is used to generate the schema examples)."""
+    module constants (a smaller set is used to generate the schema examples). `extra_styles`: (name, font
+    file) added to STYLES."""
     root = base / "input"
     (root / "plans").mkdir(parents=True)
     src = build_set(base, "src.dxf")
     doc = readfile(str(src))
-    for name, font in STYLES:
+    for name, font in STYLES + (extra_styles or []):
         doc.styles.add(name, font=font)
     msp = doc.modelspace()
     y = TOP_Y
@@ -130,7 +140,7 @@ def build_work(
     doc.saveas(root / REL)
     (root / "notes.txt").write_text("not a drawing", encoding="utf-8")
     work = base / "work"
-    run_intake(root, work, "demo-callouts")
+    run_intake(root, work, "demo-callouts", knowledge=PROPOSED_FONT_TABLE)
     write_structure(root, work)
     return work
 

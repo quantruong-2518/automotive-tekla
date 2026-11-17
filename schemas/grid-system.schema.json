@@ -96,7 +96,12 @@
           "systems": { "type": "array", "minItems": 2, "maxItems": 2, "items": { "type": "string", "pattern": "^S[0-9]{3,}$" } },
           "blocking": { "type": "boolean" },
           "closed_by": { "enum": [null, "not_selected", "separate"] },
-          "question_key": { "anyOf": [{ "type": "null" }, { "type": "string", "pattern": "^[0-9a-f]{16}$" }] }
+          "proposed_closed_by": {
+            "enum": ["not_selected", "separate"],
+            "description": "Tool wave 3: what an active grid_system_select answer that the engineer did not give (answered_by_role simulated, or no role) would close this conflict by. It closes nothing: closed_by stays null and blocking is computed without that answer. Absent when no such answer would close it."
+          },
+          "question_key": { "anyOf": [{ "type": "null" }, { "type": "string", "pattern": "^[0-9a-f]{16}$" }] },
+          "question_id": { "anyOf": [{ "type": "null" }, { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/question_id" }], "description": "Registry id of question_key." }
         }
       }
     },
@@ -106,7 +111,18 @@
       "additionalProperties": { "type": "integer", "minimum": 1 },
       "description": "True number of questions per code; `questions` lists at most 100 per code (a warning says so)."
     },
-    "warnings": { "type": "array", "items": { "type": "string" } }
+    "warnings": { "type": "array", "items": { "type": "string" } },
+    "file_sets": {
+      "type": "object",
+      "description": "The intake file_set_relation question: systems are compared only within one set. status pending: not answered (cross-file conflicts are non-blocking until it is); answered: sets as answered; single: one readable drawing file, no question.",
+      "required": ["status", "sets", "question_id"],
+      "additionalProperties": false,
+      "properties": {
+        "status": { "enum": ["pending", "answered", "single"] },
+        "sets": { "anyOf": [{ "type": "null" }, { "type": "array", "items": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } } }] },
+        "question_id": { "anyOf": [{ "type": "null" }, { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/question_id" }] }
+      }
+    }
   },
   "$defs": {
     "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
@@ -136,7 +152,7 @@
         "views": { "type": "integer", "minimum": 0 },
         "families_usable": { "type": "integer", "minimum": 0 },
         "grid_spacing_median": {
-          "description": "Median positive grid spacing over every family of the file's grids document, in drawing units, and how many spacings. Null when the file has no spacing. `harness grid-system` and `harness status` test the engineer's answered unit against it (plausible range 0.5 m to 30 m) next to the dimension median (units_answer_contradicts_evidence). Always written by harness grid-system; absent only in a document from an older run.",
+          "description": "Median positive grid spacing of the file's PLAN systems, in drawing units, and how many spacings (tool wave 4). A system with fewer than two independent views (a key plan, a detail) never decides while the file has a system with two or more; a file whose systems are all single-source takes the median of its systems' medians (each system counts once; `count` is then the total number of spacings of those systems, not the number the median was taken over). Null when the file has no spacing. `harness grid-system` and `harness status` test the engineer's answered unit against it (plausible range 0.5 m to 30 m) next to the dimension median (units_answer_contradicts_evidence). Always written by harness grid-system; absent only in a document from an older run.",
           "anyOf": [
             { "type": "null" },
             {
@@ -155,7 +171,7 @@
               "required": ["status", "unit"],
               "additionalProperties": false,
               "properties": {
-                "status": { "enum": ["answered", "not_answered", "disagree", "invalid", "contradicted"], "description": "contradicted: answered, but the drawing's dimensions contradict the unit and the units_answer_contradicts_evidence question is not answered with it." },
+                "status": { "enum": ["answered", "not_answered", "disagree", "invalid", "contradicted", "proposed_simulated"], "description": "contradicted: answered, but the drawing's dimensions contradict the unit and the units_answer_contradicts_evidence question is not answered with it. proposed_simulated (tool wave 3): the only units answer was not given by the engineer (answered_by_role simulated, or no role); `unit` is that proposal, which converts nothing." },
                 "unit": { "anyOf": [{ "type": "null" }, { "$ref": "#/$defs/unit" }] }
               }
             }
@@ -215,15 +231,15 @@
           "description": "Tekla style in drawing units: '0' then the spacings, equal runs as 'n*d'."
         },
         "unit": { "$ref": "#/$defs/declared_unit" },
-        "rounding_step": { "type": "number", "exclusiveMinimum": 0 },
-        "angle_deg": { "type": "number", "description": "Representative family's line direction in the drawing." },
+        "rounding_step": { "type": ["number", "null"], "exclusiveMinimum": 0, "description": "null only in a system built from an engineer answer (source engineer_answer)." },
+        "angle_deg": { "type": ["number", "null"], "description": "Representative family's line direction in the drawing; null only in a system built from an engineer answer." },
         "max_relative_spread": {
           "type": "number",
           "minimum": 0,
           "description": "Largest relative difference of a contributing family's distance to the representative's (<= drafting tolerance or below half the rounding step)."
         },
-        "families": { "type": "integer", "minimum": 1, "description": "Contributing families of this direction." },
-        "representative": { "$ref": "#/$defs/family_ref" },
+        "families": { "type": "integer", "minimum": 0, "description": "Contributing families of this direction (at least 1 in a detected system; 0 in a system built from an engineer answer)." },
+        "representative": { "anyOf": [{ "type": "null" }, { "$ref": "#/$defs/family_ref" }], "description": "null only in a system built from an engineer answer." },
         "provenance": { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/provenance" },
         "confidence": { "$ref": "#/$defs/confidence" },
         "tekla_axis": { "enum": ["X", "Y", null], "description": "Only from an active grid_family_axis_assignment answer." },
@@ -291,14 +307,29 @@
           "type": "object",
           "required": ["views", "full_views", "partial_views", "independent_views", "sheets", "files", "contributors"],
           "additionalProperties": false,
+          "description": "A detected system has views, full_views, independent_views and sheets of at least 1 and at least one contributor; a system built from an engineer answer has no view (all 0, contributors empty), files 1 and sheets 0 or 1 (the answer's sheet).",
           "properties": {
-            "views": { "type": "integer", "minimum": 1 },
-            "full_views": { "type": "integer", "minimum": 1 },
+            "views": { "type": "integer", "minimum": 0 },
+            "full_views": { "type": "integer", "minimum": 0 },
             "partial_views": { "type": "integer", "minimum": 0 },
-            "independent_views": { "type": "integer", "minimum": 1 },
-            "sheets": { "type": "integer", "minimum": 1, "description": "Distinct (file, sheet) pairs." },
+            "independent_views": { "type": "integer", "minimum": 0 },
+            "sheets": { "type": "integer", "minimum": 0, "description": "Distinct (file, sheet) pairs." },
             "files": { "type": "integer", "minimum": 1 },
-            "contributors": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/contributor" } }
+            "contributors": { "type": "array", "items": { "$ref": "#/$defs/contributor" } }
+          }
+        },
+        "source": {
+          "enum": ["detected", "engineer_answer"],
+          "description": "Tool wave 3 (ADR-0013): detected from the drawing's bubbles, labels and lines (also when absent), or built from an active, structured grid_system_missing answer that the engineer gave (answered_by_role engineer). A simulated or role-less answer builds nothing."
+        },
+        "source_answer": {
+          "type": "object",
+          "description": "Only with source engineer_answer: the answer the system was built from.",
+          "required": ["question_id", "key"],
+          "additionalProperties": false,
+          "properties": {
+            "question_id": { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/question_id" },
+            "key": { "type": "string", "pattern": "^[0-9a-f]{16}$", "description": "Registry key of the answered grid_system_missing question (answers.json key)." }
           }
         },
         "flags": {
@@ -342,14 +373,18 @@
           "properties": {
             "declared": { "$ref": "#/$defs/declared_unit" },
             "answered": { "anyOf": [{ "type": "null" }, { "$ref": "#/$defs/unit" }], "description": "The unit the representative's file answered (the drawing-unit values are in it); null while units are not confirmed." },
-            "status": { "enum": ["confirmed", "not_confirmed"] },
+            "status": {
+              "enum": ["confirmed", "not_confirmed", "proposed_simulated"],
+              "description": "proposed_simulated (tool wave 3): the units rest on an answer the engineer did not give (answered_by_role simulated, or no role); `answered` may name that unit, but nothing is converted (direction mm stays null) and harness status counts it as not confirmed."
+            },
             "reason": {
               "enum": [
                 null,
                 "units not confirmed",
                 "units answers disagree",
                 "units answer contradicted by the drawing",
-                "units answer invalid"
+                "units answer invalid",
+                "units answered by a non-engineer role"
               ]
             }
           }
@@ -359,7 +394,10 @@
           "required": ["status", "reason"],
           "additionalProperties": false,
           "properties": {
-            "status": { "enum": ["answered", "not_answered", "contradictory"] },
+            "status": {
+              "enum": ["answered", "not_answered", "contradictory", "proposed_simulated"],
+              "description": "proposed_simulated (tool wave 3): X/Y rest on an answer the engineer did not give (simulated, or no role); tekla_axis stays null and harness status counts the system as not assigned."
+            },
             "reason": { "type": ["string", "null"] }
           }
         },
@@ -388,15 +426,65 @@
         },
         "note": { "type": "string" },
         "axis_question_key": { "anyOf": [{ "type": "null" }, { "type": "string", "pattern": "^[0-9a-f]{16}$" }], "description": "Registry key of this system's grid_system_axis_unassigned question (raised for every system); `harness status` names its id. Null when the per-code cap dropped the question." }
+      },
+      "if": { "properties": { "source": { "const": "engineer_answer" } }, "required": ["source"] },
+      "then": {
+        "required": ["source_answer"],
+        "properties": {
+          "evidence": {
+            "properties": {
+              "views": { "const": 0 },
+              "full_views": { "const": 0 },
+              "partial_views": { "const": 0 },
+              "independent_views": { "const": 0 },
+              "sheets": { "maximum": 1 },
+              "files": { "const": 1 },
+              "contributors": { "maxItems": 0 }
+            }
+          },
+          "directions": {
+            "items": {
+              "properties": {
+                "families": { "const": 0 },
+                "representative": { "type": "null" },
+                "provenance": { "properties": { "method": { "const": "engineer_answer" } }, "required": ["question_id"] }
+              }
+            }
+          }
+        }
+      },
+      "else": {
+        "not": { "required": ["source_answer"] },
+        "properties": {
+          "evidence": {
+            "properties": {
+              "views": { "minimum": 1 },
+              "full_views": { "minimum": 1 },
+              "independent_views": { "minimum": 1 },
+              "sheets": { "minimum": 1 },
+              "contributors": { "minItems": 1 }
+            }
+          },
+          "directions": {
+            "items": {
+              "properties": {
+                "families": { "minimum": 1 },
+                "representative": { "type": "object" },
+                "rounding_step": { "type": "number" },
+                "angle_deg": { "type": "number" }
+              }
+            }
+          }
+        }
       }
     },
     "question": {
       "type": "object",
-      "description": "Question for the engineer (grids.py shape plus file), numbered in grid-system-questions.json. Codes: grid_system_select (one per project, blocking); grid_system_conflict (one per pair, see `conflicts`); grid_system_axis_unassigned (one per system, always raised so its answer keeps its key: blocking only when the system is selected and not assigned; `found` names the directions dir1, dir2); grid_system_units_unconfirmed (never blocking: the units question to answer is the file's units_confirm_all); units_answer_contradicts_evidence (one per contradicted file, blocking).",
+      "description": "Question for the engineer (grids.py shape plus file), numbered in grid-system-questions.json. Codes: grid_system_select (one per project, blocking); grid_system_conflict (one per pair, see `conflicts`); grid_system_axis_unassigned (one per system, always raised so its answer keeps its key: blocking only when the system is selected and not assigned; `found` names the directions dir1, dir2); grid_system_units_unconfirmed (never blocking: the units question to answer is the file's units_confirm_all); units_answer_contradicts_evidence (one per contradicted file, blocking). Tool wave 3 (ADR-0013): grid_system_missing (one per drawing file that has plan sheets but no usable system, blocking; `found` quotes the bubbles, labels and rejected systems; answered with the dir1_labels / dir1_spacings / dir2_labels / dir2_spacings [/ sheet] values of answers.schema.json, or no_grid=yes alone when the file holds no plan that needs a grid); grid_answer_contradicts_drawing (blocking; one per answered file whose given spacings disagree with linear dimensions at the given axes; quotes both; takes no value).",
       "required": ["code", "blocking", "message", "where", "found"],
       "additionalProperties": false,
       "properties": {
-        "code": { "enum": ["grid_system_select", "grid_system_conflict", "grid_system_units_unconfirmed", "grid_system_axis_unassigned", "units_answer_contradicts_evidence"] },
+        "code": { "enum": ["grid_system_select", "grid_system_conflict", "grid_system_units_unconfirmed", "grid_system_axis_unassigned", "units_answer_contradicts_evidence", "grid_system_missing", "grid_answer_contradicts_drawing"] },
         "blocking": { "type": "boolean" },
         "message": { "type": "string", "minLength": 1 },
         "where": { "type": "string", "minLength": 1 },

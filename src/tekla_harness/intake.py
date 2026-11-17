@@ -5,14 +5,19 @@ One deterministic command for the future `drawing-intake` skill. Writes into the
     read-log.json    every attempt per file (read-log schema)
     inventory.json   one row per file + summary, with the diff against the previous inventory.json of the
                      same work folder (intake schema, kind 'inventory')
-    questions.json   the questions, one per (code, file), with stable key, registry id and answer
-                     (intake schema, kind 'questions'; see questions.py)
+    questions.json   the questions, one per (code, file), or per file and text style for
+                     legacy_ascii_text, with stable key, registry id and answer (intake schema, kind
+                     'questions'; see questions.py)
     question-registry.json  key -> id for the three producers (written by questions.py)
     answers.json            only rewritten when an answer became stale (the file of its question changed
                             or was removed, or the question is no longer raised)
     probe/<path>.json       dxf-probe document of each DXF (native or converted)
     text/<path>.json        text-index document of each DXF that was probed (extract_text)
     converted/<path>.dxf    DXF produced from each DWG
+
+File sets: with two or more readable drawing files, one blocking project-level `file_set_relation` question
+(one ref per file and its sha256) asks which files form one set (one building, one grid); `harness
+grid-system` compares grids only within a set once it is answered.
 
 Units: every probed file gets ONE blocking units question, `units_confirm_all` (answered with a structured
 `unit=`); the probe's units_conflict / units_suspect / units_unknown questions are not asked apart: their
@@ -49,6 +54,7 @@ from tekla_harness.detect import detect_file, iter_input_files
 from tekla_harness.extract_text import extract_text
 from tekla_harness.knowledge import FontEncodingTable, KnowledgeError, default_font_encodings
 from tekla_harness.questions import (
+    FILE_SET_CODE,
     QuestionsError,
     dump_json,
     load_ledger,
@@ -57,9 +63,10 @@ from tekla_harness.questions import (
     questions_document,
     questions_per_file,
 )
-from tekla_harness.read_dxf import probe_dxf
+from tekla_harness.read_dxf import legacy_ascii_questions, probe_dxf, text_visibility_questions
 from tekla_harness.readlog import Attempt, ReadLog, ReadLogError, timed_attempt
 from tekla_harness.schemas import validate
+from tekla_harness.worklock import WorkLockError, work_lock
 
 SCHEMA_VERSION = "0.1"
 MAX_PROBE_REFS = 50  # refs listed per probe or text question group; the true total is always given
@@ -107,6 +114,12 @@ _MESSAGES = {
         "No reader exists yet for these file formats (roadmap), so nothing was extracted from them. "
         "Provide a DXF or DWG of each listed sheet, or wait for the reader."
     ),
+    FILE_SET_CODE: (
+        "These drawing files were all read. Which of them belong together (one building or structure, one "
+        "grid)? Answer with --value set1=a.dwg,b.dwg --value set2=c.dwg, naming every listed file exactly "
+        "once. Grid systems are compared only within one set; until this is answered, grid conflicts "
+        "between files do not block and wait for it."
+    ),
 }
 
 
@@ -142,6 +155,8 @@ class _Entry:
     text_text: str | None = None
     text_summary: dict[str, Any] | None = None
     unknown_by_style: dict[str, tuple[int, str | None]] = field(default_factory=dict)
+    legacy_ascii: list[dict[str, Any]] = field(default_factory=list)  # legacy_ascii_text questions
+    visibility: list[dict[str, Any]] = field(default_factory=list)  # text_visibility_uncertain (tool wave 4)
     read_failure: str | None = None  # supported format that could not be read: why
     failure_stage: str = ""
     no_reader: bool = False
@@ -251,6 +266,8 @@ def _run_text(entry: _Entry, dxf: Path, converter: str, text_dir: Path, knowledg
         return
     entry.text_summary = _text_summary(text)
     entry.unknown_by_style = _unknown_by_style(text)
+    entry.legacy_ascii = legacy_ascii_questions(text, entry.rel, (entry.probe or {}).get("text_styles"))
+    entry.visibility = text_visibility_questions(text, entry.rel)
     if text["status"] == "partial":
         entry.warnings.append(
             f"text index status partial: {text['summary']['errors_total']} entity error(s), "
@@ -476,6 +493,19 @@ def _text_groups(entries: list[_Entry]) -> list[dict[str, Any]]:
     return questions_per_file("encoding_unknown_non_ascii", False, message, refs, MAX_PROBE_REFS)
 
 
+def _legacy_groups(entries: list[_Entry]) -> list[dict[str, Any]]:
+    """legacy_ascii_text (tool wave 3, W3): one non-blocking question per file and text style holding
+    legacy_ascii_suspect entries (read_dxf.legacy_ascii_questions); none for a file whose text index is
+    unreadable."""
+    return [q for e in entries for q in e.legacy_ascii]
+
+
+def _visibility_groups(entries: list[_Entry]) -> list[dict[str, Any]]:
+    """text_visibility_uncertain (tool wave 4, V1): one non-blocking question per file with printed text that
+    may not print (read_dxf.text_visibility_questions); none for a file whose text index is unreadable."""
+    return [q for e in entries for q in e.visibility]
+
+
 def _conversion_groups(entries: list[_Entry]) -> list[dict[str, Any]]:
     empty, errors = [], []
     for e in entries:
@@ -513,10 +543,28 @@ def _failure_groups(entries: list[_Entry]) -> list[dict[str, Any]]:
     )
 
 
+def _file_set_group(entries: list[_Entry]) -> list[dict[str, Any]]:
+    """With two or more readable drawing files (DXF / DWG the probe opened): one blocking project-level
+    file_set_relation question, one ref per file with its sha256. The key hashes every ref, so a file added,
+    removed or changed asks again (the old answer goes stale)."""
+    readable = [e for e in entries if e.fmt in ("dxf", "dwg") and e.probed]
+    if len(readable) < 2:
+        return []
+    refs = [{"file": e.rel, "where": e.rel, "found": f"sha256 {e.info['sha256']}"} for e in readable]
+    return [question_group(FILE_SET_CODE, True, _MESSAGES[FILE_SET_CODE], refs, file=None)]
+
+
 def _questions(entries: list[_Entry]) -> list[dict[str, Any]]:
-    """Raw questions (no id, key or answer yet), one per code, blocking flag and file, in document order."""
-    groups = _units_group(entries) + _probe_groups(entries) + _text_groups(entries)
-    return groups + _conversion_groups(entries) + _failure_groups(entries)
+    """Raw questions (no id, key or answer yet), one per code, blocking flag and file, in document order;
+    the project-level file_set_relation last, so it never shifts a file question's new id."""
+    groups = (
+        _units_group(entries)
+        + _probe_groups(entries)
+        + _text_groups(entries)
+        + _legacy_groups(entries)
+        + _visibility_groups(entries)
+    )
+    return groups + _conversion_groups(entries) + _failure_groups(entries) + _file_set_group(entries)
 
 
 def _read_log(project_id: str, entries: list[_Entry]) -> ReadLog:
@@ -608,12 +656,6 @@ def run_intake(
     entries = _detect_all(input_dir)
     if not entries:
         raise IntakeError(EXIT_USAGE, f"input folder {input_dir} has no files")
-    try:
-        ledger = load_ledger(work_dir, project_id, create=True)
-    except QuestionsError as exc:
-        raise IntakeError(exc.exit_code, str(exc)) from exc
-    hashes = {e.rel: e.info["sha256"] for e in entries}
-    changes = _diff_inputs(_previous_hashes(work_dir), hashes)
     targets: dict[str, str] = {}
     for e in entries:
         if e.fmt == "dwg":
@@ -626,6 +668,35 @@ def run_intake(
             "input contains DWG files but no DWG converter is configured: pass --oda / --dwg2dxf, set "
             "HARNESS_ODA_CONVERTER / HARNESS_DWG2DXF, or put ODAFileConverter / dwg2dxf on PATH",
         )
+    try:
+        work_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise IntakeError(EXIT_ENV, f"cannot create the work folder {work_dir}: {exc}") from exc
+    # One writer per work folder (ADR-0011): everything below reads or writes the work folder's state.
+    try:
+        with work_lock(work_dir, "intake"):
+            return _intake_locked(input_dir, work_dir, project_id, entries, oda, dwg2dxf, timeout, table)
+    except WorkLockError as exc:  # held, or no lock support: exit 3 as an IntakeError like every other exit
+        raise IntakeError(exc.exit_code, str(exc)) from exc
+
+
+def _intake_locked(
+    input_dir: Path,
+    work_dir: Path,
+    project_id: str,
+    entries: list[_Entry],
+    oda: list[str] | None,
+    dwg2dxf: list[str] | None,
+    timeout: float,
+    table: FontEncodingTable,
+) -> IntakeResult:
+    """run_intake after its usage checks, under the work-folder lock."""
+    try:
+        ledger = load_ledger(work_dir, project_id, create=True)
+    except QuestionsError as exc:
+        raise IntakeError(exc.exit_code, str(exc)) from exc
+    hashes = {e.rel: e.info["sha256"] for e in entries}
+    changes = _diff_inputs(_previous_hashes(work_dir), hashes)
 
     for name in WORK_SUBFOLDERS:  # rerun into the same folder: no stale files
         shutil.rmtree(work_dir / name, ignore_errors=True)
@@ -665,7 +736,6 @@ def run_intake(
     inventory_text = _utf8(dump_json(inventory), "inventory.json")
     questions_text = _utf8(dump_json(questions_doc), "questions.json")
 
-    work_dir.mkdir(parents=True, exist_ok=True)
     try:
         ledger.write()  # the registry is written before any document that uses its ids
     except OSError as exc:

@@ -376,8 +376,8 @@
     {
       "code": "grid_system_axis_unassigned",
       "blocking": false,
-      "message": "Not blocking: Tekla X / Y is assigned. Which direction of this grid system is Tekla X (lines parallel to Y) and which is Y? Answer with --value for dir1 and dir2 as listed in found (e.g. dir1=X), or answer grid_family_axis_assignment per family.",
-      "where": "S001",
+      "message": "Not blocking: Tekla X / Y is assigned. Grid system S001: which direction of this grid system is Tekla X (lines parallel to Y) and which is Y? Answer with --value for dir1 and dir2 as listed in found (e.g. dir1=X), or answer grid_family_axis_assignment per family.",
+      "where": "structural-set.dxf V001/F001 x V001/F002",
       "found": "dir1: V001/F001 labels A B C D, angle 0 deg; dir2: V001/F002 labels 1 2 3, angle 90 deg",
       "file": "structural-set.dxf",
       "sheet": "model#01"
@@ -385,8 +385,8 @@
     {
       "code": "grid_system_axis_unassigned",
       "blocking": true,
-      "message": "Which direction of this grid system is Tekla X (lines parallel to Y) and which is Y? Answer with --value for dir1 and dir2 as listed in found (e.g. dir1=X), or answer grid_family_axis_assignment per family. (no axis answer covers every direction)",
-      "where": "S002",
+      "message": "Grid system S002: which direction of this grid system is Tekla X (lines parallel to Y) and which is Y? Answer with --value for dir1 and dir2 as listed in found (e.g. dir1=X), or answer grid_family_axis_assignment per family. (no axis answer covers every direction)",
+      "where": "structural-set.dxf V003/F005 x V003/F006",
       "found": "dir1: V003/F005 labels A B C, angle 0 deg; dir2: V003/F006 labels 1 2 3, angle 90 deg",
       "file": "structural-set.dxf",
       "sheet": "model#03"

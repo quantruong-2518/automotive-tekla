@@ -68,7 +68,8 @@
         "reason": { "type": ["string", "null"], "description": "Why the file has no sheet list; null when listed." },
         "text_entries": { "type": ["integer", "null"], "minimum": 0, "description": "Entries in the text index; null when there is none." },
         "unassigned_text": { "type": ["integer", "null"], "minimum": 0, "description": "Entries on no sheet or on several (ambiguous); null when not listed." },
-        "sheets": { "anyOf": [{ "type": "null" }, { "type": "array", "items": { "$ref": "#/$defs/list_sheet" } }] }
+        "sheets": { "anyOf": [{ "type": "null" }, { "type": "array", "items": { "$ref": "#/$defs/list_sheet" } }] },
+        "blocked_text_count": { "type": ["integer", "null"], "minimum": 0, "description": "Entries of the file's text index whose meaning is blocked (legacy-font gate), on any sheet or none; null when not listed." }
       }
     },
     "list_sheet": {
@@ -117,24 +118,59 @@
         "file": { "type": "string", "minLength": 1, "description": "Inventory path." },
         "sheet": {
           "type": "object",
+          "description": "sheet_id 'unassigned' (sheet-text --unassigned): the entries on no sheet or on several; its layout and bbox are null.",
           "required": ["sheet_id", "space", "layout", "bbox", "sheet_number", "duplicate_of"],
           "additionalProperties": false,
           "properties": {
             "sheet_id": { "type": "string" },
             "space": { "type": "string", "minLength": 1 },
-            "layout": { "type": "string", "minLength": 1 },
-            "bbox": { "$ref": "#/$defs/bbox" },
+            "layout": { "type": ["string", "null"], "minLength": 1 },
+            "bbox": { "anyOf": [{ "type": "null" }, { "$ref": "#/$defs/bbox" }] },
             "sheet_number": { "$ref": "#/$defs/sheet_number" },
             "duplicate_of": { "type": ["string", "null"] }
-          }
+          },
+          "if": { "properties": { "sheet_id": { "not": { "const": "unassigned" } } } },
+          "then": { "properties": { "layout": { "type": "string" }, "bbox": { "type": "array" } } }
         },
         "query": {
           "type": "object",
           "required": ["contains", "max_entries"],
           "additionalProperties": false,
           "properties": {
+            "unassigned": { "type": "boolean", "description": "True when the request was --unassigned instead of a sheet id." },
             "contains": { "type": ["string", "null"], "description": "Case-insensitive substring (NFC + casefold, diacritics significant); null = no filter." },
-            "max_entries": { "type": ["integer", "null"], "minimum": 1, "description": "Effective cap: --max, else 400, else null (unbounded) when contains filters." }
+            "max_entries": { "type": ["integer", "null"], "minimum": 1, "description": "Effective cap: --max, else 400, else null (unbounded) when contains filters." },
+            "region": { "$ref": "#/$defs/bbox", "description": "Tool wave 3 (a5): sheet-text --region x0,y0,x1,y1, in the coordinates of the sheet's space (x0 < x1, y0 < y1)." }
+          }
+        },
+        "region": { "$ref": "#/$defs/bbox", "description": "Tool wave 3 (a5): present exactly when query.region is: the box read. `entries` then holds only the entries whose insertion point lies in it, and `rows` groups them." },
+        "rows": {
+          "type": "array",
+          "description": "Tool wave 3 (a5), only with a region: the region's entries in reading order (top down), one row per reading-order row, its cells split where the x gap between neighbouring entries exceeds the sheet's text-height threshold (left to right). A blank cell is never invented: a cell exists only where an entry is. Blocked entries stay blocked (the legacy-font gate is unchanged).",
+          "items": {
+            "type": "object",
+            "required": ["y", "cells"],
+            "additionalProperties": false,
+            "properties": {
+              "y": { "type": "number", "description": "The row's reference y (its first entry's y)." },
+              "cells": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "object",
+                  "required": ["entry_ids", "display_text", "meaning", "blocked_reason"],
+                  "additionalProperties": false,
+                  "properties": {
+                    "entry_ids": { "type": "array", "minItems": 1, "items": { "type": "string", "pattern": "^T[0-9]{6,}$" }, "description": "The cell's entries, left to right." },
+                    "display_text": { "type": "string", "description": "The entries' display_text joined by one space, exactly as `entries` show them (a blocked entry as stored: quote it, never read it)." },
+                    "meaning": { "$ref": "#/$defs/meaning", "description": "blocked when any entry of the cell is blocked." },
+                    "blocked_reason": { "$ref": "#/$defs/blocked_reason", "description": "The first blocked entry's reason; null when allowed." },
+                    "x0": { "type": "number", "description": "Leftmost insertion x of the cell's entries." },
+                    "x1": { "type": "number", "description": "Rightmost insertion x of the cell's entries." }
+                  }
+                }
+              }
+            }
           }
         },
         "counts": {
@@ -147,7 +183,8 @@
             "matched": { "type": "integer", "minimum": 0, "description": "Assigned entries passing the filter." },
             "returned": { "type": "integer", "minimum": 0 },
             "omitted": { "type": "integer", "minimum": 0, "description": "matched - returned." },
-            "truncated": { "type": "boolean" }
+            "truncated": { "type": "boolean" },
+            "not_printed_in_scope": { "type": "integer", "minimum": 0, "description": "Tool wave 4: entries assigned to the sheet that do not print (text index `printed: false`). Without --include-hidden they are left out of every other count and of `entries`; with it they are in all of them." }
           }
         },
         "entries": { "type": "array", "items": { "$ref": "#/$defs/entry" } },
@@ -161,18 +198,21 @@
             "blocked_entries": { "type": "integer", "minimum": 0 },
             "by_reason": {
               "type": "object",
-              "propertyNames": { "enum": ["knowledge_conflict", "encoding_proposed", "encoding_contradiction", "encoding_unknown"] },
+              "propertyNames": { "enum": ["knowledge_conflict", "encoding_proposed", "encoding_contradiction", "encoding_unknown", "legacy_ascii_suspect"] },
               "additionalProperties": { "type": "integer", "minimum": 1 }
             },
             "styles": { "type": "array", "items": { "type": "string" }, "description": "Sorted names of the text styles of the blocked entries ('' = no style)." },
             "question_ids": {
               "type": "array",
               "items": { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/question_id" },
-              "description": "Non-obsolete questions of this file (question-registry.json) with code font_encoding_proposed, font_encoding_conflict, text_encoding_hint or encoding_unknown_non_ascii: the engineer's answers unblock the gate."
+              "description": "Non-obsolete questions of this file (question-registry.json) with code font_encoding_proposed, font_encoding_conflict, text_encoding_hint or encoding_unknown_non_ascii: the engineer's answers unblock the gate. Empty when no blocked entry has a reason such an answer can lift (none blocked, or all legacy_ascii_suspect: ASCII text stays ASCII in every encoding). Tool wave 3 (W3): for legacy_ascii_suspect entries, the file's legacy_ascii_text questions (one per file and style, raised by intake) are listed too; their answer records the engineer's reading of the style and decodes nothing."
             }
           }
         }
-      }
+      },
+      "if": { "properties": { "query": { "required": ["region"] } }, "required": ["query"] },
+      "then": { "required": ["region", "rows"] },
+      "else": { "not": { "anyOf": [{ "required": ["region"] }, { "required": ["rows"] }] } }
     },
     "entry": {
       "type": "object",
@@ -189,6 +229,7 @@
         "confidence": { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/confidence" },
         "flags": { "type": "array", "items": { "type": "string" } },
         "case_uncertain": { "const": true, "description": "Present only when true: the case of some letters is a guess." },
+        "printed": { "const": false, "description": "Tool wave 4: present only on an entry that does not print (text index `printed: false`); such entries are returned only with --include-hidden." },
         "layer": { "type": "string" },
         "style": { "type": ["string", "null"] },
         "x": { "type": ["number", "null"] },
@@ -205,7 +246,7 @@
       "description": "Legacy-font gate: 'blocked' = the text's encoding is unknown, proposed (unapproved knowledge row), contradicted or in conflict, so no meaning may be taken from it (quote it verbatim with its entry id). 'allowed' = ASCII, Unicode, or a decoding decided by font name, code points or an approved row."
     },
     "blocked_reason": {
-      "enum": ["knowledge_conflict", "encoding_proposed", "encoding_contradiction", "encoding_unknown", null],
+      "enum": ["knowledge_conflict", "encoding_proposed", "encoding_contradiction", "encoding_unknown", "legacy_ascii_suspect", null],
       "description": "null when meaning is 'allowed'; else the first matching reason of text_gate.BLOCK_REASONS."
     },
     "find_text": {
@@ -223,13 +264,15 @@
           "properties": {
             "contains": { "type": "string", "minLength": 1, "description": "Substring, NFC + casefold on both sides, diacritics significant." },
             "file": { "type": ["string", "null"], "description": "Inventory path searched; null = every DXF/DWG file." },
-            "max_hits": { "type": ["integer", "null"], "minimum": 1, "description": "Cap on returned hits; null = unbounded." }
+            "max_hits": { "type": ["integer", "null"], "minimum": 1, "description": "Cap on returned hits; null = unbounded." },
+            "unassigned": { "type": "boolean", "description": "True: only the entries on no sheet or on several were searched (find-text --unassigned); their hits carry sheet_id 'unassigned'." }
           }
         },
         "counts": {
           "type": "object",
           "description": "True counts, whatever was returned.",
-          "required": ["hits", "returned", "omitted", "truncated", "blocked_entries_not_searchable", "unassigned_entries_not_searched"],
+          "required": ["hits", "returned", "omitted", "truncated", "unassigned_entries_not_searched"],
+          "anyOf": [{ "required": ["blocked_in_scope"] }, { "required": ["blocked_entries_not_searchable"] }],
           "additionalProperties": false,
           "properties": {
             "hits": { "type": "integer", "minimum": 0 },
@@ -239,9 +282,16 @@
             "blocked_entries_not_searchable": {
               "type": "integer",
               "minimum": 0,
-              "description": "Blocked entries examined (whether they matched or not). They were matched on their stored text only, which rarely contains a Vietnamese word: the search is INCOMPLETE over them."
+              "description": "Deprecated (tool wave 3, replaced by blocked_in_scope): blocked entries examined (whether they matched or not), matched on their stored text only."
             },
-            "unassigned_entries_not_searched": { "type": "integer", "minimum": 0, "description": "Entries on no sheet or on several sheets (sheets document); not searched." }
+            "blocked_in_scope": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Tool wave 3 (W4): blocked entries in the searched files or sheets, whatever the query (the same number for every --contains). find-text never matches a blocked entry, on its raw or any decoded or normalised text, so a count that depended on the query would leak what the blocked text says; read blocked entries by entry id or sheet listing only."
+            },
+            "unassigned_entries_not_searched": { "type": "integer", "minimum": 0, "description": "Entries on no sheet or on several sheets (sheets document); not searched." },
+            "unassigned_entries_searched": { "type": "integer", "minimum": 0, "description": "With --unassigned: the entries on no sheet or on several that were searched." },
+            "not_printed_in_scope": { "type": "integer", "minimum": 0, "description": "Tool wave 4: entries of the searched files or sheets that do not print (text index `printed: false`). Without --include-hidden they are not searched and not counted in `entries_searched`; with it they are searched and their hits carry `printed: false`." }
           }
         },
         "files": {
@@ -277,7 +327,8 @@
               "entry_id": { "type": "string", "pattern": "^T[0-9]{6,}$" },
               "display_text": { "type": "string" },
               "meaning": { "$ref": "#/$defs/meaning" },
-              "blocked_reason": { "$ref": "#/$defs/blocked_reason" }
+              "blocked_reason": { "$ref": "#/$defs/blocked_reason" },
+              "printed": { "const": false, "description": "Tool wave 4: present only on a hit that does not print (--include-hidden)." }
             }
           }
         },

@@ -18,6 +18,7 @@ import pytest
 from _callout_fixtures import REL, build_work
 from tekla_harness.cli import main
 from tekla_harness.findings import FindingError, add_finding, list_findings, withdraw_finding
+from tekla_harness.knowledge import FontEncodingRow, FontEncodingTable
 from tekla_harness.schemas import validate
 
 NOTES = ["GENERAL NOTES", "Concrete grade C30/37 for all", "foundations   and columns"]
@@ -291,6 +292,22 @@ def test_no_font_question_in_the_registry_is_said(work):
     assert "no font question is registered" in msg
 
 
+def test_a_legacy_ascii_text_question_is_a_font_question(work):
+    # tool wave 3 (W3): intake asks legacy_ascii_text per file and style; the refusal points at it
+    path = work / "question-registry.json"
+    registry = load(path)
+    qid = f"Q-{registry['next_id']:03d}"
+    registry["next_id"] += 1
+    registry["questions"]["e" * 16] = {
+        "id": qid, "code": "legacy_ascii_text", "file": REL, "producer": "intake", "status": "open",
+        "first_seen_run": 1, "last_seen_run": 1,
+    }  # fmt: skip
+    path.write_text(json.dumps(registry), encoding="utf-8")
+    edit_index(work, {REST: {"flags": ["legacy_ascii_suspect"]}})
+    msg = refused(work, 1, kind="structural_system", entries=[REST], value="v", fields=["aspect=floors"])
+    assert "legacy_ascii_suspect" in msg and f"{qid} (legacy_ascii_text, open)" in msg
+
+
 def test_sheets_document_missing_refuses_a_sheet_finding(work):
     (work / "structure" / f"{REL}.sheets.json").unlink()
     assert "read-structure" in refused(
@@ -558,3 +575,151 @@ def test_a_corrupt_next_id_is_refused(work):
     with pytest.raises(FindingError) as err:
         list_findings(work)
     assert err.value.exit_code == 1
+
+
+# --- decoded_by (tool wave 2, fix 10): which knowledge row decoded the cited text --------------------------
+
+
+def table(*rows: tuple[str, str, str]) -> FontEncodingTable:
+    """A knowledge table of (pattern, status, decided_on) font_file rows."""
+    return FontEncodingTable(
+        tuple(
+            FontEncodingRow(n + 2, pattern, "font_file", "tcvn3", None, status, "e", "tests", "eng", decided)
+            for n, (pattern, status, decided) in enumerate(rows)
+        )
+    )
+
+
+KNOWN = table(("VHARIAL.TTF", "approved", "2026-11-07"), ("vntimeh.shx", "approved", "2026-11-07"))
+
+
+def run(source: str, pattern: str | None = None, encoding: str = "tcvn3") -> dict[str, Any]:
+    return {"font": None, "font_source": source, "encoding": encoding, "capital_font": None,
+            "knowledge_pattern": pattern}  # fmt: skip
+
+
+def decoded(work: Path, entry_id: str, source: str, runs: list[dict[str, Any]]) -> None:
+    """Give a text-index entry this decode source and these runs."""
+    index = load(work / "text" / f"{REL}.json")
+    decode = next(e for e in index["entries"] if e["id"] == entry_id)["decode"]
+    patterns = list(dict.fromkeys(r["knowledge_pattern"] for r in runs if r["knowledge_pattern"]))
+    decode = {
+        **decode,
+        "source": source,
+        "knowledge_patterns": patterns,
+        "run_details": runs,
+        "runs": len(runs),
+    }
+    edit_index(work, {entry_id: {"decode": decode}})
+
+
+def test_decoded_by_groups_the_cited_entries_per_decode_source_and_row(work):
+    decoded(work, HEAD, "style_font", [run("style_font", encoding="unicode")])
+    decoded(work, CONCRETE, "knowledge_table", [run("knowledge_table", "VHARIAL.TTF")])
+    mixed = [run("codepoint_evidence", encoding="unicode"), run("knowledge_table", "VHARIAL.TTF")]
+    decoded(work, REST, "codepoint_evidence", mixed)
+    add(work, kind="structural_system", entries=[HEAD, CONCRETE, REST], value="v", fields=["aspect=floors"],
+        knowledge=KNOWN)  # fmt: skip
+    f = doc(work)["findings"][0]
+    assert validate("reader-findings", doc(work)) == []
+    assert f["decoded_by"] == [
+        {"source": "style_font", "knowledge_pattern": None, "row_status": None, "decided_on": None,
+         "entries": [HEAD]},
+        {"source": "knowledge_table", "knowledge_pattern": "VHARIAL.TTF", "row_status": "approved",
+         "decided_on": "2026-11-07", "entries": [CONCRETE, REST]},
+        {"source": "codepoint_evidence", "knowledge_pattern": None, "row_status": None, "decided_on": None,
+         "entries": [REST]},
+    ]  # fmt: skip
+
+
+def test_a_finding_goes_stale_when_its_knowledge_row_changes(work):
+    decoded(work, CONCRETE, "knowledge_table", [run("knowledge_table", "VHARIAL.TTF")])
+    add(
+        work,
+        kind="structural_system",
+        entries=[CONCRETE],
+        value="v",
+        fields=["aspect=floors"],
+        knowledge=KNOWN,
+    )
+    add(work, kind="structural_system", entries=[REST], value="w", fields=["aspect=floors"], knowledge=KNOWN)
+
+    def stale(knowledge: FontEncodingTable) -> list[bool]:
+        return [f["stale"] for f in list_findings(work, knowledge=knowledge)["findings"]]
+
+    assert stale(KNOWN) == [False, False]
+    assert stale(table(("VHARIAL.TTF", "approved", "2026-12-01"))) == [True, False]  # decided again
+    assert stale(table(("VHARIAL.TTF", "rejected", "2026-11-07"))) == [True, False]  # status changed
+    assert stale(table(("vntimeh.shx", "approved", "2026-11-07"))) == [True, False]  # row removed
+    assert stale(table(("VHARIAL.TTF", "approved", "2026-11-07"))) == [False, False]
+
+
+def test_a_finding_stale_from_its_row_does_not_block_recording_it_again(work):
+    decoded(work, HEAD, "knowledge_table", [run("knowledge_table", "VHARIAL.TTF")])
+    kw: dict[str, Any] = {
+        "kind": "sheet_class",
+        "sheet": "model#01",
+        "entries": [HEAD],
+        "value": "general_notes",
+    }
+    add(work, **kw, knowledge=KNOWN)
+    changed = table(("VHARIAL.TTF", "approved", "2026-12-01"))
+    again = add(work, **kw, knowledge=changed)
+    assert again == {"id": "F-002", "status": "new"}  # not already_recorded, not "one active class"
+    assert [f["stale"] for f in list_findings(work, knowledge=changed)["findings"]] == [True, False]
+    assert doc(work)["findings"][1]["decoded_by"][0]["decided_on"] == "2026-12-01"
+
+
+def test_two_rows_with_one_pattern_resolve_to_the_approved_one(work):
+    """The text index records the pattern, not applies_to: the approved row (the only kind that decodes)
+    is the one recorded, even when a proposed row with that pattern comes first."""
+    pattern, day = "VHARIAL.TTF", "2026-11-07"
+    shared = FontEncodingTable(
+        (
+            FontEncodingRow(2, pattern, "style_name", "vni", None, "proposed", "e", "t", "", ""),
+            FontEncodingRow(3, pattern, "font_file", "tcvn3", None, "approved", "e", "t", "eng", day),
+        )
+    )
+    decoded(work, CONCRETE, "knowledge_table", [run("knowledge_table", "VHARIAL.TTF")])
+    add(work, kind="structural_system", value="v", fields=["aspect=floors"], knowledge=shared)
+    (item,) = doc(work)["findings"][0]["decoded_by"]
+    assert (item["row_status"], item["decided_on"]) == ("approved", "2026-11-07")
+    assert [f["stale"] for f in list_findings(work, knowledge=shared)["findings"]] == [False]
+
+
+def test_a_finding_without_decoded_by_is_judged_by_its_file_only(work):
+    decoded(work, CONCRETE, "knowledge_table", [run("knowledge_table", "VHARIAL.TTF")])
+    add(work, kind="structural_system", value="v", fields=["aspect=floors"], knowledge=KNOWN)
+    d = doc(work)
+    d["findings"][0].pop("decoded_by")
+    (work / "reader-findings.json").write_text(json.dumps(d), encoding="utf-8")
+    assert [f["stale"] for f in list_findings(work, knowledge=table())["findings"]] == [False]
+
+
+# --- list summary.by_class (tool wave 2, fix 11) ------------------------------------------------------
+
+
+def test_list_counts_the_current_sheet_classes(work):
+    """by_class counts the listed sheet_class findings that are active and not stale: a withdrawn or stale
+    class has been replaced (or must be), so it would count a sheet twice."""
+    assert list_findings(work)["summary"] == {"by_class": {}}
+    add(work, kind="sheet_class", sheet="model#01", entries=[HEAD], value="general_notes")
+    add(work, kind="sheet_class", sheet="model#02", entries=[OTHER_SHEET], value="foundation")
+    add(work, kind="structural_system", value="v", fields=["aspect=floors"])  # not a sheet class
+    listing = list_findings(work)
+    assert listing["summary"] == {"by_class": {"foundation": 1, "general_notes": 1}}
+    assert validate("reader-findings", {k: v for k, v in listing.items()} | {
+        "findings": [{k: v for k, v in f.items() if k != "stale"} for f in listing["findings"]]
+    }) == []  # fmt: skip
+    withdraw_finding(work, "F-002", "it is the setting-out plan")
+    add(work, kind="sheet_class", sheet="model#02", entries=[OTHER_SHEET], value="setting_out")
+    assert list_findings(work)["summary"]["by_class"] == {"general_notes": 1, "setting_out": 1}
+    assert list_findings(work, file="other.dxf")["summary"]["by_class"] == {}  # follows the filters
+    assert "summary" not in doc(work)  # never stored
+    path = work / "inventory.json"
+    inventory = load(path)
+    for row in inventory["files"]:
+        if row["path"] == REL:
+            row["sha256"] = "0" * 64
+    path.write_text(json.dumps(inventory), encoding="utf-8")
+    assert list_findings(work)["summary"]["by_class"] == {}  # every class is stale now

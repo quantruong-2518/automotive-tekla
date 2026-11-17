@@ -338,7 +338,7 @@
         "project_id": { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/project_id" },
         "questions": {
           "type": "array",
-          "description": "One question per code, blocking flag and file. questions.json (intake) order: units_confirm_all; probe question codes (blocking first, then by code); encoding_unknown_non_ascii; conversion_empty, converter_errors, read_failed, no_reader_implemented; inside a code by file. structure-questions.json and callouts-questions.json order: blocking first, then by code, then by file. Ids come from question-registry.json (one counter for the three documents, never reused), so they are NOT necessarily ascending in this order: a rerun keeps the id of every unchanged question and appends new ids. Engineer-facing text is English here; the Vietnamese rendering is a later reporter step.",
+          "description": "One question per code, blocking flag and file, except one per file and text style for legacy_ascii_text and one per file and unparsed_code for callout_unparsed (tool wave 3). questions.json (intake) order: units_confirm_all; probe question codes (blocking first, then by code); encoding_unknown_non_ascii; legacy_ascii_text (by file, then style); text_visibility_uncertain (by file, tool wave 4); conversion_empty, converter_errors, read_failed, no_reader_implemented; inside a code by file. structure-questions.json and callouts-questions.json order: blocking first, then by code, then by file. Ids come from question-registry.json (one counter for the three documents, never reused), so they are NOT necessarily ascending in this order: a rerun keeps the id of every unchanged question and appends new ids. Engineer-facing text is English here; the Vietnamese rendering is a later reporter step.",
           "items": { "$ref": "#/$defs/question" }
         },
         "summary": { "$ref": "#/$defs/questions_summary" }
@@ -357,7 +357,7 @@
     },
     "question": {
       "type": "object",
-      "description": "One question per code, blocking flag and file (file null for a question about the whole project), listing the places it applies to. Probe question codes, encoding_unknown_non_ascii and callout / structure questions list at most 50 refs (10 per member mark prefix): then truncated is true and count is the true total; an extractor that capped its own questions per code says so in its warnings (kept in structure-summary.json), so count can still be below the true number of occurrences in that case. encoding_unknown_non_ascii (non-blocking) has one ref per text style that holds non-ASCII text of unknown encoding, built from the text index; font_encoding_proposed (non-blocking) is a probe question: one ref per proposed knowledge row, its evidence in 'found'. units_confirm_all is the file's ONLY blocking units question: its first ref is the file's header units (unit, confidence, flags), then one ref per probe units_conflict / units_suspect / units_unknown question with that question's where and found verbatim and `message` '<code>: <probe message>'; those codes are not asked apart, nor is the non-blocking units_confirm probe question. It needs an answer with a structured unit (answers.schema.json). `key` is the stable identity (question-registry): sha256 over code, file, the file's sha256 and the canonical sorted refs (where, found, sheet), first 16 hex. `answer` is the active answer from answers.json, or null.",
+      "description": "One question per code, blocking flag and file (file null for a question about the whole project), listing the places it applies to; legacy_ascii_text is one per file and text style, callout_unparsed one per file and unparsed_code (tool wave 3), told apart by their refs and so by their key. Probe question codes, encoding_unknown_non_ascii and callout / structure questions list at most 50 refs (10 per member mark prefix): then truncated is true and count is the true total; an extractor that capped its own questions per code says so in its warnings (kept in structure-summary.json), so count can still be below the true number of occurrences in that case. encoding_unknown_non_ascii (non-blocking) has one ref per text style that holds non-ASCII text of unknown encoding, built from the text index; font_encoding_proposed (non-blocking) is a probe question: one ref per proposed knowledge row, its evidence in 'found'. units_confirm_all is the file's ONLY blocking units question: its first ref is the file's header units (unit, confidence, flags), then one ref per probe units_conflict / units_suspect / units_unknown question with that question's where and found verbatim and `message` '<code>: <probe message>'; those codes are not asked apart, nor is the non-blocking units_confirm probe question. It needs an answer with a structured unit (answers.schema.json). `key` is the stable identity (question-registry): sha256 over code, file, the file's sha256 and the canonical sorted refs (where, found, sheet), first 16 hex. `answer` is the active answer from answers.json, or null.",
       "required": ["id", "key", "code", "blocking", "file", "message", "count", "truncated", "refs", "answer"],
       "additionalProperties": false,
       "properties": {
@@ -396,6 +396,38 @@
         "answer": {
           "anyOf": [{ "type": "null" }, { "$ref": "urn:tekla-harness:schema:answers:0.1#/$defs/answer" }],
           "description": "The active answer (answers.json) to this key, or null."
+        },
+        "closed_by": {
+          "type": "object",
+          "description": "Present when the question is closed without an answer of its own (lifecycle.closures): it no longer blocks. question_id: the question whose answer closes it (null when none does). not_selected / separate: a grid-system conflict closed by the grid_system_select answer; units_answered: grid_units_doubt after the file's units_confirm_all answer; rejected_systems_only: every grid family it cites belongs to an unselected system; other_file_set: a cross-file question between two different file sets. The key still hashes only where / found / sheet of the refs.",
+          "required": ["question_id", "reason"],
+          "additionalProperties": false,
+          "properties": {
+            "question_id": { "anyOf": [{ "type": "null" }, { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/question_id" }] },
+            "reason": { "enum": ["not_selected", "separate", "units_answered", "rejected_systems_only", "other_file_set"] }
+          }
+        },
+        "places": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "pattern": "\\S" },
+          "description": "Reader questions only (tool wave 3, harness ask --amend --places): every place the question applies to, as the reader wrote them (e.g. 'model#05 axis 3-4'), besides the ref's `where`, which stays the question's identity. Replaced as a whole by each --places amendment."
+        },
+        "amendments": {
+          "type": "array",
+          "minItems": 1,
+          "description": "Reader questions only (tool wave 3, harness ask --amend): the history of in-place amendments, oldest first. Each records the registry run counter at the amendment (`at`; no clock time, so documents stay deterministic) and the values it REPLACED: `text` the previous message, `places` the previous places ([] when there were none). The current values are `message` and `places`; id and key never change.",
+          "items": {
+            "type": "object",
+            "required": ["at"],
+            "minProperties": 2,
+            "additionalProperties": false,
+            "properties": {
+              "at": { "type": "integer", "minimum": 1, "description": "question-registry.json `runs` value of the amendment." },
+              "text": { "type": "string", "minLength": 1, "description": "The message before this amendment." },
+              "places": { "type": "array", "items": { "type": "string", "pattern": "\\S" }, "description": "The places before this amendment." }
+            }
+          }
         }
       }
     },
@@ -411,7 +443,8 @@
         "message": { "type": "string", "description": "Only when this ref's wording differs from the group's message (for example because it carries a count)." },
         "unit": { "type": "string", "description": "units_confirm_all only, first ref: the unit declared by the header." },
         "confidence": { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/confidence" },
-        "flags": { "type": "array", "items": { "type": "string" }, "description": "units_confirm_all only: the units_* flags of the file." }
+        "flags": { "type": "array", "items": { "type": "string" }, "description": "units_confirm_all only: the units_* flags of the file." },
+        "families": { "type": "array", "items": { "type": "string", "pattern": "^F[0-9]{3,}$" }, "description": "read-structure grid questions: every grid family id (F001..) the ref is about, the full list even when refs are truncated. Not part of the key." }
       }
     }
   }

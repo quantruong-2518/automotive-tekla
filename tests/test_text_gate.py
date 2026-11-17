@@ -38,6 +38,14 @@ def test_non_ascii_text_of_unsettled_encoding_is_blocked(e, reason):
     assert meaning_block_reason(e) == reason and reason in BLOCK_REASONS
 
 
+@pytest.mark.parametrize("encoding", ["unknown", "tcvn3", "vni"])
+def test_ascii_text_flagged_as_legacy_looking_is_blocked(encoding):
+    # extract_text flags pure-ASCII text of a legacy-font style that looks like legacy Vietnamese (fix 2b)
+    e = entry("4/g14", encoding, ("legacy_ascii_suspect", "proposed_knowledge_row"))
+    assert meaning_block_reason(e) == "legacy_ascii_suspect" and "legacy_ascii_suspect" in BLOCK_REASONS
+    assert meaning_allowed(entry("D1", encoding))
+
+
 @pytest.mark.parametrize("encoding", ["unicode", "tcvn3", "vni"])
 def test_non_ascii_text_of_a_decided_encoding_is_allowed(encoding):
     assert meaning_allowed(entry("bản vẽ", encoding))

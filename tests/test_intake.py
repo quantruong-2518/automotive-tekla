@@ -12,14 +12,16 @@ import textwrap
 from pathlib import Path
 
 import pytest
-from ezdxf.filemanagement import new
+from ezdxf.filemanagement import new, readfile
 
 from conftest import EXAMPLES
 from tekla_harness import intake as intake_mod
+from tekla_harness.answers import record_answer
 from tekla_harness.cli import main
 from tekla_harness.intake import MAX_PROBE_REFS, IntakeError, run_intake
 from tekla_harness.knowledge import EMPTY_TABLE, KnowledgeError
 from tekla_harness.schemas import validate
+from tekla_harness.worklock import work_lock
 from test_knowledge import approved, row, table_of
 
 DWG_BYTES = b"AC1032" + b"\x00" * 64
@@ -318,12 +320,67 @@ def test_question_ids_order_and_blocking_summary(done):
         ("read_failed", "sub/bad.dwg"),
         ("no_reader_implemented", "c.pdf"),
         ("no_reader_implemented", "notes.txt"),
+        ("file_set_relation", None),  # project level, last: it never shifts the file questions' ids
     ]
     summary = load(out, "inventory.json")["summary"]
     assert summary["questions"] == len(questions) == result.summary["questions"]
-    assert summary["blocking_questions"] == sum(q["blocking"] for q in questions) == 6
-    assert doc["summary"] == {"questions": 6, "blocking_questions": 6, "answered": 0, "blocking_open": 6}
+    assert summary["blocking_questions"] == sum(q["blocking"] for q in questions) == 7
+    assert doc["summary"] == {"questions": 7, "blocking_questions": 7, "answered": 0, "blocking_open": 7}
     assert all(q["answer"] is None and len(q["key"]) == 16 for q in questions)
+
+
+def _file_set(out: Path) -> dict | None:
+    found = [q for q in load(out, "questions.json")["questions"] if q["code"] == "file_set_relation"]
+    assert len(found) <= 1
+    return found[0] if found else None
+
+
+def test_two_or_more_readable_drawing_files_raise_one_file_set_question(done):
+    """EVAL-2 fix 5: one project-level "same set or separate projects?" question. One ref per readable
+    DXF / DWG (`file` set: harness answer checks the answer's files against it); unreadable files and other
+    formats are not in it."""
+    _, out = done
+    q = _file_set(out)
+    assert q is not None
+    assert (q["file"], q["blocking"], q["count"], q["truncated"]) == (None, True, 3, False)
+    rows = {r["path"]: r["sha256"] for r in load(out, "inventory.json")["files"]}
+    assert q["refs"] == [
+        {"file": f, "where": f, "found": f"sha256 {rows[f]}"} for f in ("a.dxf", "good.dwg", "sub/b.dxf")
+    ]
+    assert "set1=" in q["message"]
+
+
+def test_one_readable_drawing_file_raises_no_file_set_question(tmp_path):
+    root = tmp_path / "input"
+    make_dxf(root / "a.dxf")
+    (root / "c.pdf").write_bytes(b"%PDF-1.4\n%%EOF\n")
+    run_intake(root, tmp_path / "work", "demo-intake")
+    assert _file_set(tmp_path / "work") is None
+
+
+def test_the_file_set_question_is_answered_and_re_keyed_when_a_file_is_added(tmp_path):
+    root = tmp_path / "input"
+    make_dxf(root / "a.dxf")
+    make_dxf(root / "b.dxf", units=6)
+    work = tmp_path / "work"
+    run_intake(root, work, "demo-intake")
+    first = _file_set(work)
+    assert first is not None and [r["file"] for r in first["refs"]] == ["a.dxf", "b.dxf"]
+    record_answer(
+        work, first["id"], "two buildings", "me", {"set1": "a.dxf", "set2": "b.dxf"}, role="engineer"
+    )
+    run_intake(root, work, "demo-intake")  # nothing changed: same key, same id, answer kept
+    again = _file_set(work)
+    assert again is not None and (again["id"], again["key"]) == (first["id"], first["key"])
+    assert again["answer"]["values"] == {"set1": ["a.dxf"], "set2": ["b.dxf"]}
+    make_dxf(root / "c.dxf")
+    result = run_intake(root, work, "demo-intake")
+    added = _file_set(work)
+    assert added is not None and added["key"] != first["key"] and added["id"] != first["id"]
+    assert [r["file"] for r in added["refs"]] == ["a.dxf", "b.dxf", "c.dxf"] and added["answer"] is None
+    assert [a["question_id"] for a in result.summary["stale_answers"]] == [first["id"]]
+    registry = load(work, "question-registry.json")["questions"]
+    assert registry[first["key"]]["status"] == "obsolete"
 
 
 def test_no_reader_question_is_blocking_and_one_per_file(done):
@@ -413,6 +470,18 @@ def test_no_converter_is_fine_without_dwg(tmp_path, monkeypatch):
     root = tmp_path / "input"
     make_dxf(root / "a.dxf")
     assert run_intake(root, tmp_path / "work", "demo-intake").exit_code == 0
+
+
+def test_a_held_work_lock_is_an_intake_error_with_exit_3_and_writes_nothing(tmp_path):
+    """run_intake promises IntakeError for exits 2 and 3: a held lock must not escape as WorkLockError."""
+    root = tmp_path / "input"
+    make_dxf(root / "a.dxf")
+    work = tmp_path / "work"
+    work.mkdir()
+    with work_lock(work, "answer"), pytest.raises(IntakeError) as caught:
+        run_intake(root, work, "demo-intake")
+    assert caught.value.exit_code == 3 and "answer" in str(caught.value)
+    assert not (work / "inventory.json").exists()
 
 
 def test_exit_code_rule(done, folder, tmp_path):
@@ -546,7 +615,82 @@ def test_questions_group_unknown_encodings_and_proposed_rows(text_folder, tmp_pa
     )
     assert [q["count"] for q in unknown] == [2, 1]
     order = [q["code"] for q in all_q]
-    assert order[-1] == "encoding_unknown_non_ascii"  # after the probe groups (and before conversion ones)
+    # after the probe groups (and before conversion ones); the project-level file set question comes last
+    assert order[-2:] == ["encoding_unknown_non_ascii", "file_set_relation"]
+
+
+LEGACY_FONT = "TrueType family none"
+
+
+@pytest.fixture
+def legacy_folder(tmp_path) -> Path:
+    """a.dxf has no legacy-looking ASCII; b.dxf has two legacy-font styles holding it, and a clean one."""
+    root = tmp_path / "input"
+    make_text_dxf(root / "a.dxf", [("D1", ".VnTime", "vntime.ttf"), ("ABC 200", "Simplex", "simplex.shx")])
+    make_text_dxf(
+        root / "b.dxf",
+        [
+            ("4/g14", ".VnTime", "vntime.ttf"),
+            ("chi tiESt", ".VnTime", "vntime.ttf"),
+            ("D1", ".VnTime", "vntime.ttf"),  # structural ASCII: not suspect
+            ("haFn 200", "VNI-Times", "vni-times.ttf"),
+            ("haFn 200", "Simplex", "simplex.shx"),  # no legacy font, no non-ASCII sibling: not suspect
+            (LEGACY_BYTES, "Odd", "odd.shx"),  # non-ASCII of unknown encoding: encoding_unknown_non_ascii
+        ],
+    )
+    return root
+
+
+def test_intake_asks_legacy_ascii_text_once_per_file_and_style(legacy_folder, tmp_path):
+    """Tool wave 3 (W3): every legacy_ascii_suspect entry's file gets a live question covering it (M6)."""
+    out = tmp_path / "work"
+    run_intake(legacy_folder, out, "demo-intake", knowledge=EMPTY_TABLE)
+    doc = load(out, "questions.json")
+    assert validate("intake", doc) == []
+    legacy = [q for q in doc["questions"] if q["code"] == "legacy_ascii_text"]
+    assert [(q["file"], q["refs"][0]["where"], q["count"]) for q in legacy] == [
+        ("b.dxf", f"text style .VnTime (font file vntime.ttf, {LEGACY_FONT})", 2),
+        ("b.dxf", f"text style VNI-Times (font file vni-times.ttf, {LEGACY_FONT})", 1),
+    ]  # none for a.dxf; one per style of b.dxf
+    assert all(q["blocking"] is False and q["truncated"] is False for q in legacy)
+    assert len({q["id"] for q in legacy}) == 2 and len({q["key"] for q in legacy}) == 2
+    text = {e["id"]: e for e in load(out, "text/b.dxf.json")["entries"]}
+    flagged = sorted(i for i, e in text.items() if "legacy_ascii_suspect" in e["flags"])
+    assert sorted(r["found"].split(":")[0] for q in legacy for r in q["refs"]) == flagged
+    assert legacy[0]["refs"][0]["found"] == f"{flagged[0]}: 4/g14"  # quoted as stored
+    registry = load(out, "question-registry.json")["questions"]
+    entries = [v for v in registry.values() if v["code"] == "legacy_ascii_text"]
+    assert sorted(v["id"] for v in entries) == sorted(q["id"] for q in legacy)
+    assert all(v["producer"] == "intake" and v["status"] == "open" and v["file"] == "b.dxf" for v in entries)
+    order = [q["code"] for q in doc["questions"]]
+    # with the other text questions, before the project-level file set question (always last)
+    assert order[-4:] == [
+        "encoding_unknown_non_ascii", "legacy_ascii_text", "legacy_ascii_text", "file_set_relation",
+    ]  # fmt: skip
+
+
+def test_an_unreadable_text_index_raises_no_legacy_ascii_text(legacy_folder, tmp_path, monkeypatch):
+    real = intake_mod.extract_text
+
+    def unreadable(*args, **kwargs):
+        result = real(*args, **kwargs)
+        return {
+            "schema_version": result["schema_version"],
+            "status": "unreadable",
+            "file": result["file"],
+            "attempts": result["attempts"],
+            "error": "simulated: the text index could not be computed",
+        }
+
+    monkeypatch.setattr(intake_mod, "extract_text", unreadable)
+    out = tmp_path / "work"
+    run_intake(legacy_folder, out, "demo-intake", knowledge=EMPTY_TABLE)
+    codes = [q["code"] for q in load(out, "questions.json")["questions"]]
+    assert "legacy_ascii_text" not in codes
+    assert any(
+        "text index could not be computed" in w
+        for w in by_file(load(out, "read-log.json"))["b.dxf"]["warnings"]
+    )
 
 
 def test_an_approved_row_removes_the_unknown_question_for_its_styles(text_folder, tmp_path):
@@ -580,7 +724,11 @@ def test_default_knowledge_is_the_shipped_table(text_folder, tmp_path):
     out = tmp_path / "work"
     run_intake(text_folder, out, "demo-intake")
     codes = [q["code"] for q in load(out, "questions.json")["questions"]]
-    assert "font_encoding_proposed" in codes  # knowledge/font-encodings.csv proposes VH*.TTF
+    # knowledge/font-encodings.csv approves VHARIAL.TTF as TCVN3: no proposed-row question, and the
+    # kt..1 entries decode instead of staying unknown
+    assert "font_encoding_proposed" not in codes
+    a = by_file(load(out, "inventory.json"))["a.dxf"]
+    assert a["text"]["by_encoding_used"] == {"tcvn3": 4, "unicode": 1, "unknown": 1}
 
 
 def test_text_folder_is_cleared_on_rerun(text_folder, tmp_path):
@@ -662,7 +810,7 @@ def test_cli_intake_exit_codes_and_summary(folder, tmp_path, template, capsys, m
     args = ["intake", str(folder), "--out", str(out), "--project-id", "demo-intake"]
     assert main(args) == 1
     summary = json.loads(capsys.readouterr().out)
-    assert summary["files"] == 6 and summary["blocking_questions"] == 6
+    assert summary["files"] == 6 and summary["blocking_questions"] == 7  # 6 file questions + the file set
     assert summary["read_failures"] == ["sub/bad.dwg"]
     assert summary["outputs"]["inventory"] == str(out.resolve() / "inventory.json")
     assert main(["intake", str(folder), "--out", str(folder / "w"), "--project-id", "demo-intake"]) == 2
@@ -688,3 +836,28 @@ def test_dwg2dxf_cli_prints_stderr_fields(tmp_path, template, capsys, monkeypatc
     out = json.loads(capsys.readouterr().out)
     assert out["stderr_error_lines"] == 2 and out["stderr_warning_lines"] == 0
     assert "overflow" in out["stderr_tail"]
+
+
+def test_intake_asks_text_visibility_uncertain_once_per_file_with_uncertain_text(tmp_path):
+    """Tool wave 4 (V1): a.dxf has an attribute under $ATTMODE 2, b.dxf has nothing uncertain."""
+    root = tmp_path / "input"
+    make_text_dxf(root / "b.dxf", [("D1", "Simplex", "simplex.shx")])
+    path = make_text_dxf(root / "a.dxf", [("D1", "Simplex", "simplex.shx")])
+    doc = readfile(str(path))
+    doc.header["$ATTMODE"] = 2
+    doc.blocks.new("B").add_attdef("T", (0, 0), text="d", dxfattribs={"height": 1})
+    doc.modelspace().add_blockref("B", (50, 0)).add_auto_attribs({"T": "attr"})
+    doc.saveas(path)
+    out = tmp_path / "work"
+    run_intake(root, out, "demo-intake", knowledge=EMPTY_TABLE)
+    questions = load(out, "questions.json")
+    assert validate("intake", questions) == []
+    visibility = [q for q in questions["questions"] if q["code"] == "text_visibility_uncertain"]
+    assert [(q["file"], q["blocking"], q["count"]) for q in visibility] == [("a.dxf", False, 1)]
+    assert visibility[0]["refs"][0] == {
+        "file": "a.dxf",
+        "where": "reason attmode_not_normal",
+        "found": "1 entry",
+    }
+    registry = load(out, "question-registry.json")["questions"]
+    assert [v["file"] for v in registry.values() if v["code"] == "text_visibility_uncertain"] == ["a.dxf"]

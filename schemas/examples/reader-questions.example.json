@@ -1,0 +1,40 @@
+{
+  "schema_version": "0.1",
+  "kind": "questions",
+  "project_id": "demo-reader",
+  "questions": [
+    {
+      "id": "Q-041",
+      "key": "1f2e3d4c5b6a7980",
+      "code": "reader_drawing_list_missing",
+      "blocking": true,
+      "file": null,
+      "message": "Bộ bản vẽ không có tờ danh mục bản vẽ. Bộ đã đủ tờ chưa, và danh mục nằm ở đâu?",
+      "count": 1,
+      "truncated": false,
+      "refs": [{ "file": null, "where": "whole set", "found": "no sheet titled drawing list" }],
+      "answer": null
+    },
+    {
+      "id": "Q-042",
+      "key": "a0b1c2d3e4f50617",
+      "code": "reader_beam_mark_unclear",
+      "blocking": false,
+      "file": "S-101.dwg",
+      "message": "Ký hiệu dầm D3 xuất hiện trên mặt bằng ở tờ model#05 và model#07 nhưng không có trong bảng thống kê. D3 là dầm nào?",
+      "count": 1,
+      "truncated": false,
+      "refs": [{ "file": "S-101.dwg", "where": "model#05 axis 3-4", "found": "D3 (T000231)", "sheet": "model#05" }],
+      "places": ["model#05 axis 3-4", "model#07 axis 3-4"],
+      "amendments": [
+        {
+          "at": 12,
+          "text": "Ký hiệu dầm D3 xuất hiện trên mặt bằng ở tờ model#05 nhưng không có trong bảng thống kê. D3 là dầm nào?",
+          "places": []
+        }
+      ],
+      "answer": null
+    }
+  ],
+  "summary": { "questions": 2, "blocking_questions": 1, "answered": 0, "blocking_open": 1 }
+}

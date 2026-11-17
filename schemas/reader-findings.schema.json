@@ -11,7 +11,15 @@
     "kind": { "const": "reader_findings" },
     "project_id": { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/project_id" },
     "next_id": { "type": "integer", "minimum": 1, "description": "N of the next id to allocate (F-N); greater than every allocated id." },
-    "findings": { "type": "array", "items": { "$ref": "#/$defs/finding" } }
+    "findings": { "type": "array", "items": { "$ref": "#/$defs/finding" } },
+    "summary": {
+      "type": "object",
+      "description": "Only in `harness finding list` output, never stored.",
+      "additionalProperties": false,
+      "properties": {
+        "by_class": { "type": "object", "additionalProperties": { "type": "integer", "minimum": 0 }, "description": "Listed sheet_class findings per class value." }
+      }
+    }
   },
   "$defs": {
     "finding_id": { "type": "string", "pattern": "^F-[0-9]{3,}$" },
@@ -49,7 +57,23 @@
         "questions": { "type": "array", "items": { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/question_id" }, "description": "Registry question ids the finding relates to (required for cross_check)." },
         "confidence": { "enum": ["low", "medium"], "description": "Minimum of the cited entries' confidence, optionally lowered; never 'high'." },
         "note": { "type": "string", "minLength": 1 },
-        "withdrawn_reason": { "type": "string", "minLength": 1, "description": "Only when status is 'withdrawn'." }
+        "withdrawn_reason": { "type": "string", "minLength": 1, "description": "Only when status is 'withdrawn'." },
+        "decoded_by": {
+          "type": "array",
+          "description": "How the cited entries were decoded when the finding was recorded: one item per decode source (text-index decode.source), with the knowledge row that decided it (pattern, its status and decision date) and the entries it covers. `finding list` marks the finding stale when that row changes.",
+          "items": {
+            "type": "object",
+            "required": ["source", "knowledge_pattern", "row_status", "decided_on", "entries"],
+            "additionalProperties": false,
+            "properties": {
+              "source": { "enum": ["style_font", "style_family", "mtext_inline_font", "knowledge_table", "codepoint_evidence", "none"] },
+              "knowledge_pattern": { "type": ["string", "null"] },
+              "row_status": { "enum": ["approved", "proposed", "rejected", null] },
+              "decided_on": { "anyOf": [{ "type": "null" }, { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" }] },
+              "entries": { "type": "array", "minItems": 1, "items": { "type": "string", "pattern": "^T[0-9]{6,}$" } }
+            }
+          }
+        }
       },
       "allOf": [
         { "if": { "properties": { "status": { "const": "withdrawn" } } }, "then": { "required": ["withdrawn_reason"] }, "else": { "not": { "required": ["withdrawn_reason"] } } },
