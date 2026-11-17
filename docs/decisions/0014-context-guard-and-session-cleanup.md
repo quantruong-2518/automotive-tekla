@@ -77,9 +77,15 @@ The repository also gathers stale state. On 2026-11-10 it held 25 worktrees and 
      is listed for the engineer, never removed.
 5. **`statusline.py`** is registered as `statusLine` (main session) and as `subagentStatusLine`
    with `--subagents`.
-   - The main line shows the model, the effort and the context tokens. The subagent rows show each
-     agent's type, model, effort and tokens.
-   - Colour gives freshness: green below warn, yellow from warn, red from handoff. The thresholds
+   - The main line shows `[worktree]` (`[main]` in the main checkout), the model and effort in
+     short form (`op5.5-high`, `son5.5-med`), the context tokens, the session cost, the 5-hour and
+     7-day rate-limit shares with their reset time in Vietnam time, 24h (`D:8% (11/11 14:30) ·
+     W:47% (15/11 09:00)`; one colour per window: D purple, W blue) and the branch. The subagent rows show each agent's type (one
+     colour per role), model, effort, tokens, the model's input list price per million tokens and
+     the task. The cost is Claude Code's list-price estimate, not the bill; the row price is not a
+     running cost because the panel sends no per-task spend.
+   - Colour gives freshness: green below warn, yellow from warn, red from handoff; the token
+     count carries no icon or label. The thresholds
      are loaded from `context_guard.py`, the single source.
    - The main token count is the documented `context_window.total_input_tokens`.
 6. **Prefix trimming:** the six claude.ai-synced plugins that do not bear on this repository

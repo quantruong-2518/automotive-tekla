@@ -7,6 +7,7 @@ import os
 import re
 import subprocess
 import sys
+from datetime import UTC
 from pathlib import Path
 from typing import Any
 
@@ -62,18 +63,18 @@ def rows(sl, tasks: list[dict[str, Any]], columns: int = 120) -> list[dict[str, 
 @pytest.mark.parametrize(("tokens", "colour", "label"), BOUNDARIES)
 def test_main_colour_boundaries(sl, tokens, colour, label):
     line = sl.render_main(main_payload(tokens))
-    assert f"{colour}● {tokens // 1000}k/1M {label}{RESET}" in line
+    assert f"{colour}{tokens // 1000}k/1M{RESET}" in line
 
 
 @pytest.mark.parametrize(("tokens", "colour", "label"), BOUNDARIES)
 def test_subagent_colour_boundaries(sl, tokens, colour, label):
     (row,) = rows(sl, [task(tokens)])
-    assert f"{colour}● {tokens // 1000}k {label}{RESET}" in row["content"]
+    assert f"{colour}{tokens // 1000}k{RESET}" in row["content"]
 
 
 def test_main_line_layout_and_window(sl):
     line = ANSI.sub("", sl.render_main(main_payload(167_000)))
-    assert line == "Opus · xhigh · ● 167k/1M fresh"
+    assert line == "[main] op-xhigh · 167k/1M"
     payload = main_payload(5000)
     payload["context_window"]["context_window_size"] = 200_000
     assert "5k/200k" in sl.render_main(payload)
@@ -84,7 +85,7 @@ def test_main_missing_effort_and_branch(sl):
     del payload["effort"]
     payload["worktree"] = {"branch": "feat/x"}
     line = ANSI.sub("", sl.render_main(payload))
-    assert line == "Opus · - · ● 167k/1M fresh · feat/x"
+    assert line == "[main] op-- · 167k/1M · feat/x"
 
 
 def test_main_null_tokens_uncoloured(sl):
@@ -93,15 +94,17 @@ def test_main_null_tokens_uncoloured(sl):
         if value == "missing":
             del payload["context_window"]["total_input_tokens"]
         line = sl.render_main(payload)
-        assert "\033" not in line
-        assert line == "Opus · xhigh · \u2013/1M"
+        assert not {GREEN, YELLOW, RED} & set(ANSI.findall(line))
+        assert ANSI.sub("", line) == "[main] op-xhigh · \u2013/1M"
 
 
 def test_missing_guard_module_is_uncoloured(sl, monkeypatch, tmp_path):
     monkeypatch.setattr(sl, "GUARD_PATH", tmp_path / "absent.py")
-    assert "\033" not in sl.render_main(main_payload(300_000))
+    main = sl.render_main(main_payload(300_000))
+    assert not {GREEN, YELLOW, RED} & set(ANSI.findall(main))
     (row,) = rows(sl, [task(300_000)])
-    assert "\033" not in row["content"]
+    assert not {GREEN, YELLOW, RED} & set(ANSI.findall(row["content"]))  # agent colour stays
+    assert " · 300k · " in ANSI.sub("", row["content"])
     assert "300k" in row["content"]
 
 
@@ -118,7 +121,7 @@ def test_thresholds_come_from_loaded_module(sl, monkeypatch, tmp_path):
 def test_subagent_model_shortening_and_row(sl):
     (row,) = rows(sl, [task(50_000)])
     assert row["id"] == "t1"
-    assert ANSI.sub("", row["content"]) == "executor · sonnet-5-5 · high · ● 50k fresh · do work"
+    assert ANSI.sub("", row["content"]) == "executor son5.5-high · 50k · $2 · do work"
 
 
 def test_subagent_fallback_names_and_missing_fields(sl):
@@ -126,11 +129,11 @@ def test_subagent_fallback_names_and_missing_fields(sl):
     del t["effort"]
     del t["model"]
     (row,) = rows(sl, [t])
-    assert ANSI.sub("", row["content"]).startswith("alice · - · - · ")
+    assert ANSI.sub("", row["content"]).startswith("alice --")
     t2 = task()
     del t2["agentType"]
     (row2,) = rows(sl, [t2])
-    assert ANSI.sub("", row2["content"]).startswith("local_agent · ")
+    assert ANSI.sub("", row2["content"]).startswith("local_agent son5.5-high")
 
 
 def test_truncation_counts_visible_chars_only(sl):
@@ -177,7 +180,7 @@ def test_end_to_end_main():
     assert proc.returncode == 0
     assert proc.stderr == ""
     assert proc.stdout.count("\n") == 1
-    assert f"{RED}● 250k/1M handoff{RESET}" in proc.stdout
+    assert f"{RED}250k/1M{RESET}" in proc.stdout
 
 
 def test_end_to_end_subagents():
@@ -209,4 +212,106 @@ def test_file_is_where_expected():
 
 def test_subagent_numeric_effort_is_shown(sl):
     (row,) = rows(sl, [task(effort=3)])
-    assert " · 3 · " in ANSI.sub("", row["content"])
+    assert " son5.5-3 · " in ANSI.sub("", row["content"])
+
+
+def test_subagent_agent_colours_differ_and_avoid_freshness_colours(sl):
+    names = ["executor", "doc-reader", "planner", "builder", "verifier", "reporter", "general-purpose"]
+    colours = {sl.AGENT_COLOURS[n] for n in names}
+    assert len(colours) == len(names)
+    assert not {GREEN, YELLOW, RED} & {c.replace("1;", "") for c in colours}
+    (row,) = rows(sl, [task(agentType="executor")])
+    assert row["content"].startswith(f"{sl.AGENT_COLOURS['executor']}executor{RESET}")
+    (other,) = rows(sl, [task(agentType="mystery")])
+    assert other["content"].startswith(f"{sl.DEFAULT_AGENT_COLOUR}mystery{RESET}")
+
+
+@pytest.mark.parametrize(
+    ("model", "effort", "text"),
+    [
+        ("claude-sonnet-5-5", "medium", "son5.5-med · 1k · $2"),
+        ("claude-opus-5-5", "high", "op5.5-high · 1k · $4"),
+        ("claude-haiku-5-5", "low", "hai5.5-low · 1k · $0.1"),
+        ("claude-future-9", "high", "future9-high · 1k"),
+    ],
+)
+def test_subagent_model_effort_and_price(sl, model, effort, text):
+    (row,) = rows(sl, [task(1_000, model=model, effort=effort, description="")])
+    assert ANSI.sub("", row["content"]).endswith(text)
+
+
+def test_prices_share_one_colour_and_are_not_freshness_colours(sl):
+    assert sl.PRICE_COLOUR not in {GREEN, YELLOW, RED, *sl.AGENT_COLOURS.values()}
+    (row,) = rows(sl, [task()])
+    assert f"{sl.PRICE_COLOUR}$2{RESET}" in row["content"]
+    line = sl.render_main(main_payload(cost={"total_cost_usd": 4.2149}))
+    assert f"{sl.PRICE_COLOUR}$4.21{RESET}" in line
+
+
+def test_main_line_has_no_time_and_subagent_rows_have_no_time(sl):
+    payload = main_payload(cost={"total_cost_usd": 1, "total_duration_ms": 4_800_000})
+    assert "1h20m" not in ANSI.sub("", sl.render_main(payload))
+    (row,) = rows(sl, [task(startTime=1_000_000_000_000)])
+    assert re.search(r"\d+[smh]\b", ANSI.sub("", row["content"])) is None
+
+
+def test_main_line_cost_limit_and_fast_mode(sl):
+    payload = main_payload(
+        93_000,
+        model={"display_name": "Opus 5.5"},
+        cost={"total_cost_usd": 4.2149},
+        rate_limits={"five_hour": {"used_percentage": 7.2}, "seven_day": {"used_percentage": 46}},
+        fast_mode=True,
+    )
+    line = ANSI.sub("", sl.render_main(payload))
+    assert line == "[main] op5.5\u26a1-xhigh · 93k/1M · $4.21 · D:7% · W:46%"
+
+
+def test_main_limit_reset_time_is_24h_vietnam_time(sl):
+    from datetime import datetime, timedelta, timezone
+
+    vn = timezone(timedelta(hours=7))
+    later = datetime(2026, 11, 15, 9, 5, tzinfo=vn).timestamp()
+    assert sl._reset({"resets_at": later}) == " (15/11 09:05)"
+    # 17:30 UTC on the 10th is 00:30 on the 11th in Vietnam.
+    utc = datetime(2026, 11, 10, 17, 30, tzinfo=UTC).timestamp()
+    assert sl._reset({"resets_at": utc}) == " (11/11 00:30)"
+
+
+@pytest.mark.parametrize("bad", [None, "x", True, 1e30, {}])
+def test_main_limit_reset_time_ignores_bad_values(sl, bad):
+    assert sl._reset({"resets_at": bad}) == ""
+    assert sl._reset("no") == ""
+
+
+def test_main_worktree_tag(sl):
+    assert ANSI.sub("", sl.render_main(main_payload())).startswith("[main] op")
+    linked = main_payload(worktree={"name": "w4-fp2"})
+    assert ANSI.sub("", sl.render_main(linked)).startswith("[w4-fp2] op")
+    git_only = main_payload(workspace={"git_worktree": "executor-agent"})
+    assert ANSI.sub("", sl.render_main(git_only)).startswith("[executor-agent] op")
+
+
+def test_main_rate_limits_are_labelled_and_coloured_per_window(sl):
+    from datetime import datetime, timedelta, timezone
+
+    reset = datetime(2026, 10, 20, 12, 40, tzinfo=timezone(timedelta(hours=7))).timestamp()
+    payload = main_payload(
+        rate_limits={
+            "five_hour": {"used_percentage": 41, "resets_at": reset},
+            "seven_day": {"used_percentage": 95.4},
+        }
+    )
+    line = sl.render_main(payload)
+    assert f"{sl.DAY_COLOUR}D:41% (20/10 12:40){RESET}" in line
+    assert f"{sl.WEEK_COLOUR}W:95%{RESET}" in line  # one colour per window, whatever the share
+    assert sl.DAY_COLOUR != sl.WEEK_COLOUR
+
+
+def test_main_line_skips_absent_or_malformed_extras(sl):
+    payload = main_payload(
+        cost={"total_cost_usd": "x"},
+        rate_limits={"five_hour": {"used_percentage": True}, "seven_day": "no"},
+        fast_mode="yes",
+    )
+    assert ANSI.sub("", sl.render_main(payload)) == "[main] op-xhigh · 167k/1M"
