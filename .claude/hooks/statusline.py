@@ -4,20 +4,21 @@
 Two modes, one script:
 
 - `statusline.py` (main): one line for the main session, same style as the subagent rows:
-  `[worktree] opus5.5-high · ● 93k/1M fresh · $4.20 · limit 5%|46% · branch`. `[worktree]` is
-  the linked worktree the session works in, `[main]` in the main checkout. The cost is Claude
-  Code's own estimate at list price (not the bill). `limit` is the 5-hour then the 7-day rate-limit
-  share, shown only when Claude Code sends it, yellow from 70%, red from 90%. A fast-mode session
-  gets a ⚡.
+  `[worktree] op5.5-high · 93k/1M · $4.20 · D:5% (11/11 14:30) · W:46% (15/11 09:00) · branch`.
+  `[worktree]` is the linked worktree the session works in, `[main]` in the main checkout. The
+  cost is Claude Code's own estimate at list price (not the bill). The two
+  limits are the rate-limit shares of the 5-hour (`D`, light purple) then the 7-day window (`W`,
+  light blue), shown only when Claude Code sends them, each followed by its reset time
+  `(dd/mm HH:MM)` (24h, Vietnam time). A fast-mode session gets a ⚡.
 - `statusline.py --subagents`: one JSON line `{"id", "content"}` per task for the subagent panel:
-  `agent model-effort · ● tokens freshness · $price · task`. The agent name has a fixed colour per
+  `agent model-effort · tokens · $price · task`. The agent name has a fixed colour per
   role. The price is the model's API list price for one million input tokens, not a running cost:
   the panel gives no per-task spend. Prices and costs share one colour.
 
-Colour by tokens, with the thresholds loaded from `context_guard.py` (same folder) so there is
-one source of truth: below WARN green `fresh`, from WARN yellow `warn`, from HANDOFF red
-`handoff`. If the thresholds cannot be loaded, tokens are shown uncoloured. Malformed input
-prints nothing; always exits 0. Stdlib only, no subprocess calls.
+Models are abbreviated (`op`, `son`, `hai`) and effort `medium` is `med`. Tokens are coloured,
+with the thresholds loaded from `context_guard.py` (same folder) so there is one source of
+truth: below WARN green, from WARN yellow, from HANDOFF red. If the thresholds cannot be loaded,
+tokens are shown uncoloured. Malformed input prints nothing; always exits 0. Stdlib only, no subprocess calls.
 """
 
 from __future__ import annotations
@@ -27,6 +28,7 @@ import importlib.util
 import json
 import re
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -86,6 +88,18 @@ def _dict(value: object) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+FAMILY_SHORT = {"opus": "op", "sonnet": "son", "haiku": "hai"}
+EFFORT_SHORT = {"medium": "med"}
+
+
+def _short_family(name: str) -> str:
+    """'opus5.5' -> 'op5.5', 'sonnet5.5' -> 'son5.5'; unknown families are kept."""
+    for long, short in FAMILY_SHORT.items():
+        if name.startswith(long):
+            return short + name[len(long) :]
+    return name
+
+
 def _tokens_k(tokens: int) -> str:
     return f"{tokens // 1000}k"
 
@@ -102,25 +116,33 @@ def _badge(tokens: int, window: str | None) -> str:
     if limits is None:
         return count
     warn, handoff = limits
-    if tokens < warn:
-        colour, label = GREEN, "fresh"
-    elif tokens < handoff:
-        colour, label = YELLOW, "warn"
-    else:
-        colour, label = RED, "handoff"
-    return f"{colour}● {count} {label}{RESET}"
+    colour = GREEN if tokens < warn else YELLOW if tokens < handoff else RED
+    return f"{colour}{count}{RESET}"
 
 
-RATE_WARN, RATE_RED = 70, 90
+DAY_COLOUR = "\033[38;5;141m"  # light purple: the 5-hour window (D)
+WEEK_COLOUR = "\033[38;5;117m"  # light blue: the 7-day window (W)
+VN_TZ = timezone(timedelta(hours=7))  # Asia/Ho_Chi_Minh: fixed UTC+7, no DST, no tzdata needed
 
 
-def _rate(window: object) -> str | None:
+def _reset(window: object) -> str:
+    """` (dd/mm HH:MM)`: when the window resets, 24h, Vietnam time."""
+    at = _dict(window).get("resets_at")
+    if isinstance(at, bool) or not isinstance(at, (int, float)):
+        return ""
+    try:
+        when = datetime.fromtimestamp(at, VN_TZ)
+    except (OverflowError, OSError, ValueError):
+        return ""
+    return f" ({when.strftime('%d/%m %H:%M')})"
+
+
+def _rate(label: str, colour: str, window: object) -> str | None:
+    """`D:41% (20/10 12:40)` in the window's own colour."""
     used = _dict(window).get("used_percentage")
     if isinstance(used, bool) or not isinstance(used, (int, float)):
         return None
-    used = round(used)  # colour what is shown, so "70%" is never uncoloured
-    colour = RED if used >= RATE_RED else YELLOW if used >= RATE_WARN else ""
-    return f"{colour}{used}%{RESET if colour else ''}"
+    return f"{colour}{label}:{round(used)}%{_reset(window)}{RESET}"
 
 
 def _worktree_tag(data: dict[str, Any]) -> str:
@@ -135,14 +157,15 @@ def _price(amount: str) -> str:
 
 
 def _main_model(display_name: str, fast: bool) -> str:
-    return display_name.lower().replace(" ", "") + ("\u26a1" if fast else "")
+    return _short_family(display_name.lower().replace(" ", "")) + ("\u26a1" if fast else "")
 
 
 def render_main(data: dict[str, Any]) -> str:
     model = _text(_dict(data.get("model")).get("display_name"))
     if model is None:
         return ""
-    effort = _text(_dict(data.get("effort")).get("level")) or "-"
+    level = _text(_dict(data.get("effort")).get("level")) or "-"
+    effort = EFFORT_SHORT.get(level, level)
     ctx = _dict(data.get("context_window"))
     tokens = _num(ctx.get("total_input_tokens"))
     window = _window(_num(ctx.get("context_window_size")))
@@ -152,9 +175,10 @@ def render_main(data: dict[str, Any]) -> str:
     if isinstance(spent, (int, float)) and not isinstance(spent, bool):
         parts.append(_price(f"${spent:.2f}"))
     limits = _dict(data.get("rate_limits"))
-    shares = [r for r in (_rate(limits.get("five_hour")), _rate(limits.get("seven_day"))) if r]
-    if shares:
-        parts.append("limit " + "|".join(shares))
+    for label, colour, key in (("D", DAY_COLOUR, "five_hour"), ("W", WEEK_COLOUR, "seven_day")):
+        share = _rate(label, colour, limits.get(key))
+        if share:
+            parts.append(share)
     branch = _text(_dict(data.get("worktree")).get("branch"))
     if branch:
         parts.append(branch)
@@ -183,7 +207,7 @@ def _short_model(model: str | None) -> tuple[str, str | None]:
     if model is None:
         return "-", None
     family, _, version = model.removeprefix("claude-").partition("-")
-    short = f"{family}{version.replace('-', '.')}" if version else family
+    short = _short_family(f"{family}{version.replace('-', '.')}" if version else family)
     price = PRICES.get(family)
     return short, None if price is None else f"${price[0]:g}"
 
@@ -202,7 +226,7 @@ def render_subagents(data: dict[str, Any]) -> list[str]:
         raw_effort = item.get("effort")
         if isinstance(raw_effort, (int, float)) and not isinstance(raw_effort, bool):
             raw_effort = str(raw_effort)
-        effort = {"medium": "med"}.get(raw_effort, raw_effort) if isinstance(raw_effort, str) else None
+        effort = EFFORT_SHORT.get(raw_effort, raw_effort) if isinstance(raw_effort, str) else None
         tokens = _num(item.get("tokenCount"))
         label = name or "?"
         colour = AGENT_COLOURS.get(label, DEFAULT_AGENT_COLOUR)
