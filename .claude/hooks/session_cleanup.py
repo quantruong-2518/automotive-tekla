@@ -8,14 +8,19 @@ to reverse, so every rule errs toward keeping.
 A worktree is removed only if ALL of these hold (otherwise it is kept, with the first failing reason):
   a. it is not the main worktree and not in use: none of the session's directories (the hook's stdin
      `cwd`, the process cwd, `CLAUDE_PROJECT_DIR`) is the worktree or inside it, no live session listed
-     in `~/.claude/sessions/*.json` (undocumented; best effort) runs inside it, and it does not
-     contain such a directory unless that is inside the main checkout;
+     in `~/.claude/sessions/*.json` (undocumented; best effort) runs inside it or in a folder above it
+     (a coordinator spawning agents), and it does not lie inside such a directory, except that a session
+     in the main checkout but outside every linked worktree never keeps worktrees nested in it;
   b. it is neither locked nor prunable (a prunable worktree, whose directory is gone, is only
      reported: this hook never runs `git worktree prune`);
   c. it is idle: the newest mtime of its admin files `HEAD` and `logs/HEAD` is older than
      `MIN_IDLE_HOURS`;
   d. neither its branch name, nor its directory name, nor either without the `worktree-` / `agent-`
-     prefix appears in `.handoff/*.md` of the main checkout, and every such file is readable;
+     prefix appears in a `*.md` file anywhere under `.handoff/` of the main checkout or under the coordinator
+     folder `<parent of the main checkout>/.coord/` (both walked recursively; linked folders are followed
+     once, a loop is skipped), and every such source is readable; only a missing folder
+     mentions nothing, any other error listing it (EACCES) keeps the target. The keep reason names
+     the source, e.g. `mentioned in .handoff/x.md`;
   e. `git status --porcelain --ignored=matching` lists nothing except entries that are themselves
      regenerable (`.venv/`, `__pycache__/`, `*.pyc`, `bin/`, ...): no modified, untracked or other
      ignored entry. Ignored directories are reported whole, so `projects/p1/` (ignored by
@@ -27,12 +32,14 @@ git refuses, the worktree is kept.
 
 A local branch is deleted only with `git branch -d` (never `-D`) and only if it is not checked out in
 a worktree (a prunable one still counts), is not `master` or `feat/*`, is an ancestor of
-`origin/master` or `master`, and is not mentioned in `.handoff/*.md` (an unreadable file keeps it).
+`origin/master` or `master`, and is not mentioned (rule d; an unreadable source keeps it).
 
 Every action is appended as one JSON line to `<git-common-dir>/claude-session-cleanup.jsonl` right
 after it succeeds.
-`--dry-run` decides and reports but changes nothing and writes no log. `--repo <path>` selects the
-repository (default `CLAUDE_PROJECT_DIR` or the current directory).
+`--dry-run` decides and reports but changes nothing and writes no log; its list is cut only at
+`DRY_RUN_LIST_LIMIT` characters (Claude Code caps hook `additionalContext` at 10,000), ending with the
+command that prints the full list: the same with `--full`, which skips the cut. `--repo <path>` selects
+the repository (default `CLAUDE_PROJECT_DIR` or the current directory).
 
 Registered for the `startup` and `clear` sources only (a fresh start). Never blocks; always exits 0.
 Stdlib only.
@@ -45,6 +52,7 @@ import ctypes
 import fnmatch
 import json
 import os
+import shlex
 import subprocess
 import sys
 import time
@@ -68,6 +76,7 @@ REGENERABLE = [
 LOG_NAME = "claude-session-cleanup.jsonl"
 GIT_TIMEOUT = 15
 MAX_LINES = 20
+DRY_RUN_LIST_LIMIT = 9000  # characters; Claude Code caps hook `additionalContext` at 10,000
 
 REVIEW_REMINDER = (
     "Mention the kept-for-review items to the engineer once; never remove them without their confirmation."
@@ -235,15 +244,21 @@ def key_within(child: str, parent: str, pathmod: Any = os.path) -> bool:
     return child == parent or child.startswith(prefix)
 
 
-def in_use(wt_path: str, session_dirs: Sequence[Path], main_path: str) -> bool:
-    """A session directory is in this worktree, or (not in the main checkout) the worktree sits inside it."""
+def in_use(
+    wt_path: str, session_dirs: Sequence[Path], main_path: str, linked_roots: Sequence[str] = ()
+) -> bool:
+    """A session directory is in this worktree, or (not in the main checkout) the worktree sits inside it.
+
+    The rule is `live_covers`: a directory in the main checkout outside every linked worktree does not
+    keep worktrees nested in it, but one inside a linked worktree does keep those nested below it.
+    """
     wt, main = path_key(wt_path), path_key(main_path)
     for directory in session_dirs:
         try:
-            cur = path_key(directory)
+            covers = live_covers(wt, directory, main, linked_roots)
         except (OSError, ValueError, RuntimeError):
             continue  # a path that cannot exist cannot hold a session
-        if key_within(cur, wt) or (key_within(wt, cur) and not key_within(cur, main)):
+        if covers:
             return True
     return False
 
@@ -331,23 +346,101 @@ def live_session_dirs(folder: Path) -> list[Path]:
     return dirs
 
 
-def handoff_reason(main_path: str, needles: list[str]) -> str | None:
-    """Why `.handoff/*.md` keeps the target: a file mentions a needle, or a file cannot be read."""
-    folder = Path(main_path) / ".handoff"
-    try:
-        files = sorted(folder.glob("*.md"))
-    except OSError:
-        return "handoff unreadable: .handoff"
-    unreadable: str | None = None
-    for file in files:
+def live_covers(wt_root: str, directory: Path, main_root: str, linked_roots: Sequence[str] = ()) -> bool:
+    """A live session runs inside the worktree, or in a folder above it (a coordinator spawning agents).
+
+    A session in the main checkout outside every linked worktree does not cover worktrees nested in
+    it (such as `.claude/worktrees/`): every session starts there, so they would never be cleaned.
+    A session inside a linked worktree (`.claude/worktrees/A`) still covers one below it.
+    """
+    cur = path_key(directory)
+    if key_within(cur, wt_root):
+        return True
+    if not key_within(wt_root, cur):
+        return False
+    in_main_only = key_within(cur, main_root) and not any(key_within(cur, root) for root in linked_roots)
+    return not in_main_only
+
+
+def collect_mentions(folder: Path, label: str, files: list[tuple[str, str]], visited: set[str]) -> str | None:
+    """Append `(relative path, text)` of every `*.md` under `folder` to `files`; return the first unreadable.
+
+    Only a missing top folder is empty. Subfolders are walked (`.coord/tracks/t1.md` counts) and linked
+    folders (symlinks, junctions) are followed once: `visited` holds the resolved path of each folder
+    walked, so a folder reached again (a loop, or two links to one folder) is skipped silently.
+    `Path.glob` returns `[]` on EACCES, so each folder is listed with `os.scandir`: any `OSError`
+    other than a missing top folder (also a subfolder that vanishes mid-walk, or a link whose target is
+    missing) marks that folder, or a file in it, unreadable. Paths are relative to the folder, after `label`.
+    """
+
+    def walk(directory: Path, rel: str) -> str | None:
+        here = f"{label}/{rel}" if rel else label
+        key = os.path.normcase(os.path.realpath(directory))
+        if key in visited:
+            return None
+        visited.add(key)
         try:
-            text = file.read_text(encoding="utf-8", errors="replace")
+            with os.scandir(directory) as scan:
+                entries = sorted(
+                    (e.name, e.is_dir(), not e.is_dir() and not Path(e.path).exists()) for e in scan
+                )
+        except FileNotFoundError:
+            if rel:
+                return here  # a subfolder that vanished mid-walk: cannot tell, keep
+            # a dangling symlink also raises FileNotFoundError, but the folder is there: keep
+            return label if os.path.lexists(directory) else None
         except OSError:
-            unreadable = unreadable or file.name
-            continue
-        if any(needle and needle in text for needle in needles):
-            return f"mentioned in handoff .handoff/{file.name}"
-    return f"handoff unreadable: .handoff/{unreadable}" if unreadable else None
+            return here
+        unreadable: str | None = None
+        for name, is_dir, broken in entries:
+            sub = f"{rel}/{name}" if rel else name
+            if is_dir:
+                unreadable = unreadable or walk(directory / name, sub)
+            elif name.lower().endswith(".md"):
+                try:
+                    text = (directory / name).read_text(encoding="utf-8", errors="replace")
+                except OSError:
+                    unreadable = unreadable or f"{label}/{sub}"
+                    continue
+                files.append((f"{label}/{sub}", text))
+            elif broken:  # a link (symlink, junction) to nothing may hide mentions: keep
+                unreadable = unreadable or f"{label}/{sub}"
+        return unreadable
+
+    return walk(folder, "")
+
+
+class MentionSources:
+    """The `*.md` mention sources of a run, read once: `.handoff/` and `.coord/` (next to the checkout).
+
+    `.coord/` is the ledger of a coordinator's live agent worktrees, in the parent of the main checkout.
+    Both folders are walked recursively. The first check loads them; later checks reuse the result.
+    """
+
+    def __init__(self, main_path: str) -> None:
+        self.main_path = main_path
+        self.files: list[tuple[str, str]] = []
+        self.unreadable: str | None = None
+        self.loaded = False
+
+    def load(self) -> None:
+        if self.loaded:
+            return
+        self.files, self.unreadable = [], None  # a load cut short by an exception starts over
+        main = Path(self.main_path)
+        visited: set[str] = set()
+        for folder, label in ((main / ".handoff", ".handoff"), (main.parent / ".coord", ".coord")):
+            bad = collect_mentions(folder, label, self.files, visited)
+            self.unreadable = self.unreadable or bad
+        self.loaded = True  # only a complete walk is reused
+
+    def reason(self, needles: list[str]) -> str | None:
+        """Why a source keeps the target: one mentions a needle, or one cannot be read. Names the source."""
+        self.load()
+        for name, text in self.files:
+            if any(needle and needle in text for needle in needles):
+                return f"mentioned in {name}"
+        return f"mention source unreadable: {self.unreadable}" if self.unreadable else None
 
 
 def integration_refs(main_path: str) -> list[str]:
@@ -425,6 +518,7 @@ def cleanup(
             sessions_dir = None
     live = live_session_dirs(sessions_dir) if sessions_dir is not None else []
     log = ActionLog(main.path, now, enabled=not dry_run)
+    sources = MentionSources(main.path)  # read once, on the first check that needs it
 
     def keep(kind: str, target: str, reason: str, head: str, review: bool, idle: bool) -> None:
         report["kept"].append(
@@ -433,15 +527,17 @@ def cleanup(
         if review:
             log.row("kept", target, reason, head)
 
+    main_root = path_key(main.path)
+    linked_roots = [path_key(w.path) for w in worktrees[1:]]
     gone: set[str] = set()  # paths of worktrees removed (or, in dry-run, that would be)
     for wt in worktrees[1:]:
         if wt.bare:
             continue
-        if in_use(wt.path, session_dirs, main.path):
+        if in_use(wt.path, session_dirs, main.path, linked_roots):
             keep("worktree", wt.path, "current session directory", wt.head, review=False, idle=False)
             continue
         wt_root = path_key(wt.path)
-        if any(key_within(path_key(directory), wt_root) for directory in live):
+        if any(live_covers(wt_root, directory, main_root, linked_roots) for directory in live):
             keep("worktree", wt.path, "live session", wt.head, review=False, idle=False)
             continue
         if wt.locked:
@@ -452,7 +548,7 @@ def cleanup(
             continue
         mtime = newest_admin_mtime(wt.path)
         idle = mtime is not None and now - mtime > idle_limit
-        reason = worktree_keep_reason(wt, main.path, refs, idle, mtime is None, min_idle_hours)
+        reason = worktree_keep_reason(wt, main.path, sources, refs, idle, mtime is None, min_idle_hours)
         if reason is None:
             removed = {
                 "target": wt.path,
@@ -473,21 +569,27 @@ def cleanup(
             reason = f"git refused: {first_line(err)}"
         keep("worktree", wt.path, reason, wt.head, review=True, idle=idle)
 
-    delete_branches(report, worktrees, gone, main.path, refs, now, idle_limit, dry_run, log)
+    delete_branches(report, worktrees, gone, main.path, sources, refs, now, idle_limit, dry_run, log)
     return report
 
 
 def worktree_keep_reason(
-    wt: Worktree, main_path: str, refs: list[str], idle: bool, no_mtime: bool, min_idle_hours: float
+    wt: Worktree,
+    main_path: str,
+    sources: MentionSources,
+    refs: list[str],
+    idle: bool,
+    no_mtime: bool,
+    min_idle_hours: float,
 ) -> str | None:
-    """First failing check among idle, handoff, status, merge (the caller checked the rest), else None."""
+    """First failing check among idle, mention, status, merge (the caller checked the rest), else None."""
     if no_mtime:
         return "idle time unknown"
     if not idle:
         return f"not idle for {min_idle_hours:g}h yet"
     branch, name = short_ref(wt.branch), Path(wt.path).name
     needles = [branch, name, branch.removeprefix("worktree-"), name.removeprefix("agent-")]
-    mention = handoff_reason(main_path, needles)
+    mention = sources.reason(needles)
     if mention:
         return mention
     dirty = unclean_reason(wt.path)
@@ -504,6 +606,7 @@ def delete_branches(
     worktrees: list[Worktree],
     gone: set[str],
     main_path: str,
+    sources: MentionSources,
     refs: list[str],
     now: float,
     idle_limit: float,
@@ -539,7 +642,7 @@ def delete_branches(
             keep(name, "not merged into origin/master or master", sha, idle)
             continue
         needles = [name, name.removeprefix("worktree-"), name.removeprefix("worktree-agent-")]
-        mention = handoff_reason(main_path, needles)
+        mention = sources.reason(needles)
         if mention:
             keep(name, mention, sha, idle)
             continue
@@ -558,7 +661,31 @@ def shorten(lines: list[str], limit: int) -> list[str]:
     return [*lines[: limit - 1], f"- ... and {len(lines) - (limit - 1)} more (see the cleanup log in .git)"]
 
 
-def build_output(report: dict[str, list[dict[str, Any]]], dry_run: bool) -> dict[str, Any] | None:
+def cap_chars(lines: list[str], limit: int, main_path: str | None) -> list[str]:
+    """The leading lines that fit in `limit` characters, then a line saying how to print the rest."""
+    if sum(len(line) + 1 for line in lines) <= limit:
+        return lines
+    where = main_path or "<main checkout path>"
+    where = shlex.quote(where) if os.name != "nt" else subprocess.list2cmdline([where])
+
+    def footer(count: int) -> str:
+        command = f"python .claude/hooks/session_cleanup.py --dry-run --full --repo {where}"
+        return f"\u2026 {count} more; full list: {command}"
+
+    room = limit - len(footer(len(lines))) - 1  # the footer counts for the largest possible number
+    kept: list[str] = []
+    used = 0
+    for line in lines:
+        if used + len(line) + 1 > room:
+            break
+        kept.append(line)
+        used += len(line) + 1
+    return [*kept, footer(len(lines) - len(kept))]
+
+
+def build_output(
+    report: dict[str, list[dict[str, Any]]], dry_run: bool, main_path: str | None = None, full: bool = False
+) -> dict[str, Any] | None:
     removed_wt, deleted = report["removed_worktrees"], report["deleted_branches"]
     review = [k for k in report["kept"] if k["review"] and k["idle"]]
     if not removed_wt and not deleted and not review:
@@ -570,7 +697,12 @@ def build_output(report: dict[str, list[dict[str, Any]]], dry_run: bool) -> dict
     removed_lines += [f"- branch {verb}deleted: {b['target']}" for b in deleted]
     kept_lines = [f"- kept for review, {k['kind']} {k['target']}: {k['reason']}" for k in review]
     kept_budget = min(len(kept_lines), MAX_LINES // 2)  # kept items must stay visible
-    lines = shorten(removed_lines, MAX_LINES - kept_budget) + shorten(kept_lines, kept_budget)
+    if dry_run:  # a dry-run writes no log to point at: it lists all it can and says how to get the rest
+        lines = removed_lines + kept_lines
+        if not full:
+            lines = cap_chars(lines, DRY_RUN_LIST_LIMIT, main_path)
+    else:
+        lines = shorten(removed_lines, MAX_LINES - kept_budget) + shorten(kept_lines, kept_budget)
     text = "\n".join(lines)
     if review:
         text += f"\n\n{REVIEW_REMINDER}"
@@ -588,14 +720,15 @@ def build_output(report: dict[str, list[dict[str, Any]]], dry_run: bool) -> dict
     return out
 
 
-def parse_args(argv: list[str]) -> tuple[bool, str | None]:
+def parse_args(argv: list[str]) -> tuple[bool, str | None, bool]:
     dry_run = "--dry-run" in argv
+    full = "--full" in argv
     repo: str | None = None
     if "--repo" in argv:
         position = argv.index("--repo")
         if position + 1 < len(argv):
             repo = argv[position + 1]
-    return dry_run, repo
+    return dry_run, repo, full
 
 
 def stdin_cwd() -> Path | None:
@@ -611,7 +744,7 @@ def stdin_cwd() -> Path | None:
 
 
 def main(argv: list[str]) -> int:
-    dry_run, repo_arg = parse_args(argv)
+    dry_run, repo_arg, full = parse_args(argv)
     try:
         process_cwd: Path | None = Path.cwd()
     except OSError:
@@ -622,7 +755,12 @@ def main(argv: list[str]) -> int:
     if project is None or repo is None or not repo.is_dir():
         return 0
     protected = [d for d in (stdin_cwd(), process_cwd) if d is not None]
-    out = build_output(cleanup(repo, current=project, protected=protected, dry_run=dry_run), dry_run)
+    report = cleanup(repo, current=project, protected=protected, dry_run=dry_run)
+    main_path = str(repo)
+    if dry_run and not full:  # only the capped dry-run listing prints the main checkout
+        checkouts = list_worktrees(repo)
+        main_path = checkouts[0].path if checkouts else main_path
+    out = build_output(report, dry_run, main_path, full)
     if out is not None:
         sys.stdout.write(json.dumps(out, ensure_ascii=False))
     return 0
