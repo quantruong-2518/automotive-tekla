@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:tekla-harness:schema:answer-key:0.1",
+  "title": "Answer key",
+  "description": "The documents of the spot check of a locked part (ADR-0019, C11). `kind` tells them apart. `spotcheck` (E9a): `W/parts/<part>/spotcheck.json`, written by `harness part spotcheck`: the sampled `seen` rows of one part at one part hash, with where each value is read. `harness part answer-key` records a verdict only for a row of this file whose `part_hash` is the part's current hash. `answer_key` (E9b): `W/answer-key.json`, written by `harness part answer-key` only: the engineer's verdicts on sampled rows, each under the key (part, file, sheet, mark or subject in NFC, casefolded and single-spaced, field) and never a finding id, so a reread with new ids is scored by `harness part score`.",
+  "oneOf": [{ "$ref": "#/$defs/spotcheck" }, { "$ref": "#/$defs/answer_key" }],
+  "$defs": {
+    "spotcheck": {
+      "type": "object",
+      "required": ["schema_version", "kind", "part", "part_hash", "seed", "n", "rows"],
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": { "const": "0.1" },
+        "kind": { "const": "spotcheck" },
+        "part": { "$ref": "urn:tekla-harness:schema:parts-manifest:0.1#/$defs/part_id" },
+        "part_hash": { "type": "string", "pattern": "^[0-9a-f]{64}$", "description": "The part hash the sample was drawn at (`part_receipts.part_hash`)." },
+        "seed": { "type": "integer", "minimum": 0 },
+        "n": { "type": "integer", "minimum": 1, "description": "The requested sample size (`--n`, default 5); a small pool gives all its rows, and one row per LISTED field can exceed it." },
+        "rows": { "type": "array", "description": "By row id.", "items": { "$ref": "#/$defs/spotcheck_row" } }
+      }
+    },
+    "answer_key": {
+      "type": "object",
+      "required": ["schema_version", "kind", "rows"],
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": { "const": "0.1" },
+        "kind": { "const": "answer_key" },
+        "rows": { "type": "array", "description": "In the order recorded; a new verdict on a key sets the earlier active one to `superseded`.", "items": { "$ref": "#/$defs/answer_row" } }
+      }
+    },
+    "answer_row": {
+      "type": "object",
+      "required": ["part", "file", "sheet", "subject", "field", "row", "verdict", "correct", "engineer_text", "by", "at", "value_shown", "status", "part_hash", "seed"],
+      "additionalProperties": false,
+      "allOf": [
+        { "if": { "properties": { "verdict": { "const": "wrong" } } }, "then": { "properties": { "correct": { "type": "string" } } }, "else": { "properties": { "correct": { "type": "null" } } } }
+      ],
+      "properties": {
+        "part": { "$ref": "urn:tekla-harness:schema:parts-manifest:0.1#/$defs/part_id" },
+        "file": { "type": "string", "minLength": 1 },
+        "sheet": { "type": ["string", "null"], "minLength": 1, "description": "Null when the row was on no sheet." },
+        "subject": { "type": "string", "minLength": 1, "description": "The normalised (NFC, casefolded, single-spaced) mark or subject of the row." },
+        "field": { "type": "string", "minLength": 1 },
+        "row": { "type": "string", "pattern": "^R[0-9]{3,}$", "description": "The row id at the time of the sample; information only, never part of the key." },
+        "verdict": { "enum": ["ok", "wrong", "cannot_tell"] },
+        "correct": { "type": ["string", "null"], "minLength": 1, "description": "The value the drawing gives; set exactly when the verdict is `wrong`." },
+        "engineer_text": { "type": ["string", "null"], "minLength": 1, "description": "The engineer's words, kept as given." },
+        "by": { "type": "string", "minLength": 1, "pattern": "\\S", "description": "The engineer's name as given." },
+        "at": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$" },
+        "value_shown": { "type": "string", "minLength": 1, "description": "The value the sample showed the engineer; the expected value of an `ok` verdict." },
+        "status": { "enum": ["active", "superseded"] },
+        "part_hash": { "type": "string", "pattern": "^[0-9a-f]{64}$", "description": "The part hash of the sample the verdict judged (`spotcheck.part_hash`): the reading it was about." },
+        "seed": { "type": "integer", "minimum": 0, "description": "The seed of that sample: with the hash it names the draw, so a verdict shopped across seeds shows." }
+      }
+    },
+    "spotcheck_row": {
+      "type": "object",
+      "required": ["row", "field", "value", "file", "sheet", "sheet_number", "sheet_title", "view", "entries", "findings"],
+      "additionalProperties": false,
+      "oneOf": [
+        { "required": ["mark"], "not": { "required": ["subject"] } },
+        { "required": ["subject"], "not": { "required": ["mark"] } }
+      ],
+      "properties": {
+        "row": { "type": "string", "pattern": "^R[0-9]{3,}$" },
+        "mark": { "type": "string", "minLength": 1 },
+        "subject": { "type": "string", "minLength": 1 },
+        "field": { "type": "string", "minLength": 1 },
+        "value": { "type": "string", "minLength": 1, "description": "The value as the part's row gives it, verbatim." },
+        "file": { "type": ["string", "null"], "minLength": 1, "description": "Null when the row names no file." },
+        "sheet": { "type": ["string", "null"], "minLength": 1, "description": "Null when the row is on no sheet (a cluster) or names no file." },
+        "sheet_number": { "type": ["string", "null"], "minLength": 1, "description": "Text of the manifest `number_entry` of the sheet; null when none, or when the text is blocked or not printed." },
+        "sheet_title": { "type": ["string", "null"], "minLength": 1, "description": "Text of the manifest `title_entry` of the sheet; null as `sheet_number`." },
+        "view": { "type": ["string", "null"], "minLength": 1, "description": "Text of the row's `view.heading_entry`; null when none (a bbox view too) or when the text is blocked or not printed." },
+        "entries": { "type": "array", "items": { "type": "string", "pattern": "^T[0-9]{6,}$" }, "description": "The entry ids the row cites; the form quotes their texts." },
+        "findings": { "type": "array", "items": { "type": "string", "pattern": "^F-[0-9]{3,}$" }, "description": "The finding ids the row cites." }
+      }
+    }
+  }
+}

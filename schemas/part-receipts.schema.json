@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:tekla-harness:schema:part-receipts:0.1",
+  "title": "Part receipts",
+  "description": "parts/<part>/receipts.json in the work folder (ADR-0019, E5b): the append-only record of what happened to one part, written only by `harness part receipt`, modelled on `spec-receipt`. Receipts are numbered 1, 2, ... in the order written. A receipt binds a kind (`checked`, `reviewed`, `locked`, `reopened`) to the part hash at that time; the part's status is derived from the latest receipts and the current hash (`part_receipts.part_status`), never stored. A hash is evidence that the part is unchanged since the receipt, not who wrote it.",
+  "type": "object",
+  "required": ["schema_version", "part", "receipts"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": "0.1" },
+    "part": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+      "description": "The part the file belongs to: the folder name under parts/."
+    },
+    "receipts": {
+      "type": "array",
+      "description": "Oldest first. The latest receipt is the last element.",
+      "items": { "$ref": "#/$defs/receipt" }
+    }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "receipt": {
+      "type": "object",
+      "required": ["n", "kind", "part_hash", "at", "tool_version", "review", "reason", "inputs"],
+      "additionalProperties": false,
+      "properties": {
+        "n": { "type": "integer", "minimum": 1, "description": "1 for the first receipt, then one more each (append-only)." },
+        "kind": {
+          "enum": ["checked", "reviewed", "locked", "reopened"],
+          "description": "checked: `part check` passed on part_hash. reviewed: a review round of the part at part_hash ended with `review.verdict`. locked: the part is closed at part_hash, over `inputs`. reopened: a locked part is open again."
+        },
+        "part_hash": { "$ref": "#/$defs/sha256", "description": "The part hash (`part_receipts.part_hash`) when the receipt was written." },
+        "at": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$",
+          "description": "UTC time, second precision. Information only, never an expiry."
+        },
+        "tool_version": { "type": "string", "minLength": 1, "description": "Package version of tekla_harness that wrote the receipt." },
+        "review": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "required": ["round", "verdict", "file", "sha256"],
+              "additionalProperties": false,
+              "properties": {
+                "round": { "type": "integer", "minimum": 1 },
+                "verdict": { "enum": ["pass", "fix", "engineer"] },
+                "file": { "type": "string", "minLength": 1, "description": "Work-relative path of the review file, parts/<part>/review/round-<round>/review.md." },
+                "sha256": { "$ref": "#/$defs/sha256", "description": "SHA-256 of the review file's bytes when the receipt was written." }
+              }
+            }
+          ],
+          "description": "Required (not null) for kind `reviewed`; null for the others."
+        },
+        "reason": {
+          "oneOf": [{ "type": "null" }, { "type": "string", "minLength": 1 }],
+          "description": "Required (not null) for kind `reopened`: why the part is open again; null for the others."
+        },
+        "inputs": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "propertyNames": { "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$" },
+              "additionalProperties": { "$ref": "#/$defs/sha256" }
+            }
+          ],
+          "description": "Required (not null) for kind `locked`: the part hash of each input part (manifest `inputs`) when the lock was written; {} for a part without inputs. Null for the others."
+        }
+      },
+      "allOf": [
+        { "if": { "properties": { "kind": { "const": "reviewed" } } }, "then": { "properties": { "review": { "type": "object" } } },
+          "else": { "properties": { "review": { "type": "null" } } } },
+        { "if": { "properties": { "kind": { "const": "locked" } } }, "then": { "properties": { "inputs": { "type": "object" } } },
+          "else": { "properties": { "inputs": { "type": "null" } } } },
+        { "if": { "properties": { "kind": { "const": "reopened" } } }, "then": { "properties": { "reason": { "type": "string" } } },
+          "else": { "properties": { "reason": { "type": "null" } } } }
+      ]
+    }
+  }
+}

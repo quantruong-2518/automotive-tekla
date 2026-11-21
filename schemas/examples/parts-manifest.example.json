@@ -1,0 +1,330 @@
+{
+  "schema_version": "0.1",
+  "blocks": [
+    {
+      "id": "ALPHA",
+      "grid_system_ids": [
+        "S001"
+      ],
+      "origin_note": "Block ALPHA: own grid, origin at the lower-left axis crossing of its foundation plan."
+    },
+    {
+      "id": "BETA",
+      "grid_system_ids": [
+        "S002"
+      ],
+      "origin_note": "Block BETA: own grid, origin at the lower-left axis crossing of its foundation plan."
+    }
+  ],
+  "parts": [
+    {
+      "id": "scout",
+      "kind": "bookkeeping",
+      "order": 0
+    },
+    {
+      "id": "all-grid-levels",
+      "kind": "cross",
+      "order": 1,
+      "sheets": [
+        {
+          "file": "plans/set.dxf",
+          "sheet": "model#06",
+          "number_entry": "T000012",
+          "title_entry": "T000012",
+          "role": "plan",
+          "views": [
+            {
+              "heading_entry": "T000012"
+            }
+          ]
+        }
+      ],
+      "expected_sources": [
+        "text",
+        "linework"
+      ]
+    },
+    {
+      "id": "all-notes-materials",
+      "kind": "cross",
+      "order": 1,
+      "sheets": [
+        {
+          "file": "plans/set.dxf",
+          "sheet": "model#05",
+          "number_entry": "T000010",
+          "title_entry": "T000011",
+          "role": "notes"
+        }
+      ],
+      "expected_sources": [
+        "text"
+      ]
+    },
+    {
+      "id": "ALPHA-piles",
+      "kind": "member",
+      "block": "ALPHA",
+      "family": "piles",
+      "order": 2,
+      "inputs": [
+        "all-grid-levels"
+      ],
+      "sheets": [
+        {
+          "file": "plans/set.dxf",
+          "sheet": "model#01",
+          "number_entry": "T000001",
+          "title_entry": "T000002",
+          "role": "plan",
+          "views": [
+            {
+              "heading_entry": "T000003"
+            }
+          ]
+        }
+      ],
+      "clusters": [
+        {
+          "file": "plans/set.dxf",
+          "sheet": "model#01",
+          "side": "below"
+        }
+      ],
+      "layers": {
+        "outline": [
+          "S-PILE-OUT"
+        ],
+        "symbol": [
+          "S-PILE"
+        ]
+      },
+      "marks_regex": "^P[0-9]+$",
+      "expected_sources": [
+        "text",
+        "linework"
+      ],
+      "tables": [
+        {
+          "cluster": {
+            "file": "plans/set.dxf",
+            "sheet": "model#01",
+            "side": "below"
+          },
+          "header_entries": [
+            "T000013"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ALPHA-piles-b",
+      "kind": "member",
+      "block": "ALPHA",
+      "family": "piles",
+      "order": 2,
+      "inputs": [
+        "all-grid-levels"
+      ],
+      "sheets": [
+        {
+          "file": "plans/set.dxf",
+          "sheet": "model#01",
+          "role": "plan"
+        }
+      ],
+      "split_of": "ALPHA-piles"
+    },
+    {
+      "id": "ALPHA-caps",
+      "kind": "member",
+      "block": "ALPHA",
+      "family": "caps",
+      "order": 3,
+      "inputs": [
+        "ALPHA-piles"
+      ],
+      "sheets": [
+        {
+          "file": "plans/set.dxf",
+          "sheet": "model#01",
+          "number_entry": "T000001",
+          "title_entry": "T000002",
+          "role": "plan",
+          "views": [
+            {
+              "heading_entry": "T000003"
+            },
+            {
+              "bbox": [
+                0,
+                0,
+                1000,
+                500
+              ]
+            }
+          ]
+        },
+        {
+          "file": "plans/set.dxf",
+          "sheet": "model#02",
+          "number_entry": "T000004",
+          "title_entry": "T000006",
+          "role": "schedule"
+        }
+      ],
+      "tables": [
+        {
+          "file": "plans/set.dxf",
+          "sheet": "model#02",
+          "header_entries": [
+            "T000006"
+          ]
+        }
+      ],
+      "layers": {
+        "outline": [
+          "S-CAP-OUT"
+        ],
+        "symbol": [
+          "S-CAP"
+        ]
+      },
+      "marks_regex": "^C[0-9]+$",
+      "expected_sources": [
+        "text",
+        "schedule",
+        "linework"
+      ]
+    },
+    {
+      "id": "BETA-piles",
+      "kind": "member",
+      "block": "BETA",
+      "family": "piles",
+      "order": 2,
+      "inputs": [
+        "all-grid-levels"
+      ],
+      "sheets": [
+        {
+          "file": "plans/set.dxf",
+          "sheet": "model#03",
+          "number_entry": "T000007",
+          "title_entry": "T000008",
+          "role": "plan",
+          "views": [
+            {
+              "heading_entry": "T000008"
+            }
+          ]
+        }
+      ],
+      "layers": {
+        "outline": [
+          "S-PILE-OUT"
+        ],
+        "symbol": [
+          "S-PILE"
+        ]
+      },
+      "marks_regex": "^P[0-9]+$",
+      "expected_sources": [
+        "text",
+        "linework"
+      ]
+    },
+    {
+      "id": "BETA-caps",
+      "kind": "member",
+      "block": "BETA",
+      "family": "caps",
+      "order": 3,
+      "inputs": [
+        "BETA-piles"
+      ],
+      "sheets": [
+        {
+          "file": "plans/set.dxf",
+          "sheet": "model#03",
+          "number_entry": "T000007",
+          "title_entry": "T000008",
+          "role": "plan",
+          "views": [
+            {
+              "heading_entry": "T000008"
+            }
+          ]
+        },
+        {
+          "file": "plans/set.dxf",
+          "sheet": "model#04",
+          "number_entry": "T000009",
+          "title_entry": "T000009",
+          "role": "schedule"
+        }
+      ],
+      "tables": [
+        {
+          "file": "plans/set.dxf",
+          "sheet": "model#04",
+          "header_entries": [
+            "T000009"
+          ]
+        }
+      ],
+      "layers": {
+        "outline": [
+          "S-CAP-OUT"
+        ],
+        "symbol": [
+          "S-CAP"
+        ]
+      },
+      "marks_regex": "^C[0-9]+$",
+      "expected_sources": [
+        "text",
+        "schedule",
+        "linework"
+      ],
+      "producer_questions": [
+        "Q-001"
+      ]
+    },
+    {
+      "id": "all-assembly",
+      "kind": "bookkeeping",
+      "order": 4,
+      "inputs": [
+        "ALPHA-caps",
+        "BETA-caps"
+      ]
+    },
+    {
+      "id": "all-no-sheet",
+      "kind": "no_sheet",
+      "order": 4,
+      "files": [
+        "plans/legacy.dxf"
+      ],
+      "clusters": [
+        {
+          "file": "plans/set.dxf",
+          "sheet": null,
+          "side": "none"
+        }
+      ]
+    }
+  ],
+  "acks": [
+    {
+      "warning": "grid_origin_other_block|plans/set.dxf|model#03|ALPHA",
+      "reason": "synthetic example"
+    },
+    {
+      "warning": "revision_from_table|plans/set.dxf|model#01|T000001",
+      "question": "Q-001"
+    }
+  ]
+}

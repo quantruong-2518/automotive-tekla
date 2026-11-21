@@ -14,6 +14,9 @@ Layout: machine artefacts in `projects/<id>/work/`; engineer documents (`questio
 
 ## Steps
 
+Run every `harness` command through the one invocation the dispatch names (`uv run --project <checkout> harness …` with absolute
+paths: structural-drawing-reader tools.md, first paragraph). In part mode intake runs on the same work folder.
+
 1. **Intake.** `uv run harness intake I --out W --project-id <id>`. Exit 3 = no DWG converter
    configured (`HARNESS_ODA_CONVERTER` / `HARNESS_DWG2DXF`) or an input unreadable; exit 1 = a
    file could not be read, an output failed its schema, or `knowledge/font-encodings.csv` is
@@ -58,12 +61,13 @@ Layout: machine artefacts in `projects/<id>/work/`; engineer documents (`questio
 
 ## Answers
 
-Only the engineer answers. Record an answer given in chat with
-`uv run harness answer W <Q-id> --text "<their words>" --by "<their name>" [--value k=v …]`
-(the command in `questions.md` names the values each question needs), then rerun the
-producer it feeds and `harness status`. The command refuses obsolete ids, changed files and
-`grid_system_conflict` (that one closes through `grid_system_select` with `systems=` or
-`separate=`).
+Only the engineer answers, and units come only from his chat answer. Only the orchestrator records it, from its own chat with him; the
+intake runner never runs `harness answer` and hands the question ids back instead (rule: structural-drawing-reader SKILL.md § Asking). The orchestrator runs
+`uv run harness answer W <Q-id> --text "<his words>" --by "<the engineer's name as he gives it>" --role engineer [--value k=v …]`
+(the command in `questions.md` names the values each question needs), never the git user, then reruns the
+producer it feeds and `harness status`. When he gave no name, the orchestrator asks him for it before recording. The command refuses obsolete ids,
+changed files and `grid_system_conflict` (that one closes through `grid_system_select` with
+`systems=` or `separate=`).
 
 ## Hard stops
 

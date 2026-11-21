@@ -1,0 +1,37 @@
+{
+  "schema_version": "0.1",
+  "kind": "geometry",
+  "project_id": "demo-warehouse",
+  "file": "drawings/S-101.dwg",
+  "query": { "sheet": ["model#01"], "bbox": null, "layer": ["S-PILE", "S-CAP"], "detail": true, "max": null, "tol": 1.0 },
+  "units": { "declared": "mm", "answered": "mm", "converted": false },
+  "regions": [
+    {
+      "sheet": "model#01",
+      "bbox": null,
+      "layers": {
+        "S-CAP": { "circles": 0, "outlines": 1, "lines": 0, "arcs": 0, "hatches": 0, "ellipses": 0, "splines": 0, "open_polylines": 0, "hidden": 0, "invisible": 0, "unplaced": 0, "copies_collapsed": 0 },
+        "S-PILE": { "circles": 1, "outlines": 0, "lines": 0, "arcs": 0, "hatches": 0, "ellipses": 0, "splines": 0, "open_polylines": 0, "hidden": 0, "invisible": 0, "unplaced": 0, "copies_collapsed": 12 }
+      },
+      "circle_groups": [
+        { "layer": "S-PILE", "diameter": 300.0, "count": 1, "copies": 13, "invisible": 0, "centre_bbox": [10000.0, 10000.0, 10000.0, 10000.0] }
+      ],
+      "outline_groups": [
+        { "layer": "S-CAP", "short": 800.0, "long": 1700.0, "rectangle": true, "vertices": 4, "count": 1, "copies": 1, "invisible": 0, "centre_bbox": [42000.0, 20000.0, 42000.0, 20000.0] }
+      ],
+      "items": [
+        {
+          "id": "G-0123456789", "kind": "circle", "layer": "S-PILE", "sheet": "model#01", "space": "model", "centre": [10000.0, 10000.0],
+          "diameter": 300.0, "bbox": null, "short": null, "long": null, "angle": null, "rectangle": null, "vertices": null,
+          "points": null, "points_truncated": null, "copies": 13, "invisible": false, "top_handle": "2A1", "block_path": ["PILE"]
+        },
+        {
+          "id": "G-abcdef0123", "kind": "outline", "layer": "S-CAP", "sheet": "model#01", "space": "model", "centre": [42000.0, 20000.0],
+          "diameter": null, "bbox": [41150.0, 19600.0, 42850.0, 20400.0], "short": 800.0, "long": 1700.0, "angle": 0.0,
+          "rectangle": true, "vertices": 4, "points": null, "points_truncated": null, "copies": 1, "invisible": false, "top_handle": "2B7", "block_path": []
+        }
+      ]
+    }
+  ],
+  "warnings": []
+}

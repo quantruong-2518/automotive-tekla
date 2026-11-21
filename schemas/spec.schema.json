@@ -2,27 +2,47 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:tekla-harness:schema:spec:0.1",
   "title": "Lot spec",
-  "description": "Everything the builder needs to create one lot. Units: millimetres, global coordinates. Semantic rules not expressible here (unique spec_id, non-zero length, low confidence needs a question) are checked by tekla_harness.schemas.check_spec.",
+  "description": "Everything the builder needs to create one lot. Units: millimetres, global coordinates unless a field says otherwise. Lot 0 is the setup lot: it holds grids only, and a grid's levels are its Z planes. Lots 1 and above hold members, poly_members, slabs, polygonal_caps and walls, never grids (ADR-0015, ADR-0016). Openings are nested in their slab or wall. Every reference line or face is the drawing's: a member's line as its type states, a slab's or cap's top face, a wall's base line; the CLI maps it to Tekla's Position (ADR-0016 decision 2). Semantic rules not expressible here (spec_id unique across every array and every nested opening; non-zero length and segment length; increasing grid positions on a 0.01 mm step; poly member, outline and opening geometry rules; vertical footings and piles, horizontal strip footings, slabs, caps and wall bases; elevation and grid frame provenance; engineer answers carry their question_id; low confidence anywhere in an item needs a question) are checked by tekla_harness.schemas.check_spec.",
   "type": "object",
   "required": ["schema_version", "project_id", "lot", "units", "members", "open_questions"],
   "additionalProperties": false,
   "properties": {
-    "schema_version": { "const": "0.1" },
-    "project_id": { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/project_id" },
-    "lot": { "type": "integer", "minimum": 1 },
-    "units": { "const": "mm" },
-    "description": { "type": "string" },
-    "members": {
+    "schema_version": {"const": "0.1"},
+    "project_id": {"$ref": "urn:tekla-harness:schema:common:0.1#/$defs/project_id"},
+    "lot": {"type": "integer", "minimum": 0, "description": "0 = setup lot (grids only); 1 and above = member lots."},
+    "units": {"const": "mm"},
+    "description": {"type": "string"},
+    "members": {"type": "array", "description": "Straight members, one start-end line each. Empty in lot 0.", "items": {"$ref": "#/$defs/member"}},
+    "poly_members": {"type": "array", "description": "Members that are not one straight start-end line (Tekla PolyBeam). Absent or empty in lot 0.", "items": {"$ref": "#/$defs/poly_member"}},
+    "grids": {"type": "array", "description": "Grids with their levels, each in its own frame (origin and rotation about +Z). Lot 0 only.", "items": {"$ref": "#/$defs/grid"}},
+    "slabs": {"type": "array", "description": "Horizontal concrete slabs (Tekla ContourPlate, type SLAB), with their openings. Lots 1 and above (ADR-0016).", "items": {"$ref": "#/$defs/slab"}},
+    "walls": {"type": "array", "description": "Straight concrete walls (Tekla Beam of type PANEL), with their openings. Lots 1 and above (ADR-0016).", "items": {"$ref": "#/$defs/wall"}},
+    "polygonal_caps": {
       "type": "array",
-      "minItems": 1,
-      "items": { "$ref": "#/$defs/member" }
+      "description": "Pile caps whose plan is a polygon (3-pile, hexagonal): Tekla ContourPlate (type SLAB), Name PILE_CAP and the item's class tell them from slabs. Lots 1 and above (ADR-0016 decision 3).",
+      "items": {"$ref": "#/$defs/polygonal_cap"}
     },
     "open_questions": {
       "type": "array",
       "description": "Question ids from questions.md that affect this lot.",
-      "items": { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/question_id" },
+      "items": {"$ref": "urn:tekla-harness:schema:common:0.1#/$defs/question_id"},
       "uniqueItems": true
     }
+  },
+  "if": {"properties": {"lot": {"const": 0}}, "required": ["lot"]},
+  "then": {
+    "required": ["grids"],
+    "properties": {"grids": {"minItems": 1}, "members": {"maxItems": 0}, "poly_members": {"maxItems": 0}, "slabs": {"maxItems": 0}, "walls": {"maxItems": 0}, "polygonal_caps": {"maxItems": 0}}
+  },
+  "else": {
+    "properties": {"grids": {"maxItems": 0}},
+    "anyOf": [
+      {"properties": {"members": {"minItems": 1}}},
+      {"required": ["poly_members"], "properties": {"poly_members": {"minItems": 1}}},
+      {"required": ["slabs"], "properties": {"slabs": {"minItems": 1}}},
+      {"required": ["polygonal_caps"], "properties": {"polygonal_caps": {"minItems": 1}}},
+      {"required": ["walls"], "properties": {"walls": {"minItems": 1}}}
+    ]
   },
   "$defs": {
     "member": {
@@ -30,22 +50,205 @@
       "required": ["spec_id", "type", "profile", "material", "start", "end"],
       "additionalProperties": false,
       "properties": {
-        "spec_id": { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/spec_id" },
-        "type": { "enum": ["column", "beam", "brace", "purlin", "girt", "rafter", "other"] },
-        "mark": { "type": "string", "description": "Member mark as printed on the drawing, e.g. 'C1', 'B12'." },
-        "profile": { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/sourced_string" },
-        "material": { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/sourced_string" },
-        "start": { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/sourced_point" },
-        "end": { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/sourced_point" },
-        "rotation_deg": { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/sourced_number" },
-        "name": { "type": "string" },
-        "class": { "type": "string", "pattern": "^[0-9]{1,3}$" },
-        "question_ids": {
-          "type": "array",
-          "items": { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/question_id" },
-          "uniqueItems": true
+        "spec_id": {"$ref": "urn:tekla-harness:schema:common:0.1#/$defs/spec_id"},
+        "type": {
+          "enum": ["column", "beam", "brace", "purlin", "girt", "rafter", "other", "pad_footing", "pile_cap", "pile", "strip_footing"],
+          "description": "Harness kind. pad_footing and pile_cap are built as Beam PAD_FOOTING, pile as Beam COLUMN, strip_footing as Beam STRIP_FOOTING (ADR-0016). start-end is the drawing's reference line: column bottom centre to top centre; a concrete beam's top centre line; pad_footing and pile_cap top centre to bottom centre; pile head (cut-off) to toe; strip_footing top centre line. The CLI sets Tekla's Position per (type, material type) so the solid lies on the stated side (ADR-0016 decision 2)."
         },
-        "notes": { "type": "string" }
+        "mark": {"type": "string", "description": "Member mark as printed on the drawing, e.g. 'C1', 'B12'."},
+        "profile": {"$ref": "urn:tekla-harness:schema:common:0.1#/$defs/sourced_string"},
+        "material": {"$ref": "urn:tekla-harness:schema:common:0.1#/$defs/sourced_string"},
+        "start": {"$ref": "urn:tekla-harness:schema:common:0.1#/$defs/sourced_point"},
+        "end": {"$ref": "urn:tekla-harness:schema:common:0.1#/$defs/sourced_point"},
+        "rotation_deg": {"$ref": "urn:tekla-harness:schema:common:0.1#/$defs/sourced_number"},
+        "name": {
+          "type": "string",
+          "description": "Tekla Name. Reserved: PILE (the CLI writes it for every pile) and PILE_CAP (every pile cap); a pile may omit it or give PILE, a pile cap PILE_CAP, no other type may use either."
+        },
+        "class": {"type": "string", "pattern": "^[0-9]{1,3}$"},
+        "question_ids": {"type": "array", "items": {"$ref": "urn:tekla-harness:schema:common:0.1#/$defs/question_id"}, "uniqueItems": true},
+        "notes": {"type": "string"}
+      },
+      "allOf": [
+        {"if": {"properties": {"type": {"const": "pile"}}, "required": ["type"]}, "then": {"required": ["class"], "properties": {"name": {"const": "PILE"}}}},
+        {"if": {"properties": {"type": {"const": "pile_cap"}}, "required": ["type"]}, "then": {"required": ["class"], "properties": {"name": {"const": "PILE_CAP"}}}},
+        {"if": {"properties": {"type": {"not": {"enum": ["pile", "pile_cap"]}}}, "required": ["type"]}, "then": {"properties": {"name": {"not": {"enum": ["PILE", "PILE_CAP"]}}}}}
+      ]
+    },
+    "poly_member": {
+      "type": "object",
+      "description": "A Tekla PolyBeam through `points` in order. A 'none' point is a corner (Chamfer CHAMFER_NONE); an 'arc_point' point gets Chamfer CHAMFER_ARC_POINT, intended to make the run from the previous point through it to the next point one arc (ADR-0015 To verify T3). The first and last points are 'none'; two 'arc_point' points are never adjacent.",
+      "required": ["spec_id", "type", "profile", "material", "points"],
+      "additionalProperties": false,
+      "properties": {
+        "spec_id": {"$ref": "urn:tekla-harness:schema:common:0.1#/$defs/spec_id"},
+        "type": {"enum": ["beam", "brace", "purlin", "girt", "rafter", "other"], "description": "Harness kind; every value is built as PolyBeamTypeEnum.BEAM."},
+        "mark": {"type": "string", "description": "Member mark as printed on the drawing."},
+        "profile": {"$ref": "urn:tekla-harness:schema:common:0.1#/$defs/sourced_string"},
+        "material": {"$ref": "urn:tekla-harness:schema:common:0.1#/$defs/sourced_string"},
+        "points": {"type": "array", "minItems": 3, "description": "At least three points; a two-point member is a `members` item.", "items": {"$ref": "#/$defs/poly_point"}},
+        "rotation_deg": {"$ref": "urn:tekla-harness:schema:common:0.1#/$defs/sourced_number"},
+        "name": {"type": "string", "not": {"enum": ["PILE", "PILE_CAP"]}, "description": "Tekla Name; PILE and PILE_CAP are reserved."},
+        "class": {"type": "string", "pattern": "^[0-9]{1,3}$"},
+        "question_ids": {"type": "array", "items": {"$ref": "urn:tekla-harness:schema:common:0.1#/$defs/question_id"}, "uniqueItems": true},
+        "notes": {"type": "string"}
+      }
+    },
+    "poly_point": {
+      "type": "object",
+      "description": "Global coordinates in millimetres, with the point's chamfer.",
+      "required": ["x", "y", "z", "chamfer", "provenance", "confidence"],
+      "additionalProperties": false,
+      "properties": {
+        "x": {"type": "number"},
+        "y": {"type": "number"},
+        "z": {"type": "number"},
+        "chamfer": {"enum": ["none", "arc_point"]},
+        "provenance": {"$ref": "urn:tekla-harness:schema:common:0.1#/$defs/provenance"},
+        "confidence": {"$ref": "urn:tekla-harness:schema:common:0.1#/$defs/confidence"}
+      }
+    },
+    "grid": {
+      "type": "object",
+      "description": "One Tekla Grid. Its frame: `origin` (global mm, z = 0) and `rotation_deg` (the angle from global +X to the grid's local x axis, counter-clockwise seen from +Z). Line positions are absolute distances from the origin along the local axes, never spacings; with origin (0, 0, 0) and rotation 0 they are global X and Y. Its levels are its Z planes, at global Z. `y_lines` empty = a one-direction grid (one family of parallel lines; ADR-0015 To verify T8). The CLI composes Origin, CoordinateX/Y (spacings from the first line, 2 decimals), CoordinateZ (absolute) and sets IsMagnetic false; a rotated grid is inserted in a work plane turned by rotation_deg (ADR-0015 decision 2, To verify T7).",
+      "required": ["spec_id", "name", "origin", "rotation_deg", "x_lines", "y_lines", "levels"],
+      "additionalProperties": false,
+      "properties": {
+        "spec_id": {"$ref": "urn:tekla-harness:schema:common:0.1#/$defs/spec_id"},
+        "name": {"type": "string", "pattern": "^\\S(.*\\S)?$", "description": "Tekla grid name; unique among the spec's grids. A harness choice, not a drawing value."},
+        "origin": {
+          "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/sourced_point",
+          "description": "Global point where the grid's local axes meet, mm; z must be 0 (check_spec). Confirmed by the engineer (provenance engineer_answer or derived from one)."
+        },
+        "rotation_deg": {
+          "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/sourced_number",
+          "properties": {"value": {"exclusiveMinimum": -180, "maximum": 180}},
+          "description": "Angle from global +X to the grid's local x axis, degrees, counter-clockwise seen from +Z, in (-180, 180]. 0 = axis-aligned. Confirmed by the engineer, like origin."
+        },
+        "x_lines": {
+          "type": "array",
+          "minItems": 2,
+          "description": "Lines at constant local x (parallel to the local y axis), in increasing position: Tekla CoordinateX and LabelX. At least two.",
+          "items": {"$ref": "#/$defs/grid_line"}
+        },
+        "y_lines": {
+          "type": "array",
+          "description": "Lines at constant local y (parallel to the local x axis), in increasing position: Tekla CoordinateY and LabelY. Empty (a one-direction grid) or at least two.",
+          "anyOf": [{"maxItems": 0}, {"minItems": 2}],
+          "items": {"$ref": "#/$defs/grid_line"}
+        },
+        "levels": {"type": "array", "minItems": 1, "description": "Level planes in increasing Z: Tekla CoordinateZ and LabelZ.", "items": {"$ref": "#/$defs/grid_level"}},
+        "question_ids": {"type": "array", "items": {"$ref": "urn:tekla-harness:schema:common:0.1#/$defs/question_id"}, "uniqueItems": true},
+        "notes": {"type": "string"}
+      }
+    },
+    "grid_line": {
+      "type": "object",
+      "required": ["label", "position"],
+      "additionalProperties": false,
+      "properties": {
+        "label": {
+          "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/sourced_string",
+          "properties": {"value": {"pattern": "^\\S+$"}},
+          "description": "Axis label as printed, no whitespace (Tekla labels are space-separated)."
+        },
+        "position": {
+          "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/sourced_number",
+          "description": "Absolute distance of the line from the grid origin along the local x axis (x_lines) or local y axis (y_lines), mm, on a 0.01 mm step. Never a spacing from the previous line (ADR-0015 decision 2)."
+        }
+      }
+    },
+    "grid_level": {
+      "type": "object",
+      "required": ["label", "z"],
+      "additionalProperties": false,
+      "properties": {
+        "label": {
+          "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/sourced_string",
+          "properties": {"value": {"pattern": "^\\S+$"}},
+          "description": "Level label, no whitespace, e.g. '+3.600' as printed."
+        },
+        "z": {
+          "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/sourced_number",
+          "description": "Global Z of the level plane, mm. Its provenance is the engineer's answer (method engineer_answer) or derived from one, since a drawing never says whether a level is structural or finished."
+        }
+      }
+    },
+    "slab": {
+      "type": "object",
+      "description": "One horizontal concrete slab: Tekla ContourPlate, concrete material (type SLAB). `outline` is the slab's top face, counter-clockwise seen from +Z, every point at the same Z. The CLI builds the contour on the top face, with the Position Depth that puts the thickness below it (value set by To verify C2), and composes the profile from `thickness` (ADR-0016).",
+      "required": ["spec_id", "material", "thickness", "outline"],
+      "additionalProperties": false,
+      "properties": {
+        "spec_id": {"$ref": "urn:tekla-harness:schema:common:0.1#/$defs/spec_id"},
+        "mark": {"type": "string", "description": "Slab mark as printed, e.g. 'S1'."},
+        "material": {"$ref": "urn:tekla-harness:schema:common:0.1#/$defs/sourced_string"},
+        "thickness": {"$ref": "urn:tekla-harness:schema:common:0.1#/$defs/sourced_number", "properties": {"value": {"minimum": 1}}, "description": "Slab thickness, mm."},
+        "outline": {
+          "type": "array",
+          "minItems": 3,
+          "description": "Top-face corners in order, global mm. 'arc_point' rounds the run through that corner into an arc (ADR-0015 poly_point); a slab with an arc_point has no openings (check_spec).",
+          "items": {"$ref": "#/$defs/poly_point"}
+        },
+        "openings": {"type": "array", "description": "Through openings, each outline on the slab's top face.", "items": {"$ref": "#/$defs/opening"}},
+        "name": {"type": "string", "not": {"enum": ["PILE", "PILE_CAP"]}, "description": "Tekla Name; PILE and PILE_CAP are reserved."},
+        "class": {"type": "string", "pattern": "^[0-9]{1,3}$"},
+        "question_ids": {"type": "array", "items": {"$ref": "urn:tekla-harness:schema:common:0.1#/$defs/question_id"}, "uniqueItems": true},
+        "notes": {"type": "string"}
+      }
+    },
+    "polygonal_cap": {
+      "type": "object",
+      "description": "A pile cap whose plan is a polygon: Tekla ContourPlate, concrete material (type SLAB, not PAD_FOOTING). The CLI writes Name PILE_CAP; `class` is required, so reports tell it from slabs by Name and class. `outline` is the cap's top face, counter-clockwise seen from +Z, every point at the same Z; built like a slab (ADR-0016 decision 3). No openings.",
+      "required": ["spec_id", "material", "thickness", "outline", "class"],
+      "additionalProperties": false,
+      "properties": {
+        "spec_id": {"$ref": "urn:tekla-harness:schema:common:0.1#/$defs/spec_id"},
+        "mark": {"type": "string", "description": "Cap mark as printed, e.g. 'PC3'."},
+        "material": {"$ref": "urn:tekla-harness:schema:common:0.1#/$defs/sourced_string"},
+        "thickness": {"$ref": "urn:tekla-harness:schema:common:0.1#/$defs/sourced_number", "properties": {"value": {"minimum": 1}}, "description": "Cap depth, mm."},
+        "outline": {"type": "array", "minItems": 3, "description": "Top-face corners in order, global mm.", "items": {"$ref": "#/$defs/poly_point"}},
+        "class": {"type": "string", "pattern": "^[0-9]{1,3}$", "description": "Tekla class for pile caps in this project (gate 2)."},
+        "question_ids": {"type": "array", "items": {"$ref": "urn:tekla-harness:schema:common:0.1#/$defs/question_id"}, "uniqueItems": true},
+        "notes": {"type": "string"}
+      }
+    },
+    "wall": {
+      "type": "object",
+      "description": "One straight concrete wall: Tekla Beam of type PANEL, concrete material. `start`-`end` is the wall's base centre line (horizontal); `height` is measured up from it. The CLI uses the base line as the panel's reference line, with the Position that puts the wall above it and centred on it (values set by To verify C2), and composes the profile from `thickness` and `height` (ADR-0016).",
+      "required": ["spec_id", "material", "start", "end", "thickness", "height"],
+      "additionalProperties": false,
+      "properties": {
+        "spec_id": {"$ref": "urn:tekla-harness:schema:common:0.1#/$defs/spec_id"},
+        "mark": {"type": "string", "description": "Wall mark as printed, e.g. 'W1', 'V1'."},
+        "material": {"$ref": "urn:tekla-harness:schema:common:0.1#/$defs/sourced_string"},
+        "start": {"$ref": "urn:tekla-harness:schema:common:0.1#/$defs/sourced_point"},
+        "end": {"$ref": "urn:tekla-harness:schema:common:0.1#/$defs/sourced_point"},
+        "thickness": {"$ref": "urn:tekla-harness:schema:common:0.1#/$defs/sourced_number", "properties": {"value": {"minimum": 1}}, "description": "Wall thickness, mm."},
+        "height": {"$ref": "urn:tekla-harness:schema:common:0.1#/$defs/sourced_number", "properties": {"value": {"minimum": 1}}, "description": "Wall height above the base line, mm."},
+        "openings": {"type": "array", "description": "Through openings, each outline in the wall's vertical centre plane.", "items": {"$ref": "#/$defs/opening"}},
+        "name": {"type": "string", "not": {"enum": ["PILE", "PILE_CAP"]}, "description": "Tekla Name; PILE and PILE_CAP are reserved."},
+        "class": {"type": "string", "pattern": "^[0-9]{1,3}$"},
+        "question_ids": {"type": "array", "items": {"$ref": "urn:tekla-harness:schema:common:0.1#/$defs/question_id"}, "uniqueItems": true},
+        "notes": {"type": "string"}
+      }
+    },
+    "opening": {
+      "type": "object",
+      "description": "A through opening in its parent slab or wall: a Tekla BooleanPart cut (BOOLEAN_CUT) whose operative part the CLI composes from `outline` and the parent (ADR-0016 decision 6). Same lot as its parent, always. Corners only (no arc_point). spec_id at most 60 characters, so the reserved cutter tag '<spec_id>~CUT' fits 64.",
+      "required": ["spec_id", "outline"],
+      "additionalProperties": false,
+      "properties": {
+        "spec_id": {"$ref": "urn:tekla-harness:schema:common:0.1#/$defs/spec_id", "maxLength": 60},
+        "mark": {"type": "string", "description": "Opening mark as printed, if any."},
+        "outline": {
+          "type": "array",
+          "minItems": 3,
+          "description": "Opening corners in order, global mm, on the parent's top face (slab) or vertical centre plane (wall); chamfer 'none' only.",
+          "items": {"$ref": "#/$defs/poly_point", "properties": {"chamfer": {"const": "none"}}}
+        },
+        "question_ids": {"type": "array", "items": {"$ref": "urn:tekla-harness:schema:common:0.1#/$defs/question_id"}, "uniqueItems": true},
+        "notes": {"type": "string"}
       }
     }
   }

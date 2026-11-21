@@ -136,8 +136,8 @@ public sealed class SpecLoaderTests : IDisposable
         Assert.Equal("0.1", spec.SchemaVersion);
         Assert.Equal("demo-warehouse", spec.ProjectId);
         Assert.Equal(1, spec.Lot);
-        Assert.Equal(1, spec.RulesVersion);
-        Assert.Equal("77a1243091e09d63325185ae2a70896726c355f20f78564b57b9429023b91713", spec.SpecSha256);
+        Assert.Equal(2, spec.RulesVersion);
+        Assert.Equal("214347e0a98de0343ebeeceecfd2f70853b9b52c95315e328db05580561be496", spec.SpecSha256);
         Assert.Equal(new[] { "L1-C-A1", "L1-C-A2", "L1-B-A12" }, spec.Members.Select(m => m.SpecId));
 
         var c = spec.Members[0];

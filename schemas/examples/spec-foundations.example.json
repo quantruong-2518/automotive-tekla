@@ -1,0 +1,319 @@
+{
+  "schema_version": "0.1",
+  "project_id": "demo-house",
+  "lot": 1,
+  "units": "mm",
+  "description": "Synthetic example: foundation lot with one pile, its pile cap, one pad footing, one strip footing and one 3-pile polygonal cap.",
+  "members": [
+    {
+      "spec_id": "L1-P-C2-1",
+      "type": "pile",
+      "mark": "P1",
+      "profile": {
+        "value": "200*200",
+        "provenance": {"file": "S-100.dxf", "sheet": "S-100", "revision": "A", "region": {"detail": "PILE SECTION"}, "method": "dxf_dimension_text"},
+        "confidence": "high"
+      },
+      "material": {
+        "value": "C25/30",
+        "provenance": {"file": "S-001.pdf", "sheet": "S-001", "revision": "A", "region": {"page": 1, "detail": "GENERAL NOTES 2.1"}, "method": "engineer_answer", "question_id": "Q-012"},
+        "confidence": "high"
+      },
+      "start": {
+        "x": 3000,
+        "y": 4000,
+        "z": -1400,
+        "provenance": {
+          "file": "S-100.dxf",
+          "sheet": "S-100",
+          "revision": "A",
+          "region": {"grid_ref": "C/2"},
+          "method": "derived",
+          "derived_from": [
+            {"file": "S-100.dxf", "sheet": "S-100", "revision": "A", "method": "dxf_entity"},
+            {"file": "S-101.dxf", "sheet": "S-101", "revision": "A", "region": {"detail": "PILE CAP PC1"}, "method": "dxf_dimension_text"},
+            {"file": "S-201.dxf", "sheet": "S-201", "revision": "A", "method": "engineer_answer", "question_id": "Q-010"}
+          ]
+        },
+        "confidence": "high"
+      },
+      "end": {
+        "x": 3000,
+        "y": 4000,
+        "z": -19400,
+        "provenance": {
+          "file": "S-001.pdf",
+          "sheet": "S-001",
+          "revision": "A",
+          "region": {"page": 1, "detail": "PILE NOTES L=18m"},
+          "method": "derived",
+          "derived_from": [
+            {"file": "S-001.pdf", "sheet": "S-001", "revision": "A", "region": {"page": 1, "detail": "PILE NOTES L=18m"}, "method": "pdf_text_layer"},
+            {
+              "file": "S-100.dxf",
+              "sheet": "S-100",
+              "revision": "A",
+              "region": {"grid_ref": "C/2"},
+              "method": "derived",
+              "derived_from": [{"file": "S-201.dxf", "sheet": "S-201", "revision": "A", "method": "engineer_answer", "question_id": "Q-010"}]
+            }
+          ]
+        },
+        "confidence": "medium"
+      },
+      "class": "2"
+    },
+    {
+      "spec_id": "L1-PC-C2",
+      "type": "pile_cap",
+      "mark": "PC1",
+      "profile": {
+        "value": "1200*1200",
+        "provenance": {"file": "S-101.dxf", "sheet": "S-101", "revision": "A", "region": {"detail": "PILE CAP PC1"}, "method": "dxf_dimension_text"},
+        "confidence": "high"
+      },
+      "material": {"value": "C25/30", "provenance": {"file": "S-001.pdf", "sheet": "S-001", "revision": "A", "method": "engineer_answer", "question_id": "Q-012"}, "confidence": "high"},
+      "start": {
+        "x": 3000,
+        "y": 4000,
+        "z": -700,
+        "provenance": {
+          "file": "S-101.dxf",
+          "sheet": "S-101",
+          "revision": "A",
+          "region": {"detail": "PILE CAP PC1"},
+          "method": "derived",
+          "derived_from": [
+            {"file": "S-101.dxf", "sheet": "S-101", "revision": "A", "method": "dxf_entity"},
+            {"file": "S-201.dxf", "sheet": "S-201", "revision": "A", "method": "engineer_answer", "question_id": "Q-010"}
+          ]
+        },
+        "confidence": "high"
+      },
+      "end": {
+        "x": 3000,
+        "y": 4000,
+        "z": -1500,
+        "provenance": {
+          "file": "S-101.dxf",
+          "sheet": "S-101",
+          "revision": "A",
+          "region": {"detail": "PILE CAP PC1"},
+          "method": "derived",
+          "derived_from": [
+            {"file": "S-101.dxf", "sheet": "S-101", "revision": "A", "method": "dxf_dimension_text"},
+            {"file": "S-201.dxf", "sheet": "S-201", "revision": "A", "method": "engineer_answer", "question_id": "Q-010"}
+          ]
+        },
+        "confidence": "high"
+      },
+      "rotation_deg": {"value": 0, "provenance": {"file": "S-100.dxf", "sheet": "S-100", "revision": "A", "method": "dxf_entity"}, "confidence": "high"},
+      "class": "8"
+    },
+    {
+      "spec_id": "L1-F-A1",
+      "type": "pad_footing",
+      "mark": "BM-1",
+      "profile": {"value": "1800*1500", "provenance": {"file": "S-102.dxf", "sheet": "S-102", "revision": "B", "region": {"detail": "FOOTING SCHEDULE"}, "method": "table"}, "confidence": "medium"},
+      "material": {"value": "C25/30", "provenance": {"file": "S-001.pdf", "sheet": "S-001", "revision": "A", "method": "engineer_answer", "question_id": "Q-012"}, "confidence": "high"},
+      "start": {
+        "x": 9000,
+        "y": 4000,
+        "z": -1000,
+        "provenance": {
+          "file": "S-102.dxf",
+          "sheet": "S-102",
+          "revision": "B",
+          "region": {"grid_ref": "A/1"},
+          "method": "derived",
+          "derived_from": [
+            {"file": "S-102.dxf", "sheet": "S-102", "revision": "B", "method": "dxf_entity"},
+            {"file": "S-201.dxf", "sheet": "S-201", "revision": "A", "method": "engineer_answer", "question_id": "Q-010"}
+          ]
+        },
+        "confidence": "high"
+      },
+      "end": {
+        "x": 9000,
+        "y": 4000,
+        "z": -1500,
+        "provenance": {
+          "file": "S-102.dxf",
+          "sheet": "S-102",
+          "revision": "B",
+          "region": {"detail": "FOOTING SCHEDULE"},
+          "method": "derived",
+          "derived_from": [
+            {"file": "S-102.dxf", "sheet": "S-102", "revision": "B", "region": {"detail": "FOOTING SCHEDULE"}, "method": "vision"},
+            {"file": "S-201.dxf", "sheet": "S-201", "revision": "A", "method": "engineer_answer", "question_id": "Q-010"}
+          ]
+        },
+        "confidence": "low"
+      },
+      "class": "8",
+      "question_ids": ["Q-051"]
+    },
+    {
+      "spec_id": "L1-SF-D",
+      "type": "strip_footing",
+      "mark": "SF1",
+      "profile": {"value": "800*500", "provenance": {"file": "S-102.dxf", "sheet": "S-102", "revision": "B", "region": {"detail": "SECTION 1-1"}, "method": "dxf_dimension_text"}, "confidence": "high"},
+      "material": {"value": "C25/30", "provenance": {"file": "S-001.pdf", "sheet": "S-001", "revision": "A", "method": "engineer_answer", "question_id": "Q-012"}, "confidence": "high"},
+      "start": {
+        "x": 0,
+        "y": 10000,
+        "z": -1000,
+        "provenance": {
+          "file": "S-102.dxf",
+          "sheet": "S-102",
+          "revision": "B",
+          "region": {"grid_ref": "D/1"},
+          "method": "derived",
+          "derived_from": [
+            {"file": "S-102.dxf", "sheet": "S-102", "revision": "B", "method": "dxf_entity"},
+            {"file": "S-201.dxf", "sheet": "S-201", "revision": "A", "method": "engineer_answer", "question_id": "Q-010"}
+          ]
+        },
+        "confidence": "high"
+      },
+      "end": {
+        "x": 9000,
+        "y": 10000,
+        "z": -1000,
+        "provenance": {
+          "file": "S-102.dxf",
+          "sheet": "S-102",
+          "revision": "B",
+          "region": {"grid_ref": "D/3"},
+          "method": "derived",
+          "derived_from": [
+            {"file": "S-102.dxf", "sheet": "S-102", "revision": "B", "method": "dxf_entity"},
+            {"file": "S-201.dxf", "sheet": "S-201", "revision": "A", "method": "engineer_answer", "question_id": "Q-010"}
+          ]
+        },
+        "confidence": "high"
+      },
+      "class": "8"
+    }
+  ],
+  "polygonal_caps": [
+    {
+      "spec_id": "L1-PC3-E2",
+      "mark": "PC3",
+      "material": {"value": "C25/30", "provenance": {"file": "S-001.pdf", "sheet": "S-001", "revision": "A", "method": "engineer_answer", "question_id": "Q-012"}, "confidence": "high"},
+      "thickness": {"value": 900, "provenance": {"file": "S-101.dxf", "sheet": "S-101", "revision": "A", "region": {"detail": "PILE CAP PC3"}, "method": "dxf_dimension_text"}, "confidence": "high"},
+      "outline": [
+        {
+          "x": 13900,
+          "y": 3400,
+          "z": -700,
+          "chamfer": "none",
+          "provenance": {
+            "file": "S-101.dxf",
+            "sheet": "S-101",
+            "revision": "A",
+            "region": {"detail": "PILE CAP PC3"},
+            "method": "derived",
+            "derived_from": [
+              {"file": "S-101.dxf", "sheet": "S-101", "revision": "A", "method": "dxf_entity"},
+              {"file": "S-201.dxf", "sheet": "S-201", "revision": "A", "method": "engineer_answer", "question_id": "Q-010"}
+            ]
+          },
+          "confidence": "high"
+        },
+        {
+          "x": 16100,
+          "y": 3400,
+          "z": -700,
+          "chamfer": "none",
+          "provenance": {
+            "file": "S-101.dxf",
+            "sheet": "S-101",
+            "revision": "A",
+            "region": {"detail": "PILE CAP PC3"},
+            "method": "derived",
+            "derived_from": [
+              {"file": "S-101.dxf", "sheet": "S-101", "revision": "A", "method": "dxf_entity"},
+              {"file": "S-201.dxf", "sheet": "S-201", "revision": "A", "method": "engineer_answer", "question_id": "Q-010"}
+            ]
+          },
+          "confidence": "high"
+        },
+        {
+          "x": 16650,
+          "y": 4350,
+          "z": -700,
+          "chamfer": "none",
+          "provenance": {
+            "file": "S-101.dxf",
+            "sheet": "S-101",
+            "revision": "A",
+            "region": {"detail": "PILE CAP PC3"},
+            "method": "derived",
+            "derived_from": [
+              {"file": "S-101.dxf", "sheet": "S-101", "revision": "A", "method": "dxf_entity"},
+              {"file": "S-201.dxf", "sheet": "S-201", "revision": "A", "method": "engineer_answer", "question_id": "Q-010"}
+            ]
+          },
+          "confidence": "high"
+        },
+        {
+          "x": 15550,
+          "y": 6250,
+          "z": -700,
+          "chamfer": "none",
+          "provenance": {
+            "file": "S-101.dxf",
+            "sheet": "S-101",
+            "revision": "A",
+            "region": {"detail": "PILE CAP PC3"},
+            "method": "derived",
+            "derived_from": [
+              {"file": "S-101.dxf", "sheet": "S-101", "revision": "A", "method": "dxf_entity"},
+              {"file": "S-201.dxf", "sheet": "S-201", "revision": "A", "method": "engineer_answer", "question_id": "Q-010"}
+            ]
+          },
+          "confidence": "high"
+        },
+        {
+          "x": 14450,
+          "y": 6250,
+          "z": -700,
+          "chamfer": "none",
+          "provenance": {
+            "file": "S-101.dxf",
+            "sheet": "S-101",
+            "revision": "A",
+            "region": {"detail": "PILE CAP PC3"},
+            "method": "derived",
+            "derived_from": [
+              {"file": "S-101.dxf", "sheet": "S-101", "revision": "A", "method": "dxf_entity"},
+              {"file": "S-201.dxf", "sheet": "S-201", "revision": "A", "method": "engineer_answer", "question_id": "Q-010"}
+            ]
+          },
+          "confidence": "high"
+        },
+        {
+          "x": 13350,
+          "y": 4350,
+          "z": -700,
+          "chamfer": "none",
+          "provenance": {
+            "file": "S-101.dxf",
+            "sheet": "S-101",
+            "revision": "A",
+            "region": {"detail": "PILE CAP PC3"},
+            "method": "derived",
+            "derived_from": [
+              {"file": "S-101.dxf", "sheet": "S-101", "revision": "A", "method": "dxf_entity"},
+              {"file": "S-201.dxf", "sheet": "S-201", "revision": "A", "method": "engineer_answer", "question_id": "Q-010"}
+            ]
+          },
+          "confidence": "high"
+        }
+      ],
+      "class": "8"
+    }
+  ],
+  "open_questions": ["Q-051"]
+}

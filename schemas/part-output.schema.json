@@ -1,0 +1,458 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:tekla-harness:schema:part-output:0.1",
+  "title": "Output of the `harness part` commands",
+  "description": "The stdout document of each `harness part <action>`, one entry in `$defs` per command (ADR-0019). Each document carries `command`, a const that tells them apart: `manifest-check`, `check`, `receipt`, `conflicts`, `chain`, `review_sample`, `spotcheck`, `answer_key` and `score`.",
+  "anyOf": [
+    { "$ref": "#/$defs/manifest_check" },
+    { "$ref": "#/$defs/check" },
+    { "$ref": "#/$defs/receipt" },
+    { "$ref": "#/$defs/conflicts" },
+    { "$ref": "#/$defs/chain" },
+    { "$ref": "#/$defs/review_sample" },
+    { "$ref": "#/$defs/spotcheck" },
+    { "$ref": "#/$defs/answer_key" },
+    { "$ref": "#/$defs/score" }
+  ],
+  "$defs": {
+    "manifest_check": {
+      "type": "object",
+      "description": "`harness part manifest-check W`: exit 0 when `ok`, 1 otherwise. A sheet is a (file, sheet id) pair of `harness list-sheets`; `total` counts them, `covered` counts those listed by at least one part of kind cross or member.",
+      "required": ["command", "ok", "sheets", "parts", "problems", "warnings", "skipped"],
+      "additionalProperties": false,
+      "properties": {
+        "command": { "const": "manifest-check" },
+        "ok": { "type": "boolean", "description": "True exactly when the exit code is 0: `problems` is empty and every warning is acknowledged." },
+        "sheets": {
+          "type": "object",
+          "required": ["total", "covered"],
+          "additionalProperties": false,
+          "properties": {
+            "total": { "type": "integer", "minimum": 0 },
+            "covered": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "parts": { "type": "integer", "minimum": 0, "description": "The number of parts in the manifest." },
+        "problems": {
+          "type": "array",
+          "description": "Sorted by (code, part, file, sheet), then detail; null sorts first.",
+          "items": {
+            "type": "object",
+            "required": ["code", "part", "file", "sheet", "detail"],
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "enum": [
+                  "schema",
+                  "duplicate_part_id",
+                  "sheet_unknown",
+                  "sheet_uncovered",
+                  "cluster_uncovered",
+                  "cluster_in_two_parts",
+                  "cross_part_missing",
+                  "bookkeeping_part_missing",
+                  "input_unknown",
+                  "input_cycle",
+                  "block_unknown",
+                  "sheet_in_two_blocks",
+                  "part_over_cap",
+                  "table_outside_part",
+                  "cluster_unknown",
+                  "entry_unknown",
+                  "duplicate_block_id",
+                  "part_kind_mismatch",
+                  "file_unread",
+                  "files_entry_unused",
+                  "record_part_unknown",
+                  "order_not_after_input",
+                  "grid_system_unknown",
+                  "ack_unmatched",
+                  "ack_duplicate",
+                  "ack_question_unknown",
+                  "unit_answer_unread",
+                  "unit_unanswered"
+                ]
+              },
+              "part": { "type": ["string", "null"], "description": "The part the problem is about; null when it does not apply." },
+              "file": { "type": ["string", "null"] },
+              "sheet": { "type": ["string", "null"] },
+              "detail": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
+        "warnings": {
+          "type": "array",
+          "description": "Sorted by id. A warning stops the manifest (exit 1) until the manifest's `acks[]` names its id.",
+          "items": {
+            "type": "object",
+            "required": ["id", "code", "part", "file", "sheet", "detail", "acked", "ack"],
+            "additionalProperties": false,
+            "properties": {
+              "id": { "type": "string", "minLength": 1, "description": "The exact key an ack names, fields joined by `|`: `grid_origin_other_block|<file>|<sheet>|<block>`, `linework_duplicate|<part>|<file>|<sheet>|<other sheet>`, `revision_from_table|<file>|<sheet>|<entry id>`." },
+              "code": { "enum": ["grid_origin_other_block", "linework_duplicate", "revision_from_table"] },
+              "part": { "type": ["string", "null"], "description": "The part the warning is about; null when it is about a sheet." },
+              "file": { "type": "string" },
+              "sheet": { "type": "string" },
+              "detail": { "type": "string", "minLength": 1 },
+              "acked": { "type": "boolean", "description": "True when an ack of the manifest names this id." },
+              "ack": {
+                "type": ["object", "null"],
+                "description": "The `question` and `reason` of the ack that clears the warning; null when not acked.",
+                "additionalProperties": false,
+                "properties": {
+                  "question": { "type": "string", "minLength": 1 },
+                  "reason": { "type": "string", "minLength": 1 }
+                }
+              }
+            }
+          }
+        },
+        "skipped": {
+          "type": "array",
+          "description": "Sorted by (file, sheet, code, reason). A sheet a warning could not test; never a failure.",
+          "items": {
+            "type": "object",
+            "required": ["code", "file", "sheet", "reason"],
+            "additionalProperties": false,
+            "properties": {
+              "code": { "enum": ["grid_origin_other_block", "linework_duplicate", "revision_from_table"] },
+              "file": { "type": "string" },
+              "sheet": { "type": "string" },
+              "reason": {
+                "enum": [
+                  "unit_unknown",
+                  "no_grids_document",
+                  "no_plan_grid",
+                  "several_plan_grids",
+                  "rotated_grid",
+                  "few_items",
+                  "no_position"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "check": {
+      "type": "object",
+      "description": "`harness part check W --part X`: exit 0 when `ok`, 1 otherwise. `counts` holds the rows of values.json by state, the part's active findings and its live reader questions (all zero when the check stops early). Problems are sorted by (code, row, id, detail), null first.",
+      "required": ["command", "part", "hash", "ok", "counts", "problems"],
+      "additionalProperties": false,
+      "properties": {
+        "command": { "const": "check" },
+        "part": { "type": "string" },
+        "hash": {
+          "type": ["string", "null"],
+          "pattern": "^[0-9a-f]{64}$",
+          "description": "The part hash (`part_receipts.part_hash`): what a receipt binds to. Null when the check stops at `manifest_invalid`, `part_unknown` or `input_invalid`; a `values_invalid` stop still has it unless a record document is malformed."
+        },
+        "ok": { "type": "boolean", "description": "True exactly when `problems` is empty." },
+        "counts": {
+          "type": "object",
+          "required": ["rows", "seen", "asked", "unread", "absent", "findings", "questions"],
+          "additionalProperties": false,
+          "properties": {
+            "rows": { "type": "integer", "minimum": 0, "description": "Rows of values.json." },
+            "seen": { "type": "integer", "minimum": 0 },
+            "asked": { "type": "integer", "minimum": 0 },
+            "unread": { "type": "integer", "minimum": 0 },
+            "absent": { "type": "integer", "minimum": 0 },
+            "findings": { "type": "integer", "minimum": 0, "description": "Active findings of the part." },
+            "questions": { "type": "integer", "minimum": 0, "description": "Live reader questions of the part." }
+          }
+        },
+        "problems": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["code", "row", "id", "detail"],
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "enum": [
+                  "manifest_invalid",
+                  "part_unknown",
+                  "values_invalid",
+                  "input_invalid",
+                  "row_duplicate",
+                  "row_state",
+                  "row_outside_part",
+                  "cite_unknown",
+                  "cite_inactive",
+                  "cite_stale",
+                  "cite_foreign_part",
+                  "entry_blocked",
+                  "entry_not_printed",
+                  "entry_outside_part",
+                  "number_unbacked",
+                  "token_unbacked",
+                  "hand_sum_invalid",
+                  "hand_sum_mismatch",
+                  "sheet_uncovered",
+                  "mark_missing",
+                  "marks_regex_invalid",
+                  "listed_needs_blocking",
+                  "listed_question_not_blocking",
+                  "low_without_question",
+                  "claim_form",
+                  "note_item_prefix",
+                  "search_unaccented",
+                  "family_linework_twice",
+                  "family_linework_needless",
+                  "value_not_verbatim",
+                  "note_quote_unmatched"
+                ]
+              },
+              "row": { "type": ["string", "null"], "description": "The row id; null when the problem is not about one row." },
+              "id": { "type": ["string", "null"], "description": "The cited or owning record id (part, finding, question, entry or geometry item); null when none." },
+              "detail": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
+      }
+    },
+    "receipt": {
+      "type": "object",
+      "description": "`harness part receipt W --part X --kind K`: exit 0 when written or already recorded, 1 when a precondition failed (nothing written; `refused` says which). `receipt` is the receipt written, or the latest one when it was already recorded (`written` false); null when refused. `problems` are the problems of `harness part check` when a `checked` or `locked` receipt was refused because of them, else empty.",
+      "required": ["command", "part", "kind", "written", "receipt", "refused", "problems"],
+      "additionalProperties": false,
+      "properties": {
+        "command": { "const": "receipt" },
+        "part": { "type": "string" },
+        "kind": { "enum": ["checked", "reviewed", "locked", "reopened"] },
+        "written": { "type": "boolean", "description": "True when this call appended the receipt." },
+        "receipt": {
+          "oneOf": [{ "type": "null" }, { "$ref": "urn:tekla-harness:schema:part-receipts:0.1#/$defs/receipt" }],
+          "description": "A receipt of the part-receipts schema."
+        },
+        "refused": { "type": ["string", "null"], "minLength": 1, "description": "Why nothing was written (exit 1); null otherwise." },
+        "problems": { "type": "array", "items": { "$ref": "#/$defs/check/properties/problems/items" } }
+      },
+      "allOf": [
+        { "if": { "properties": { "written": { "const": true } } }, "then": { "properties": { "receipt": { "type": "object" }, "refused": { "type": "null" } } } },
+        { "if": { "properties": { "refused": { "type": "string" } } }, "then": { "properties": { "written": { "const": false }, "receipt": { "type": "null" } } } },
+        { "if": { "properties": { "written": { "const": false }, "refused": { "type": "null" } } }, "then": { "properties": { "receipt": { "type": "object" } } } }
+      ]
+    },
+    "conflicts": {
+      "type": "object",
+      "description": "`harness part conflicts W` (E6b): exit 0 when the questions file is written, conflicts or not. `questions` are the part-conflict questions raised, `duplicates` the pairs of reader questions or note findings of two parts that say the same thing (listed, never asked), `obsolete` every part-conflicts question of the registry that is obsolete after this run (cumulative, by number), `skipped_parts` the parts without values.json.",
+      "required": ["command", "conflicts", "questions", "duplicates", "obsolete", "skipped_parts"],
+      "additionalProperties": false,
+      "properties": {
+        "command": { "const": "conflicts" },
+        "conflicts": { "type": "integer", "minimum": 0, "description": "The number of conflicts raised." },
+        "questions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "code", "blocking", "parts"],
+            "additionalProperties": false,
+            "properties": {
+              "id": { "type": "string", "pattern": "^Q-[0-9]{3,}$" },
+              "code": { "type": "string", "minLength": 1, "description": "part_value_conflict, part_system_conflict or part_measure_conflict." },
+              "blocking": { "type": "boolean" },
+              "parts": { "type": "array", "items": { "type": "string", "minLength": 1 }, "description": "The parts of the refs, sorted." }
+            }
+          }
+        },
+        "duplicates": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["kind", "ids", "parts", "blocking_differs"],
+            "additionalProperties": false,
+            "properties": {
+              "kind": { "enum": ["question", "finding"] },
+              "ids": { "type": "array", "items": { "type": "string", "minLength": 1 }, "description": "Question or finding ids, sorted." },
+              "parts": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+              "blocking_differs": { "type": "boolean" }
+            }
+          }
+        },
+        "obsolete": { "type": "array", "items": { "type": "string", "pattern": "^Q-[0-9]{3,}$" } },
+        "skipped_parts": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+      }
+    },
+    "chain": {
+      "type": "object",
+      "description": "`harness part chain W --block B` (E7): read-only. The member parts of the block by (order, id) with their count rows; no comparison is made here, the assembler compares. `number` is the row's one number, null when the value holds none (or none is read); `addends` are the hand-sum terms, empty when none; `sums` are null when there is nothing to add.",
+      "required": ["command", "block", "parts"],
+      "additionalProperties": false,
+      "properties": {
+        "command": { "const": "chain" },
+        "block": { "type": "string", "minLength": 1 },
+        "parts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["part", "order", "rows", "products", "sums"],
+            "additionalProperties": false,
+            "properties": {
+              "part": { "type": "string", "minLength": 1 },
+              "order": { "type": "integer" },
+              "rows": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": ["row", "mark", "subject", "field", "value", "number", "state", "addends"],
+                  "additionalProperties": false,
+                  "properties": {
+                    "row": { "type": "string", "pattern": "^R[0-9]{3,}$" },
+                    "mark": { "type": ["string", "null"], "minLength": 1 },
+                    "subject": { "type": ["string", "null"], "minLength": 1 },
+                    "field": { "enum": ["count_plan", "count_schedule", "piles_per_member"] },
+                    "value": { "type": ["string", "null"], "description": "The row's value as printed; null when nothing is read (a part-values row may carry null)." },
+                    "number": { "type": ["number", "null"] },
+                    "state": { "enum": ["seen", "asked", "unread", "absent"] },
+                    "addends": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": ["term", "value"],
+                        "additionalProperties": false,
+                        "properties": {
+                          "term": { "type": "string", "minLength": 1 },
+                          "value": { "type": "integer" }
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "products": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": ["mark", "count_plan", "piles_per_member", "product"],
+                  "additionalProperties": false,
+                  "properties": {
+                    "mark": { "type": "string", "minLength": 1 },
+                    "count_plan": { "type": "number" },
+                    "piles_per_member": { "type": "number" },
+                    "product": { "type": "number" }
+                  }
+                }
+              },
+              "sums": {
+                "type": "object",
+                "required": ["count_plan", "count_x_piles"],
+                "additionalProperties": false,
+                "properties": {
+                  "count_plan": { "type": ["number", "null"], "description": "The sum of the numeric count_plan of the mark rows." },
+                  "count_x_piles": { "type": ["number", "null"], "description": "The sum of the products." }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "review_sample": {
+      "type": "object",
+      "description": "`harness part review-sample W --part X --seed S [--n N]` (E7): read-only. Blind prompts for a reviewer, one per row: `n` seeded, stratified `value` prompts from the part's seen and asked rows, then at most one `absence` prompt (a seeded pick among the absent rows) and at most one `outside_frame` prompt (a seeded pick among the unsampled rows that cite an entry in an unassigned cluster of their file). One fixed English template per kind; no value, citation or entry id in `prompt`. `mark` or `subject` is null (the row has one of them, or both when the text would give the value away); `file` and `sheet` are null when the row has none (an asked or absent row); `sheet_number` and `view` are null when the manifest names none or the text would give the value away.",
+      "required": ["command", "part", "seed", "prompts"],
+      "additionalProperties": false,
+      "properties": {
+        "command": { "const": "review_sample" },
+        "part": { "type": "string", "minLength": 1 },
+        "seed": { "type": "integer", "minimum": 0 },
+        "prompts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["row", "kind", "mark", "subject", "field", "file", "sheet", "sheet_number", "view", "prompt"],
+            "additionalProperties": false,
+            "properties": {
+              "row": { "type": "string", "pattern": "^R[0-9]{3,}$" },
+              "kind": { "enum": ["value", "absence", "outside_frame"] },
+              "mark": { "type": ["string", "null"], "minLength": 1 },
+              "subject": { "type": ["string", "null"], "minLength": 1 },
+              "field": { "type": "string", "minLength": 1 },
+              "file": { "type": ["string", "null"], "minLength": 1 },
+              "sheet": { "type": ["string", "null"], "minLength": 1 },
+              "sheet_number": { "type": ["string", "null"] },
+              "view": { "type": ["string", "null"] },
+              "prompt": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
+      }
+    },
+    "spotcheck": {
+      "type": "object",
+      "description": "`harness part spotcheck W --part X --seed S [--n N]` (E9a): exit 0 when written or unchanged. `rows` are the sampled row ids; `written` the files, relative to the work folder.",
+      "required": ["command", "part", "seed", "rows", "written"],
+      "additionalProperties": false,
+      "properties": {
+        "command": { "const": "spotcheck" },
+        "part": { "type": "string", "minLength": 1 },
+        "seed": { "type": "integer", "minimum": 0 },
+        "rows": { "type": "array", "items": { "type": "string", "pattern": "^R[0-9]{3,}$" } },
+        "written": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+      }
+    },
+    "answer_key": {
+      "type": "object",
+      "description": "`harness part answer-key W --part X --row R --verdict V --by NAME`: exit 0 when written or already recorded (`written` false). `key` is (part, file, sheet, subject, field), never a finding id; `sheet` is null when the row has none; `superseded` counts the active verdicts this one replaced.",
+      "required": ["command", "written", "key", "superseded"],
+      "additionalProperties": false,
+      "properties": {
+        "command": { "const": "answer_key" },
+        "written": { "type": "boolean" },
+        "key": {
+          "type": "object",
+          "required": ["part", "file", "sheet", "subject", "field"],
+          "additionalProperties": false,
+          "properties": {
+            "part": { "type": "string", "minLength": 1 },
+            "file": { "type": "string", "minLength": 1 },
+            "sheet": { "type": ["string", "null"], "minLength": 1 },
+            "subject": { "type": "string", "minLength": 1, "description": "The casefolded mark or subject." },
+            "field": { "type": "string", "minLength": 1 }
+          }
+        },
+        "superseded": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "score": {
+      "type": "object",
+      "description": "`harness part score W [--answer-key FILE]` (E9b): read-only; exit 0 when computed (a measure, not a verdict). One count per active key: `agree` and `differ` compare the current row with the expected value, `missing` has no current row, `cannot_tell` is kept apart.",
+      "required": ["command", "answer_key", "parts", "total"],
+      "additionalProperties": false,
+      "properties": {
+        "command": { "const": "score" },
+        "answer_key": { "type": "string", "minLength": 1, "description": "The key file scored." },
+        "parts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["part", "checked", "agree", "differ", "missing", "cannot_tell"],
+            "additionalProperties": false,
+            "properties": {
+              "part": { "type": "string", "minLength": 1 },
+              "checked": { "type": "integer", "minimum": 0 },
+              "agree": { "type": "integer", "minimum": 0 },
+              "differ": { "type": "integer", "minimum": 0 },
+              "missing": { "type": "integer", "minimum": 0 },
+              "cannot_tell": { "type": "integer", "minimum": 0 }
+            }
+          }
+        },
+        "total": {
+          "type": "object",
+          "required": ["checked", "agree", "differ", "missing", "cannot_tell"],
+          "additionalProperties": false,
+          "properties": {
+            "checked": { "type": "integer", "minimum": 0 },
+            "agree": { "type": "integer", "minimum": 0 },
+            "differ": { "type": "integer", "minimum": 0 },
+            "missing": { "type": "integer", "minimum": 0 },
+            "cannot_tell": { "type": "integer", "minimum": 0 }
+          }
+        }
+      }
+    }
+  }
+}

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:tekla-harness:schema:reader-findings:0.1",
   "title": "Reader findings",
-  "description": "reader-findings.json in the work folder: the judgements of the drawing-reader agent (what kind of drawing a sheet is, what a general-note item says, how the structure is organised, where two sources disagree), each tied to the text-index entries it rests on. Written only by `harness finding`; a report may print a number or a claim only when a finding (or another named artefact) carries it. A finding is accepted only when every cited entry exists, sits on the cited sheet and is not blocked by the legacy-font gate (text_gate.py: meaning is never taken from text whose encoding is unknown, proposed or contradicted); a blocked entry can only be quoted in a reader question (`harness ask`). `entries[].display_text` is copied verbatim from the text index when the finding is recorded. `confidence` is the minimum of the cited entries' confidence, optionally lowered by the reader, and is never 'high' (only an engineer answer is). `file_sha256` is the inventory's sha256 of the file at that time: a finding whose file has since changed is 'stale' (`harness finding list` shows it; the stored document does not). Ids F-001.. are allocated in increasing order from `next_id` and never reused; a withdrawn finding stays with its reason. Findings are ordered by id; the document has no timestamps.",
+  "description": "reader-findings.json in the work folder: the judgements of the drawing-reader agent (what kind of drawing a sheet is, what a general-note item says, how the structure is organised, where two sources disagree), each tied to the text-index entries it rests on (a `measured` finding, or a cross_check against a measurement, rests on items of a saved geometry or contents document instead of, or besides, entries). Written only by `harness finding`; a report may print a number or a claim only when a finding (or another named artefact) carries it. A finding is accepted only when every cited entry exists, sits on the cited sheet and is not blocked by the legacy-font gate (text_gate.py: meaning is never taken from text whose encoding is unknown, proposed or contradicted); a blocked entry can only be quoted in a reader question (`harness ask`). `entries[].display_text` is copied verbatim from the text index when the finding is recorded. `confidence` is the minimum of the cited entries' confidence, optionally lowered by the reader, and is never 'high' (only an engineer answer is), except for a `measured` finding that also cites entries. `file_sha256` is the inventory's sha256 of the file at that time: a finding whose file has since changed is 'stale' (`harness finding list` shows it; the stored document does not). Ids F-001.. are allocated in increasing order from `next_id` and never reused; a withdrawn finding stays with its reason. Findings are ordered by id; the document has no timestamps.",
   "type": "object",
   "required": ["schema_version", "kind", "project_id", "next_id", "findings"],
   "additionalProperties": false,
@@ -11,7 +11,15 @@
     "kind": { "const": "reader_findings" },
     "project_id": { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/project_id" },
     "next_id": { "type": "integer", "minimum": 1, "description": "N of the next id to allocate (F-N); greater than every allocated id." },
-    "findings": { "type": "array", "items": { "$ref": "#/$defs/finding" } }
+    "findings": { "type": "array", "items": { "$ref": "#/$defs/finding" } },
+    "summary": {
+      "type": "object",
+      "description": "Only in `harness finding list` output, never stored.",
+      "additionalProperties": false,
+      "properties": {
+        "by_class": { "type": "object", "additionalProperties": { "type": "integer", "minimum": 0 }, "description": "Listed sheet_class findings per class value." }
+      }
+    }
   },
   "$defs": {
     "finding_id": { "type": "string", "pattern": "^F-[0-9]{3,}$" },
@@ -24,6 +32,40 @@
         "display_text": { "type": "string", "description": "The entry's display_text, copied verbatim when the finding was recorded." }
       }
     },
+    "evidence_item": {
+      "type": "object",
+      "description": "One cited item as measured in the saved document: its id and the fields the item has there (a null field is left out). A contents outline has no kind, sheet, space or diameter; a geometry item has no symbols, marks or axes.",
+      "required": ["id"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "urn:tekla-harness:schema:geometry:0.1#/$defs/item_id" },
+        "kind": { "enum": ["circle", "outline"] },
+        "layer": { "type": "string", "description": "Effective layer." },
+        "sheet": { "type": "string", "description": "Detector sheet of the centre (geometry items)." },
+        "space": { "type": "string" },
+        "centre": { "$ref": "urn:tekla-harness:schema:contents:0.1#/$defs/point" },
+        "short": { "type": "number" },
+        "long": { "type": "number" },
+        "diameter": { "type": "number", "description": "Circles of a geometry document only." },
+        "symbols": { "type": "integer", "minimum": 0, "description": "Contents outlines only: unique symbols inside the ring." },
+        "marks": { "$ref": "urn:tekla-harness:schema:contents:0.1#/$defs/outline/properties/marks" },
+        "axes": { "$ref": "urn:tekla-harness:schema:contents:0.1#/$defs/outline/properties/axes" },
+        "invisible": { "type": "boolean" }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "description": "The measurement a finding rests on: items of a document saved by `harness geometry --save` or `harness contents --save`. Required for kind measured, allowed on cross_check. `sha256` is that of the saved file when the finding was recorded (a saved file is never overwritten): `harness finding list` marks the finding stale, with `stale_reasons`, when the file has changed or is gone. `items` snapshots every cited item, so the finding carries the numbers it rests on; `--claim` values were checked against each of them when the finding was added.",
+      "required": ["source", "sha256", "command", "query", "items"],
+      "additionalProperties": false,
+      "properties": {
+        "source": { "type": "string", "pattern": "^geometry/[^/\\\\]+\\.json$", "description": "Work-relative path of the saved document." },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "command": { "enum": ["geometry", "contents"], "description": "The `kind` of the saved document." },
+        "query": { "type": "object", "description": "The document's `query`, copied verbatim." },
+        "items": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/$defs/evidence_item" }, "description": "One snapshot per cited item (geometry: regions[].items[]; contents: outlines[]), in the order given (the tool refuses an id twice)." }
+      }
+    },
     "finding": {
       "type": "object",
       "required": ["id", "kind", "status", "file", "file_sha256", "sheet", "entries", "value", "fields", "questions", "confidence"],
@@ -31,25 +73,43 @@
       "properties": {
         "id": { "$ref": "#/$defs/finding_id" },
         "kind": {
-          "enum": ["sheet_class", "note_item", "structural_system", "cross_check"],
-          "description": "sheet_class: the kind of drawing a sheet is (value from the closed list below; 'mixed' = one sheet holding several drawings; 'other' needs a note). note_item: a verbatim quote from a general note, fields.topic says which topic. structural_system: the reader's claim about the structure, fields.aspect says which aspect. cross_check: a mismatch between sources, with at least two entries and at least one question."
+          "enum": ["sheet_class", "note_item", "structural_system", "cross_check", "measured"],
+          "description": "sheet_class: the kind of drawing a sheet is (value from the closed list below; 'mixed' = one sheet holding several drawings; 'other' needs a note). note_item: a verbatim quote from a general note, fields.topic says which topic. structural_system: the reader's claim about the structure, fields.aspect says which aspect. cross_check: a mismatch between sources, with at least two entries (one entry plus `evidence` is enough when the second source is a saved geometry or contents document) and at least one question. measured: a value taken from measured vector geometry (a pile count per cap, a cap size, the axes that carry caps), tied to the items of a saved `harness geometry` / `harness contents` document in `evidence`; `entries` may be empty."
         },
         "status": { "enum": ["active", "withdrawn"] },
         "file": { "type": "string", "minLength": 1, "description": "Inventory path of the drawing file." },
         "file_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$", "description": "The inventory's sha256 of `file` when the finding was recorded." },
         "sheet": { "type": ["string", "null"], "minLength": 1, "description": "Detector sheet id (model#01, <layout>#01) every cited entry is assigned to; null when the finding is not tied to one sheet (allowed for every kind but sheet_class)." },
-        "entries": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/entry" }, "description": "The cited entries, in the order given." },
+        "entries": { "type": "array", "items": { "$ref": "#/$defs/entry" }, "description": "The cited entries, in the order given. At least one, except for kind measured (which may rest on evidence alone)." },
+        "evidence": { "$ref": "#/$defs/evidence" },
         "value": { "type": "string", "minLength": 1 },
         "fields": {
           "type": "object",
-          "description": "note_item: topic (design_code, concrete_class, rebar_grade, steel_grade, bolt_grade, weld, cover, lap, convention, other). structural_system: aspect (frame_type, foundation_type, lateral_system, floors, typical_floors). Other keys are free (lowercase snake_case), values are strings.",
+          "description": "measured: quantity (count, size, position, level, spacing), optional. note_item: topic (design_code, concrete_class, rebar_grade, steel_grade, bolt_grade, weld, cover, lap, convention, other). structural_system: aspect (frame_type, foundation_type, lateral_system, floors, typical_floors). Other keys are free (lowercase snake_case), values are strings.",
           "propertyNames": { "pattern": "^[a-z][a-z0-9_]*$" },
           "additionalProperties": { "type": "string" }
         },
         "questions": { "type": "array", "items": { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/question_id" }, "description": "Registry question ids the finding relates to (required for cross_check)." },
-        "confidence": { "enum": ["low", "medium"], "description": "Minimum of the cited entries' confidence, optionally lowered; never 'high'." },
+        "confidence": { "enum": ["low", "medium", "high"], "description": "Minimum of the cited entries' confidence, optionally lowered; 'medium' without entries. 'high' only for kind measured that cites entries (an agreeing printed value; entries minItems 1): never for another kind (only an engineer answer is high)." },
         "note": { "type": "string", "minLength": 1 },
-        "withdrawn_reason": { "type": "string", "minLength": 1, "description": "Only when status is 'withdrawn'." }
+        "part": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$", "description": "The part (block x member family, ADR-0019) the finding belongs to, set by `harness finding add --part`. Optional: absent for a finding recorded before the work folder had a parts manifest; required by the command once parts/manifest.json exists." },
+        "withdrawn_reason": { "type": "string", "minLength": 1, "description": "Only when status is 'withdrawn'." },
+        "decoded_by": {
+          "type": "array",
+          "description": "How the cited entries were decoded when the finding was recorded: one item per decode source (text-index decode.source), with the knowledge row that decided it (pattern, its status and decision date) and the entries it covers. `finding list` marks the finding stale when that row changes.",
+          "items": {
+            "type": "object",
+            "required": ["source", "knowledge_pattern", "row_status", "decided_on", "entries"],
+            "additionalProperties": false,
+            "properties": {
+              "source": { "enum": ["style_font", "style_family", "mtext_inline_font", "knowledge_table", "codepoint_evidence", "none"] },
+              "knowledge_pattern": { "type": ["string", "null"] },
+              "row_status": { "enum": ["approved", "proposed", "rejected", null] },
+              "decided_on": { "anyOf": [{ "type": "null" }, { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" }] },
+              "entries": { "type": "array", "minItems": 1, "items": { "type": "string", "pattern": "^T[0-9]{6,}$" } }
+            }
+          }
+        }
       },
       "allOf": [
         { "if": { "properties": { "status": { "const": "withdrawn" } } }, "then": { "required": ["withdrawn_reason"] }, "else": { "not": { "required": ["withdrawn_reason"] } } },
@@ -87,7 +147,31 @@
         },
         {
           "if": { "properties": { "kind": { "const": "cross_check" } } },
-          "then": { "properties": { "entries": { "minItems": 2 }, "questions": { "minItems": 1 } } }
+          "then": { "properties": { "questions": { "minItems": 1 } } }
+        },
+        {
+          "if": { "properties": { "kind": { "const": "cross_check" } }, "not": { "required": ["evidence"] } },
+          "then": { "properties": { "entries": { "minItems": 2 } } }
+        },
+        {
+          "if": { "properties": { "kind": { "const": "measured" } } },
+          "else": { "properties": { "confidence": { "enum": ["low", "medium"] } } }
+        },
+        {
+          "if": { "properties": { "kind": { "const": "measured" } } },
+          "then": {
+            "required": ["evidence"],
+            "properties": { "fields": { "properties": { "quantity": { "enum": ["count", "size", "position", "level", "spacing"] } } } }
+          },
+          "else": { "properties": { "entries": { "minItems": 1 } } }
+        },
+        {
+          "if": { "properties": { "kind": { "const": "measured" }, "confidence": { "const": "high" } }, "required": ["kind", "confidence"] },
+          "then": { "properties": { "entries": { "minItems": 1 } } }
+        },
+        {
+          "if": { "properties": { "kind": { "enum": ["measured", "cross_check"] } } },
+          "else": { "not": { "required": ["evidence"] } }
         }
       ]
     }

@@ -1,0 +1,59 @@
+{
+  "schema_version": "0.1",
+  "kind": "spotcheck",
+  "part": "B1-caps",
+  "part_hash": "3e5a7c9b1d2f4a6c8e0b2d4f6a8c0e1b3d5f7a9c1e3b5d7f9a1c3e5b7d9f0a2c",
+  "seed": 7,
+  "n": 5,
+  "rows": [
+    {
+      "row": "R001",
+      "mark": "K-1",
+      "field": "size",
+      "value": "1500x2400",
+      "file": "plans.dxf",
+      "sheet": "model#01",
+      "sheet_number": "S-01",
+      "sheet_title": "FOUNDATION PLAN",
+      "view": "PLAN",
+      "entries": [
+        "T000012",
+        "T000013"
+      ],
+      "findings": [
+        "F-004"
+      ]
+    },
+    {
+      "row": "R004",
+      "subject": "piles",
+      "field": "count_plan",
+      "value": "26",
+      "file": "plans.dxf",
+      "sheet": "model#02",
+      "sheet_number": null,
+      "sheet_title": null,
+      "view": null,
+      "entries": [],
+      "findings": [
+        "F-007",
+        "F-008"
+      ]
+    },
+    {
+      "row": "R009",
+      "mark": "K-2",
+      "field": "level",
+      "value": "-1.200",
+      "file": "plans.dxf",
+      "sheet": null,
+      "sheet_number": null,
+      "sheet_title": null,
+      "view": null,
+      "entries": [
+        "T000031"
+      ],
+      "findings": []
+    }
+  ]
+}

@@ -1,0 +1,232 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:tekla-harness:schema:contents:0.1",
+  "title": "Contents of the member outlines of one plan sheet",
+  "description": "Output of the read-only `harness contents <work_dir> <file> --sheet ID --outline-layer L [L ...] --circle-layer L [L ...] [--max-long N] [--marks REGEX] [--mark-radius R] [--dims] [--detail] [--max N] [--tol T] [--input-dir DIR]` (stdout, nothing written): for each closed outline of the outline layers on one sheet (a pile cap, a column stub) its size, how many symbols (pile circles, one per unique centre) lie inside it, its marks and its position against the sheet's grid axes. Built on `harness geometry`: the same items, ids, effective layers and world coordinates. Values are in the drawing's units as stored: nothing is converted (see `units`).",
+  "type": "object",
+  "required": ["schema_version", "kind", "project_id", "file", "query", "units", "summary", "symbols", "outlines_total", "outlines", "marks_unassigned", "marks_ambiguous", "warnings"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": "0.1" },
+    "kind": { "const": "contents" },
+    "project_id": { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/project_id" },
+    "file": { "type": "string", "minLength": 1, "description": "Inventory path of the drawing, relative to the input folder." },
+    "query": {
+      "type": "object",
+      "required": ["sheet", "outline_layers", "circle_layers", "max_long", "marks", "mark_radius", "detail", "max", "tol"],
+      "additionalProperties": false,
+      "properties": {
+        "sheet": { "type": "string" },
+        "outline_layers": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+        "circle_layers": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+        "max_long": { "type": "number", "exclusiveMinimum": 0, "description": "Outlines with a longer long side are dropped (frames). As used: the --max-long value, else 20 m in the answered, else the declared unit, else 20000." },
+        "marks": { "type": ["string", "null"], "description": "Regular expression a mark text must fully match; null = no marks." },
+        "mark_radius": { "type": "number", "minimum": 0, "description": "As used: the --mark-radius value, else 3 m in the answered, else the declared unit, else 3000." },
+        "detail": { "type": "boolean" },
+        "max": { "type": ["integer", "null"], "minimum": 1, "description": "Cap on listed outlines; null = 500." },
+        "tol": { "type": "number", "exclusiveMinimum": 0, "description": "As used: the --tol value, else geometry's default (1 mm in the answered, else the declared unit, else 1.0 with a warning)." },
+        "dims": { "const": true, "description": "Only with --dims (absent otherwise, so documents saved before the flag stay valid): the printed dimensions are attached (`printed_dims`, `dims`)." }
+      }
+    },
+    "units": {
+      "type": "object",
+      "required": ["declared", "answered", "converted"],
+      "additionalProperties": false,
+      "properties": {
+        "declared": { "type": ["string", "null"], "description": "The unit the header declares; null when none." },
+        "answered": { "anyOf": [{ "type": "null" }, { "enum": ["mm", "cm", "m", "in", "ft"] }], "description": "The unit of the file's active units_confirm_all answer; null when not answered." },
+        "converted": { "const": false, "description": "Always false: every value is as stored in the drawing." }
+      }
+    },
+    "summary": {
+      "type": "array",
+      "description": "Every outline (not capped by max), grouped by layer, size (rounded to tol) and symbols inside; by count desc. The marks of the group are shown, never propagated to outlines that hold none.",
+      "items": {
+        "type": "object",
+        "required": ["layer", "short", "long", "symbols", "count", "marks_seen", "unmarked", "invisible"],
+        "additionalProperties": false,
+        "properties": {
+          "layer": { "type": "string" },
+          "short": { "type": "number" },
+          "long": { "type": "number" },
+          "symbols": { "type": "integer", "minimum": 0 },
+          "count": { "type": "integer", "minimum": 1 },
+          "marks_seen": { "type": "object", "additionalProperties": { "type": "integer", "minimum": 1 }, "description": "Mark text to the number of outlines of the group holding it (an outline counts once per text)." },
+          "unmarked": { "type": "integer", "minimum": 0, "description": "Outlines of the group with no mark assigned." },
+          "invisible": { "type": "integer", "minimum": 0, "description": "Outlines of the group that carry the invisible flag (group 60) on all their copies: used, but not drawn." },
+          "printed_dims": {
+            "type": "object",
+            "description": "Only with --dims: the outlines of the group by what their attached dimensions print. `none`: nothing attached (also a non-rectangle); `disagree`: at least one printed value differs from the drawn side; else `agree`. `values`: each (side, printed value rounded to tol) with the number of outlines of the group that carry it (an outline counts once per pair), by side then value.",
+            "required": ["agree", "disagree", "none", "values"],
+            "additionalProperties": false,
+            "properties": {
+              "agree": { "type": "integer", "minimum": 0 },
+              "disagree": { "type": "integer", "minimum": 0 },
+              "none": { "type": "integer", "minimum": 0 },
+              "values": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": ["side", "printed", "count"],
+                  "additionalProperties": false,
+                  "properties": {
+                    "side": { "enum": ["long", "short"] },
+                    "printed": { "type": "number" },
+                    "count": { "type": "integer", "minimum": 1 }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "symbols": {
+      "type": "object",
+      "required": ["total", "inside", "outside", "groups"],
+      "additionalProperties": false,
+      "properties": {
+        "total": { "type": "integer", "minimum": 0, "description": "Unique symbol centres (concentric circles are one)." },
+        "inside": { "type": "integer", "minimum": 0, "description": "Symbols inside at least one kept outline." },
+        "outside": { "type": "integer", "minimum": 0, "description": "Symbols inside no kept outline." },
+        "groups": {
+          "type": "array",
+          "description": "Symbols by the set of circle diameters drawn at their centre.",
+          "items": {
+            "type": "object",
+            "required": ["diameters", "count"],
+            "additionalProperties": false,
+            "properties": {
+              "diameters": { "type": "array", "items": { "type": "number" }, "minItems": 1 },
+              "count": { "type": "integer", "minimum": 1 }
+            }
+          }
+        }
+      }
+    },
+    "outlines_total": { "type": "integer", "minimum": 0, "description": "Kept outlines, before the cap on `outlines`." },
+    "outlines": { "type": "array", "items": { "$ref": "#/$defs/outline" } },
+    "marks_unassigned": {
+      "type": "array",
+      "description": "Matching, usable mark entries with no outline within the mark radius. Empty without --marks.",
+      "items": {
+        "type": "object",
+        "required": ["text", "entry_id", "position"],
+        "additionalProperties": false,
+        "properties": {
+          "text": { "type": "string" },
+          "entry_id": { "type": "string" },
+          "position": { "$ref": "#/$defs/point", "description": "The stored position of the entry (not the measured middle)." }
+        }
+      }
+    },
+    "marks_ambiguous": {
+      "type": "array",
+      "description": "Matching mark entries assigned to none: inside two outlines that do not hold each other, or outside every outline with a runner-up nearly as close (d2 - d1 <= max(tol, 0.25 x d2)), within the radius. Empty without --marks.",
+      "items": {
+        "type": "object",
+        "required": ["text", "entry_id", "position", "outlines"],
+        "additionalProperties": false,
+        "properties": {
+          "text": { "type": "string" },
+          "entry_id": { "type": "string" },
+          "position": { "$ref": "#/$defs/point" },
+          "outlines": { "type": "array", "items": { "$ref": "urn:tekla-harness:schema:geometry:0.1#/$defs/item_id" }, "minItems": 2, "description": "Ids of the outlines it could belong to." }
+        }
+      }
+    },
+    "symbols_outside": {
+      "type": "array",
+      "description": "Only with --detail: the symbols inside no kept outline.",
+      "items": {
+        "type": "object",
+        "required": ["centre", "diameters"],
+        "additionalProperties": false,
+        "properties": {
+          "centre": { "$ref": "#/$defs/point" },
+          "diameters": { "type": "array", "items": { "type": "number" } }
+        }
+      }
+    },
+    "dims": {
+      "type": "object",
+      "description": "Only with --dims: what became of the DIMENSIONs of the sheet (any layer, hidden layers dropped). They add up: on_sheet = attached + ambiguous + unusable + not_linear + the usable linear ones that reach no outline.",
+      "required": ["on_sheet", "attached", "ambiguous", "unusable", "not_linear"],
+      "additionalProperties": false,
+      "properties": {
+        "on_sheet": { "type": "integer", "minimum": 0, "description": "Every DIMENSION on the sheet, block content placed by its INSERT counted per placement." },
+        "attached": { "type": "integer", "minimum": 0, "description": "Attached to one outline (the `printed_dims` rows of all outlines, even past the cap on `outlines`)." },
+        "ambiguous": { "type": "integer", "minimum": 0, "description": "Two outlines fitted it equally well (same kind, gaps within tol): attached to neither." },
+        "unusable": { "type": "integer", "minimum": 0, "description": "Linear, but with no usable printed number or direction: an error row, a value not compared, a text that is no number or is blocked by the legacy-font gate, a suppressed text, a DIMLFAC that is not positive, or a scaled INSERT, or a rotated one whose dimension stores no angle (group 50) and whose definition points lie on one line." },
+        "not_linear": { "type": "integer", "minimum": 0, "description": "Not dimtype 0 or 1 (angular, radial, diameter, ordinate)." }
+      }
+    },
+    "warnings": { "type": "array", "items": { "type": "string" } }
+  },
+  "$defs": {
+    "point": { "type": "array", "items": { "type": "number" }, "minItems": 2, "maxItems": 2 },
+    "mark": {
+      "type": "object",
+      "required": ["text", "entry_id", "distance"],
+      "additionalProperties": false,
+      "properties": {
+        "text": { "type": "string" },
+        "entry_id": { "type": "string", "description": "Id of the text-index entry." },
+        "distance": { "type": "number", "minimum": 0, "description": "From the middle of the text to the outline ring; 0 when inside or on the ring. The middle is the centre of the text box of the text index (`sheets.text_box`: ESTIMATED width 0.7 x height x characters, the TEXT alignment or MTEXT attachment, rotation and line count taken into account; a text midpoint or a block position is the point itself). A MULTILEADER mark is measured from its text, not from the arrow: the text index has no leader vertices." }
+      }
+    },
+    "outline": {
+      "type": "object",
+      "required": ["id", "layer", "short", "long", "angle", "centre", "symbols", "invisible", "marks", "axes"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "urn:tekla-harness:schema:geometry:0.1#/$defs/item_id" },
+        "layer": { "type": "string", "description": "Effective layer." },
+        "short": { "type": "number" },
+        "long": { "type": "number" },
+        "angle": { "type": ["number", "null"], "description": "Direction of the long side in degrees, [0, 180); null for a non-rectangle." },
+        "centre": { "$ref": "#/$defs/point", "description": "Bounding-box centre, world coordinates." },
+        "symbols": { "type": "integer", "minimum": 0, "description": "Unique symbols whose centre is inside the drawn ring, arcs included (boundary within tol counts)." },
+        "invisible": { "type": "boolean", "description": "True when every copy of the outline carries the invisible flag (group 60): it is used but not drawn; one warning counts such outlines and symbols." },
+        "marks": { "type": "array", "items": { "$ref": "#/$defs/mark" }, "description": "The matching entries whose innermost holding outline, else whose one nearest outline within the radius, is this one; nearest first; usually 0 or 1." },
+        "axes": {
+          "type": "array",
+          "description": "One entry per family of each grid group of the sheet whose bbox strictly contains the outline centre (same space); an outline in several groups has entries for each, one in none has none (a warning counts them).",
+          "items": {
+            "type": "object",
+            "required": ["group_id", "family_id", "label", "offset", "nearest_unlabelled_offset"],
+            "additionalProperties": false,
+            "properties": {
+              "group_id": { "type": "string", "description": "The grid group of grids.json the entry comes from." },
+              "family_id": { "type": "string" },
+              "label": { "type": ["string", "null"], "description": "Label of the nearest LABELLED axis of the family; null when the family has no labelled axis. Axes equally near (within tol) give the lower position. An axis is placed at its line midpoint." },
+              "offset": { "type": "number", "description": "Outline centre minus that axis, along the family normal (minus the nearest unlabelled axis when the family has no labelled one)." },
+              "nearest_unlabelled_offset": { "type": ["number", "null"], "description": "Outline centre minus the nearest unlabelled axis (an axis without a label, or a line of the family's unlabelled_lines in the grids document), only when that axis is nearer than the labelled one; else null. Such a line never sets label or offset, and is not read in a family without a labelled axis." }
+            }
+          }
+        },
+        "symbol_centres": { "type": "array", "items": { "$ref": "#/$defs/point" }, "description": "Only with --detail." },
+        "printed_dims": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/printed_dim" },
+          "description": "Only with --dims: the linear dimensions attached to the outline, by side, printed value, handle. Empty when none reaches it, and for a non-rectangle."
+        }
+      }
+    },
+    "printed_dim": {
+      "type": "object",
+      "description": "One dimension attached to a rectangular outline: it measures along the `side` of the outline (within 1 degree) and lies within the mark radius of it. `how`: `edges` (its two ends on the two edges across that side, within tol) or `centred` (neither end on an edge, centred on the side, the longer of dimension and side at most twice the shorter; not attached when both ends lie on symbol centres inside the outline, a pile spacing, unless the pile layer was not passed as `--circle-layer`, then it may still attach `centred`). `agrees`: |printed - side x DIMLFAC| <= tol x DIMLFAC.",
+      "required": ["handle", "entry_id", "text", "printed", "side", "how", "agrees"],
+      "additionalProperties": false,
+      "properties": {
+        "handle": { "type": ["string", "null"], "description": "Handle of the DIMENSION; null for block content (a placement of the definition) or when the file's handles are not reliable." },
+        "entry_id": { "type": ["string", "null"], "description": "Id of the dimension's text-index entry when its text is typed; null for a measured or suppressed text." },
+        "text": { "type": "string", "description": "The raw text of the dimension as stored (empty or `<>`: the measured value)." },
+        "printed": { "type": "number", "description": "The number it prints, in drawing units: the typed number of an override text, else the measured length x DIMLFAC (rounded to 0.001)." },
+        "side": { "enum": ["long", "short"], "description": "The outline side it measures along: `long` when parallel to the outline `angle`, else `short`." },
+        "how": { "enum": ["edges", "centred"] },
+        "agrees": { "type": "boolean" }
+      }
+    }
+  }
+}

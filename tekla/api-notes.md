@@ -1,7 +1,7 @@
 # Tekla Open API notes (Step 3 input)
 
-Purpose: everything needed to start `TeklaCore` + the console CLI against **Tekla Structures 2024 (Diamond)**, with the 2025/2026 deltas.
-Under review (engineer, 2026-11-09): the company runs Tekla **2026** Diamond; the target is confirmed when Step 3 resumes after Steps 1–2 ([roadmap](../docs/roadmap.md), Step 3). The 2026 deltas below were not researched in depth.
+Purpose: everything needed to start `TeklaCore` + the console CLI against **Tekla Structures 2026 (Diamond)** (target since 2026-11-11, ADR-0015 Q1). The research below was done against 2024 (then the target); 2024-only facts are marked 2024 and kept with their provenance, and the 2025/2026 deltas are in the version matrix.
+Target changed (engineer, 2026-11-09; confirmed 2026-11-11, ADR-0015 Q1): the company runs Tekla **2026** Diamond. The 2026 deltas below were not researched in depth and the sections that cite 2024 packages or paths are 2024-only until re-checked on 2026.
 Date accessed: **2026-11-06**. Authored by a research agent on a Linux machine with no Tekla installed.
 
 **Status of these notes: doc-sourced, NOT run-verified.** Nothing here was executed against Tekla. Every claim carries a status:
@@ -42,12 +42,12 @@ Abbreviations for sources:
 3. UDA definition: who adds `LOT`, `RUN_ID`, `SPEC_ID` to the company `objects.inp` (model/project/firm folder, not the global file), `unique_attribute`, and `special_flag no`.
 4. Confirm the licence is a Diamond *subscription* and whether a second Tekla session / headless is ever wanted.
 5. EULA/Partner question if the CLI is ever given to a third party (section 4).
-6. Confirm the exact 2024 service pack installed (for the version report only).
+6. Confirm the exact 2026 service pack installed (for the version report only).
 
 ### Start-here checklist
-1. Create `Directory.Build.props` + `TeklaCli.csproj` from section 1 (net48, x64, `Tekla.Structures.Model` 2024.0.4, `Tekla.Structures.Catalogs` 2024.0.4, `TSAppConfigPatcherTask` 2.1.3).
+1. Create `Directory.Build.props` + `TeklaCli.csproj` from section 1 (net48, x64, `Tekla.Structures.Model` 2026.0.3, `Tekla.Structures.Catalogs` 2026.0.3, `TSAppConfigPatcherTask` 2.1.3 (the 2024 pin was 2024.0.4); the first Windows build must confirm that the `net48` x64 exe consumes the `netstandard2.0`-only 2026 Model package).
 2. Build; confirm the output is named `tekla-cli.exe` (never run it via `dotnet run`: the guard cannot see that) and `bin\...\tekla-cli.exe.config` contains `codeBase` lines pointing at `...\Tekla Structures\2024.0\bin`.
-3. First connection test (Tekla 2024 running, empty test model open): `new Model().GetConnectionStatus()`, `GetInfo().ModelPath`, `TeklaStructuresInfo.GetCurrentProgramVersion()`; also run with Tekla closed and record whether it throws or returns false (To verify #2).
+3. First connection test (Tekla 2026 running, empty test model open): `new Model().GetConnectionStatus()`, `GetInfo().ModelPath`, `TeklaStructuresInfo.GetCurrentProgramVersion()`; also run with Tekla closed and record whether it throws or returns false (To verify #2).
 4. First catalog test: `GetUserPropertyItems()` lists `LOT`/`RUN_ID`/`SPEC_ID`; `MaterialItem.Select("S235JR")`; `LibraryProfileItem.Select("HEA400")`.
 5. First build test on the *test model copy*: `new Beam(Beam.BeamTypeEnum.COLUMN)`, set profile/material, `Insert()`, `SetUserProperty` x3, `Modify()`, `Model.CommitChanges("...")`; then query back by UDA filter and GUID; then delete by Identifier and commit.
 6. Record each result in this file (change status to `run-verified` with Tekla build number).
@@ -120,7 +120,7 @@ Abbreviations for sources:
 - **Official rule (closest statement)**: "Tekla Open API libraries are backwards compatible." Target the **oldest** supported API that works for your extension; upgrade only when you need a newer Open API; avoid internal APIs (they "usually change between versions"). It does **not** say "rebuild per version" nor state a forward guarantee for an exe built against 2024 running on 2026. · 2024+ · GACLESS · `doc`
 - **Binding redirects**: Tekla-generated configs redirect `0.0.0.0-2099.1.0.0` to the running Tekla version and set `codeBase`; "any other bindings will remain untouched" so own redirects can be added. This is the mechanism that lets one build load a different Tekla version's DLLs. · 2024+ · GACLESS · `doc`
 - **Evidence it works across versions**: Trimble's multi-version sample compiles a driver once against `Tekla.Structures.Model 2021.0.0` and runs it against other installed versions (2022, 2023, 2026 shown) by re-patching the config per version; for versions < 2024 it patches without `codeBase`, from 2024 with `codeBase`. Technique demonstration, not a guarantee. · 2021-2026 · MultiTeklaStructuresMonitor (`DriverStarter.cs`, `TeklaGrpcApiService.csproj`) · `sample-code`
-- **Safe plan**: one `TeklaCore` per target major version (2024 now), rebuilt per version with the matching NuGet version; do not rely on forward compatibility until tested (To verify #4).
+- **Safe plan**: one `TeklaCore` per target major version (2026 now; 2024 was the earlier target), rebuilt per version with the matching NuGet version; do not rely on forward compatibility until tested (To verify #4).
 - **Runtime of Open API**: 2024: .NET Framework 4.8, libraries also .NET Standard 2.0 compatible, COM support removed, assemblies no longer in the GAC, communication "at least two times faster", targeting older .NET Framework no longer possible. 2025: no runtime change noted; CustomPropertiesPlugin became NetStandard2.0-compatible. 2026: no .NET change; Open API extensions "support only 64-bit platforms" (TTSD-73016); Tekla 2026 requires Windows 11 x64, no ARM. All three still require .NET Framework 4.8. · REL24 / REL25 / REL26; system requirements pages · `doc`
 - **Windows**: 2024 Windows 10 (64-bit) and 11; 2025 Windows 11 only; 2026 Windows 11 (64-bit) only. · system requirements pages · `doc`
 - **Breaking/notable changes**:
@@ -224,7 +224,7 @@ Namespaces: `Tekla.Structures` (`Identifier`, `TeklaStructuresInfo`, `TeklaStruc
 
 ## Version matrix
 
-| | 2024 (company) | 2025 | 2026 |
+| | 2024 (earlier target) | 2025 | 2026 (company, target) |
 |---|---|---|---|
 | Tekla runtime / Open API runtime | .NET Framework 4.8 | .NET Framework 4.8 | .NET Framework 4.8 |
 | Windows | 10 (64-bit), 11 | 11 | 11 (64-bit), no ARM |
@@ -245,17 +245,17 @@ Sources: nuspecs/DLLs (PKG24/25/26), REL24-26, system requirements pages, releas
 
 ## To verify on the test model
 
-1. After build, does `tekla-cli.exe.config` carry the `codeBase` entries and does `new Model()` connect from a Release build run from the build folder, with Tekla 2024 open?
+1. After build, does `tekla-cli.exe.config` carry the `codeBase` entries and does `new Model()` connect from a Release build run from the build folder, with Tekla 2026 open (the 2024 wording was the original)?
 2. With Tekla not running: does `new Model()` throw or does `GetConnectionStatus()` return false (and how long does it block)?
-3. Tekla open but CLI run elevated vs not, as a different Windows user, and with two Tekla 2024 sessions open: which session does `Model()` bind to, and what is the error?
-4. Build against 2024.0.4, run against Tekla 2025/2026 with a re-patched config (version pin test) if the company upgrades.
+3. Tekla open but CLI run elevated vs not, as a different Windows user, and with two Tekla 2026 sessions open: which session does `Model()` bind to, and what is the error?
+4. Build against 2026.0.3 and run against Tekla 2026 with the patched config; build/run across versions (for example a 2024.0.4 build against 2025/2026 with a re-patched config, the original wording) only if the company changes version again.
 5. `SetUserProperty` for a name **not** defined in any `objects.inp`: returns true/false? Persists after save and reopen? Visible to `GetUserProperty` and to a `CustomString` filter?
 6. `SetUserProperty` before vs after `Insert()`; before vs after `Modify()`; string vs integer overloads for `RUN_ID`.
 7. `ObjectFilterExpressions.CustomString("LOT")` vs `PartFilterExpressions.CustomString("LOT")` on a Beam and on a ContourPlate: which returns the objects? Does a Grid carry UDAs?
 8. `Insert()` with an unknown profile or material: returns false, throws, or inserts with a default? Is `Identifier.GUID` populated right after `Insert()` (before `CommitChanges`)?
 9. If the process dies/exits after `Insert()` and before `CommitChanges()`: is the object in the model? Does `Delete()` + `CommitChanges()` leave a clean model and one undo step?
 10. `Delete()` on a part with attached welds/bolts/components: are dependents removed? Do those dependents carry the UDAs?
-11. `ModelInfo.ModelPath` exact format (folder, trailing `\`, casing) and `TeklaStructuresInfo.GetCurrentProgramVersion()` output on 2024 (service pack visible?).
+11. `ModelInfo.ModelPath` exact format (folder, trailing `\`, casing) and `TeklaStructuresInfo.GetCurrentProgramVersion()` output on 2026 (service pack visible?; asked on 2024 originally).
 12. `UserPropertyItem.Unique` / `AffectsNumbering` values for the three UDAs after defining them as `unique_attribute` / `special_flag no`.
 13. Backup route: does `Operation.RunMacro` of a macro that issues *Save and create backup copy* work against the open model? Does `ModelHandler.Save` followed by a file-copy of the model folder open correctly? Does a copy keep GUIDs? Where does `XS_MODEL_BACKUP_DIRECTORY` point on this machine?
 14. `CreateReportFromSelected` synchronous or not; template location; CSV content; does `CreateIFC4ExportFromSelected` honour the UI selection of 1 part; clear selection afterwards works.

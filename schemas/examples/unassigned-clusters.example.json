@@ -1,0 +1,39 @@
+{
+  "schema_version": "0.1",
+  "kind": "unassigned_clusters",
+  "project_id": "demo-clusters",
+  "clusters": [
+    {
+      "file": "loose.dxf",
+      "sheet_id": "model#01",
+      "sheet_number": { "value": "S-1", "confidence": "high" },
+      "side": "below",
+      "entry_count": 3,
+      "gap_min": 50.0,
+      "gap_max": 300.0,
+      "bbox": [100.0, -300.0, 900.0, -50.0],
+      "entry_ids": ["t-0001", "t-0002", "t-0003"],
+      "blocked_entry_ids": ["t-0003"]
+    },
+    {
+      "file": "loose.dxf",
+      "sheet_id": null,
+      "sheet_number": null,
+      "side": "none",
+      "entry_count": 1,
+      "gap_min": null,
+      "gap_max": null,
+      "bbox": [1500.0, -500.0, 1500.0, -500.0],
+      "entry_ids": ["t-0004"],
+      "blocked_entry_ids": []
+    }
+  ],
+  "totals": {
+    "printed_unassigned": 4,
+    "not_printed_excluded": 1,
+    "blocked": 1,
+    "by_side": { "below": 3, "above": 0, "left": 0, "right": 0, "inside": 0, "none": 1 },
+    "clusters": 2
+  },
+  "warnings": []
+}

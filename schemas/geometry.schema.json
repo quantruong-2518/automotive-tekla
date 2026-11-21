@@ -1,0 +1,136 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:tekla-harness:schema:geometry:0.1",
+  "title": "Linework of one drawing: circles and closed outlines",
+  "description": "Output of the read-only `harness geometry <work_dir> <file> [--sheet ID ...] [--bbox X0 Y0 X1 Y1] [--layer L ...] [--detail] [--max N] [--tol T] [--input-dir DIR]` (stdout, nothing written): the circles (piles) and closed outlines (pile caps, columns) of one drawing of a work folder, grouped by size per sheet (or per model-space region). Items: `circle` (a CIRCLE, a full ELLIPSE whose ratio is within 1e-6 of 1 such as a circle in a non-uniformly scaled INSERT, or a donut: a closed 2-vertex LWPOLYLINE whose two bulges are both +1 or both -1, centre = midpoint, diameter = vertex distance) and `outline` (a LWPOLYLINE or 2D POLYLINE with the closed flag, or without it when first and last vertex lie within tol); LINE, ARC, HATCH, other ELLIPSEs, SPLINEs and open polylines are only counted per layer. A closed-flag polyline loses its last vertex only when it repeats the first one (within 1e-9 of its size); spline-frame control vertices of a 2D POLYLINE are not points. An outline with a bulge is never a rectangle and its bbox follows the arcs. KNOWN GAP: an outline drawn as loose LINEs is not found. Identical items (same kind, effective layer, geometry rounded to tol) collapse into one with `copies`. All coordinates are world coordinates (mirrored INSERTs converted). Values are in the drawing's units as stored: nothing is converted (see `units`). Hidden entities are counted as `hidden` only: on an off or frozen layer, or drawn by an INSERT (at any depth) on a frozen layer (an off INSERT layer hides only its layer-0 content, which takes that layer). The invisible flag (group 60 = 1, own or of an INSERT above) hides nothing: the entity is counted normally and also in `invisible`; an item is invisible when all its copies are; a warning names the total. Placement: LINE by its midpoint, ARC by its mid-angle point, HATCH and SPLINE by the centre of their extents; one that has no extents is counted as `unplaced` in the null-sheet region.",
+  "type": "object",
+  "required": ["schema_version", "kind", "project_id", "file", "query", "units", "regions", "warnings"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": "0.1" },
+    "kind": { "const": "geometry" },
+    "project_id": { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/project_id" },
+    "file": { "type": "string", "minLength": 1, "description": "Inventory path of the drawing, relative to the input folder." },
+    "query": {
+      "type": "object",
+      "required": ["sheet", "bbox", "layer", "detail", "max", "tol"],
+      "additionalProperties": false,
+      "properties": {
+        "sheet": { "type": ["array", "null"], "items": { "type": "string" }, "description": "Detector sheet ids asked for; null = every sheet (or the bbox)." },
+        "bbox": { "anyOf": [{ "type": "null" }, { "$ref": "#/$defs/box" }], "description": "Model-space region (x0, y0, x1, y1); never together with sheet." },
+        "layer": { "type": ["array", "null"], "items": { "type": "string" }, "description": "Effective-layer filter, case-insensitive; null = every layer." },
+        "detail": { "type": "boolean" },
+        "max": { "type": ["integer", "null"], "minimum": 1, "description": "Cap on groups per region and on items per region; null = defaults (40 groups, 500 items)." },
+        "tol": { "type": "number", "exclusiveMinimum": 0, "description": "Dedupe and rounding tolerance in drawing units, as used: the --tol value, else 1 mm in the answered unit, else in the declared unit, else 1.0 (with a warning)." }
+      }
+    },
+    "units": {
+      "type": "object",
+      "required": ["declared", "answered", "converted"],
+      "additionalProperties": false,
+      "properties": {
+        "declared": { "type": ["string", "null"], "description": "The unit the header declares ($INSUNITS, as the probe reports it); null when none." },
+        "answered": { "anyOf": [{ "type": "null" }, { "enum": ["mm", "cm", "m", "in", "ft"] }], "description": "The unit of the file's active units_confirm_all answer; null when not answered." },
+        "converted": { "const": false, "description": "Always false: every value is as stored in the drawing." }
+      }
+    },
+    "regions": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/region" },
+      "description": "One entry per requested sheet (in the order asked), the bbox region, or every non-empty sheet plus a null-sheet region for items on no sheet."
+    },
+    "warnings": { "type": "array", "items": { "type": "string" } }
+  },
+  "$defs": {
+    "box": { "type": "array", "items": { "type": "number" }, "minItems": 4, "maxItems": 4 },
+    "point": { "type": "array", "items": { "type": "number" }, "minItems": 2, "maxItems": 2 },
+    "layer_counts": {
+      "type": "object",
+      "required": ["circles", "outlines", "lines", "arcs", "hatches", "ellipses", "splines", "open_polylines", "hidden", "invisible", "unplaced", "copies_collapsed"],
+      "additionalProperties": false,
+      "properties": {
+        "circles": { "type": "integer", "minimum": 0, "description": "Unique circles." },
+        "outlines": { "type": "integer", "minimum": 0, "description": "Unique closed outlines." },
+        "lines": { "type": "integer", "minimum": 0 },
+        "arcs": { "type": "integer", "minimum": 0 },
+        "hatches": { "type": "integer", "minimum": 0 },
+        "ellipses": { "type": "integer", "minimum": 0, "description": "ELLIPSEs that are not a full circle (a ratio-1 ellipse is a circle, or an arc when partial)." },
+        "splines": { "type": "integer", "minimum": 0 },
+        "open_polylines": { "type": "integer", "minimum": 0 },
+        "hidden": { "type": "integer", "minimum": 0, "description": "Entities on this layer that are not drawn: the layer is off or frozen, or an INSERT above it is on a frozen layer (counted in no other field)." },
+        "invisible": { "type": "integer", "minimum": 0, "description": "Entities carrying the invisible flag (group 60), own or of an INSERT above, that are also counted in their kind; copies included." },
+        "unplaced": { "type": "integer", "minimum": 0, "description": "HATCHes and SPLINEs without extents: no position, so on no sheet (counted in no other field)." },
+        "copies_collapsed": { "type": "integer", "minimum": 0, "description": "Extra identical circles / outlines folded into a unique item." }
+      }
+    },
+    "circle_group": {
+      "type": "object",
+      "required": ["layer", "diameter", "count", "copies", "invisible", "centre_bbox"],
+      "additionalProperties": false,
+      "properties": {
+        "layer": { "type": "string" },
+        "diameter": { "type": "number", "description": "Rounded to tol." },
+        "count": { "type": "integer", "minimum": 1, "description": "Unique items." },
+        "copies": { "type": "integer", "minimum": 1, "description": "Circles drawn (unique items with their copies)." },
+        "invisible": { "type": "integer", "minimum": 0, "description": "Unique items that carry the invisible flag (all their copies do)." },
+        "centre_bbox": { "$ref": "#/$defs/box", "description": "Bounding box of the item centres." }
+      }
+    },
+    "outline_group": {
+      "type": "object",
+      "required": ["layer", "short", "long", "rectangle", "vertices", "count", "copies", "invisible", "centre_bbox"],
+      "additionalProperties": false,
+      "properties": {
+        "layer": { "type": "string" },
+        "short": { "type": "number", "description": "Rounded to tol (short side; bounding-box side for a non-rectangle, the bbox follows arc segments)." },
+        "long": { "type": "number", "description": "Rounded to tol." },
+        "rectangle": { "type": "boolean" },
+        "vertices": { "type": "integer", "minimum": 3, "description": "Without the closing duplicate." },
+        "count": { "type": "integer", "minimum": 1 },
+        "copies": { "type": "integer", "minimum": 1 },
+        "invisible": { "type": "integer", "minimum": 0, "description": "Unique items that carry the invisible flag (all their copies do)." },
+        "centre_bbox": { "$ref": "#/$defs/box" }
+      }
+    },
+    "item_id": { "type": "string", "pattern": "^G-[0-9a-f]{10}$", "description": "Stable item id: first 10 hex of sha1 of space|kind|layer|rounded geometry. Shared with `harness contents`." },
+    "item": {
+      "type": "object",
+      "required": ["id", "kind", "layer", "sheet", "space", "centre", "diameter", "bbox", "short", "long", "angle", "rectangle", "vertices", "points", "points_truncated", "copies", "invisible", "top_handle", "block_path"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/item_id" },
+        "kind": { "enum": ["circle", "outline"] },
+        "layer": { "type": "string", "description": "Effective layer." },
+        "space": { "type": "string", "description": "The space the item is drawn in, as the text index names it: `model`, or a layout name. An item seen through a viewport stays in `model`, in world coordinates." },
+        "sheet": { "type": ["string", "null"], "description": "Detector sheet of the centre as `SheetLocator.locate` gives it (the first sheet frame in detector order that holds the point); null when no frame holds it." },
+        "centre": { "$ref": "#/$defs/point", "description": "Circle centre, or the bounding-box centre of an outline (world coordinates)." },
+        "diameter": { "type": ["number", "null"], "description": "Circles only." },
+        "bbox": { "anyOf": [{ "type": "null" }, { "$ref": "#/$defs/box" }], "description": "Outlines only." },
+        "short": { "type": ["number", "null"], "description": "Outlines only: short side of a rectangle, else bounding-box side." },
+        "long": { "type": ["number", "null"] },
+        "angle": { "type": ["number", "null"], "minimum": 0, "exclusiveMaximum": 180, "description": "Rectangles only: direction of the long side in degrees, [0, 180)." },
+        "rectangle": { "type": ["boolean", "null"], "description": "Outlines only: 4 vertices with right angles within 0.5 degree and no arc segment." },
+        "vertices": { "type": ["integer", "null"], "minimum": 3 },
+        "points": { "anyOf": [{ "type": "null" }, { "type": "array", "items": { "$ref": "#/$defs/point" }, "maxItems": 64 }], "description": "Non-rectangle outlines only: the vertices (at most 64)." },
+        "points_truncated": { "type": ["boolean", "null"] },
+        "copies": { "type": "integer", "minimum": 1, "description": "How many identical items were drawn." },
+        "invisible": { "type": "boolean", "description": "Every copy carries the invisible flag (group 60), own or of an INSERT above." },
+        "top_handle": { "type": ["string", "null"], "description": "Handle of the top-level entity it came through; null when handles are unreliable." },
+        "block_path": { "type": "array", "items": { "type": "string" }, "description": "Blocks entered, outermost first; empty at top level." }
+      }
+    },
+    "region": {
+      "type": "object",
+      "required": ["sheet", "bbox", "layers", "circle_groups", "outline_groups"],
+      "additionalProperties": false,
+      "properties": {
+        "sheet": { "type": ["string", "null"], "description": "Detector sheet id; null for the bbox region and for items on no sheet." },
+        "bbox": { "anyOf": [{ "type": "null" }, { "$ref": "#/$defs/box" }] },
+        "layers": { "type": "object", "additionalProperties": { "$ref": "#/$defs/layer_counts" } },
+        "circle_groups": { "type": "array", "items": { "$ref": "#/$defs/circle_group" }, "description": "By count desc, then layer." },
+        "outline_groups": { "type": "array", "items": { "$ref": "#/$defs/outline_group" } },
+        "items": { "type": "array", "items": { "$ref": "#/$defs/item" }, "description": "Only with --detail." }
+      }
+    }
+  }
+}

@@ -1,123 +1,189 @@
 ---
 name: structural-drawing-reader
-description: Expert reading of a structural drawing set after drawing-intake — sheet set, general notes, structural system, grid systems, levels, member marks and schedules — every judgement recorded as a finding tied to extracted entries, every gap a question. Use whenever the engineer asks what a drawing or sheet says, which sheet is which (đọc bản vẽ, phân loại các tờ, mặt bằng móng, chi tiết cột, loại móng), which levels are storey levels and which are local (cao độ tầng, cao độ cục bộ), which grid axes the project uses (lưới trục), what the general notes specify (mác bê tông, thép, lớp bảo vệ), whether beam or column marks on plans match the schedule (ký hiệu cấu kiện, bảng thống kê, schedule_only/plan_only), or to analyse a drawing set in projects/<id> for a Tekla model.
+description: Expert reading of a structural drawing set after drawing-intake. Use whenever the engineer asks what a drawing set or sheet shows (đọc bản vẽ, tổng quan công trình, khối nhà, phân loại các tờ, mặt bằng móng, chi tiết cột, loại móng), which levels are storey levels and which are local (cao độ tầng, cao độ cục bộ), which grid axes the project uses (lưới trục), what the general notes specify (mác bê tông, thép, lớp bảo vệ), whether marks on plans match the schedule (ký hiệu cấu kiện, bảng thống kê), how a steel factory building is framed (nhà xưởng, khung kèo, xà gồ, chân cột, bu lông neo, móng cọc), to analyse a drawing set in projects/<id> for a Tekla model, or when dispatched to review such a reading.
 ---
 
+<!-- PROPOSAL rev 11 — not live. The live skill is .claude/skills/structural-drawing-reader (rev 10). -->
 
 # Structural drawing reader
 
-Scripts measure; you classify, cross-check and ask. Every judgement you make is a **finding**
-(`harness finding add`) tied to text entries, or a question (`harness ask`). A judgement in
-neither place does not exist: the report prints only what the artefacts hold.
+Read the set as a structural engineer does: the whole works before any member, the load path before any mark, every value met twice before
+it is trusted. Scripts measure (text from the index, sizes and counts from `geometry`/`contents`; a `render` image only checks a count,
+never gives a number or text); you interpret. An interpretation is a **claim** (a finding with its evidence) or a question; the report
+prints nothing else.
 
-`W` = `projects/<id>/work`, `I` = `projects/<id>/input`.
+`P` = `projects/<id>`, `W` = `P/work`, `I` = `P/input`, `PT` = `W/parts/<part>`. Commands and fallbacks: [tools.md](tools.md); read it once
+before your first command. Every command here means the harness invocation that tools.md's first paragraph defines.
 
-## Before you start
+## Roles
 
-- `drawing-intake` has run; `uv run harness status W` shows every producer `fresh` (`reader`
-  `n/a`). Stale → rerun the producer it names.
-- Steps 1–2 may run before units are answered; **steps 3–7 need `gate1.reasons` free of units
-  reasons**, else stop after step 2.
-- Your tools (all read-only except `finding` and `ask`):
-  - `uv run harness list-sheets W` — sheets with ranked titles and `blocked_text_count`;
-  - `uv run harness sheet-text W <file> <sheet_id> [--contains …] [--max N]` — one sheet; when
-    `counts.truncated` is true, rerun with the `--max` it names;
-  - `uv run harness find-text W --contains … [--file F]` — every sheet at once;
-  - `W/marks.json`, `W/callouts.json`, `W/grid-systems.json`, `W/structure/<file>.levels.json`;
-  - `uv run harness finding add W --kind … --file … [--sheet …] --entries T…,T… --value "…" [--field k=v] [--question Q-…]`;
-  - `uv run harness ask W --code reader_<topic> --file … --sheet <detector id> --where "…" --found "…" --text "…" [--blocking]`.
-- A step that needs something these tools do not give: name the gap and stop that step. The
-  numbers you report come from these tools only, so a scratch script has nothing to add.
+A reading runs **part by part**: the scout cuts the set into parts, each part is read, checked, reviewed and locked alone, the assembler
+joins them ([part-mode.md](part-mode.md): stages, manifest, brief, dispatch, lock).
+- **Scout** (`doc-reader`): phases 0–1 for the whole set; writes the manifest, records only `--part scout`, no member value. Context 150k.
+- **Part reader** (`doc-reader`): phases 2–4 for one part, from its brief. Records `--part <own part>`, writes `PT/values.json` and
+  `PT/notes.md`, never another part; an input part is cited, never re-recorded. Context 200k: print no whole artefact (tools.md § Reading).
+- **Part reviewer** (a fresh dispatch that saw nothing of the part): [review-rubric.md](review-rubric.md) only.
+- **Assembler** (`doc-reader`): phases 5–6 across the locked parts, as part `all-assembly`.
+- **Orchestrator**: dispatches every agent, records every receipt (`reopened` too), runs `part conflicts` after each
+  `checked` receipt and again before assembly, then the review round and loop of [improvement-loop.md](improvement-loop.md) (it picks
+  each `--seed`). Only the engineer answers questions and opens gates.
+
+## Seen, unread, absent
+
+Every statement about the drawings is one of three, and says which:
+
+- **seen** — allowed, printed entries say it, or a measured finding's `G-` ids counted it; you cite their ids.
+- **unread** — nothing reached the content: blocked text, text that does not print, a table or insert the tools did not open, a file with no
+  detected sheet, a producer that returned nothing. Give the count, the reason and the question id; `unread` says nothing about the content.
+- **absent** — you searched for it and record the search: `searched: "<q1>","<q2>" | scope: <file>, <sheets | all + unassigned> | hits: 0 |
+  blocked_in_scope: <n> | not_printed_hits: <n from the --include-hidden rerun> | unassigned_searched: yes | unassigned_assigned: yes`.
+  Search every term accented and unaccented (tools.md T10); `part check` reports a missing twin (`search_unaccented`). With
+  `blocked_in_scope` above 0 the statement is `unread`: `không thấy trong chữ đọc được; N mục bị chặn (Q-…)`. With `not_printed_hits` above
+  0 it is not `absent`: quote the hits `không in (T…)` (E16). Blocked entries on named sheets: search the others one by one; `absent` there,
+  `unread` on the blocked ones.
+
+**Text outside every frame** is read before any "no rows", "schedule unread" or `absent`: the scout assigns each cluster to the nearest
+frame (method § Phase 0, E10) and the manifest gives every cluster to one part. A producer's empty result (no grid system, no schedule,
+`plan_only`, `matched: 0`) is `unread` until your own search makes it `seen` or `absent` (terms: reading-method.md § Search terms).
+
+## Claims
+
+A finding is a claim with its evidence: `--value` the claim, `--entries` the entries it rests on, `--confidence` at most the extractor's
+(`high` comes only from an engineer answer; a `measured` finding: tools.md § Measured findings), and for every kind except `note_item` a `--note` in this form:
+
+`node: <tree id> | basis: two_sources | single_source | alt: <the strongest other reading> — ruled out by <entry id or check> | alt: none
+after <check run>`
+
+- `two_sources` = two sheets, or two kinds of evidence (text and dimension, plan and schedule); for `sheet_class`, the title-block title
+  plus one in-frame heading or schedule header of the same subject. `part check` counts two different (kind, file, sheet) keys, not your `basis`.
+- `single_source` → `--confidence low` (not a `measured` finding: tools.md § Measured findings). Every `low` finding has a `--question`
+  asking its value (a font question alone does not count); all `single_source` sheet classes of a file share one question.
+- A `measured` finding cites `--source`/`--items` (the `G-` ids of one member type) and a `--claim` per number (recipe: tools.md § Measured
+  findings and § Recording; form: reading-method § Recording forms).
+- An alternative nothing rules out is no claim: ask one question that states both readings.
+- Every `note_item` `--note` starts `block: <node id>`; for topic `other` it continues `; topic: <name>`.
+
+Evidence no kind fits (level or datum text, grid, mark, blocks, rows, units): the forms in reading-method.md § Recording forms, never a bent
+kind. A K line or a `values.json` row cites `F-…`, `Q-…`, `T…`, `G-…` ids, an artefact pointer, or both.
+
+## Done when, by tool
+
+Code computes done-when; no phase card is written. The scout runs `harness part manifest-check W` to exit 0, a part reader `harness part
+check W --part <id>` to exit 0, the assembler the same on `all-assembly`. Fix a problem where it sits, in `values.json` or the findings;
+`input_invalid` names a tool-written file to regenerate (`grid-systems.json` too), not a row. `PT/notes.md` (form: [part-mode.md](part-mode.md) § Brief) holds scope,
+unread and absent lines with question ids, tool gaps, `needs:` lines. `W/reading-record.md` holds the scout's two tables, **Reach** and
+**Breakdown**, edited in place (English keys, drawing text verbatim); the assembler sets each node's coverage. A number a phase needs names
+its command and JSON field path ([reading-method.md](reading-method.md) § Required counts). Rework is a new `part check` and review round.
+
+## Phases
+
+Before each phase read its section in [reading-method.md](reading-method.md). A situation no phase fits: its row in
+[edge-cases.md](edge-cases.md).
+
+**0. Reach — what can be read at all (scout).** `harness status W` (every producer `fresh`; a stale one is rerun first), `list-sheets`,
+`inventory.json`, `read-log.json`, one `geometry --save` call per file (tools.md). Fill the Reach table: per file and sheet `readable |
+blocked N of M (Q-font) | no sheet | near-empty (no text, no geometry) | partial conversion`, and one row `U<n>` per cluster of text outside
+every frame, with nearest frame and gap.
+*Done when* every file, sheet and cluster has a reach value; each but `readable`/`assigned` names a question id.
+
+**1. Orient — what the works are (scout).** Class every sheet (`sheet_class`, title entry cited; values in method § Phase 1; a plan also by
+its `geometry` layers). Reconcile the drawing list with the sheets both ways; record revision and issue status per sheet from its title
+block, never an abbreviation table (`revision_from_table`). State the works: use, blocks, disciplines drawn, storeys, a first reading of the
+structural system, the load path from roof to ground with the sheets showing each link. Build the **breakdown tree** (works → block → part →
+member group), every sheet in one node, a coverage per node: `seen | titled | unread | absent | unclear`. Raise one blocking
+`reader_breakdown_confirm` question showing the tree. Then write `W/parts/manifest.json` ([part-mode.md](part-mode.md) § Manifest), each
+sheet's block placed by title, grid origin and number series together.
+*Done when* every sheet has a class or a question and sits in one node; every list-versus-sheet difference has a question; every block and
+load-path link has a node; the confirm question is raised; `part manifest-check` exits 0.
+
+**2. Rules — what applies everywhere (part `all-notes-materials`; a member part for notes on its own sheets).** General notes, legend,
+abbreviations, typical details, and notes printed on any drawing sheet (a pile-head concrete on a detail): one verbatim `note_item` per
+topic in the method's topic list, per block. A cited standard keeps its edition (E27: a superseded or yearless one is a non-blocking
+question, never mapped).
+*Done when* every topic, for every block, is `seen` (finding), `unread` (count, Q-id) or `absent` (search record).
+
+**3. Frame — grids, levels, orientation (part `all-grid-levels`).** Runs on a file once its units are answered (`part manifest-check`
+reports `unit_unanswered` or `unit_answer_unread` until then); otherwise stop after phase 2 for that file and say so in `notes.md`. Per
+block node: its grid system and selection status; whether RC and steel sheets show the same axes; the datum (`±0.000` against the absolute
+level); storey and reference levels against local ones; the foundation levels the tree needs; the relative position of the blocks (a
+blocking question when no site plan places them). The engineer selects systems and storey levels; you bring the evidence (producer
+questions: method § Phase 3). A grid row cites the finding and the grid system; the system backs no number. A spacing with
+`grid-systems.json` status `dimension_agrees` or `dimension_measured` needs no question (the second is recorded `printed, default text`,
+normal confidence only when a whole number of millimetres, else asked); `dimension_differs` and `no_dimension` raise one.
+*Done when* every block names its grid system with an answer or open question ids, and every level a leaf needs is a row at the extractor's
+confidence or sits in a question.
+
+**4. Members — along the load path, from the ground up (one member part).** One `values.json` row per mark × field: size, thickness or
+depth, count on plan and in schedule, piles per member, levels, axes, each with its entry, finding or `G-` ids, or a question id (a value
+read off another quantity is never the size). Sizes, counts and marks per type come from `contents` and `marks.json`, render-checked (method
+§ Phase 4). A hand sum that uses another part's rows lists that part as an input in the manifest, else `cite_foreign_part`. **Trace** each
+section and detail reference from the plan to its target and back; C2–C10 of the method (§ Phase 6) run here, on the part's sheets. Steel frames,
+bases, bolts: [steel-industrial.md](steel-industrial.md); rebar, schedules, grades: [conventions.md](conventions.md).
+*Done when* every manifest sheet has a row or a finding of its part (an unreadable sheet gets an `unread` row citing its question), every mark of `marks.json` on them that fits `marks_regex` has a row,
+every `schedule_only` and `plan_only` mark is explained by a finding or a question, every section or detail heading belongs to a row or one
+orphan question, and `part check` exits 0.
+
+**5. Reason — would an engineer sign this reading? (assembler.)** Answer key claims K1–K14 of the method, each `claimed` (finding ids,
+basis, alternative ruled out), `question` (ids) or `unread`; then every surprise (a base with no foundation, a schedule row no plan shows).
+*Done when* K1–K14 each have a line with ids, every `claimed` line names its ruled-out alternative, every surprise has a question.
+
+**6. Analyse — is it enough to plan a model? (assembler.)** First `harness status W --verify` and `harness part check` on every `locked` part: name each part with `check_failed: true` or `input_check_failed` to the
+orchestrator and stop (only the orchestrator records `part receipt --kind reopened --reason "part check: <check_codes>"`, and never for a part with `check_error`: see part-mode.md § Lock and reopen); one that `harness status` reads
+`reopened` or `stale_input` goes back, by the orchestrator, through `reopened`, `checked`, `reviewed`, `locked`. Then, from `part chain`
+per block (a plan count conflicts across parts only on one shared sheet; sums across sheets are yours) and the `part conflicts` questions, run
+C1, C11 (which axes and bays carry what) and C12 (counts per block) of the method on every block; each mismatch is a `cross_check` finding
+citing both entries, or one entry plus a saved `contents` document, with its question (`--part all-assembly`). Rank the problems Critical /
+Major / Minor in `all-assembly/notes.md`, each with its question id; readiness per part is `harness status` `parts[]` (`status`,
+`blocking_open_ids`, `ready`) with `project_blocking_ids` and `parts_project_reasons`; a `parts_error` means fix the named record first.
+*Done when* every check has a line (`run: result` or `not run: reason, Q-id`), every part is `locked` or named with its blocking ids, no
+Breakdown node is `titled`, `part check --part all-assembly` exits 0, `status` and `questions-md` rerun.
 
 ## Blocked text
 
-Each entry carries `meaning: allowed | blocked`. **Blocked** text (legacy font not yet
-approved) is quoted verbatim with its entry id and read no further: no class, value, keyword or
-paraphrase comes from it, and `harness finding` refuses it. A word that appears only in blocked
-text stays out of everything you write — finding values, question text, notes — even when you
-can guess the decoding. Tie it to the font question in `legacy_font_gate.question_ids`. A step
-whose items are all blocked for a file is done for that file when one reader question lists
-them (entry ids, no paraphrase) and points at that font question.
-
-## A file with no detected sheet
-
-`list-sheets` lists no sheet for it and read-structure raised `sheets_not_detected`: its text is
-out of reach of `sheet-text` and `find-text`. Point to that question for steps 1–3; steps 4–6 run
-on the JSON artefacts (`grid-systems.json`, `levels.json`, `marks.json`, `callouts.json`), which
-do not depend on sheets; record the gap in your step report.
+Each entry carries `meaning: allowed | blocked`; decide by that field alone. Blocked text is quoted verbatim with its entry id and read no
+further; `harness finding` refuses it. Every class, value, topic and keyword you write (findings, questions, notes, rows, the hand-back)
+rests on an allowed entry, a finding or an answer. A blocked title is written `<sheet id>: tiêu đề bị chặn (T…)` with its font question. A
+phase whose items are all blocked for a file is done for it when one reader question lists them by entry id and the font question; its Reach
+and coverage values are `unread`.
 
 ## Asking
 
-- First look for the question among the producers' (`questions.md`, `W/*questions.json`): reuse
-  its id in your findings instead of asking again. Same subject on several sheets (datum,
-  footing type) → one question listing every place.
-- Your codes start with `reader_`. `--sheet` takes the detector sheet id (`model#03`).
-- Write `--text` in Vietnamese, one question per call; `--found` verbatim.
-- An engineer answer contradicted by drawing text → a blocking reader question quoting both
-  (answer id and entry id). You never pick one.
-- More than one input file and no answer yet on whether they are one set → before comparing
-  anything across files, one project-level `reader_file_set_relation` question (no `--file`).
+- Reuse a producer's question (`questions.md`, `W/*questions.json`) before raising yours; one subject on several sheets or parts is one
+  question listing every place (`ask --part` on an existing question adds the part). A work folder that already holds reader findings: edge
+  case E35.
+- Codes start with `reader_`; `--sheet` takes the detector sheet id; `--text` in Vietnamese, one subject and one question per call;
+  `--found` verbatim, or the search record for an absence; in part mode every write has `--part`, except `ask --supplement` and `--withdraw-supplement`, which take none.
+- **Blocking** (`--blocking`; it keeps `ready_for_gate1` false) when its answer sets or changes a gate 1 value or a gate 3 lot input. A row
+  field but `material` and `other` that is `asked`, `unread`, `absent` or `seen` on one source needs a blocking question, and a question
+  such a field cites is blocking. A question no row carries: grid per block; pile cut-off and cap-top levels; size, count or position of
+  piles, caps, ground beams, column bases; slab thickness; or a rule of this skill, its method or its edge cases names it. Every other
+  question is non-blocking.
+- A size or count read from linework with no agreeing printed entry: one `reader_family_linework` question per part (tools.md § Measured
+  findings); none where every measured row has an agreeing printed entry, none from copied linework (`linework_duplicate`, E40).
+- Every discrepancy you find between drawings (a sheet with another block's grid origin or number series, a schedule row no plan shows, a
+  printed dimension against its drawing, copied linework) is one question to the designer, even when no value depends on it, except within
+  5 mm or 1 % (the larger) (E42).
+- Amend your own earlier question (`ask --amend Q-… --text …`), never a new code. Only the orchestrator runs `harness answer`, with the engineer's words from its own chat:
+  `harness answer W <Q-id> --text "<his words>" --by "<his name as he gives it>" --role engineer`, never the git user. No dispatched
+  agent (scout, part reader, reviewer, assembler, report writer, intake runner) runs it. Units come only from such an answer: on
+  `unit_unanswered` (no acknowledgement clears it) or `unit_answer_unread` hand the units question ids back and stop. A missing
+  `question-registry.json` means `harness intake` has not run.
+- An engineer answer that allowed, printed entries contradict → one blocking question quoting the answer id and entry ids. Comparing across
+  files waits for the answer on whether the files form one set. Conventions come from the project's own legend and notes first, then
+  [conventions.md](conventions.md); an unverified convention is a question.
 
-## Steps
+## Hand-back
 
-1. **Sheet set.** Classify every sheet with a `sheet_class` finding citing its title entry:
-   `general_notes, setting_out, foundation, foundation_details, floor_framing, column_details,
-   beam_details, slab_details, stairs, schedules, steel_details, mixed` (one sheet, several
-   drawings), `other` (with `--note`). Look for a drawing list with `find-text` (danh mục,
-   drawing list, index). None → one blocking `reader_drawing_list_missing` per file (one per set
-   once the engineer says the files form one set); found → every listed sheet present and every
-   sheet listed, else a question per difference. No floor-framing or foundation drawing in the
-   set → blocking `reader_scope_drawings_missing` naming what is absent. *Done when* every sheet
-   has a class or a question.
-2. **General notes.** `note_item` findings (verbatim quotes) for design codes and editions,
-   concrete class, rebar/steel/bolt/weld grades, cover, laps, U.N.O./TYP. conventions. No notes
-   sheet → one non-blocking `reader_general_notes_missing` per file listing the items not found;
-   notes on plans that differ from each other or from the notes sheet → one question per item.
-   *Done when* each item is a finding or in a question.
-3. **Structural system.** `structural_system` findings: frame type, foundation type, lateral
-   system, floors, typical floors, each citing the entries it rests on. *Done when* each aspect
-   is a finding or a question.
-4. **Grid systems.** `W/grid-systems.json` and its SVGs: per system the views, independence,
-   conflicts, single-source flag. The engineer selects systems (`grid_system_select`,
-   `systems=`, `separate=` for different buildings) and assigns X/Y per system
-   (`grid_system_axis_unassigned`, `dir1=X dir2=Y`). Sanity check each selected system: an
-   overall dimension that differs from the sum of spacings, or unlabelled grid-layer lines
-   beyond the last axis → `reader_grid_extent` quoting both. Grids are never rebuilt from member
-   positions or averaged. *Done when* each system is selected or rejected by an answer, or its
-   questions are open.
-5. **Levels.** `structure/<file>.levels.json`: storey levels vs local ones (beam soffits, steps,
-   wet rooms, storage platforms, canopies, landings — even when their title says TẦNG). The
-   extractor's `storey_heights` stay unconfirmed. When read-structure raised
-   `level_storey_selection` for the file, add your candidates to the record by citing that id;
-   otherwise, unless the engineer has answered a storey selection, raise one blocking
-   `reader_level_storey_selection` per file listing the candidate storey levels verbatim. Quote
-   level texts the extractor missed (e.g. `(+ 6.00M LEVEL)`) as candidates. A level value whose
-   entries are blocked is not a candidate. A finding that states a level value takes
-   `--confidence low` unless `levels.json` gives that value `medium`. Finished vs structural stays
-   a question until answered. *Done when* every level used later is a confirmed storey level or
-   in a question.
-6. **Members and schedules.** From `W/marks.json`: plan marks per sheet, schedule tables, the
-   `matched` / `schedule_only` / `plan_only` lists, notation variants, size conflicts, tables
-   with a blocked header. A member word in a title (`title_member_word`, `DẦM D1.1`) is evidence
-   you cite as `Đề xuất (chưa xác nhận)` in the prefix question; prefix meanings come only from
-   `member_mark_prefix_meaning` answers. From `W/callouts.json`: parsed callouts, and unparsed
-   ones as counts per reason with at most 5 examples each. Quantities, lengths and weights stay
-   uncomputed. *Done when* every `schedule_only` and `plan_only` mark is in a question or
-   explained by a finding.
-7. **Cross-check.** Same mark → same size on plan, schedule, section; same labels → same grid
-   system; values from a superseded revision rejected. Each mismatch is a `cross_check` finding
-   with its question. *Done when* every mismatch found has both.
-
-## Rules
-
-- Conventions come from the project's own legend and notes first, then
-  [conventions.md](conventions.md); unverified conventions are questions.
-- Provenance as the extractor wrote it; the detector sheet id goes in `--sheet` / `--where`, the
-  printed sheet number only where the extractor gave it.
-- Confidence never rises above the extractor's; `high` comes only from an engineer answer.
-- A typed-over dimension (`dimension_override_differs`) is a conflict to ask about.
+Each role stops at its done-when and reports. Scout: the `manifest-check` result, parts with sheet counts, `unread` counts. Part reader: the
+`part check` result, the `needs:` lines, the blocking question ids. Assembler: the K1–K14 table, the locked parts that read `reopened`, `stale_input` or `check_failed`, findings by confidence, questions by
+blocking, the Critical and Major problems with question ids. All: tool gaps, and `Part unreviewed: review round 1 not run.` (assembly:
+`Reading unreviewed`). When the last part is locked, `drawing-analysis-report` reads `harness status` `parts[]`, each `PT/notes.md`,
+`W/reading-record.md` and each part's latest review; its step 2 closes with `01-analysis.md` and `takeoff/`. A run that cannot finish stops
+at its last green check; the next resumes there.
 
 ## Hard stops
 
-Units reasons in `gate1.reasons` (after step 2); a producer stale; a step needs a tool not
-listed here. Name it, stop, hand the questions to the orchestrator.
+A producer stays stale after its rerun; a phase needs a command whose fallback in [tools.md](tools.md) is `stop`; a set under
+`projects/_heldout-*` is to be read; your part is locked: a write is refused, and `values.json`, `notes.md` and `receipts.json` of a locked part are never edited, deleted or moved; only the orchestrator records `reopened`, and you edit after it has. Name it,
+stop, hand the questions to the orchestrator. Never search or list (`grep -r`, `rg`, `find`, a `**` glob) over `projects/` or above `P`:
+search only inside `P`.

@@ -1,0 +1,141 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:tekla-harness:schema:part-values:0.1",
+  "title": "Part values",
+  "description": "`W/parts/<part>/values.json`, typed by hand by a part reader (ADR-0019): one row per mark and field, each with the finding, question, entry or measurement it rests on. `harness part check W --part X` proves every row before the part can be locked. A row holds the value as printed (the unit included), never a converted number. Every object refuses fields it does not list.",
+  "type": "object",
+  "required": ["schema_version", "part", "rows"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": "0.1" },
+    "part": { "$ref": "urn:tekla-harness:schema:parts-manifest:0.1#/$defs/part_id", "description": "The part this file belongs to: the folder name under `parts/`." },
+    "rows": { "type": "array", "items": { "$ref": "#/$defs/row" } }
+  },
+  "$defs": {
+    "row": {
+      "type": "object",
+      "required": ["row", "field", "value", "state"],
+      "additionalProperties": false,
+      "dependentRequired": { "sheet": ["file"] },
+      "oneOf": [
+        { "required": ["mark"], "not": { "required": ["subject"] } },
+        { "required": ["subject"], "not": { "required": ["mark"] } }
+      ],
+      "properties": {
+        "row": { "type": "string", "pattern": "^R[0-9]{3,}$", "description": "Unique in the file." },
+        "mark": { "type": "string", "minLength": 1, "maxLength": 80, "description": "The printed mark." },
+        "subject": { "type": "string", "minLength": 1, "maxLength": 80, "description": "What a row without a mark is about, e.g. piles, grid S001 A-B, concrete of caps." },
+        "field": {
+          "enum": [
+            "size",
+            "thickness",
+            "depth",
+            "length",
+            "count_plan",
+            "count_schedule",
+            "piles_per_member",
+            "level",
+            "level_top",
+            "level_bottom",
+            "material",
+            "axes",
+            "start_axes",
+            "end_axes",
+            "spacing",
+            "other"
+          ]
+        },
+        "value": { "type": ["string", "null"], "minLength": 1, "maxLength": 300, "description": "Verbatim, the unit as printed (hs=200, (SL: 6), -1.200); null when nothing is read." },
+        "file": { "$ref": "urn:tekla-harness:schema:parts-manifest:0.1#/$defs/file", "description": "Where the value is read." },
+        "sheet": {
+          "anyOf": [{ "$ref": "urn:tekla-harness:schema:parts-manifest:0.1#/$defs/sheet_id" }, { "type": "null" }],
+          "description": "Needs `file`. Null or absent: text on no sheet (a cluster)."
+        },
+        "view": {
+          "oneOf": [
+            {
+              "type": "object",
+              "required": ["heading_entry"],
+              "additionalProperties": false,
+              "properties": { "heading_entry": { "$ref": "urn:tekla-harness:schema:parts-manifest:0.1#/$defs/entry_id" } }
+            },
+            {
+              "type": "object",
+              "required": ["bbox"],
+              "additionalProperties": false,
+              "properties": {
+                "bbox": { "type": "array", "items": { "type": "number" }, "minItems": 4, "maxItems": 4, "description": "x0, y0, x1, y1 in the sheet's drawing coordinates." }
+              }
+            }
+          ],
+          "description": "The view of the sheet the value is read in, as one of the manifest's `views[]`."
+        },
+        "note": { "type": "string", "minLength": 1, "maxLength": 300 },
+        "state": { "enum": ["seen", "asked", "unread", "absent"] },
+        "cites": { "$ref": "#/$defs/cites" },
+        "hand_sum": { "$ref": "#/$defs/hand_sum" }
+      }
+    },
+    "cites": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "findings": { "type": "array", "items": { "type": "string", "pattern": "^F-[0-9]{3,}$" }, "uniqueItems": true },
+        "questions": { "type": "array", "items": { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/question_id" }, "uniqueItems": true },
+        "entries": { "type": "array", "items": { "$ref": "urn:tekla-harness:schema:parts-manifest:0.1#/$defs/entry_id" }, "uniqueItems": true },
+        "grid_systems": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^S[0-9]{3,}$" },
+          "uniqueItems": true,
+          "description": "Grid systems of grid-systems.json the row was read from (the `system_id` of grid-system.schema.json). A citation only: it backs no number and no `seen` state."
+        },
+        "geometry": {
+          "type": "object",
+          "required": ["source", "items"],
+          "additionalProperties": false,
+          "properties": {
+            "source": { "type": "string", "pattern": "^geometry/[^/\\\\]+\\.json$", "description": "A saved `harness geometry --save` or `harness contents --save` document." },
+            "items": { "type": "array", "minItems": 1, "items": { "type": "string", "pattern": "^G-[0-9a-f]{10}$" }, "uniqueItems": true }
+          }
+        }
+      }
+    },
+    "hand_sum": {
+      "type": "object",
+      "required": ["terms"],
+      "additionalProperties": false,
+      "description": "The value is the total of these terms; a one-term sum records a count of marks.",
+      "properties": {
+        "terms": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "oneOf": [
+              {
+                "type": "object",
+                "required": ["finding", "of"],
+                "additionalProperties": false,
+                "properties": {
+                  "finding": { "type": "string", "pattern": "^F-[0-9]{3,}$" },
+                  "of": { "enum": ["items", "symbols"], "description": "A measured finding: its number of items, or the sum of their symbols." }
+                }
+              },
+              {
+                "type": "object",
+                "required": ["marks"],
+                "additionalProperties": false,
+                "properties": { "marks": { "type": "string", "minLength": 1, "maxLength": 80, "description": "The plan marks of marks.json equal to it (case-blind) on the row's file and sheet." } }
+              },
+              {
+                "type": "object",
+                "required": ["entry"],
+                "additionalProperties": false,
+                "properties": { "entry": { "$ref": "urn:tekla-harness:schema:parts-manifest:0.1#/$defs/entry_id", "description": "The one standalone integer of its text." } }
+              }
+            ]
+          }
+        }
+      }
+    }
+  }
+}

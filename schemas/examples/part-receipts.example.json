@@ -1,0 +1,53 @@
+{
+  "schema_version": "0.1",
+  "part": "B1-caps",
+  "receipts": [
+    {
+      "n": 1,
+      "kind": "checked",
+      "part_hash": "1f0c3b7a5d9e4a2c8b6f0d1e3a5c7b9d2e4f60812a3b4c5d6e7f8091a2b3c4d5",
+      "at": "2026-01-15T08:30:00Z",
+      "tool_version": "0.1.0",
+      "review": null,
+      "reason": null,
+      "inputs": null
+    },
+    {
+      "n": 2,
+      "kind": "reviewed",
+      "part_hash": "1f0c3b7a5d9e4a2c8b6f0d1e3a5c7b9d2e4f60812a3b4c5d6e7f8091a2b3c4d5",
+      "at": "2026-01-15T09:10:00Z",
+      "tool_version": "0.1.0",
+      "review": {
+        "round": 1,
+        "verdict": "pass",
+        "file": "parts/B1-caps/review/round-1/review.md",
+        "sha256": "9a8b7c6d5e4f30211a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f7081"
+      },
+      "reason": null,
+      "inputs": null
+    },
+    {
+      "n": 3,
+      "kind": "locked",
+      "part_hash": "1f0c3b7a5d9e4a2c8b6f0d1e3a5c7b9d2e4f60812a3b4c5d6e7f8091a2b3c4d5",
+      "at": "2026-01-15T09:12:00Z",
+      "tool_version": "0.1.0",
+      "review": null,
+      "reason": null,
+      "inputs": {
+        "B1-piles": "0e1d2c3b4a59687766554433221100ffeeddccbbaa99887766554433221100ab"
+      }
+    },
+    {
+      "n": 4,
+      "kind": "reopened",
+      "part_hash": "1f0c3b7a5d9e4a2c8b6f0d1e3a5c7b9d2e4f60812a3b4c5d6e7f8091a2b3c4d5",
+      "at": "2026-01-16T07:45:00Z",
+      "tool_version": "0.1.0",
+      "review": null,
+      "reason": "A cap size was read again on sheet 2.",
+      "inputs": null
+    }
+  ]
+}

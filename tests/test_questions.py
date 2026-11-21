@@ -21,7 +21,12 @@ from tekla_harness.answers import check_values, parse_values, record_answer
 from tekla_harness.callouts import run_callouts
 from tekla_harness.cli import main
 from tekla_harness.intake import IntakeError, run_intake
+from tekla_harness.marks import run_marks
 from tekla_harness.questions import (
+    OBSOLETE_FILE_CHANGED,
+    OBSOLETE_FILE_REMOVED,
+    OBSOLETE_NOT_RAISED,
+    OBSOLETE_SUPERSEDED,
     QuestionsError,
     load_ledger,
     question_group,
@@ -127,7 +132,11 @@ def test_questions_carry_key_file_answer_and_the_documented_summary(world):
     doc = load(work / "questions.json")
     assert validate("intake", doc) == []
     for q in doc["questions"]:
-        assert len(q["key"]) == 16 and q["answer"] is None and q["file"] in ("set.dxf", "other.dxf")
+        assert len(q["key"]) == 16 and q["answer"] is None
+        if q["code"] == "file_set_relation":  # the one project-level question: one ref per drawing file
+            assert q["file"] is None and [r["file"] for r in q["refs"]] == ["other.dxf", "set.dxf"]
+            continue
+        assert q["file"] in ("set.dxf", "other.dxf")
         assert all(r["file"] == q["file"] for r in q["refs"])
     assert doc["summary"] == questions_summary(doc["questions"])
     registry = load(work / "question-registry.json")
@@ -158,6 +167,15 @@ def test_a_new_file_keeps_existing_ids_and_appends_new_ones(world):
     build_set(root, "third.dxf", sheet2_number="S-555")
     rerun_all(root, work)
     new_intake, new_struct = ids_by_key(work, "questions.json"), ids_by_key(work, "structure-questions.json")
+    # the project-level file_set_relation lists every drawing file: a new file re-keys it (asked again)
+    (file_set,) = [q["key"] for q in questions_of(work, "questions.json") if q["code"] == "file_set_relation"]
+    old_set = {
+        k
+        for k in old_intake
+        if load(work / "question-registry.json")["questions"][k]["code"] == "file_set_relation"
+    }
+    assert len(old_set) == 1 and file_set not in old_set and old_set.isdisjoint(new_intake)
+    old_intake = {k: v for k, v in old_intake.items() if k not in old_set}
     assert {k: new_intake[k] for k in old_intake} == old_intake
     assert {k: new_struct[k] for k in old_struct} == old_struct
     added = {
@@ -166,7 +184,7 @@ def test_a_new_file_keeps_existing_ids_and_appends_new_ones(world):
     assert added and all(int(i[2:]) > highest for i in added.values())
     assert len(set(added.values())) == len(added)
     third = [q for n in ("questions.json", "structure-questions.json") for q in questions_of(work, n)]
-    assert {q["file"] for q in third if q["id"] in added.values()} == {"third.dxf"}
+    assert {q["file"] for q in third if q["id"] in added.values()} == {"third.dxf", None}  # None: file set
     assert load(work / "inventory.json")["summary"]["changes"] == {
         "added": ["third.dxf"],
         "removed": [],
@@ -227,7 +245,14 @@ def test_a_changed_file_is_asked_again_and_its_old_answer_goes_stale(world):
     root, work = world
     old = find(questions_of(work), "units_confirm_all", "set.dxf")
     untouched = find(questions_of(work), "units_confirm_all", "other.dxf")
-    record_answer(work, old["id"], "mm, checked against the 6000 dimension", "A. Nguyen", {"unit": "mm"})
+    record_answer(
+        work,
+        old["id"],
+        "mm, checked against the 6000 dimension",
+        "A. Nguyen",
+        {"unit": "mm"},
+        role="engineer",
+    )
     build_set(root, "set.dxf", sheet2_number="S-888")  # the drawing changed
     result = run_intake(root, work, PROJECT)
     assert load(work / "inventory.json")["summary"]["changes"]["changed"] == ["set.dxf"]
@@ -253,7 +278,7 @@ def test_a_changed_file_is_asked_again_and_its_old_answer_goes_stale(world):
     registry = load(work / "question-registry.json")["questions"]
     assert registry[old["key"]]["status"] == "obsolete" and registry[new["key"]]["status"] == "open"
     with pytest.raises(QuestionsError, match="obsolete") as caught:
-        record_answer(work, old["id"], "again", "A. Nguyen", {"unit": "mm"})
+        record_answer(work, old["id"], "again", "A. Nguyen", {"unit": "mm"}, role="engineer")
     assert caught.value.exit_code == 2
 
 
@@ -274,6 +299,7 @@ def test_an_answer_goes_stale_when_its_producer_no_longer_raises_the_question(tm
             "answer_text": "yes",
             "values": {},
             "answered_by": "A. Nguyen",
+            "answered_by_role": "engineer",
             "answered_on": "2026-11-06",
             "status": "active",
         }
@@ -295,10 +321,175 @@ def test_an_answer_goes_stale_when_its_producer_no_longer_raises_the_question(tm
     assert third[1]["id"] not in (q1["id"], q2["id"]) and ledger.registry["next_id"] == 4
 
 
+# --- why an entry became obsolete (tool wave 3, W5) -----------------------------------------------
+
+
+A_SHA, B_SHA = "ab" * 32, "cd" * 32
+
+
+def _raw(code: str, found: str = "f", file: str | None = "a.dxf") -> dict[str, Any]:
+    return question_group(code, True, "m", [{"file": file, "where": "w", "found": found}], file=file)
+
+
+def _activate(ledger: Any, q: dict[str, Any], values: dict[str, Any] | None = None) -> None:
+    ledger.answers["answers"].append(
+        {
+            "key": q["key"],
+            "question_id": q["id"],
+            "code": q["code"],
+            "file": q["file"],
+            "answer_text": "yes",
+            "values": values or {},
+            "answered_by": "A. Nguyen",
+            "answered_by_role": "engineer",
+            "answered_on": "2026-11-09",
+            "status": "active",
+        }
+    )
+    ledger.mark_answered(q["key"], True)
+
+
+def _entry(ledger: Any, q: dict[str, Any]) -> dict[str, Any]:
+    return ledger.registry["questions"][q["key"]]
+
+
+def test_obsolete_reason_not_raised(tmp_path):
+    ledger = load_ledger(tmp_path, PROJECT, create=True)
+    keep, gone, project = ledger.sync(
+        "structure", [_raw("grid_x"), _raw("grid_y"), _raw("grid_p", file=None)], {"a.dxf": A_SHA}
+    )
+    ledger.sync("structure", [_raw("grid_x")], {"a.dxf": A_SHA})
+    assert _entry(ledger, gone)["obsolete_reason"] == OBSOLETE_NOT_RAISED.format(producer="structure")
+    assert _entry(ledger, project)["obsolete_reason"] == OBSOLETE_NOT_RAISED.format(producer="structure")
+    assert "obsolete_reason" not in _entry(ledger, keep)
+    assert validate("question-registry", ledger.registry) == []
+
+
+def test_obsolete_reason_file_removed_or_changed_from_the_hashes(tmp_path):
+    ledger = load_ledger(tmp_path, PROJECT, create=True)
+    on_a, on_b = ledger.sync(
+        "marks", [_raw("mark_x"), _raw("mark_y", file="b.dxf")], {"a.dxf": A_SHA, "b.dxf": A_SHA}
+    )
+    ledger.sync("marks", [], {"a.dxf": B_SHA})  # a.dxf changed, b.dxf removed
+    assert _entry(ledger, on_a)["obsolete_reason"] == OBSOLETE_FILE_CHANGED
+    assert _entry(ledger, on_b)["obsolete_reason"] == OBSOLETE_FILE_REMOVED
+
+
+def test_obsolete_reason_file_removed_or_changed_from_stale_files(tmp_path):
+    ledger = load_ledger(tmp_path, PROJECT, create=True)
+    on_a, on_b = ledger.sync("intake", [_raw("xref_unresolved"), _raw("multiple_scales", file="b.dxf")], {})
+    # intake's own diff names the files even when the hashes say nothing (no recorded sha256 here)
+    ledger.sync("intake", [], {"a.dxf": A_SHA, "b.dxf": A_SHA}, {"a.dxf": "changed", "b.dxf": "removed"})
+    assert _entry(ledger, on_a)["obsolete_reason"] == OBSOLETE_FILE_CHANGED
+    assert _entry(ledger, on_b)["obsolete_reason"] == OBSOLETE_FILE_REMOVED
+
+
+def test_intakes_diff_wins_over_the_hashes(tmp_path):
+    ledger = load_ledger(tmp_path, PROJECT, create=True)
+    (q,) = ledger.sync("intake", [_raw("xref_unresolved")], {"a.dxf": A_SHA})
+    ledger.sync(
+        "intake", [], {}, {"a.dxf": "changed"}
+    )  # the diff says changed: not "removed" from the hashes
+    assert _entry(ledger, q)["obsolete_reason"] == OBSOLETE_FILE_CHANGED
+
+
+def test_an_entry_without_a_recorded_sha_and_a_present_file_is_simply_not_raised(tmp_path):
+    ledger = load_ledger(tmp_path, PROJECT, create=True)
+    (q,) = ledger.sync("structure", [_raw("grid_x")], {"a.dxf": A_SHA})
+    del _entry(ledger, q)["file_sha256"]  # an entry written before file_sha256 existed
+    ledger.sync("structure", [], {"a.dxf": B_SHA})
+    assert _entry(ledger, q)["obsolete_reason"] == OBSOLETE_NOT_RAISED.format(producer="structure")
+
+
+def test_obsolete_reason_superseded_needs_the_declared_code_and_an_active_answer(tmp_path):
+    ledger = load_ledger(tmp_path, PROJECT, create=True)
+    file_set, unrelated = ledger.sync(
+        "intake", [_raw("file_set_relation", file=None), _raw("xref_unresolved", file=None)], {"a.dxf": A_SHA}
+    )
+    _activate(ledger, unrelated)  # an active answer to ANOTHER code supersedes nothing
+    conflict, other = ledger.sync(
+        "grid-system", [_raw("grid_system_conflict", file=None), _raw("grid_system_select", file=None)], {}
+    )
+    declared = {"grid_system_conflict": "file_set_relation"}
+    ledger.sync("grid-system", [], {}, superseded_by=declared)  # declared, but no answer yet
+    assert _entry(ledger, conflict)["obsolete_reason"] == OBSOLETE_NOT_RAISED.format(producer="grid-system")
+
+    second = tmp_path / "second"
+    second.mkdir()
+    ledger2 = load_ledger(second, PROJECT, create=True)
+    (file_set,) = ledger2.sync("intake", [_raw("file_set_relation", file=None)], {"a.dxf": A_SHA})
+    _activate(ledger2, file_set, {"set1": ["a.dxf"]})
+    conflict, other = ledger2.sync(
+        "grid-system", [_raw("grid_system_conflict", file=None), _raw("grid_system_select", file=None)], {}
+    )
+    ledger2.sync("grid-system", [], {}, superseded_by=declared)
+    assert _entry(ledger2, conflict)["obsolete_reason"] == OBSOLETE_SUPERSEDED.format(
+        code="file_set_relation"
+    )
+    # a code the producer did not declare is simply no longer raised
+    assert _entry(ledger2, other)["obsolete_reason"] == OBSOLETE_NOT_RAISED.format(producer="grid-system")
+
+
+def test_obsolete_reason_precedence_file_before_superseded(tmp_path):
+    ledger = load_ledger(tmp_path, PROJECT, create=True)
+    (prefix,) = ledger.sync("callouts", [_raw("grade_legacy_mapping", file=None)], {})
+    _activate(ledger, prefix)
+    on_a, on_b = ledger.sync(
+        "marks", [_raw("mark_x"), _raw("mark_x", "g", file="b.dxf")], {"a.dxf": A_SHA, "b.dxf": A_SHA}
+    )
+    ledger.sync("marks", [], {"a.dxf": B_SHA}, superseded_by={"mark_x": "grade_legacy_mapping"})
+    assert _entry(ledger, on_a)["obsolete_reason"] == OBSOLETE_FILE_CHANGED  # changed beats superseded
+    assert _entry(ledger, on_b)["obsolete_reason"] == OBSOLETE_FILE_REMOVED  # removed beats superseded
+
+
+def test_obsolete_reason_is_set_once_and_cleared_when_the_key_comes_back(tmp_path):
+    ledger = load_ledger(tmp_path, PROJECT, create=True)
+    (q,) = ledger.sync("structure", [_raw("grid_x")], {"a.dxf": A_SHA})
+    ledger.sync("structure", [], {"a.dxf": A_SHA})
+    first = _entry(ledger, q)["obsolete_reason"]
+    assert first == OBSOLETE_NOT_RAISED.format(producer="structure")
+    ledger.sync("structure", [], {})  # later the file goes too: the reason of the transition stays
+    assert _entry(ledger, q)["obsolete_reason"] == first
+    (again,) = ledger.sync("structure", [_raw("grid_x")], {"a.dxf": A_SHA})  # same content: same key
+    assert again["key"] == q["key"] and _entry(ledger, q)["status"] == "open"
+    assert "obsolete_reason" not in _entry(ledger, q)
+
+
+def test_obsolete_reason_leaves_other_producers_and_legacy_entries_alone(tmp_path):
+    ledger = load_ledger(tmp_path, PROJECT, create=True)
+    (theirs,) = ledger.sync("callouts", [_raw("callout_x")], {"a.dxf": A_SHA})
+    (legacy,) = ledger.sync("structure", [_raw("grid_x")], {"a.dxf": A_SHA})
+    _entry(ledger, legacy)["status"] = "obsolete"  # retired before obsolete_reason existed
+    ledger.sync("structure", [], {})
+    assert "obsolete_reason" not in _entry(ledger, legacy)
+    assert "obsolete_reason" not in _entry(ledger, theirs) and _entry(ledger, theirs)["status"] == "open"
+
+
+def test_a_removed_file_records_why_its_questions_are_obsolete(world):
+    root, work = world
+    (root / "other.dxf").unlink()
+    rerun_all(root, work)
+    registry = load(work / "question-registry.json")
+    assert validate("question-registry", registry) == []
+    reasons = {e["obsolete_reason"] for e in registry["questions"].values() if e["file"] == "other.dxf"}
+    assert reasons == {OBSOLETE_FILE_REMOVED}
+
+
+def test_a_changed_file_records_why_its_old_questions_are_obsolete(world):
+    root, work = world
+    old = {k for k, e in load(work / "question-registry.json")["questions"].items() if e["file"] == "set.dxf"}
+    build_set(root, "set.dxf", sheet2_number="S-888")
+    rerun_all(root, work)
+    registry = load(work / "question-registry.json")["questions"]
+    gone = {registry[k].get("obsolete_reason") for k in old if registry[k]["status"] == "obsolete"}
+    assert gone == {OBSOLETE_FILE_CHANGED}
+    assert all("obsolete_reason" not in e for e in registry.values() if e["status"] != "obsolete")
+
+
 def test_structure_answers_of_a_changed_file_go_stale_at_intake(world):
     root, work = world
     q = find(questions_of(work, "structure-questions.json"), "grid_gate1_confirmation", "set.dxf")
-    record_answer(work, q["id"], "confirmed", "A. Nguyen")
+    record_answer(work, q["id"], "confirmed", "A. Nguyen", role="engineer")
     build_set(root, "set.dxf", sheet2_number="S-888")
     result = run_intake(root, work, PROJECT)
     assert [a["question_id"] for a in result.summary["stale_answers"]] == [q["id"]]
@@ -312,7 +503,7 @@ def test_structure_answers_of_a_changed_file_go_stale_at_intake(world):
 def test_a_rebuilt_drawing_stales_the_answer_and_read_structure_reports_it(world):
     root, work = world
     q = find(questions_of(work, "structure-questions.json"), "grid_gate1_confirmation", "other.dxf")
-    record_answer(work, q["id"], "confirmed", "A. Nguyen")
+    record_answer(work, q["id"], "confirmed", "A. Nguyen", role="engineer")
     # the same name now holds a different drawing: the structure producer no longer raises this key
     build_set(root, "other.dxf", sheet2_number="S-999")
     run_intake(root, work, PROJECT)
@@ -336,6 +527,8 @@ def test_answer_is_bound_to_the_key_and_shown_in_every_document(world, capsys):
         "Don vi la mm.",
         "--by",
         "A. Nguyen",
+        "--role",
+        "engineer",
         "--value",
         "unit=mm",
     )
@@ -364,8 +557,8 @@ def test_an_answer_survives_reruns_and_lowers_blocking_open(world):
     intake_open = load(work / "questions.json")["summary"]["blocking_open"]
     units = find(questions_of(work), "units_confirm_all", "set.dxf")
     gate = find(questions_of(work, "structure-questions.json"), "grid_gate1_confirmation", "set.dxf")
-    record_answer(work, units["id"], "mm", "A. Nguyen", {"unit": "mm"})
-    record_answer(work, gate["id"], "confirmed", "A. Nguyen")
+    record_answer(work, units["id"], "mm", "A. Nguyen", {"unit": "mm"}, role="engineer")
+    record_answer(work, gate["id"], "confirmed", "A. Nguyen", role="engineer")
     rerun_all(root, work)
     again = find(questions_of(work), "units_confirm_all", "set.dxf")
     assert (again["id"], again["key"]) == (units["id"], units["key"]) and again["answer"]["values"] == {
@@ -382,8 +575,10 @@ def test_an_answer_survives_reruns_and_lowers_blocking_open(world):
 def test_a_second_answer_supersedes_the_first(world):
     _, work = world
     q = find(questions_of(work), "units_confirm_all", "other.dxf")
-    record_answer(work, q["id"], "cm", "A. Nguyen", {"unit": "cm"}, today=date(2026, 11, 1))
-    result = record_answer(work, q["id"], "No, mm", "B. Tran", {"unit": "mm"}, today=date(2026, 11, 2))
+    record_answer(work, q["id"], "cm", "A. Nguyen", {"unit": "cm"}, today=date(2026, 11, 1), role="engineer")
+    result = record_answer(
+        work, q["id"], "No, mm", "B. Tran", {"unit": "mm"}, today=date(2026, 11, 2), role="engineer"
+    )
     assert result["superseded"] == 1
     first, second = load(work / "answers.json")["answers"]
     assert (first["status"], first["values"], first["answered_on"]) == (
@@ -411,7 +606,7 @@ def test_a_non_blocking_answer_does_not_change_blocking_open(world):
     q = non_blocking[0]
     name = "questions.json" if q in questions_of(work) else "structure-questions.json"
     before = load(work / name)["summary"]
-    record_answer(work, q["id"], "noted", "A. Nguyen")
+    record_answer(work, q["id"], "noted", "A. Nguyen", role="engineer")
     after = load(work / name)["summary"]
     assert after["blocking_open"] == before["blocking_open"] and after["answered"] == before["answered"] + 1
 
@@ -452,6 +647,7 @@ def test_structured_values_by_code(code, values, ok):
         "answer_text": "t",
         "values": values,
         "answered_by": "x",
+        "answered_by_role": "engineer",
         "answered_on": "2026-11-06",
         "status": "active",
     }
@@ -472,6 +668,7 @@ def test_system_axis_values_the_command_refuses_but_the_schema_keeps(values):
         "answer_text": "t",
         "values": values,
         "answered_by": "x",
+        "answered_by_role": "engineer",
         "answered_on": "2026-11-06",
         "status": "active",
     }
@@ -492,13 +689,21 @@ def test_answer_refusals_and_exit_codes(world, capsys):
     q = find(questions_of(work), "units_confirm_all", "set.dxf")
     snapshot = {p.name: p.read_bytes() for p in work.glob("*.json")}
     cases = [
-        (["Q-999", "--text", "x", "--by", "me", "--value", "unit=mm"], 2, "unknown question id"),
-        (["nope", "--text", "x", "--by", "me"], 2, "unknown question id"),
-        ([q["id"], "--text", "   ", "--by", "me", "--value", "unit=mm"], 2, "empty"),
-        ([q["id"], "--text", "x", "--by", " ", "--value", "unit=mm"], 2, "empty"),
-        ([q["id"], "--text", "x", "--by", "me", "--value", "unit=furlong"], 1, "furlong"),
-        ([q["id"], "--text", "x", "--by", "me"], 1, "unit="),
-        ([q["id"], "--text", "x", "--by", "me", "--value", "unit"], 2, "key=value"),
+        (
+            ["Q-999", "--text", "x", "--by", "me", "--role", "engineer", "--value", "unit=mm"],
+            2,
+            "unknown question id",
+        ),
+        (["nope", "--text", "x", "--by", "me", "--role", "engineer"], 2, "unknown question id"),
+        ([q["id"], "--text", "   ", "--by", "me", "--role", "engineer", "--value", "unit=mm"], 2, "empty"),
+        ([q["id"], "--text", "x", "--by", " ", "--role", "engineer", "--value", "unit=mm"], 2, "empty"),
+        (
+            [q["id"], "--text", "x", "--by", "me", "--role", "engineer", "--value", "unit=furlong"],
+            1,
+            "furlong",
+        ),
+        ([q["id"], "--text", "x", "--by", "me", "--role", "engineer"], 1, "unit="),
+        ([q["id"], "--text", "x", "--by", "me", "--role", "engineer", "--value", "unit"], 2, "key=value"),
     ]
     for argv, expected, needle in cases:
         code, out, err = run_cli(capsys, "answer", str(work), *argv)
@@ -508,9 +713,22 @@ def test_answer_refusals_and_exit_codes(world, capsys):
 
 
 def test_answer_needs_a_registry(tmp_path, capsys):
-    code, _, err = run_cli(capsys, "answer", str(tmp_path), "Q-001", "--text", "x", "--by", "me")
+    code, _, err = run_cli(
+        capsys, "answer", str(tmp_path), "Q-001", "--text", "x", "--by", "me", "--role", "engineer"
+    )
     assert code == 2 and "question-registry.json" in err
-    code, _, err = run_cli(capsys, "answer", str(tmp_path / "missing"), "Q-001", "--text", "x", "--by", "me")
+    code, _, err = run_cli(
+        capsys,
+        "answer",
+        str(tmp_path / "missing"),
+        "Q-001",
+        "--text",
+        "x",
+        "--by",
+        "me",
+        "--role",
+        "engineer",
+    )
     assert code == 2
 
 
@@ -524,7 +742,7 @@ def test_an_invalid_question_document_is_left_alone_and_reported(world):
     _, work = world
     (work / "structure-questions.json").write_text("{}", encoding="utf-8")
     q = find(questions_of(work), "units_confirm_all", "set.dxf")
-    result = record_answer(work, q["id"], "mm", "A. Nguyen", {"unit": "mm"})
+    result = record_answer(work, q["id"], "mm", "A. Nguyen", {"unit": "mm"}, role="engineer")
     assert result["refreshed"] == ["questions.json"]
     assert [i["file"] for i in result["not_refreshed"]] == ["structure-questions.json"]
     assert (work / "structure-questions.json").read_text(encoding="utf-8") == "{}"
@@ -551,7 +769,7 @@ def test_read_structure_needs_the_registry(world):
 def test_two_active_answers_to_one_key_are_refused(world):
     _, work = world
     q = find(questions_of(work), "units_confirm_all", "set.dxf")
-    record_answer(work, q["id"], "mm", "A. Nguyen", {"unit": "mm"})
+    record_answer(work, q["id"], "mm", "A. Nguyen", {"unit": "mm"}, role="engineer")
     doc = load(work / "answers.json")
     doc["answers"].append({**doc["answers"][0], "answer_text": "cm", "values": {"unit": "cm"}})
     (work / "answers.json").write_text(json.dumps(doc), encoding="utf-8")
@@ -621,11 +839,8 @@ def test_cli_callouts_writes_documents_and_numbers_questions(cwork, capsys):
     doc = load(cwork / "callouts-questions.json")
     assert validate("intake", doc) == []
     qs = doc["questions"]
-    assert {q["code"] for q in qs} == {
-        "callout_ambiguous",
-        "member_mark_prefix_meaning",
-        "grade_legacy_mapping",
-    }
+    # prefixes: harness marks; callout_unparsed: tool wave 3 (the fixture's loose Ø forms, unverified grades)
+    assert {q["code"] for q in qs} == {"callout_ambiguous", "callout_unparsed", "grade_legacy_mapping"}
     assert all(q["file"] == REL and all(r["file"] == REL for r in q["refs"]) for q in qs)
     keys = [(not q["blocking"], q["code"], q["file"]) for q in qs]
     assert keys == sorted(keys)
@@ -638,16 +853,9 @@ def test_cli_callouts_writes_documents_and_numbers_questions(cwork, capsys):
     registry = load(cwork / "question-registry.json")["questions"]
     assert {registry[q["key"]]["producer"] for q in qs} == {"callouts"}
     assert {registry[k]["status"] for k in before_intake} == {"open"}  # callouts never touches intake keys
-    # counts are true counts over all candidates, per prefix
-    prefixes = find(qs, "member_mark_prefix_meaning")
-    subjects = {s["name"]: s for s in prefixes["subjects"]}
-    assert {"C", "D", "DP", "GM", "M", "TB", "Đ"} == set(subjects)
-    assert subjects["C"]["count"] == 4 and subjects["C"]["examples"][0] == {"mark": "C1", "count": 2}
-    assert prefixes["count"] == sum(s["count"] for s in subjects.values())
     counts = load(cwork / "callouts.json")  # the extractor document holds counts, not questions
     assert "questions" not in counts
     assert set(counts["question_counts"]) == {q["code"] for q in qs}
-    assert counts["question_counts"]["member_mark_prefix_meaning"] == len(subjects)
     notations = {s["name"] for q in qs if q["code"] == "callout_ambiguous" for s in q["subjects"]}
     assert {"rebar_plus_join", "section_designation", "steel_grade_standard_mix"} <= notations
     for q in (q for q in qs if q["code"] == "callout_ambiguous"):
@@ -669,17 +877,21 @@ def test_callouts_are_stable_across_runs_and_survive_an_unrelated_change(cwork):
 
 
 def test_member_mark_prefix_answer_has_values_and_lowers_blocking_open(cwork):
-    run_callouts(cwork)
-    q = find(questions_of(cwork, "callouts-questions.json"), "member_mark_prefix_meaning")
+    run_marks(cwork)  # tool wave 2: marks asks member_mark_prefix_meaning
+    q = find(questions_of(cwork, "marks-questions.json"), "member_mark_prefix_meaning")
     with pytest.raises(QuestionsError):
-        record_answer(cwork, q["id"], "C is a column", "A. Nguyen")  # needs at least one prefix meaning
-    result = record_answer(cwork, q["id"], "C cot, D dam", "A. Nguyen", {"C": "column", "D": "beam"})
-    assert result["summaries"]["callouts-questions.json"]["blocking_open"] == (
-        load(cwork / "callouts-questions.json")["summary"]["blocking_questions"] - 1
+        record_answer(
+            cwork, q["id"], "C is a column", "A. Nguyen", role="engineer"
+        )  # needs at least one prefix meaning
+    result = record_answer(
+        cwork, q["id"], "C cot, D dam", "A. Nguyen", {"C": "column", "D": "beam"}, role="engineer"
     )
-    summary = run_callouts(cwork).summary
+    assert result["summaries"]["marks-questions.json"]["blocking_open"] == (
+        load(cwork / "marks-questions.json")["summary"]["blocking_questions"] - 1
+    )
+    summary = run_marks(cwork).summary
     assert summary["answered"] == 1
-    assert find(questions_of(cwork, "callouts-questions.json"), "member_mark_prefix_meaning")["answer"][
+    assert find(questions_of(cwork, "marks-questions.json"), "member_mark_prefix_meaning")["answer"][
         "values"
     ] == {"C": "column", "D": "beam"}
 

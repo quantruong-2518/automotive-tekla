@@ -1,0 +1,45 @@
+{
+  "schema_version": "0.1",
+  "kind": "sheet_text",
+  "project_id": "demo-callouts",
+  "file": "plans/set.dxf",
+  "sheet": {
+    "sheet_id": "model#01",
+    "space": "model",
+    "layout": "Model",
+    "bbox": [0.0, 0.0, 84100.0, 59400.0],
+    "sheet_number": { "value": "S-101", "confidence": "medium" },
+    "duplicate_of": null
+  },
+  "query": { "contains": null, "max_entries": 400, "region": [60000.0, 54000.0, 70000.0, 57000.0] },
+  "region": [60000.0, 54000.0, 70000.0, 57000.0],
+  "rows": [
+    {
+      "y": 56500.0,
+      "cells": [
+        { "entry_ids": ["T000071"], "display_text": "Ø<10mm", "meaning": "allowed", "blocked_reason": null, "x0": 61000.0, "x1": 61000.0 },
+        { "entry_ids": ["T000072"], "display_text": "CI", "meaning": "allowed", "blocked_reason": null, "x0": 64000.0, "x1": 64000.0 },
+        { "entry_ids": ["T000073"], "display_text": "225", "meaning": "allowed", "blocked_reason": null, "x0": 67000.0, "x1": 67000.0 }
+      ]
+    },
+    {
+      "y": 55500.0,
+      "cells": [
+        { "entry_ids": ["T000074"], "display_text": "Ø>=10mm", "meaning": "allowed", "blocked_reason": null, "x0": 61000.0, "x1": 61000.0 },
+        { "entry_ids": ["T000075"], "display_text": "CII", "meaning": "allowed", "blocked_reason": null, "x0": 64000.0, "x1": 64000.0 },
+        { "entry_ids": ["T000076"], "display_text": "ThÐp g©n", "meaning": "blocked", "blocked_reason": "encoding_proposed", "x0": 67000.0, "x1": 67000.0 }
+      ]
+    }
+  ],
+  "counts": { "assigned": 28, "matched": 6, "returned": 6, "omitted": 0, "truncated": false },
+  "legacy_font_gate": { "blocked_entries": 1, "by_reason": { "encoding_proposed": 1 }, "styles": ["VntimeH"], "question_ids": ["Q-003"] },
+  "entries": [
+    { "entry_id": "T000071", "row": 0, "display_text": "Ø<10mm", "meaning": "allowed", "blocked_reason": null, "encoding": "unicode", "confidence": "medium", "flags": [], "layer": "TABLE", "style": "Standard", "x": 61000.0, "y": 56500.0, "height": 350.0, "rotation": 0.0, "entity_type": "TEXT" },
+    { "entry_id": "T000072", "row": 0, "display_text": "CI", "meaning": "allowed", "blocked_reason": null, "encoding": "unicode", "confidence": "medium", "flags": [], "layer": "TABLE", "style": "Standard", "x": 64000.0, "y": 56500.0, "height": 350.0, "rotation": 0.0, "entity_type": "TEXT" },
+    { "entry_id": "T000073", "row": 0, "display_text": "225", "meaning": "allowed", "blocked_reason": null, "encoding": "unicode", "confidence": "medium", "flags": [], "layer": "TABLE", "style": "Standard", "x": 67000.0, "y": 56500.0, "height": 350.0, "rotation": 0.0, "entity_type": "TEXT" },
+    { "entry_id": "T000074", "row": 1, "display_text": "Ø>=10mm", "meaning": "allowed", "blocked_reason": null, "encoding": "unicode", "confidence": "medium", "flags": [], "layer": "TABLE", "style": "Standard", "x": 61000.0, "y": 55500.0, "height": 350.0, "rotation": 0.0, "entity_type": "TEXT" },
+    { "entry_id": "T000075", "row": 1, "display_text": "CII", "meaning": "allowed", "blocked_reason": null, "encoding": "unicode", "confidence": "medium", "flags": [], "layer": "TABLE", "style": "Standard", "x": 64000.0, "y": 55500.0, "height": 350.0, "rotation": 0.0, "entity_type": "TEXT" },
+    { "entry_id": "T000076", "row": 1, "display_text": "ThÐp g©n", "meaning": "blocked", "blocked_reason": "encoding_proposed", "encoding": "unknown", "confidence": "low", "flags": [], "layer": "TABLE", "style": "VntimeH", "x": 67000.0, "y": 55500.0, "height": 350.0, "rotation": 0.0, "entity_type": "TEXT" }
+  ],
+  "warnings": []
+}

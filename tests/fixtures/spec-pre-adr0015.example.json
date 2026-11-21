@@ -1,0 +1,65 @@
+{
+  "schema_version": "0.1",
+  "project_id": "demo-warehouse",
+  "lot": 1,
+  "units": "mm",
+  "description": "Synthetic example: two columns on grid A/1 and A/2 and the beam between them.",
+  "members": [
+    {
+      "spec_id": "L1-C-A1",
+      "type": "column",
+      "mark": "C1",
+      "profile": {
+        "value": "HEA300",
+        "provenance": { "file": "S-101.dxf", "sheet": "S-101", "revision": "B", "region": { "grid_ref": "A/1" }, "method": "dxf_entity" },
+        "confidence": "high"
+      },
+      "material": {
+        "value": "S355JR",
+        "provenance": { "file": "S-001.pdf", "sheet": "S-001", "revision": "A", "region": { "page": 1, "detail": "GENERAL NOTES 3.1" }, "method": "pdf_text_layer" },
+        "confidence": "medium"
+      },
+      "start": { "x": 0, "y": 0, "z": 0, "provenance": { "file": "S-101.dxf", "sheet": "S-101", "revision": "B", "method": "dxf_entity" }, "confidence": "high" },
+      "end": { "x": 0, "y": 0, "z": 6000, "provenance": { "file": "S-201.dxf", "sheet": "S-201", "revision": "A", "region": { "detail": "ELEVATION 1" }, "method": "dxf_dimension_text" }, "confidence": "high" },
+      "class": "3"
+    },
+    {
+      "spec_id": "L1-C-A2",
+      "type": "column",
+      "mark": "C1",
+      "profile": {
+        "value": "HEA300",
+        "provenance": { "file": "S-101.dxf", "sheet": "S-101", "revision": "B", "region": { "grid_ref": "A/2" }, "method": "dxf_entity" },
+        "confidence": "high"
+      },
+      "material": {
+        "value": "S355JR",
+        "provenance": { "file": "S-001.pdf", "sheet": "S-001", "revision": "A", "region": { "page": 1, "detail": "GENERAL NOTES 3.1" }, "method": "pdf_text_layer" },
+        "confidence": "medium"
+      },
+      "start": { "x": 6000, "y": 0, "z": 0, "provenance": { "file": "S-101.dxf", "sheet": "S-101", "revision": "B", "method": "dxf_dimension_text" }, "confidence": "high" },
+      "end": { "x": 6000, "y": 0, "z": 6000, "provenance": { "file": "S-201.dxf", "sheet": "S-201", "revision": "A", "method": "dxf_dimension_text" }, "confidence": "high" },
+      "class": "3"
+    },
+    {
+      "spec_id": "L1-B-A12",
+      "type": "beam",
+      "mark": "B1",
+      "profile": {
+        "value": "IPE300",
+        "provenance": { "file": "S-102.pdf", "sheet": "S-102", "revision": "A", "region": { "page": 1, "bbox": [412.5, 220.0, 470.0, 236.0] }, "method": "vision" },
+        "confidence": "low"
+      },
+      "material": {
+        "value": "S355JR",
+        "provenance": { "file": "S-001.pdf", "sheet": "S-001", "revision": "A", "method": "pdf_text_layer" },
+        "confidence": "medium"
+      },
+      "start": { "x": 0, "y": 0, "z": 6000, "provenance": { "file": "S-201.dxf", "sheet": "S-201", "revision": "A", "method": "derived", "derived_from": [ { "file": "S-101.dxf", "sheet": "S-101", "revision": "B", "method": "dxf_entity" } ] }, "confidence": "medium" },
+      "end": { "x": 6000, "y": 0, "z": 6000, "provenance": { "file": "S-201.dxf", "sheet": "S-201", "revision": "A", "method": "derived" }, "confidence": "medium" },
+      "class": "4",
+      "question_ids": ["Q-001"]
+    }
+  ],
+  "open_questions": ["Q-001"]
+}
