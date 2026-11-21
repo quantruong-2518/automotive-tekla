@@ -22,6 +22,14 @@ def load_hook(name: str) -> ModuleType:
     return module
 
 
+@pytest.fixture(autouse=True, scope="session")
+def no_lock_wait_variable():
+    """Drop the shell's HARNESS_LOCK_WAIT; session-scoped, as module-scoped fixtures run intake first."""
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.delenv("HARNESS_LOCK_WAIT", raising=False)
+        yield
+
+
 @pytest.fixture
 def guard() -> ModuleType:
     return load_hook("guard_tekla_write")

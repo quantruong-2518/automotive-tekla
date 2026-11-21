@@ -1,0 +1,179 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:tekla-harness:schema:parts-manifest:0.1",
+  "title": "Parts manifest",
+  "description": "`W/parts/manifest.json`, written by the scout in part mode (ADR-0019): which part reader reads which sheets, tables and clusters, in which order. It names where to look, never a value: no field holds a quantity, a size or a mark, and every object refuses fields it does not list. `harness part manifest-check W` checks it against the work folder. A sheet is a pair `file` (the path in inventory.json) and `sheet` (the detector sheet id of `harness list-sheets`), because a detector id is only stable inside one file. A cluster is the triple `file`, `sheet`, `side` that `harness unassigned-clusters` reports once per file, frame and side (`sheet` is null for text no frame range holds).",
+  "type": "object",
+  "required": ["schema_version", "blocks", "parts"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": "0.1" },
+    "blocks": {
+      "type": "array",
+      "description": "The building blocks of the set; each has its own grid. A member part names one of them.",
+      "items": { "$ref": "#/$defs/block" }
+    },
+    "parts": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/part" }
+    },
+    "acks": {
+      "type": "array",
+      "description": "The engineer's or orchestrator's acknowledgement of a warning of `part manifest-check`, with the question that holds it or the reason it is accepted. `part manifest-check` clears the warning whose `id` equals `warning` exactly; an ack that names no current warning, two acks of one warning, or a `question` that is no id of question-registry.json (any status) is a problem.",
+      "items": { "$ref": "#/$defs/ack" }
+    }
+  },
+  "$defs": {
+    "part_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+      "description": "Fixed ids: all-grid-levels, all-notes-materials (kind cross), scout, all-assembly (kind bookkeeping), all-no-sheet (kind no_sheet); the rest are <block>-<family> or <block>-<family>-<letter> (kind member)."
+    },
+    "entry_id": { "type": "string", "pattern": "^T[0-9]{6,}$", "description": "Text-index entry id." },
+    "sheet_id": { "type": "string", "pattern": "^.+#[0-9]{2,}$", "description": "Detector sheet id as `harness list-sheets` prints it, '<space>#NN'." },
+    "file": { "type": "string", "minLength": 1, "description": "Drawing file as listed in inventory.json." },
+    "side": { "enum": ["below", "above", "left", "right", "inside", "none"] },
+    "block": {
+      "type": "object",
+      "required": ["id", "grid_system_ids", "origin_note"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/part_id" },
+        "grid_system_ids": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^S[0-9]{3,}$" },
+          "uniqueItems": true,
+          "description": "Grid systems of grid-systems.json that belong to this block."
+        },
+        "origin_note": { "type": "string", "minLength": 1, "description": "Where the block's grid origin sits on its plan, in words." }
+      }
+    },
+    "sheet_ref": {
+      "type": "object",
+      "required": ["file", "sheet", "role"],
+      "additionalProperties": false,
+      "properties": {
+        "file": { "$ref": "#/$defs/file" },
+        "sheet": { "$ref": "#/$defs/sheet_id" },
+        "number_entry": { "$ref": "#/$defs/entry_id", "description": "The entry of the printed sheet number." },
+        "title_entry": { "$ref": "#/$defs/entry_id", "description": "The entry of the sheet title." },
+        "role": { "enum": ["plan", "schedule", "detail", "section", "notes", "list"] },
+        "views": {
+          "type": "array",
+          "description": "The views of the sheet this part reads: each is found by the entry of its heading or by a box.",
+          "items": {
+            "oneOf": [
+              {
+                "type": "object",
+                "required": ["heading_entry"],
+                "additionalProperties": false,
+                "properties": { "heading_entry": { "$ref": "#/$defs/entry_id" } }
+              },
+              {
+                "type": "object",
+                "required": ["bbox"],
+                "additionalProperties": false,
+                "properties": {
+                  "bbox": {
+                    "type": "array",
+                    "items": { "type": "number" },
+                    "minItems": 4,
+                    "maxItems": 4,
+                    "description": "x0, y0, x1, y1 in the sheet's drawing coordinates."
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "cluster_ref": {
+      "type": "object",
+      "required": ["file", "sheet", "side"],
+      "additionalProperties": false,
+      "description": "A cluster of text outside every frame, as `harness unassigned-clusters` reports it per (file, frame, side): the triple is its identity.",
+      "properties": {
+        "file": { "$ref": "#/$defs/file" },
+        "sheet": { "anyOf": [{ "$ref": "#/$defs/sheet_id" }, { "type": "null" }], "description": "The frame the cluster was assigned to; null when no frame range holds it (side none)." },
+        "side": { "$ref": "#/$defs/side" }
+      }
+    },
+    "table": {
+      "type": "object",
+      "required": ["header_entries"],
+      "additionalProperties": false,
+      "description": "A table the part reads: on a sheet (`file` and `sheet`) or in a cluster (`cluster`), with the entries of its header row.",
+      "properties": {
+        "file": { "$ref": "#/$defs/file" },
+        "sheet": { "$ref": "#/$defs/sheet_id" },
+        "cluster": { "$ref": "#/$defs/cluster_ref" },
+        "header_entries": { "type": "array", "items": { "$ref": "#/$defs/entry_id" }, "minItems": 1 }
+      },
+      "oneOf": [
+        { "required": ["file", "sheet"], "not": { "required": ["cluster"] } },
+        { "required": ["cluster"], "not": { "anyOf": [{ "required": ["file"] }, { "required": ["sheet"] }] } }
+      ]
+    },
+    "part": {
+      "type": "object",
+      "required": ["id", "kind", "order"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/part_id" },
+        "kind": { "enum": ["cross", "member", "no_sheet", "bookkeeping"] },
+        "block": { "$ref": "#/$defs/part_id", "description": "A member part: the id of one of `blocks`." },
+        "family": { "$ref": "#/$defs/part_id", "description": "A member part: the member family, e.g. piles or caps." },
+        "order": { "type": "integer", "minimum": 0, "description": "Load path: a part with a lower order is read before one with a higher order." },
+        "inputs": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/part_id" },
+          "uniqueItems": true,
+          "description": "Parts that must be locked before this one is read."
+        },
+        "sheets": { "type": "array", "items": { "$ref": "#/$defs/sheet_ref" } },
+        "tables": { "type": "array", "items": { "$ref": "#/$defs/table" } },
+        "clusters": { "type": "array", "items": { "$ref": "#/$defs/cluster_ref" } },
+        "layers": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Layers the part reads its linework from.",
+          "properties": {
+            "outline": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+            "symbol": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+          }
+        },
+        "marks_regex": { "type": "string", "minLength": 1, "description": "Regular expression of the member marks of this part." },
+        "expected_sources": {
+          "type": "array",
+          "items": { "enum": ["text", "schedule", "linework", "dimension"] },
+          "uniqueItems": true
+        },
+        "producer_questions": {
+          "type": "array",
+          "items": { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/question_id" },
+          "uniqueItems": true,
+          "description": "Questions this part waits on."
+        },
+        "split_of": { "$ref": "#/$defs/part_id", "description": "The part this one was split from (size cap), e.g. NX1-caps for NX1-caps-a. A cross part over the cap is split as <fixed id>-<letter> with kind cross and split_of the fixed id (e.g. all-notes-materials-a); it then also stands for the fixed id." },
+        "files": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/file" },
+          "uniqueItems": true,
+          "description": "A no_sheet part: DWG/DXF files that `harness list-sheets` skips (no text index, or an unreadable one) and that this part takes over, so that `harness part manifest-check` does not report them as file_unread. A files entry that is unused (the part is not no_sheet, or `harness list-sheets` does not skip the file) is reported as `files_entry_unused` by `harness part manifest-check`."
+        }
+      }
+    },
+    "ack": {
+      "type": "object",
+      "required": ["warning"],
+      "additionalProperties": false,
+      "properties": {
+        "warning": { "type": "string", "minLength": 1 },
+        "question": { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/question_id" },
+        "reason": { "type": "string", "minLength": 1 }
+      },
+      "anyOf": [{ "required": ["question"] }, { "required": ["reason"] }]
+    }
+  }
+}

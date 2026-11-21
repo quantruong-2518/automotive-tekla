@@ -2,12 +2,14 @@
 
 Agreed order: drawing reading first, Tekla second. A step is done when its exit criteria
 pass, not when its code exists.
+A step here is a build phase of the harness; the five stages of a project are in
+[`workflow.md`](workflow.md).
 
 | # | Step | Needs | Exit criteria |
 |---|---|---|---|
 | **0** | **Foundation** — repo, `AGENTS.md`/`CLAUDE.md`, schemas v0, guard hooks, CI | nothing | CI green; guard hook tests pass; `harness env-check` runs on the Tekla machine |
 | 1 | File reading + fallback (skill tier 1, readers, `read-log`) | synthetic DXF + public files | each fallback path covered by a test; no silent failure |
-| 2 | Expert reading (tier 2, accuracy measured) | **≥2 sets exported from Tekla + ≥1 past project** | grid/level/profile accuracy reported on the benchmark set |
+| 2 | Expert reading (tier 2, accuracy measured) | **engineer spot check per part** ([ADR-0019](decisions/0019-part-as-unit-of-work.md)); Tekla answer models when one exists | grid/level/profile accuracy reported per part against the engineer-checked values |
 | 3 | Touch Tekla: `tekla-api-reference`, `TeklaCore` + `tekla-cli` | exact Tekla version + SP, empty test model | contract in `tekla-cli-contract.md` implemented and tested |
 | 4 | Build and verify loop: builder, verifier, hooks | spec from Step 2 + answer model | build→verify→rollback round-trip on a test model |
 | 5 | Full process: slash commands, gates | one complete set | end-to-end run with all gates |
@@ -61,18 +63,21 @@ mutation testing, independent review, then one commit.
 Step 3 is done only when S5 passes on the Tekla version the engineer confirms (see below).
 
 **Paused after S1c (engineer, 2026-11-09).** S1–S1c and RTI-0008/0009 are merged. S2–S5 depend on
-the exact Tekla version, so they wait until Steps 1 and 2 are done. At that point, ask the
-engineer for the Tekla version and configuration, record it here and in an ADR-0009 amendment
-(NuGet pin, `TSAppConfigPatcherTask`, contract, `tekla/api-notes.md` deltas), then start S2.
-Building once for the confirmed version is cheaper than building for a guess.
+the Tekla version, so they wait until Steps 1 and 2 are done. The version is now confirmed
+(Tekla 2026, engineer 2026-11-11; ADR-0009 Amendment 3, see below). When Step 3 resumes, ask the
+engineer only for the exact 2026 service pack and the machine configuration, record them here and
+in `tekla/api-notes.md`, then start S2.
 
 ## Open before later steps
 
 - Tekla version: first given as **2024 Diamond** (engineer, 2026-11-06); on 2026-11-09 the
-  engineer reported the company uses **2026 Diamond**. ADR-0009, the contract and
-  `tekla/api-notes.md` still pin `Tekla.Structures.*` 2024.0.4; they change only when the version
-  is confirmed at the restart of Step 3 (above). Known 2026 deltas: Model package
-  netstandard2.0-only, x64-only DLLs (projects are already x64), IFC2x3 export in the API.
+  engineer reported the company uses **2026 Diamond**; decided on 2026-11-11 (Q1 of
+  [ADR-0015](decisions/0015-lot-spec-grids-levels-nonlinear-members.md)): the repo targets
+  **Tekla 2026** and `Tekla.Structures.*` **2026.0.3**. ADR-0009 (Amendment 3), the contract,
+  `tekla/README.md` and `tekla/api-notes.md` carry the new pin; the NuGet pin is documentary until a
+  project file exists. Still open for Step 3: the exact 2026 service pack (ask the engineer when
+  Step 3 resumes). Known 2026 deltas: Model package netstandard2.0-only, x64-only DLLs (projects are
+  already x64), IFC2x3 export in the API.
   Tekla machine for S5: the Windows host of the development WSL (engineer, 2026-11-07); no Tekla
   is installed there yet, and it needs the .NET SDK and an empty test model.
 - Resume "differs" tolerance for contract rule 6: **0.1 mm** on start and end points; profile
@@ -80,6 +85,20 @@ Building once for the confirmed version is cheaper than building for a guess.
 - Original models live on local drives, so the local-only rule of ADR-0009 Amendment 2 stays
   (engineer, 2026-11-07).
 - Benchmark set with answer models — before Step 2.
+- Build-side routes (EVAL-4 ranked fix 8): grid and level objects, curved and polyline beams,
+  slabs, footings, pile caps, piles and walls go into the lot spec and the `tekla-cli` contract in
+  tool wave 4, before EVAL-5; they are not left `engineer manual`. Reinforcement stays out of
+  scope for now (engineer, 2026-11-10; the first wording said only "non-linear members", which
+  the EVAL-4 judges meant as slabs, footings, piles and walls). Code that writes them to Tekla
+  still waits for the confirmed Tekla version (Step 3).
+  Scope cut (engineer, 2026-11-11): of the ADR-0015/0016 execution packages, tool wave 4 does
+  only what EVAL-5 criterion 7 needs: P15-1 (docs pin, done), P15-3 (spec schema, examples,
+  CHANGELOG), P15-5 (`check_spec` rules, `SPEC_RULES_VERSION`) and P15-8 (contract text), each
+  with the ADR-0016 parts listed in that ADR. P15-2, P15-4, P15-6, P15-7, P15-9, P15-10, P15-11
+  and P16-1 to P16-5 move to Step 3.
+- Widen the development corpus before EVAL-5: more varied public sets plus, if available, 1–2
+  finished MCS projects with their Tekla models, which also seed the Step 2 benchmark
+  (engineer, 2026-11-10).
 - Licence terms of ODA File Converter for commercial use — the engineer chose ODA with a
   LibreDWG fallback (ADR-0005); written licence confirmation still needed before a client run.
 - PyMuPDF licence (AGPL-3 or commercial) — decide before the PDF slice.

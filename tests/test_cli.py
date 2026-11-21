@@ -179,6 +179,177 @@ def test_usage_error_exit_2(capsys):
     assert main(["validate", "nope", "x.json"]) == 2
 
 
+def test_schema_names_include_the_wave2_schemas(capsys):
+    for name in ("dimensions", "supplements"):
+        assert main(["validate", name, str(EXAMPLES / f"{name}.example.json")]) == 0
+    capsys.readouterr()
+
+
+# --- tool wave 2 seam: flags and stubs (the packages implement them) ---------------------------
+
+
+def test_dimensions_is_registered(tmp_path, capsys):
+    # package P4 implemented it (tests/test_dimensions.py): a folder without inventory is a usage error
+    assert main(["dimensions", str(tmp_path), "a.dxf"]) == 2
+    assert "inventory.json" in capsys.readouterr().err
+
+
+def test_dimensions_sheet_and_unassigned_exclude_each_other(tmp_path, capsys):
+    assert main(["dimensions", str(tmp_path), "a.dxf", "--sheet", "model#01", "--unassigned"]) == 2
+
+
+def test_sheet_text_needs_a_sheet_or_unassigned_not_both(tmp_path, capsys):
+    assert main(["sheet-text", str(tmp_path), "a.dxf"]) == 2
+    assert main(["sheet-text", str(tmp_path), "a.dxf", "model#01", "--unassigned"]) == 2
+    err = capsys.readouterr().err
+    assert "--unassigned" in err
+
+
+def test_sheet_text_and_find_text_unassigned_reach_the_reader(tmp_path, capsys):
+    # implemented by package P1 (tests in test_sheet_text); an empty folder is now a usage error
+    assert main(["sheet-text", str(tmp_path), "a.dxf", "--unassigned"]) == 2
+    assert main(["find-text", str(tmp_path), "--contains", "x", "--unassigned"]) == 2
+    assert "not implemented yet" not in capsys.readouterr().err
+
+
+def test_answer_role_must_be_known(tmp_path, capsys):
+    argv = ["answer", str(tmp_path), "Q-001", "--text", "x", "--by", "me", "--role", "agent"]
+    assert main(argv) == 2
+
+
+def test_answer_without_a_role_is_a_usage_error(tmp_path, capsys):
+    assert main(["answer", str(tmp_path), "Q-001", "--text", "x", "--by", "me"]) == 2
+    assert "the following arguments are required: --role" in capsys.readouterr().err  # argparse refuses
+
+
+def test_ask_supplement_without_a_registry_is_a_usage_error(tmp_path, capsys):
+    argv = ["ask", str(tmp_path), "--supplement", "Q-001", "--where", "w", "--found", "", "--text", "t"]
+    assert main(argv) == 2
+    assert main(["ask", str(tmp_path), "--withdraw-supplement", "0123456789abcdef", "--reason", "r"]) == 2
+    assert "not implemented" not in capsys.readouterr().err
+
+
+def test_ask_supplement_refuses_code_and_blocking(tmp_path, capsys):
+    base = ["ask", str(tmp_path), "--supplement", "Q-001", "--where", "w", "--found", "", "--text", "t"]
+    assert main([*base, "--code", "my_code"]) == 2
+    assert main([*base, "--blocking"]) == 2
+    assert main(["ask", str(tmp_path), "--supplement", "Q-001", "--found", "", "--text", "t"]) == 2
+    assert main(["ask", str(tmp_path), "--withdraw-supplement", "0123456789abcdef"]) == 2
+    assert "--supplement" in capsys.readouterr().err
+
+
+# --- tool wave 3 seam: flags and stubs (packages C and T implement them) -----------------------
+
+
+def test_validate_reader_questions(capsys):
+    assert main(["validate", "reader-questions", str(EXAMPLES / "reader-questions.example.json")]) == 0
+    # a producer's document is a valid intake document, but not a reader one (several refs per question)
+    assert main(["validate", "intake", str(EXAMPLES / "intake-questions.example.json")]) == 0
+    assert main(["validate", "reader-questions", str(EXAMPLES / "intake-questions.example.json")]) == 1
+    assert main(["validate", "reader-questions", str(EXAMPLES / "answers.example.json")]) == 1
+    capsys.readouterr()
+
+
+def test_ask_amend_is_implemented_and_needs_a_work_folder(tmp_path, capsys):
+    # package C replaced the seam stub (exit 3): a folder without a registry is a usage error
+    # (the behaviour itself: tests/test_ask.py)
+    assert main(["ask", str(tmp_path), "--amend", "Q-001", "--text", "câu hỏi mới"]) == 2
+    assert main(["ask", str(tmp_path), "--amend", "Q-001", "--places", "model#05 axis 3", "model#07"]) == 2
+    err = capsys.readouterr().err
+    assert "not implemented" not in err and "question-registry.json" in err and "Traceback" not in err
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        [],  # nothing to amend
+        ["--text", "t", "--code", "reader_x"],
+        ["--text", "t", "--where", "w"],
+        ["--text", "t", "--found", "f"],
+        ["--text", "t", "--blocking"],
+        ["--text", "t", "--reason", "r"],
+        ["--text", "t", "--file", "a.dxf"],
+        ["--text", "t", "--sheet", "model#01"],
+        ["--text", "t", "--withdraw", "Q-002"],
+        ["--text", "t", "--supplement", "Q-002"],
+        ["--text", " "],
+        ["--places", " "],
+    ],
+)
+def test_ask_amend_usage_errors(tmp_path, capsys, extra):
+    assert main(["ask", str(tmp_path), "--amend", "Q-001", *extra]) == 2
+    assert "not implemented" not in capsys.readouterr().err
+
+
+def test_ask_places_only_with_amend(tmp_path, capsys):
+    argv = ["ask", str(tmp_path), "--code", "reader_x", "--where", "w", "--found", "f", "--text", "t"]
+    assert main([*argv, "--places", "model#05"]) == 2
+    assert "--places" in capsys.readouterr().err
+
+
+def test_sheet_text_region_reaches_the_reader(tmp_path, capsys):
+    # package T implemented the seam stub: an empty folder is now a usage error from the reader
+    argv = ["sheet-text", str(tmp_path), "a.dxf", "model#01", "--region", "60000,54000,70000,57000.5"]
+    assert main(argv) == 2
+    err = capsys.readouterr().err
+    assert "inventory.json" in err and "not implemented" not in err and "Traceback" not in err
+
+
+def test_sheet_text_region_takes_negative_model_coordinates_with_equals(tmp_path, capsys):
+    # model-space boxes are often negative (286's rebar table sits near y -177151); argparse reads a
+    # value starting with '-' after a space as an option, so the help names the '=' form
+    argv = ["sheet-text", str(tmp_path), "a.dxf", "model#01", "--region=-5000,-178000,0,-176000"]
+    assert main(argv) == 2
+    assert "inventory.json" in capsys.readouterr().err
+    assert main(["sheet-text", "--help"]) == 0
+    assert "--region=-5000" in " ".join(capsys.readouterr().out.split())
+
+
+@pytest.mark.parametrize(
+    "region",
+    ["1,2,3", "1,2,3,4,5", "a,2,3,4", "5,0,1,4", "0,5,4,1", "0,0,0,4", "nan,0,1,1", "0,0,inf,1"],
+)
+def test_sheet_text_region_must_be_a_box(tmp_path, capsys, region):
+    assert main(["sheet-text", str(tmp_path), "a.dxf", "model#01", "--region", region]) == 2
+    assert "--region" in capsys.readouterr().err
+
+
+def test_sheet_text_region_needs_a_sheet_and_no_unassigned(tmp_path, capsys):
+    assert main(["sheet-text", str(tmp_path), "a.dxf", "--region", "0,0,1,1"]) == 2
+    assert main(["sheet-text", str(tmp_path), "a.dxf", "--unassigned", "--region", "0,0,1,1"]) == 2
+    both = ["sheet-text", str(tmp_path), "a.dxf", "model#01", "--unassigned", "--region", "0,0,1,1"]
+    assert main(both) == 2
+    assert "not implemented" not in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    ("field", "says"),
+    [("blocked_in_scope", "never matched"), ("blocked_entries_not_searchable", "stored text only")],
+)
+def test_find_text_reports_the_blocked_entries_in_scope(tmp_path, capsys, monkeypatch, field, says):
+    # W4: package T emits blocked_in_scope and never matches a blocked entry; until then the old count
+    # keeps its old warning
+    from tekla_harness import cli
+
+    doc = json.loads((EXAMPLES / "find-text.example.json").read_text(encoding="utf-8"))
+    counts = doc["counts"]
+    del counts["blocked_entries_not_searchable"]
+    counts[field] = 7
+    monkeypatch.setattr(cli, "find_text", lambda *args, **kwargs: doc)
+    assert main(["find-text", str(tmp_path), "--contains", "x"]) == 0
+    err = capsys.readouterr().err
+    assert "7 blocked" in err and says in err
+
+
+def test_answer_help_names_the_grid_system_missing_keys(capsys):
+    assert main(["answer", "--help"]) == 0
+    text = " ".join(capsys.readouterr().out.split())
+    for key in ("dir1_labels", "dir1_spacings", "dir2_labels", "dir2_spacings", "sheet="):
+        assert key in text
+    assert "grid_answer_contradicts_drawing" in text
+    assert "no_grid=yes" in text and "alone" in text  # ADR-0013 decision 2
+
+
 def test_env_check_outputs_json(capsys):
     code = main(["env-check"])
     out = json.loads(capsys.readouterr().out)

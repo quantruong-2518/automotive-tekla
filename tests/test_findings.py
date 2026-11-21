@@ -9,7 +9,9 @@ write work on a copy.
 from __future__ import annotations
 
 import json
+import os
 import shutil
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +20,7 @@ import pytest
 from _callout_fixtures import REL, build_work
 from tekla_harness.cli import main
 from tekla_harness.findings import FindingError, add_finding, list_findings, withdraw_finding
+from tekla_harness.knowledge import FontEncodingRow, FontEncodingTable
 from tekla_harness.schemas import validate
 
 NOTES = ["GENERAL NOTES", "Concrete grade C30/37 for all", "foundations   and columns"]
@@ -291,6 +294,22 @@ def test_no_font_question_in_the_registry_is_said(work):
     assert "no font question is registered" in msg
 
 
+def test_a_legacy_ascii_text_question_is_a_font_question(work):
+    # tool wave 3 (W3): intake asks legacy_ascii_text per file and style; the refusal points at it
+    path = work / "question-registry.json"
+    registry = load(path)
+    qid = f"Q-{registry['next_id']:03d}"
+    registry["next_id"] += 1
+    registry["questions"]["e" * 16] = {
+        "id": qid, "code": "legacy_ascii_text", "file": REL, "producer": "intake", "status": "open",
+        "first_seen_run": 1, "last_seen_run": 1,
+    }  # fmt: skip
+    path.write_text(json.dumps(registry), encoding="utf-8")
+    edit_index(work, {REST: {"flags": ["legacy_ascii_suspect"]}})
+    msg = refused(work, 1, kind="structural_system", entries=[REST], value="v", fields=["aspect=floors"])
+    assert "legacy_ascii_suspect" in msg and f"{qid} (legacy_ascii_text, open)" in msg
+
+
 def test_sheets_document_missing_refuses_a_sheet_finding(work):
     (work / "structure" / f"{REL}.sheets.json").unlink()
     assert "read-structure" in refused(
@@ -558,3 +577,601 @@ def test_a_corrupt_next_id_is_refused(work):
     with pytest.raises(FindingError) as err:
         list_findings(work)
     assert err.value.exit_code == 1
+
+
+# --- decoded_by (tool wave 2, fix 10): which knowledge row decoded the cited text --------------------------
+
+
+def table(*rows: tuple[str, str, str]) -> FontEncodingTable:
+    """A knowledge table of (pattern, status, decided_on) font_file rows."""
+    return FontEncodingTable(
+        tuple(
+            FontEncodingRow(n + 2, pattern, "font_file", "tcvn3", None, status, "e", "tests", "eng", decided)
+            for n, (pattern, status, decided) in enumerate(rows)
+        )
+    )
+
+
+KNOWN = table(("VHARIAL.TTF", "approved", "2026-11-07"), ("vntimeh.shx", "approved", "2026-11-07"))
+
+
+def run(source: str, pattern: str | None = None, encoding: str = "tcvn3") -> dict[str, Any]:
+    return {"font": None, "font_source": source, "encoding": encoding, "capital_font": None,
+            "knowledge_pattern": pattern}  # fmt: skip
+
+
+def decoded(work: Path, entry_id: str, source: str, runs: list[dict[str, Any]]) -> None:
+    """Give a text-index entry this decode source and these runs."""
+    index = load(work / "text" / f"{REL}.json")
+    decode = next(e for e in index["entries"] if e["id"] == entry_id)["decode"]
+    patterns = list(dict.fromkeys(r["knowledge_pattern"] for r in runs if r["knowledge_pattern"]))
+    decode = {
+        **decode,
+        "source": source,
+        "knowledge_patterns": patterns,
+        "run_details": runs,
+        "runs": len(runs),
+    }
+    edit_index(work, {entry_id: {"decode": decode}})
+
+
+def test_decoded_by_groups_the_cited_entries_per_decode_source_and_row(work):
+    decoded(work, HEAD, "style_font", [run("style_font", encoding="unicode")])
+    decoded(work, CONCRETE, "knowledge_table", [run("knowledge_table", "VHARIAL.TTF")])
+    mixed = [run("codepoint_evidence", encoding="unicode"), run("knowledge_table", "VHARIAL.TTF")]
+    decoded(work, REST, "codepoint_evidence", mixed)
+    add(work, kind="structural_system", entries=[HEAD, CONCRETE, REST], value="v", fields=["aspect=floors"],
+        knowledge=KNOWN)  # fmt: skip
+    f = doc(work)["findings"][0]
+    assert validate("reader-findings", doc(work)) == []
+    assert f["decoded_by"] == [
+        {"source": "style_font", "knowledge_pattern": None, "row_status": None, "decided_on": None,
+         "entries": [HEAD]},
+        {"source": "knowledge_table", "knowledge_pattern": "VHARIAL.TTF", "row_status": "approved",
+         "decided_on": "2026-11-07", "entries": [CONCRETE, REST]},
+        {"source": "codepoint_evidence", "knowledge_pattern": None, "row_status": None, "decided_on": None,
+         "entries": [REST]},
+    ]  # fmt: skip
+
+
+def test_a_finding_goes_stale_when_its_knowledge_row_changes(work):
+    decoded(work, CONCRETE, "knowledge_table", [run("knowledge_table", "VHARIAL.TTF")])
+    add(
+        work,
+        kind="structural_system",
+        entries=[CONCRETE],
+        value="v",
+        fields=["aspect=floors"],
+        knowledge=KNOWN,
+    )
+    add(work, kind="structural_system", entries=[REST], value="w", fields=["aspect=floors"], knowledge=KNOWN)
+
+    def stale(knowledge: FontEncodingTable) -> list[bool]:
+        return [f["stale"] for f in list_findings(work, knowledge=knowledge)["findings"]]
+
+    assert stale(KNOWN) == [False, False]
+    assert stale(table(("VHARIAL.TTF", "approved", "2026-12-01"))) == [True, False]  # decided again
+    assert stale(table(("VHARIAL.TTF", "rejected", "2026-11-07"))) == [True, False]  # status changed
+    assert stale(table(("vntimeh.shx", "approved", "2026-11-07"))) == [True, False]  # row removed
+    assert stale(table(("VHARIAL.TTF", "approved", "2026-11-07"))) == [False, False]
+
+
+def test_a_finding_stale_from_its_row_does_not_block_recording_it_again(work):
+    decoded(work, HEAD, "knowledge_table", [run("knowledge_table", "VHARIAL.TTF")])
+    kw: dict[str, Any] = {
+        "kind": "sheet_class",
+        "sheet": "model#01",
+        "entries": [HEAD],
+        "value": "general_notes",
+    }
+    add(work, **kw, knowledge=KNOWN)
+    changed = table(("VHARIAL.TTF", "approved", "2026-12-01"))
+    again = add(work, **kw, knowledge=changed)
+    assert again == {"id": "F-002", "status": "new"}  # not already_recorded, not "one active class"
+    assert [f["stale"] for f in list_findings(work, knowledge=changed)["findings"]] == [True, False]
+    assert doc(work)["findings"][1]["decoded_by"][0]["decided_on"] == "2026-12-01"
+
+
+def test_two_rows_with_one_pattern_resolve_to_the_approved_one(work):
+    """The text index records the pattern, not applies_to: the approved row (the only kind that decodes)
+    is the one recorded, even when a proposed row with that pattern comes first."""
+    pattern, day = "VHARIAL.TTF", "2026-11-07"
+    shared = FontEncodingTable(
+        (
+            FontEncodingRow(2, pattern, "style_name", "vni", None, "proposed", "e", "t", "", ""),
+            FontEncodingRow(3, pattern, "font_file", "tcvn3", None, "approved", "e", "t", "eng", day),
+        )
+    )
+    decoded(work, CONCRETE, "knowledge_table", [run("knowledge_table", "VHARIAL.TTF")])
+    add(work, kind="structural_system", value="v", fields=["aspect=floors"], knowledge=shared)
+    (item,) = doc(work)["findings"][0]["decoded_by"]
+    assert (item["row_status"], item["decided_on"]) == ("approved", "2026-11-07")
+    assert [f["stale"] for f in list_findings(work, knowledge=shared)["findings"]] == [False]
+
+
+def test_a_finding_without_decoded_by_is_judged_by_its_file_only(work):
+    decoded(work, CONCRETE, "knowledge_table", [run("knowledge_table", "VHARIAL.TTF")])
+    add(work, kind="structural_system", value="v", fields=["aspect=floors"], knowledge=KNOWN)
+    d = doc(work)
+    d["findings"][0].pop("decoded_by")
+    (work / "reader-findings.json").write_text(json.dumps(d), encoding="utf-8")
+    assert [f["stale"] for f in list_findings(work, knowledge=table())["findings"]] == [False]
+
+
+# --- list summary.by_class (tool wave 2, fix 11) ------------------------------------------------------
+
+
+def test_list_counts_the_current_sheet_classes(work):
+    """by_class counts the listed sheet_class findings that are active and not stale: a withdrawn or stale
+    class has been replaced (or must be), so it would count a sheet twice."""
+    assert list_findings(work)["summary"] == {"by_class": {}}
+    add(work, kind="sheet_class", sheet="model#01", entries=[HEAD], value="general_notes")
+    add(work, kind="sheet_class", sheet="model#02", entries=[OTHER_SHEET], value="foundation")
+    add(work, kind="structural_system", value="v", fields=["aspect=floors"])  # not a sheet class
+    listing = list_findings(work)
+    assert listing["summary"] == {"by_class": {"foundation": 1, "general_notes": 1}}
+    listed_only = ("stale", "stale_reasons", "redo")
+    stored = {k: v for k, v in listing.items()} | {
+        "findings": [{k: v for k, v in f.items() if k not in listed_only} for f in listing["findings"]]
+    }
+    assert validate("reader-findings", stored) == []
+    withdraw_finding(work, "F-002", "it is the setting-out plan")
+    add(work, kind="sheet_class", sheet="model#02", entries=[OTHER_SHEET], value="setting_out")
+    assert list_findings(work)["summary"]["by_class"] == {"general_notes": 1, "setting_out": 1}
+    assert list_findings(work, file="other.dxf")["summary"]["by_class"] == {}  # follows the filters
+    assert "summary" not in doc(work)  # never stored
+    path = work / "inventory.json"
+    inventory = load(path)
+    for row in inventory["files"]:
+        if row["path"] == REL:
+            row["sha256"] = "0" * 64
+    path.write_text(json.dumps(inventory), encoding="utf-8")
+    assert list_findings(work)["summary"]["by_class"] == {}  # every class is stale now
+
+
+# --- --part (ADR-0019, part mode) -------------------------------------------------------------------------
+
+PART_A, PART_B = "blk1-piles", "blk1-columns"
+PART_KW: dict[str, Any] = {"kind": "structural_system", "value": "v", "fields": ["aspect=floors"]}
+
+
+def manifest(work: Path, *ids: str) -> None:
+    path = work / "parts" / "manifest.json"
+    path.parent.mkdir(exist_ok=True)
+    path.write_text(json.dumps({"parts": [{"id": i} for i in ids]}), encoding="utf-8")
+
+
+def withdraw(work: Path, finding_id: str, **kw: Any) -> dict[str, str]:
+    return withdraw_finding(work, finding_id, "wrong", **kw)
+
+
+def withdraw_refused(work: Path, code: int, finding_id: str = "F-001", **kw: Any) -> str:
+    before = (work / "reader-findings.json").read_bytes()
+    with pytest.raises(FindingError) as err:
+        withdraw(work, finding_id, **kw)
+    assert err.value.exit_code == code, str(err.value)
+    assert (work / "reader-findings.json").read_bytes() == before
+    return str(err.value)
+
+
+def test_part_is_optional_without_a_manifest_and_is_stored(work):
+    assert add(work, **PART_KW, part=PART_A) == {"id": "F-001", "status": "new"}
+    d = doc(work)
+    assert d["findings"][0]["part"] == PART_A and validate("reader-findings", d) == []
+
+
+def test_a_finding_without_part_before_a_manifest_exists_has_no_part_key_and_validates(work):
+    add(work, **PART_KW)
+    d = doc(work)
+    assert "part" not in d["findings"][0] and validate("reader-findings", d) == []
+    manifest(work, PART_A)  # a manifest appearing later does not invalidate the stored finding
+    assert list_findings(work)["findings"][0].get("part") is None
+
+
+@pytest.mark.parametrize("bad", ["", " ", "-x", "_x", "a b", "a/b", "é", "x" * 65, "a\n"])
+def test_a_part_that_breaks_the_pattern_is_exit_2_with_or_without_a_manifest(work, bad):
+    refused(work, 2, **PART_KW, part=bad)
+    manifest(work, PART_A)
+    refused(work, 2, **PART_KW, part=bad)
+
+
+def test_the_longest_part_id_is_accepted(work):
+    add(work, **PART_KW, part="a" + "b" * 63)
+    assert doc(work)["findings"][0]["part"] == "a" + "b" * 63
+
+
+def test_part_is_required_once_a_manifest_exists_exit_2(work):
+    manifest(work, PART_A)
+    msg = refused(work, 2, **PART_KW)
+    assert "--part" in msg
+
+
+def test_a_part_not_in_the_manifest_is_exit_1(work):
+    manifest(work, PART_A)
+    msg = refused(work, 1, **PART_KW, part=PART_B)
+    assert PART_B in msg
+    assert add(work, **PART_KW, part=PART_A)["status"] == "new"
+
+
+@pytest.mark.parametrize(
+    "content",
+    ["{not json", "[]", '{"parts": 3}', '{"parts": [{"name": "x"}]}', '{"parts": ["x"]}', ""],
+)
+def test_an_unreadable_or_malformed_manifest_is_exit_1_naming_the_file(work, content):
+    path = work / "parts" / "manifest.json"
+    path.parent.mkdir()
+    path.write_text(content, encoding="utf-8")
+    assert "parts/manifest.json" in refused(work, 1, **PART_KW, part=PART_A)
+    assert "parts/manifest.json" in refused(work, 1, **PART_KW)  # also without --part
+
+
+def test_a_manifest_that_lists_no_parts_says_so(work):
+    manifest(work)
+    assert "lists no parts" in refused(work, 1, **PART_KW, part=PART_A)
+
+
+def test_a_directory_at_the_manifest_path_is_exit_1_not_part_mode_off(work, capsys):
+    (work / "parts" / "manifest.json").mkdir(parents=True)
+    assert "parts/manifest.json" in refused(work, 1, **PART_KW)
+    assert "parts/manifest.json" in refused(work, 1, **PART_KW, part=PART_A)
+    base = ["add", str(work), "--kind", "structural_system", "--file", REL, "--entries", CONCRETE]
+    rc, out, err = cli(capsys, *base, "--value", "v", "--field", "aspect=floors")
+    assert rc == 1 and out == "" and "parts/manifest.json" in err
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32" or (hasattr(os, "geteuid") and os.geteuid() == 0), reason="chmod 000 needs a user"
+)
+def test_an_unreadable_manifest_path_is_exit_3(work):
+    manifest(work, PART_A)
+    for target in (work / "parts", work / "parts" / "manifest.json"):
+        target.chmod(0o000)
+        try:
+            msg = refused(work, 3, **PART_KW, part=PART_A)
+        finally:
+            target.chmod(0o755 if target.is_dir() else 0o644)
+        assert "parts/manifest.json" in msg
+    assert add(work, **PART_KW, part=PART_A)["status"] == "new"
+
+
+def test_the_manifest_is_read_from_parts_manifest_json_only(work):
+    (work / "manifest.json").write_text(json.dumps({"parts": [{"id": PART_A}]}), encoding="utf-8")
+    assert add(work, **PART_KW)["status"] == "new"  # no manifest at the fixed path: part stays optional
+
+
+def test_withdraw_needs_the_findings_own_part(work):
+    add(work, **PART_KW, part=PART_A)
+    withdraw_refused(work, 1)  # no --part
+    withdraw_refused(work, 1, part=PART_B)
+    assert "withdrawn_reason" not in doc(work)["findings"][0]
+    assert withdraw(work, "F-001", part=PART_A) == {"id": "F-001", "status": "withdrawn"}
+    d = doc(work)
+    assert d["findings"][0]["part"] == PART_A and validate("reader-findings", d) == []
+
+
+def test_withdraw_with_a_manifest_needs_part_exit_2_and_an_unknown_part_exit_1(work):
+    add(work, **PART_KW, part=PART_A)
+    manifest(work, PART_A, PART_B)
+    withdraw_refused(work, 2)
+    withdraw_refused(work, 1, part="blk9-none")
+    withdraw_refused(work, 2, part="-bad")
+    assert withdraw(work, "F-001", part=PART_A)["status"] == "withdrawn"
+
+
+def test_withdraw_of_a_finding_without_part_validates_the_part_and_stores_nothing(work):
+    add(work, **PART_KW)
+    manifest(work, PART_A)
+    withdraw_refused(work, 2)  # a manifest exists: --part is required
+    withdraw_refused(work, 1, part=PART_B)
+    assert withdraw(work, "F-001", part=PART_A)["status"] == "withdrawn"
+    assert "part" not in doc(work)["findings"][0]
+
+
+def test_withdraw_without_a_manifest_and_without_part_still_works_for_untagged_findings(work):
+    add(work, **PART_KW)
+    assert withdraw(work, "F-001")["status"] == "withdrawn"
+    withdraw_refused(work, 2, part="-bad")
+
+
+def test_a_sheet_keeps_one_active_class_whatever_the_part_and_the_message_names_the_owner(work):
+    add(work, kind="sheet_class", sheet="model#01", entries=[HEAD], value="general_notes", part="scout")
+    msg = refused(
+        work, 1, kind="sheet_class", sheet="model#01", entries=[HEAD], value="general_notes", part=PART_A
+    )
+    assert "F-001" in msg and "(part scout)" in msg and "--part scout" in msg
+    assert withdraw(work, "F-001", part="scout")["status"] == "withdrawn"  # the named part can do it
+    assert (
+        add(work, kind="sheet_class", sheet="model#01", entries=[HEAD], value="foundation", part=PART_A)[
+            "status"
+        ]
+        == "new"
+    )
+
+
+def test_the_message_for_an_untagged_class_does_not_name_a_part(work):
+    add(work, kind="sheet_class", sheet="model#01", entries=[HEAD], value="general_notes")
+    msg = refused(
+        work, 1, kind="sheet_class", sheet="model#01", entries=[HEAD], value="foundation", part=PART_A
+    )
+    assert "F-001" in msg and "--part" not in msg and "(part" not in msg
+
+
+def test_the_same_finding_in_another_part_is_a_new_finding(work):
+    first = add(work, **PART_KW, part=PART_A)
+    assert add(work, **PART_KW, part=PART_A) == {"id": first["id"], "status": "already_recorded"}
+    assert add(work, **PART_KW, part=PART_B) == {"id": "F-002", "status": "new"}
+    assert add(work, **PART_KW) == {"id": "F-003", "status": "new"}  # untagged is another record again
+    assert [f.get("part") for f in doc(work)["findings"]] == [PART_A, PART_B, None]
+
+
+def test_cli_part_exit_codes_and_list_shows_part(work, capsys):
+    base = ["add", str(work), "--kind", "structural_system", "--file", REL, "--entries", CONCRETE]
+    base += ["--value", "v", "--field", "aspect=floors"]
+    rc, out, _ = cli(capsys, *base, "--part", PART_A)
+    assert rc == 0 and json.loads(out)["status"] == "new"
+    rc, out, _ = cli(capsys, "list", str(work))
+    assert rc == 0 and json.loads(out)["findings"][0]["part"] == PART_A
+    assert cli(capsys, *base, "--part", "-bad")[0] == 2
+    manifest(work, PART_A)
+    assert cli(capsys, *base)[0] == 2
+    assert cli(capsys, *base, "--part", PART_B)[0] == 1
+    assert cli(capsys, "withdraw", str(work), "F-001", "--reason", "r")[0] == 2
+    assert cli(capsys, "withdraw", str(work), "F-001", "--reason", "r", "--part", PART_B)[0] == 1
+    assert cli(capsys, "withdraw", str(work), "F-001", "--reason", "r", "--part", PART_A)[0] == 0
+
+
+# --- a finding whose part left the manifest can still be withdrawn (E4a D5) -----------------------------
+
+
+def test_withdraw_accepts_the_findings_own_part_after_the_manifest_dropped_it(work):
+    add(work, **PART_KW, part=PART_A)
+    manifest(work, PART_B)  # PART_A is gone
+    withdraw_refused(work, 2)  # a manifest exists: --part is still required
+    withdraw_refused(work, 2, part="-bad")
+    withdraw_refused(work, 1, part=PART_B)  # listed, but not this finding's part
+    withdraw_refused(work, 1, part="blk9-none")  # neither listed nor its own
+    assert withdraw(work, "F-001", part=PART_A) == {"id": "F-001", "status": "withdrawn"}
+    assert validate("reader-findings", doc(work)) == []
+
+
+def test_withdraw_of_an_orphan_part_works_when_the_manifest_lists_no_parts(work):
+    add(work, **PART_KW, part=PART_A)
+    manifest(work)
+    assert withdraw(work, "F-001", part=PART_A)["status"] == "withdrawn"
+
+
+def test_adding_with_a_part_the_manifest_dropped_is_still_exit_1(work):
+    add(work, **PART_KW, part=PART_A)
+    manifest(work, PART_B)
+    with pytest.raises(FindingError) as err:
+        add(work, kind="structural_system", value="w", fields=["aspect=floors"], part=PART_A)
+    assert err.value.exit_code == 1
+
+
+@pytest.mark.parametrize("content", ["{not json", "[]", '{"parts": 3}'])
+def test_an_invalid_manifest_still_refuses_the_own_part_withdraw_exit_1(work, content):
+    add(work, **PART_KW, part=PART_A)
+    path = work / "parts" / "manifest.json"
+    path.parent.mkdir(exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+    assert "parts/manifest.json" in withdraw_refused(work, 1, part=PART_A)
+
+
+# --- a locked part refuses finding writes (ADR-0019, E5b-4) ------------------------------------------------
+
+LOCKED_AT = "2026-03-04T05:06:07Z"
+REOPEN_HINT = "harness part receipt W --part {part} --kind reopened --reason"
+
+
+def _receipt(kind: str, part_hash: str = "c" * 64) -> dict[str, Any]:
+    return {
+        "kind": kind, "part_hash": part_hash, "at": LOCKED_AT, "tool_version": "0.1.0",
+        "review": None, "inputs": {} if kind == "locked" else None,
+        "reason": "the sizes changed" if kind == "reopened" else None,
+    }  # fmt: skip
+
+
+def write_receipts(work: Path, part: str, *kinds: str, text: str | None = None) -> Path:
+    """`parts/<part>/receipts.json` by hand: one receipt per kind (hash arbitrary), or `text` as is."""
+    path = work / "parts" / part / "receipts.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if text is None:
+        receipts = [{"n": i, **_receipt(k)} for i, k in enumerate(kinds, start=1)]
+        text = json.dumps({"schema_version": "0.1", "part": part, "receipts": receipts})
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+def test_finding_add_and_withdraw_refused_on_a_locked_part(work):
+    manifest(work, PART_A, PART_B)
+    add(work, **PART_KW, part=PART_A)  # F-001, part A
+    add(work, **PART_KW, part=PART_B)  # F-002, part B
+    write_receipts(work, PART_A, "checked", "locked")
+    before = (work / "reader-findings.json").read_bytes()
+    message = refused(work, 1, **{**PART_KW, "value": "w"}, part=PART_A)
+    assert f"part '{PART_A}' is locked (receipt 2, {LOCKED_AT})" in message
+    assert REOPEN_HINT.format(part=PART_A) in message
+    assert refused(work, 1, **PART_KW, part=PART_A) == message  # the repeat of an existing one too
+    assert "is locked" in withdraw_refused(work, 1, "F-001", part=PART_A)
+    # the finding's own part is locked, the --part given is not: still refused for the lock
+    assert f"part '{PART_A}' is locked" in withdraw_refused(work, 1, "F-001", part=PART_B)
+    assert (work / "reader-findings.json").read_bytes() == before
+    # the other part is untouched by the lock
+    assert add(work, **{**PART_KW, "value": "w"}, part=PART_B)["status"] == "new"
+    assert withdraw(work, "F-002", part=PART_B)["status"] == "withdrawn"
+    # reopened: the latest receipt is no longer `locked`
+    write_receipts(work, PART_A, "checked", "locked", "reopened")
+    assert withdraw(work, "F-001", part=PART_A)["status"] == "withdrawn"
+    assert add(work, **{**PART_KW, "value": "x"}, part=PART_A)["status"] == "new"
+
+
+def test_a_locked_receipt_without_a_manifest_checks_nothing(work):
+    write_receipts(work, PART_A, "locked")
+    assert add(work, **PART_KW, part=PART_A)["status"] == "new"
+    assert withdraw(work, "F-001", part=PART_A)["status"] == "withdrawn"
+
+
+def test_refusal_reads_latest_receipt_not_status(work):
+    from tekla_harness.part_receipts import locked_parts, part_hash, part_status
+
+    row = {
+        "schema_version": "0.1",
+        "blocks": [{"id": "B1", "grid_system_ids": [], "origin_note": "Block B1: its own grid"}],
+        "parts": [{"id": PART_A, "kind": "bookkeeping", "order": 0}],
+    }
+    (work / "parts").mkdir(exist_ok=True)
+    (work / "parts" / "manifest.json").write_text(json.dumps(row), encoding="utf-8")
+    add(work, **PART_KW, part=PART_A)
+    write_receipts(work, PART_A, "locked")
+    path = work / "parts" / PART_A / "receipts.json"
+    data = load(path)
+    data["receipts"][0]["part_hash"] = part_hash(work, row, PART_A)
+    path.write_text(json.dumps(data), encoding="utf-8")
+    assert part_status(work, PART_A) == "locked"
+    (work / "parts" / PART_A / "values.json").write_text('{"hand": "edit"}', encoding="utf-8")
+    assert part_status(work, PART_A) == "reopened"  # the derived status says open again ...
+    assert locked_parts(work, [PART_A]) == [PART_A]
+    assert "is locked" in refused(work, 1, **{**PART_KW, "value": "w"}, part=PART_A)  # ... the write refuses
+    assert "is locked" in withdraw_refused(work, 1, part=PART_A)
+
+
+@pytest.mark.parametrize(
+    "content",
+    ["{not json", "[]", '{"schema_version": "0.1", "part": "blk1-piles"}', ""],
+)
+def test_unreadable_receipts_refuse_the_write(work, content):
+    manifest(work, PART_A)
+    add(work, **PART_KW, part=PART_A)
+    write_receipts(work, PART_A, text=content)
+    assert f"parts/{PART_A}/receipts.json" in refused(work, 1, **{**PART_KW, "value": "w"}, part=PART_A)
+    assert f"parts/{PART_A}/receipts.json" in withdraw_refused(work, 1, part=PART_A)
+
+
+def test_receipts_of_another_part_or_a_directory_refuse_the_write(work):
+    manifest(work, PART_A, PART_B)
+    add(work, **PART_KW, part=PART_A)
+    write_receipts(work, PART_A, "locked")
+    path = work / "parts" / PART_A / "receipts.json"
+    data = load(path)
+    data["part"] = PART_B
+    path.write_text(json.dumps(data), encoding="utf-8")
+    assert "receipts.json" in refused(work, 1, **{**PART_KW, "value": "w"}, part=PART_A)
+    path.unlink()
+    path.mkdir()
+    assert "receipts.json" in refused(work, 1, **{**PART_KW, "value": "w"}, part=PART_A)
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32" or (hasattr(os, "geteuid") and os.geteuid() == 0), reason="chmod 000 needs a user"
+)
+def test_an_unreadable_receipts_path_is_exit_3(work):
+    manifest(work, PART_A)
+    add(work, **PART_KW, part=PART_A)
+    path = write_receipts(work, PART_A, "reopened")
+    path.chmod(0o000)
+    try:
+        assert "receipts.json" in refused(work, 3, **{**PART_KW, "value": "w"}, part=PART_A)
+        assert "receipts.json" in withdraw_refused(work, 3, part=PART_A)
+    finally:
+        path.chmod(0o644)
+    assert add(work, **{**PART_KW, "value": "w"}, part=PART_A)["status"] == "new"
+
+
+def test_cli_add_on_a_locked_part_is_exit_1_with_the_hint_on_stderr(work, capsys):
+    manifest(work, PART_A)
+    write_receipts(work, PART_A, "locked")
+    base = ["add", str(work), "--kind", "structural_system", "--file", REL, "--entries", CONCRETE]
+    rc, out, err = cli(capsys, *base, "--value", "v", "--field", "aspect=floors", "--part", PART_A)
+    assert rc == 1 and out == "" and "is locked" in err
+
+
+# --- the evidence file of a finding (E5b review 2, m4) ----------------------------------------------------
+
+
+def with_evidence(work: Path, body: bytes = b"{}") -> Path:
+    """One finding whose evidence is `geometry/g1.json` (written with `body`, its sha256 recorded)."""
+    import hashlib
+
+    add(work, kind="cross_check", entries=[CONCRETE, REST], value="v", questions=["Q-001"])
+    saved = work / "geometry" / "g1.json"
+    saved.parent.mkdir(exist_ok=True)
+    saved.write_bytes(body)
+    d = doc(work)
+    d["findings"][0]["evidence"] = {
+        "source": "geometry/g1.json", "sha256": hashlib.sha256(body).hexdigest(), "command": "geometry",
+        "query": {"tol": 1.0}, "items": [{"id": "G-0123456789"}],
+    }  # fmt: skip
+    assert validate("reader-findings", d) == []
+    (work / "reader-findings.json").write_text(json.dumps(d), encoding="utf-8")
+    return saved
+
+
+def test_only_a_not_found_evidence_file_is_evidence_missing(work, monkeypatch, capsys):
+    saved = with_evidence(work)
+    assert [f["stale"] for f in list_findings(work)["findings"]] == [False]
+    saved.unlink()  # gone: the finding is stale
+    reasons = list_findings(work)["findings"][0]["stale_reasons"]
+    assert [r["reason"] for r in reasons] == ["evidence_missing"]
+    saved.parent.rmdir()
+    saved.parent.write_bytes(b"x")  # `geometry` is a file: the path cannot exist either
+    reasons = list_findings(work)["findings"][0]["stale_reasons"]
+    assert [r["reason"] for r in reasons] == ["evidence_missing"]
+    saved.parent.unlink()
+    saved = with_evidence(work)
+    real = Path.read_bytes
+
+    def refuse(self: Path) -> bytes:
+        if self.name == "g1.json":
+            raise PermissionError(13, "Permission denied")
+        return real(self)
+
+    monkeypatch.setattr(Path, "read_bytes", refuse)  # held by another process: not a stale finding
+    with pytest.raises(FindingError) as caught:
+        list_findings(work)
+    assert caught.value.exit_code == 3 and "geometry/g1.json" in str(caught.value)
+    code, out, err = cli(capsys, "list", str(work))
+    assert code == 3 and out == "" and "cannot read geometry/g1.json" in err
+
+
+def refuse_evidence_file(monkeypatch) -> None:
+    """The operating system refuses the evidence file `geometry/g1.json` (held by another process)."""
+    real = Path.read_bytes
+
+    def refuse(self: Path) -> bytes:
+        if self.name == "g1.json":
+            raise PermissionError(13, "Permission denied")
+        return real(self)
+
+    monkeypatch.setattr(Path, "read_bytes", refuse)
+
+
+def test_add_refuses_with_exit_3_and_writes_nothing_while_an_evidence_file_is_refused(work, monkeypatch):
+    """E5b review 3, m5: `add` judges every older finding of the file; a refused evidence file is exit 3,
+    never a stale finding (a duplicate of the older finding would otherwise be written)."""
+    with_evidence(work)
+    stored = work / "reader-findings.json"
+    before = stored.read_bytes()
+    refuse_evidence_file(monkeypatch)
+    with pytest.raises(FindingError) as caught:
+        add(work, kind="structural_system", entries=[REST], value="v", fields=["aspect=floors"])
+    assert caught.value.exit_code == 3 and "geometry/g1.json" in str(caught.value)
+    assert stored.read_bytes() == before
+    with pytest.raises(
+        FindingError
+    ) as again:  # the older finding itself, added again: not "already recorded"
+        add(work, kind="cross_check", entries=[CONCRETE, REST], value="v", questions=["Q-001"])
+    assert again.value.exit_code == 3
+    assert stored.read_bytes() == before
+
+
+def test_cli_add_exits_3_with_nothing_on_stdout_while_an_evidence_file_is_refused(work, monkeypatch, capsys):
+    with_evidence(work)
+    stored = work / "reader-findings.json"
+    before = stored.read_bytes()
+    refuse_evidence_file(monkeypatch)
+    code, out, err = cli(
+        capsys, "add", str(work), "--kind", "structural_system", "--file", REL, "--entries", REST,
+        "--value", "v", "--field", "aspect=floors",
+    )  # fmt: skip
+    assert code == 3 and out == "" and "cannot read geometry/g1.json" in err
+    assert stored.read_bytes() == before

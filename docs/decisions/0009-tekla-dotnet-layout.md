@@ -123,3 +123,18 @@ ReFS, FAT/exFAT, volume shadow copies, Tekla multi-user models.
   list, so a runtime redirect cannot swap our dependency version.
 - Artefact schemas (run journal, CLI output) are added to `schemas/` with `SCHEMA_NAMES`
   entries in a later slice.
+
+## Amendment 3 (2026-11-11, Tekla 2026 target)
+
+The engineer decided (Q1 of [ADR-0015](0015-lot-spec-grids-levels-nonlinear-members.md), accepted
+2026-11-11) that the target is **Tekla Structures 2026 Diamond**. This replaces the 2024.0.4 pin in the
+`TeklaAdapter` row of the layout table and the "under review" note in the status line; the accepted
+text above is not edited.
+
+- `TeklaAdapter` (`net48`, x64) references `Tekla.Structures.Model` and `Tekla.Structures.Catalogs`
+  **2026.0.3**. No project file references them yet, so the pin is documentary until
+  `TeklaAdapter.csproj` exists.
+- Known 2026 deltas ([`tekla/api-notes.md`](../../tekla/api-notes.md), version matrix): the Model
+  package targets `netstandard2.0` only; the DLLs are x64-only. The first Windows build confirms that
+  the `net48` x64 executable consumes them; until then this is unverified.
+- `TSAppConfigPatcherTask` stays at 2.1.x (to be re-checked on that first build).

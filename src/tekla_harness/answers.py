@@ -23,13 +23,29 @@ Rules:
         grid_system_axis_unassigned   dir1=X|Y, dir2=X|Y            (exactly the directions the question
                                       lists in `subjects`, distinct axes)
         member_mark_prefix_meaning    <prefix>=<meaning>            (at least one)
+        file_set_relation             set1=a.dwg,b.dwg set2=c.dwg   (at least one set; every file the
+                                      question's refs list (their `file`) exactly once, no other file)
         grid_system_select            systems=S001,S002             (optional: the grid systems the project
                                       uses; without it `harness status` takes every listed system as used)
                                       separate=S001,S002            (optional: two or more systems of the
                                       question, all selected, that are different buildings)
+        grid_system_missing           dir1_labels=1,2,3 dir1_spacings=3130,3540 dir2_labels=A,B
+                                      dir2_spacings=4250 [sheet=model#05]   (ADR-0013 §2: the four keys
+                                      together, or none for an answer in words only that builds nothing;
+                                      per direction at least 2 labels distinct ignoring case and one spacing
+                                      fewer, each a plain decimal > 0 and at most MAX_SPACING (1000000) in
+                                      drawing units; stored as arrays: labels strings,
+                                      spacings numbers, an integer kept an integer)
+                                      or no_grid=yes, alone (ADR-0013 §2: the file holds no plan that
+                                      needs a grid; only the engineer's closes the question)
     every other code takes no value;
   * grid_system_conflict cannot be answered: a conflict closes only through the grid_system_select answer
     (`systems` without one of the two, or `separate` with both), never through words;
+  * `role` (`answered_by_role`): 'engineer' or 'simulated' (an agent standing in for the engineer); gate 1
+    counts the engineer's answers only (status.py). Required (`harness answer --role`, and the keyword
+    `role` of record_answer, which has no default): every new answer records its role. Any other role,
+    None included, is a usage error. An answer recorded before roles existed has none; gate 1 does not
+    count it;
   * a second answer to the same key supersedes the first (kept, status 'superseded');
   * nothing is deleted: answers are only appended or change status.
 
@@ -44,6 +60,7 @@ changed, 2 usage (unknown or obsolete id, blank text or name, bad `--value`, no 
 from __future__ import annotations
 
 import json
+import math
 import re
 from datetime import date
 from pathlib import Path
@@ -56,9 +73,15 @@ from tekla_harness.questions import (
     CONTRADICTION_CODE,
     EXIT_INVALID,
     EXIT_USAGE,
+    FILE_SET_CODE,
+    FILE_SET_KEY,
+    GRID_ANSWER_KEYS,
+    GRID_ANSWER_SHEET_KEY,
+    GRID_MISSING_CODE,
     PREFIX_CODE,
     PRODUCER_COMMANDS,
     QUESTION_DOCUMENTS,
+    ROLES,
     SELECT_CODE,
     SYSTEM_AXIS_CODE,
     UNIT_CODES,
@@ -143,10 +166,129 @@ def check_values(code: str, values: dict[str, str]) -> list[str]:
                     f"separate: {', '.join(outside)} not in systems (a separate building must be selected)"
                 ]
         return bad
+    if code == GRID_MISSING_CODE:
+        return _grid_problems(values)
+    if code == FILE_SET_CODE:
+        if not values:
+            return ["this question needs at least one set: set1=a.dwg,b.dwg (set2=..., every file once)"]
+        bad = [f"'{k}' is not a set name like set1" for k in values if not FILE_SET_KEY.fullmatch(k)]
+        seen: dict[str, str] = {}
+        for name, text in values.items():
+            files = _system_ids(text)
+            if any(not f for f in files):
+                bad.append(f"{name}: a file name is blank")
+                continue
+            for f in files:
+                if f in seen:
+                    bad.append(f"{f} is named twice ({seen[f]} and {name}): each file belongs to one set")
+                seen.setdefault(f, name)
+        return bad
     return [f"questions with code '{code}' take no value, got: {', '.join(sorted(values))}"] if values else []
 
 
+NO_GRID_KEY, NO_GRID_YES = "no_grid", "yes"  # ADR-0013 §2: the file holds no plan that needs a grid
+
+
+def is_no_grid(values: Any) -> bool:
+    """The stored values of a grid_system_missing answer are exactly no_grid=yes."""
+    return values == {NO_GRID_KEY: NO_GRID_YES}
+
+
+def _grid_problems(values: dict[str, str]) -> list[str]:
+    """check_values for grid_system_missing (ADR-0013 §2): {} (words only), no_grid=yes alone, or the four
+    keys of GRID_ANSWER_KEYS plus the optional sheet; per direction at least two distinct, non-blank labels
+    and exactly one spacing fewer, each a plain decimal number > 0."""
+    if not values:
+        return []
+    if NO_GRID_KEY in values:
+        other = sorted(k for k in values if k != NO_GRID_KEY)
+        bad = (
+            [f"{NO_GRID_KEY}=yes stands alone, without {', '.join(other)} (it says the file has no grid)"]
+            if other
+            else []
+        )
+        if values[NO_GRID_KEY] != NO_GRID_YES:
+            bad.append(f"{NO_GRID_KEY}: '{values[NO_GRID_KEY]}' is not 'yes' (the only value is no_grid=yes)")
+        return bad
+    allowed = (*GRID_ANSWER_KEYS, GRID_ANSWER_SHEET_KEY)
+    bad = [f"'{k}' is not one of {', '.join(allowed)}" for k in values if k not in allowed]
+    bad += [
+        f"{k} is missing: give both directions ({' '.join(f'{n}=...' for n in GRID_ANSWER_KEYS)}), or no "
+        "value for an answer in words only"
+        for k in GRID_ANSWER_KEYS
+        if k not in values
+    ]
+    if GRID_ANSWER_SHEET_KEY in values and not values[GRID_ANSWER_SHEET_KEY].strip():
+        bad.append(f"{GRID_ANSWER_SHEET_KEY}: blank (omit it, or give the sheet id like model#05)")
+    for direction in ("dir1", "dir2"):
+        labels_key, spacings_key = f"{direction}_labels", f"{direction}_spacings"
+        labels = _system_ids(values[labels_key]) if labels_key in values else None
+        spacings = _system_ids(values[spacings_key]) if spacings_key in values else None
+        if labels is not None:
+            if any(not label for label in labels):
+                bad.append(f"{labels_key}: a label is blank")
+            elif len(labels) < 2:
+                bad.append(f"{labels_key}: give at least 2 labels")
+            elif len(set(labels)) != len(labels):
+                bad.append(f"{labels_key}: the labels must be distinct")
+            elif len({label.casefold() for label in labels}) != len(labels):  # review m2
+                bad.append(
+                    f"{labels_key}: the labels must be distinct ignoring case (the drawing check reads A "
+                    "and a as one axis)"
+                )
+        if spacings is not None:
+            wrong = [s for s in spacings if not _spacing_ok(s)]
+            bad += [
+                f"{spacings_key}: '{s}' is not a number > 0 and at most {MAX_SPACING:.0f} (plain decimal, "
+                "drawing units)"
+                for s in wrong
+            ]
+            if not wrong and labels is not None and len(spacings) != len(labels) - 1:
+                bad.append(
+                    f"{spacings_key}: {len(spacings)} spacing(s) for {len(labels)} labels; give one fewer "
+                    "than the labels (the distances between consecutive axes)"
+                )
+    return bad
+
+
+SPACING = re.compile(r"[0-9]+(?:\.[0-9]*)?|\.[0-9]+")
+# the largest grid spacing an answer may give, in drawing units: 1 km in millimetres, the smallest unit
+# (review m1: a 400-digit number was inf as a float, or an int too large for one)
+MAX_SPACING = 1_000_000.0
+
+
+def spacing_in_range(value: float) -> bool:
+    """A finite spacing > 0 and at most MAX_SPACING (drawing units)."""
+    return math.isfinite(value) and 0 < value <= MAX_SPACING
+
+
+def _spacing_ok(text: str) -> bool:
+    """A plain ASCII decimal (no sign, exponent, underscore, inf or nan) greater than 0 and at most
+    MAX_SPACING."""
+    return SPACING.fullmatch(text) is not None and spacing_in_range(float(text))
+
+
+def _spacing(text: str) -> int | float:
+    """An integer stays an integer (3130), a decimal is a float (3540.5)."""
+    return int(text) if text.isascii() and text.isdigit() else float(text)
+
+
+def grid_answer_values(values: dict[str, str]) -> dict[str, Any]:
+    """The stored form of checked grid_system_missing values (answers.schema.json): labels as arrays of
+    strings, spacings as arrays of numbers, the sheet stripped; {} stays {}."""
+    stored: dict[str, Any] = {}
+    for name, text in values.items():
+        if name.endswith("_labels"):
+            stored[name] = _system_ids(text)
+        elif name.endswith("_spacings"):
+            stored[name] = [_spacing(s) for s in _system_ids(text)]
+        else:
+            stored[name] = text.strip()
+    return stored
+
+
 def _system_ids(text: str) -> list[str]:
+    """Comma-separated ids or file names, stripped."""
     return [part.strip() for part in text.split(",")]
 
 
@@ -212,6 +354,22 @@ def _check_in_context(
                     f"{question_id}: {name} names {', '.join(unknown) or 'systems'} that the question does "
                     f"not list ({', '.join(known) or 'grid-system-questions.json has no such question'})",
                 )
+    if code == FILE_SET_CODE:
+        q = _raised_question(ledger.work, key)
+        listed = {r["file"] for r in (q or {}).get("refs") or [] if isinstance(r, dict) and r.get("file")}
+        if not listed:
+            raise QuestionsError(
+                EXIT_INVALID, f"{question_id}: its files are not in questions.json; rerun harness intake"
+            )
+        named = {f for text in values.values() for f in _system_ids(text)}
+        missing, unknown = sorted(listed - named), sorted(named - listed)
+        if missing or unknown:
+            raise QuestionsError(
+                EXIT_INVALID,
+                f"{question_id} ({code}): name every file of the question exactly once"
+                + (f"; missing {', '.join(missing)}" if missing else "")
+                + (f"; not in the question: {', '.join(unknown)}" if unknown else ""),
+            )
     if code == CONTRADICTION_CODE:
         units = {
             str(a["values"].get("unit"))
@@ -292,11 +450,14 @@ def record_answer(
     values: dict[str, str] | None = None,
     *,
     today: date | None = None,
+    role: str,
 ) -> dict[str, Any]:
     """Append an answer (see the module docstring). Returns what was done. Raises QuestionsError."""
     work = Path(work_dir).resolve()
     if not work.is_dir():
         raise QuestionsError(EXIT_USAGE, f"work folder not found (not a folder): {work_dir}")
+    if role not in ROLES:
+        raise QuestionsError(EXIT_USAGE, f"--role '{role}' is not one of {', '.join(ROLES)}")
     if not text.strip():
         raise QuestionsError(EXIT_USAGE, "the answer text is empty: write the engineer's words verbatim")
     if not by.strip():
@@ -324,7 +485,11 @@ def record_answer(
         for name in ("systems", "separate"):
             if name in values:
                 stored[name] = _system_ids(values[name])
-    answer = {
+    if entry["code"] == FILE_SET_CODE:
+        stored = {name: _system_ids(files) for name, files in values.items()}
+    if entry["code"] == GRID_MISSING_CODE:
+        stored = grid_answer_values(values)
+    answer: dict[str, Any] = {
         "key": key,
         "question_id": question_id,
         "code": entry["code"],
@@ -332,6 +497,7 @@ def record_answer(
         "answer_text": text,
         "values": stored,
         "answered_by": by.strip(),
+        "answered_by_role": role,
         "answered_on": (today or date.today()).isoformat(),
         "status": "active",
     }

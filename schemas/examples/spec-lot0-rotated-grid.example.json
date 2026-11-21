@@ -1,0 +1,227 @@
+{
+  "schema_version": "0.1",
+  "project_id": "demo-warehouse",
+  "lot": 0,
+  "units": "mm",
+  "description": "Synthetic example: setup lot, the main grid plus a wing grid rotated 30 degrees about its origin (15000, 2000).",
+  "members": [],
+  "grids": [
+    {
+      "spec_id": "L0-G-MAIN",
+      "name": "GRID MAIN",
+      "origin": {"x": 0, "y": 0, "z": 0, "provenance": {"file": "S-101.dxf", "sheet": "S-101", "revision": "B", "method": "engineer_answer", "question_id": "Q-004"}, "confidence": "high"},
+      "rotation_deg": {"value": 0, "provenance": {"file": "S-101.dxf", "sheet": "S-101", "revision": "B", "method": "engineer_answer", "question_id": "Q-004"}, "confidence": "high"},
+      "x_lines": [
+        {
+          "label": {"value": "1", "provenance": {"file": "S-101.dxf", "sheet": "S-101", "revision": "B", "region": {"grid_ref": "1"}, "method": "dxf_entity"}, "confidence": "high"},
+          "position": {
+            "value": 0,
+            "provenance": {
+              "file": "S-101.dxf",
+              "sheet": "S-101",
+              "revision": "B",
+              "region": {"grid_ref": "1"},
+              "method": "derived",
+              "derived_from": [{"file": "S-101.dxf", "sheet": "S-101", "revision": "B", "method": "engineer_answer", "question_id": "Q-004"}]
+            },
+            "confidence": "high"
+          }
+        },
+        {
+          "label": {"value": "2", "provenance": {"file": "S-101.dxf", "sheet": "S-101", "revision": "B", "region": {"grid_ref": "2"}, "method": "dxf_entity"}, "confidence": "high"},
+          "position": {
+            "value": 6000,
+            "provenance": {
+              "file": "S-101.dxf",
+              "sheet": "S-101",
+              "revision": "B",
+              "region": {"grid_ref": "2"},
+              "method": "derived",
+              "derived_from": [
+                {"file": "S-101.dxf", "sheet": "S-101", "revision": "B", "method": "dxf_dimension_text"},
+                {"file": "S-101.dxf", "sheet": "S-101", "revision": "B", "method": "engineer_answer", "question_id": "Q-001"}
+              ]
+            },
+            "confidence": "high"
+          }
+        },
+        {
+          "label": {"value": "3", "provenance": {"file": "S-101.dxf", "sheet": "S-101", "revision": "B", "region": {"grid_ref": "3"}, "method": "dxf_entity"}, "confidence": "high"},
+          "position": {
+            "value": 12000,
+            "provenance": {
+              "file": "S-101.dxf",
+              "sheet": "S-101",
+              "revision": "B",
+              "region": {"grid_ref": "3"},
+              "method": "derived",
+              "derived_from": [
+                {"file": "S-101.dxf", "sheet": "S-101", "revision": "B", "method": "dxf_dimension_text"},
+                {"file": "S-101.dxf", "sheet": "S-101", "revision": "B", "method": "engineer_answer", "question_id": "Q-001"}
+              ]
+            },
+            "confidence": "high"
+          }
+        }
+      ],
+      "y_lines": [
+        {
+          "label": {"value": "A", "provenance": {"file": "S-101.dxf", "sheet": "S-101", "revision": "B", "region": {"grid_ref": "A"}, "method": "dxf_entity"}, "confidence": "high"},
+          "position": {
+            "value": 0,
+            "provenance": {
+              "file": "S-101.dxf",
+              "sheet": "S-101",
+              "revision": "B",
+              "region": {"grid_ref": "A"},
+              "method": "derived",
+              "derived_from": [{"file": "S-101.dxf", "sheet": "S-101", "revision": "B", "method": "engineer_answer", "question_id": "Q-004"}]
+            },
+            "confidence": "high"
+          }
+        },
+        {
+          "label": {"value": "B", "provenance": {"file": "S-101.dxf", "sheet": "S-101", "revision": "B", "region": {"grid_ref": "B"}, "method": "dxf_entity"}, "confidence": "high"},
+          "position": {
+            "value": 7500,
+            "provenance": {
+              "file": "S-101.dxf",
+              "sheet": "S-101",
+              "revision": "B",
+              "region": {"grid_ref": "B"},
+              "method": "derived",
+              "derived_from": [
+                {"file": "S-101.dxf", "sheet": "S-101", "revision": "B", "method": "dxf_dimension_text"},
+                {"file": "S-101.dxf", "sheet": "S-101", "revision": "B", "method": "engineer_answer", "question_id": "Q-001"}
+              ]
+            },
+            "confidence": "high"
+          }
+        }
+      ],
+      "levels": [
+        {
+          "label": {"value": "+0.000", "provenance": {"file": "S-201.dxf", "sheet": "S-201", "revision": "A", "region": {"detail": "ELEVATION 1"}, "method": "dxf_entity"}, "confidence": "medium"},
+          "z": {"value": 0, "provenance": {"file": "S-201.dxf", "sheet": "S-201", "revision": "A", "method": "engineer_answer", "question_id": "Q-010"}, "confidence": "high"}
+        },
+        {
+          "label": {"value": "+3.600", "provenance": {"file": "S-201.dxf", "sheet": "S-201", "revision": "A", "region": {"detail": "ELEVATION 1"}, "method": "dxf_entity"}, "confidence": "medium"},
+          "z": {"value": 3600, "provenance": {"file": "S-201.dxf", "sheet": "S-201", "revision": "A", "method": "engineer_answer", "question_id": "Q-010"}, "confidence": "high"}
+        },
+        {
+          "label": {"value": "+7.200", "provenance": {"file": "S-201.dxf", "sheet": "S-201", "revision": "A", "region": {"detail": "ELEVATION 1"}, "method": "dxf_entity"}, "confidence": "medium"},
+          "z": {"value": 7200, "provenance": {"file": "S-201.dxf", "sheet": "S-201", "revision": "A", "method": "engineer_answer", "question_id": "Q-010"}, "confidence": "high"}
+        }
+      ]
+    },
+    {
+      "spec_id": "L0-G-WING",
+      "name": "GRID WING",
+      "origin": {"x": 15000, "y": 2000, "z": 0, "provenance": {"file": "S-101.dxf", "sheet": "S-101", "revision": "B", "method": "engineer_answer", "question_id": "Q-004"}, "confidence": "high"},
+      "rotation_deg": {"value": 30, "provenance": {"file": "S-101.dxf", "sheet": "S-101", "revision": "B", "method": "engineer_answer", "question_id": "Q-004"}, "confidence": "high"},
+      "x_lines": [
+        {
+          "label": {"value": "W1", "provenance": {"file": "S-102.dxf", "sheet": "S-102", "revision": "A", "region": {"grid_ref": "W1"}, "method": "dxf_entity"}, "confidence": "high"},
+          "position": {
+            "value": 0,
+            "provenance": {
+              "file": "S-102.dxf",
+              "sheet": "S-102",
+              "revision": "A",
+              "region": {"grid_ref": "W1"},
+              "method": "derived",
+              "derived_from": [{"file": "S-101.dxf", "sheet": "S-101", "revision": "B", "method": "engineer_answer", "question_id": "Q-004"}]
+            },
+            "confidence": "high"
+          }
+        },
+        {
+          "label": {"value": "W2", "provenance": {"file": "S-102.dxf", "sheet": "S-102", "revision": "A", "region": {"grid_ref": "W2"}, "method": "dxf_entity"}, "confidence": "high"},
+          "position": {
+            "value": 5400,
+            "provenance": {
+              "file": "S-102.dxf",
+              "sheet": "S-102",
+              "revision": "A",
+              "region": {"grid_ref": "W2"},
+              "method": "derived",
+              "derived_from": [
+                {"file": "S-102.dxf", "sheet": "S-102", "revision": "A", "method": "dxf_dimension_text"},
+                {"file": "S-101.dxf", "sheet": "S-101", "revision": "B", "method": "engineer_answer", "question_id": "Q-001"}
+              ]
+            },
+            "confidence": "high"
+          }
+        },
+        {
+          "label": {"value": "W3", "provenance": {"file": "S-102.dxf", "sheet": "S-102", "revision": "A", "region": {"grid_ref": "W3"}, "method": "dxf_entity"}, "confidence": "high"},
+          "position": {
+            "value": 10800,
+            "provenance": {
+              "file": "S-102.dxf",
+              "sheet": "S-102",
+              "revision": "A",
+              "region": {"grid_ref": "W3"},
+              "method": "derived",
+              "derived_from": [
+                {"file": "S-102.dxf", "sheet": "S-102", "revision": "A", "method": "dxf_dimension_text"},
+                {"file": "S-101.dxf", "sheet": "S-101", "revision": "B", "method": "engineer_answer", "question_id": "Q-001"}
+              ]
+            },
+            "confidence": "high"
+          }
+        }
+      ],
+      "y_lines": [
+        {
+          "label": {"value": "WA", "provenance": {"file": "S-102.dxf", "sheet": "S-102", "revision": "A", "region": {"grid_ref": "WA"}, "method": "dxf_entity"}, "confidence": "high"},
+          "position": {
+            "value": 0,
+            "provenance": {
+              "file": "S-102.dxf",
+              "sheet": "S-102",
+              "revision": "A",
+              "region": {"grid_ref": "WA"},
+              "method": "derived",
+              "derived_from": [{"file": "S-101.dxf", "sheet": "S-101", "revision": "B", "method": "engineer_answer", "question_id": "Q-004"}]
+            },
+            "confidence": "high"
+          }
+        },
+        {
+          "label": {"value": "WB", "provenance": {"file": "S-102.dxf", "sheet": "S-102", "revision": "A", "region": {"grid_ref": "WB"}, "method": "dxf_entity"}, "confidence": "high"},
+          "position": {
+            "value": 6000.5,
+            "provenance": {
+              "file": "S-102.dxf",
+              "sheet": "S-102",
+              "revision": "A",
+              "region": {"grid_ref": "WB"},
+              "method": "derived",
+              "derived_from": [
+                {"file": "S-102.dxf", "sheet": "S-102", "revision": "A", "method": "dxf_dimension_text"},
+                {"file": "S-101.dxf", "sheet": "S-101", "revision": "B", "method": "engineer_answer", "question_id": "Q-001"}
+              ]
+            },
+            "confidence": "high"
+          }
+        }
+      ],
+      "levels": [
+        {
+          "label": {"value": "+0.000", "provenance": {"file": "S-201.dxf", "sheet": "S-201", "revision": "A", "region": {"detail": "ELEVATION 1"}, "method": "dxf_entity"}, "confidence": "medium"},
+          "z": {"value": 0, "provenance": {"file": "S-201.dxf", "sheet": "S-201", "revision": "A", "method": "engineer_answer", "question_id": "Q-010"}, "confidence": "high"}
+        },
+        {
+          "label": {"value": "+3.600", "provenance": {"file": "S-201.dxf", "sheet": "S-201", "revision": "A", "region": {"detail": "ELEVATION 1"}, "method": "dxf_entity"}, "confidence": "medium"},
+          "z": {"value": 3600, "provenance": {"file": "S-201.dxf", "sheet": "S-201", "revision": "A", "method": "engineer_answer", "question_id": "Q-010"}, "confidence": "high"}
+        },
+        {
+          "label": {"value": "+7.200", "provenance": {"file": "S-201.dxf", "sheet": "S-201", "revision": "A", "region": {"detail": "ELEVATION 1"}, "method": "dxf_entity"}, "confidence": "medium"},
+          "z": {"value": 7200, "provenance": {"file": "S-201.dxf", "sheet": "S-201", "revision": "A", "method": "engineer_answer", "question_id": "Q-010"}, "confidence": "high"}
+        }
+      ]
+    }
+  ],
+  "open_questions": []
+}

@@ -1,0 +1,79 @@
+{
+  "schema_version": "0.1",
+  "part": "B1-caps",
+  "rows": [
+    {
+      "row": "R001",
+      "mark": "K-2",
+      "field": "size",
+      "value": "1500x2400",
+      "file": "plans.dxf",
+      "sheet": "model#05",
+      "view": { "heading_entry": "T000412" },
+      "state": "seen",
+      "cites": { "findings": ["F-012"], "questions": ["Q-031"], "entries": ["T000455"] }
+    },
+    {
+      "row": "R002",
+      "mark": "K-2",
+      "field": "count_plan",
+      "value": "7",
+      "file": "plans.dxf",
+      "sheet": "model#05",
+      "view": { "bbox": [0, 0, 1000, 500] },
+      "state": "seen",
+      "cites": {},
+      "hand_sum": { "terms": [{ "marks": "K-2" }] }
+    },
+    {
+      "row": "R003",
+      "subject": "piles",
+      "field": "count_plan",
+      "value": "26",
+      "file": "plans.dxf",
+      "sheet": "model#05",
+      "state": "seen",
+      "cites": { "entries": ["T000470"], "geometry": { "source": "geometry/contents-model-05-01234567-89abcdef.json", "items": ["G-0123456789"] } },
+      "hand_sum": { "terms": [{ "finding": "F-012", "of": "symbols" }, { "finding": "F-013", "of": "items" }, { "entry": "T000471" }] },
+      "note": "two plan views, summed by hand"
+    },
+    {
+      "row": "R004",
+      "mark": "K-2",
+      "field": "level_top",
+      "value": null,
+      "state": "asked",
+      "cites": { "questions": ["Q-033"] }
+    },
+    {
+      "row": "R005",
+      "subject": "grid S001 A-B",
+      "field": "spacing",
+      "value": null,
+      "file": "plans.dxf",
+      "sheet": null,
+      "state": "unread",
+      "cites": { "questions": ["Q-034"] }
+    },
+    {
+      "row": "R006",
+      "mark": "K-3",
+      "field": "depth",
+      "value": null,
+      "file": "plans.dxf",
+      "sheet": "model#05",
+      "state": "absent",
+      "cites": { "findings": ["F-014"] }
+    },
+    {
+      "row": "R007",
+      "subject": "grid S001 A-B",
+      "field": "spacing",
+      "value": "4 000",
+      "file": "plans.dxf",
+      "sheet": "model#05",
+      "state": "seen",
+      "cites": { "findings": ["F-015"], "grid_systems": ["S001"] }
+    }
+  ]
+}

@@ -392,7 +392,7 @@ practice not stated by Tekla; **proposal** = harness design decision for the eng
 
 | # | Rule | Basis | Status |
 |---|---|---|---|
-| 1 | Lot 0 = environment check, units, base point, grid and levels, views; engineer confirms grid/levels before any member | S1 p.19-20 setup order; engineer gate is the harness's own (workflow "mandatory section" of gate 1) | cited + proposal. **Gap**: `spec.schema.json` and the `tekla-cli` contract have no grid/level object or command |
+| 1 | Lot 0 = environment check, units, base point, grid and levels, views; engineer confirms grid/levels before any member | S1 p.19-20 setup order; engineer gate is the harness's own (workflow "mandatory section" of gate 1) | cited + proposal. Grid and level objects: lot 0 `grids` (with their `levels`) in `spec.schema.json` and contract rules 8 and 9 (ADR-0015); the write route waits for To verify T1, T2 and T4 |
 | 2 | Decide numbering prefixes/start numbers, class and material defaults before the first member; write them into default part properties | S1 p.735, p.777 | cited. **Gap**: lot spec has no prefix/start-number field |
 | 3 | Validate catalogs first: every profile, material, component name must exist in the open environment (`tekla-cli validate`) | S1 p.730 "Illegal profile/material"; S8 mapping `Check` | cited |
 | 4 | Columns (and footings/base plates) before beams | S3 p.164 (columns = phase 1 example) | example; load-path logic is practice |

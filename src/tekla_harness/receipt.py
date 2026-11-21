@@ -18,8 +18,8 @@ from typing import Any, cast
 from tekla_harness import __version__
 from tekla_harness.schemas import validate, validator
 
-# Bump whenever check_spec or the strict JSON profile gets stricter.
-SPEC_RULES_VERSION = 1
+# Bump whenever check_spec or the strict JSON profile gets stricter. 2: ADR-0015 + ADR-0016 rules.
+SPEC_RULES_VERSION = 2
 
 
 class ReceiptError(Exception):

@@ -67,3 +67,9 @@ guard has a gap:
 Decision 2 "differs" is widened by the engineer: also a different kind (column, beam, ...), a
 rotation more than 0.01° away, or a different class when the spec gives one. A different name is
 reported only. Details, journal and resume rules: [ADR-0012](0012-run-journal-and-resume-planner.md).
+
+## Amendment (2026-11-11, Tekla 2026 target)
+
+The target moved to Tekla 2026 ([ADR-0009](0009-tekla-dotnet-layout.md), Amendment 3). Decision 3 above
+says the macro route must pass "on the 2024 test model"; read it as **the 2026 test model**. The
+check itself (`tekla/api-notes.md`, To verify #13) is unchanged and still open.

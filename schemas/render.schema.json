@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:tekla-harness:schema:render:0.1",
+  "title": "Rendered region of one drawing",
+  "description": "Output of `harness render <work_dir> <file> (--sheet ID | --bbox X0 Y0 X1 Y1) [--tiles COLSxROWS] [--layer L ...] [--max-px N] [--no-overlay] [--out-dir DIR] [--input-dir DIR]` (stdout): one PNG per tile of a region of the drawing's MODEL SPACE (paper-space layouts are out of scope in version 0.1), drawn on a dark background with ezdxf and resvg-py, and the transform that maps an image pixel to drawing units. The command writes only the PNG files (default folder <work_dir>/renders, name <sheet or 'bbox'>-<10 hex of a sha1 of file, the file's sha256 in the inventory, region, tile, layers, max-px, overlay>.png, so a rerun overwrites the same file and a re-intake of a changed drawing does not). Transform: x = x0 + (px - left_margin_px) * units_per_px and y = y1 - (py - top_margin_px) * units_per_px; the drawn area is the requested region grown by less than half a pixel on each side, so the transform error is at most 0.12 px (the positions of solid geometry are exact; the dash pattern of an XLINE or RAY starts at the edge of the clip box, so its dashes may shift between tiles or after a change of region). Not drawn, as AutoCAD hides them: entities on an off or frozen layer, the content of an INSERT on a frozen layer (an off INSERT layer hides only its layer-0 content), entities and INSERTs with the invisible flag (counted in entities_invisible). Units are never converted (see `units`). Text is never read from an image: legacy-font text renders garbled, read it with sheet-text.",
+  "type": "object",
+  "required": ["schema_version", "kind", "project_id", "file", "query", "units", "images", "warnings"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": "0.1" },
+    "kind": { "const": "render" },
+    "project_id": { "$ref": "urn:tekla-harness:schema:common:0.1#/$defs/project_id" },
+    "file": { "type": "string", "minLength": 1, "description": "Inventory path of the drawing, relative to the input folder." },
+    "query": {
+      "type": "object",
+      "required": ["sheet", "bbox", "tiles", "layers", "max_px", "overlay"],
+      "additionalProperties": false,
+      "properties": {
+        "sheet": { "type": ["string", "null"], "description": "Detector sheet id whose bbox was drawn; null with --bbox." },
+        "bbox": { "type": ["array", "null"], "items": { "type": "number" }, "minItems": 4, "maxItems": 4, "description": "x0, y0, x1, y1 of the --bbox region in model-space drawing units; null with --sheet (the sheet's bbox is in each image's region)." },
+        "tiles": { "type": "array", "items": { "type": "integer", "minimum": 1 }, "minItems": 2, "maxItems": 2, "description": "[columns, rows]." },
+        "layers": { "type": "array", "items": { "type": "string" }, "description": "Effective layers drawn, as given (compared case-insensitively; layer 0 in a block follows the placing INSERT, nested); empty = every layer. An INSERT is entered whatever its layer; a DIMENSION or another composite (LEADER, MLINE, ...) is kept or dropped as a whole by its own layer." },
+        "max_px": { "type": "integer", "minimum": 128, "maximum": 1568, "description": "Longest edge allowed (at most 1568, the size above which the model downscales an image); the area is also held to 1,150,000 px." },
+        "overlay": { "type": "boolean", "description": "Margin with ticks and labels in drawing units." }
+      }
+    },
+    "units": {
+      "type": "object",
+      "required": ["declared", "answered", "converted"],
+      "additionalProperties": false,
+      "properties": {
+        "declared": { "type": ["string", "null"], "description": "The unit the header declares ($INSUNITS, as the probe reports it); null when none." },
+        "answered": { "anyOf": [{ "type": "null" }, { "enum": ["mm", "cm", "m", "in", "ft"] }], "description": "The unit of the file's active units_confirm_all answer; null when not answered." },
+        "converted": { "const": false, "description": "Always false: every coordinate is in the drawing's units as stored." }
+      }
+    },
+    "images": {
+      "type": "array",
+      "description": "One per tile, row by row from the top row, left to right.",
+      "items": { "$ref": "#/$defs/image" }
+    },
+    "warnings": { "type": "array", "items": { "type": "string" } }
+  },
+  "$defs": {
+    "image": {
+      "type": "object",
+      "required": ["path", "region", "width_px", "height_px", "units_per_px", "transform", "est_image_tokens", "entities_drawn", "entities_pruned", "entities_invisible"],
+      "additionalProperties": false,
+      "properties": {
+        "path": { "type": "string", "minLength": 1, "description": "Absolute path of the PNG." },
+        "region": { "type": "array", "items": { "type": "number" }, "minItems": 4, "maxItems": 4, "description": "x0, y0, x1, y1 of the requested tile in drawing units." },
+        "width_px": { "type": "integer", "minimum": 1, "description": "Whole image, margin included." },
+        "height_px": { "type": "integer", "minimum": 1 },
+        "units_per_px": { "type": "number", "exclusiveMinimum": 0, "description": "Drawing units per pixel, both axes (same as transform.units_per_px)." },
+        "transform": {
+          "type": "object",
+          "description": "x = x0 + (px - left_margin_px) * units_per_px; y = y1 - (py - top_margin_px) * units_per_px. Pixel (0, 0) is the top-left corner of the image.",
+          "required": ["left_margin_px", "top_margin_px", "units_per_px", "x0", "y1"],
+          "additionalProperties": false,
+          "properties": {
+            "left_margin_px": { "type": "integer", "minimum": 0, "description": "94, or wider when a y label needs it (up to a quarter of --max-px)." },
+            "top_margin_px": { "type": "integer", "minimum": 0 },
+            "units_per_px": { "type": "number", "exclusiveMinimum": 0 },
+            "x0": { "type": "number", "description": "Drawing x at the left edge of the drawn area." },
+            "y1": { "type": "number", "description": "Drawing y at the top edge of the drawn area." }
+          }
+        },
+        "est_image_tokens": { "type": "integer", "minimum": 1, "description": "ceil(width_px * height_px / 750)." },
+        "entities_drawn": { "type": "integer", "minimum": 0, "description": "Entities ezdxf drew: each leaf once (an INSERT is entered, not counted, a nested one counts per placement), a composite (dimension, leader, ...) once; not the ones skipped (an XLINE or RAY that misses the region is not counted), hidden or invisible." },
+        "entities_pruned": { "type": "integer", "minimum": 0, "description": "Entities skipped because their box misses the region (an INSERT counts once)." },
+        "entities_invisible": { "type": "integer", "minimum": 0, "description": "Entities in the region with the invisible flag (DXF group 60 = 1), on project 01 mostly the hidden visibility states of dynamic blocks, that ezdxf does not draw (an INSERT counts once, not its content; an entity hidden by its layer is not counted). `harness geometry` counts the content of such an INSERT instead." }
+      }
+    }
+  }
+}

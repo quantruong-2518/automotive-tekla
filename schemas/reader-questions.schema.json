@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:tekla-harness:schema:reader-questions:0.1",
+  "title": "Drawing-reader questions",
+  "description": "reader-questions.json in the work folder (tool wave 3): the questions the drawing-reader agent raised with `harness ask` (producer `reader` in question-registry.json). It is an intake-schema 'questions' document (every rule of intake.schema.json applies, so `harness validate intake` still accepts it) with the reader's own constraints: one question per code, blocking flag, file and where, so each question has exactly one ref and count 1; a reader question is never closed by another answer (no closed_by) and lists no subjects. `places` and `amendments` (harness ask --amend) appear only here. Check a file with `harness validate reader-questions <work>/reader-questions.json`.",
+  "allOf": [
+    { "$ref": "urn:tekla-harness:schema:intake:0.1" },
+    {
+      "type": "object",
+      "required": ["kind", "questions"],
+      "properties": {
+        "kind": { "const": "questions" },
+        "questions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "refs": { "maxItems": 1 },
+              "count": { "const": 1 },
+              "truncated": { "const": false }
+            },
+            "not": { "anyOf": [{ "required": ["closed_by"] }, { "required": ["subjects"] }] }
+          }
+        }
+      }
+    }
+  ]
+}

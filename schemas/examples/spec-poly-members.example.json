@@ -1,0 +1,141 @@
+{
+  "schema_version": "0.1",
+  "project_id": "demo-warehouse",
+  "lot": 3,
+  "units": "mm",
+  "description": "Synthetic example: a curved edge beam on level +7.200 (R = 12750 mm) and a kinked rafter on grid B.",
+  "members": [],
+  "poly_members": [
+    {
+      "spec_id": "L3-B-CURVE-A",
+      "type": "beam",
+      "mark": "CB1",
+      "profile": {"value": "IPE300", "provenance": {"file": "S-102.dxf", "sheet": "S-102", "revision": "A", "region": {"grid_ref": "A/1-3"}, "method": "dxf_entity"}, "confidence": "high"},
+      "material": {
+        "value": "S355JR",
+        "provenance": {"file": "S-001.pdf", "sheet": "S-001", "revision": "A", "region": {"page": 1, "detail": "GENERAL NOTES 3.1"}, "method": "pdf_text_layer"},
+        "confidence": "medium"
+      },
+      "points": [
+        {
+          "x": 0,
+          "y": 0,
+          "z": 7200,
+          "chamfer": "none",
+          "provenance": {
+            "file": "S-102.dxf",
+            "sheet": "S-102",
+            "revision": "A",
+            "region": {"grid_ref": "A/1"},
+            "method": "derived",
+            "derived_from": [
+              {"file": "S-102.dxf", "sheet": "S-102", "revision": "A", "region": {"grid_ref": "A/1"}, "method": "dxf_entity"},
+              {"file": "S-201.dxf", "sheet": "S-201", "revision": "A", "method": "engineer_answer", "question_id": "Q-010"}
+            ]
+          },
+          "confidence": "high"
+        },
+        {
+          "x": 6000,
+          "y": -1500,
+          "z": 7200,
+          "chamfer": "arc_point",
+          "provenance": {
+            "file": "S-102.dxf",
+            "sheet": "S-102",
+            "revision": "A",
+            "region": {"detail": "R=12750"},
+            "method": "derived",
+            "derived_from": [
+              {"file": "S-102.dxf", "sheet": "S-102", "revision": "A", "method": "dxf_dimension_text"},
+              {"file": "S-201.dxf", "sheet": "S-201", "revision": "A", "method": "engineer_answer", "question_id": "Q-010"}
+            ]
+          },
+          "confidence": "medium"
+        },
+        {
+          "x": 12000,
+          "y": 0,
+          "z": 7200,
+          "chamfer": "none",
+          "provenance": {
+            "file": "S-102.dxf",
+            "sheet": "S-102",
+            "revision": "A",
+            "region": {"grid_ref": "A/3"},
+            "method": "derived",
+            "derived_from": [
+              {"file": "S-102.dxf", "sheet": "S-102", "revision": "A", "region": {"grid_ref": "A/3"}, "method": "dxf_entity"},
+              {"file": "S-201.dxf", "sheet": "S-201", "revision": "A", "method": "engineer_answer", "question_id": "Q-010"}
+            ]
+          },
+          "confidence": "high"
+        }
+      ],
+      "class": "4"
+    },
+    {
+      "spec_id": "L3-R-B-KINK",
+      "type": "rafter",
+      "mark": "R1",
+      "profile": {"value": "IPE240", "provenance": {"file": "S-202.dxf", "sheet": "S-202", "revision": "A", "region": {"detail": "SECTION B-B"}, "method": "dxf_entity"}, "confidence": "high"},
+      "material": {"value": "S355JR", "provenance": {"file": "S-001.pdf", "sheet": "S-001", "revision": "A", "method": "pdf_text_layer"}, "confidence": "medium"},
+      "points": [
+        {
+          "x": 0,
+          "y": 7500,
+          "z": 7200,
+          "chamfer": "none",
+          "provenance": {
+            "file": "S-202.dxf",
+            "sheet": "S-202",
+            "revision": "A",
+            "method": "derived",
+            "derived_from": [
+              {"file": "S-202.dxf", "sheet": "S-202", "revision": "A", "method": "dxf_dimension_text"},
+              {"file": "S-201.dxf", "sheet": "S-201", "revision": "A", "method": "engineer_answer", "question_id": "Q-010"}
+            ]
+          },
+          "confidence": "high"
+        },
+        {
+          "x": 6000,
+          "y": 7500,
+          "z": 7800,
+          "chamfer": "none",
+          "provenance": {
+            "file": "S-202.dxf",
+            "sheet": "S-202",
+            "revision": "A",
+            "method": "derived",
+            "derived_from": [
+              {"file": "S-202.dxf", "sheet": "S-202", "revision": "A", "method": "vision"},
+              {"file": "S-201.dxf", "sheet": "S-201", "revision": "A", "method": "engineer_answer", "question_id": "Q-010"}
+            ]
+          },
+          "confidence": "low"
+        },
+        {
+          "x": 12000,
+          "y": 7500,
+          "z": 7200,
+          "chamfer": "none",
+          "provenance": {
+            "file": "S-202.dxf",
+            "sheet": "S-202",
+            "revision": "A",
+            "method": "derived",
+            "derived_from": [
+              {"file": "S-202.dxf", "sheet": "S-202", "revision": "A", "method": "dxf_dimension_text"},
+              {"file": "S-201.dxf", "sheet": "S-201", "revision": "A", "method": "engineer_answer", "question_id": "Q-010"}
+            ]
+          },
+          "confidence": "high"
+        }
+      ],
+      "class": "4",
+      "question_ids": ["Q-031"]
+    }
+  ],
+  "open_questions": ["Q-031"]
+}

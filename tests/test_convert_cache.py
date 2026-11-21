@@ -472,8 +472,20 @@ def _leftover_work_dirs(prefix: str) -> set[str]:
     return {p.name for p in Path(tempfile.gettempdir()).glob(f"{prefix}*")}
 
 
+@pytest.fixture
+def private_tempdir(tmp_path, monkeypatch):
+    """The converter's temp folders go to a folder of this test only: the shared system temp folder also
+    holds other processes' folders (parallel test runs), which made the leftover check flaky."""
+    import tempfile
+
+    private = tmp_path / "systemp"
+    private.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(private))
+    return private
+
+
 @pytest.mark.parametrize("exit_code", [0, 1])
-def test_non_utf8_converter_output_is_a_recorded_failure(tmp_path, template, dwg, exit_code):
+def test_non_utf8_converter_output_is_a_recorded_failure(tmp_path, template, dwg, exit_code, private_tempdir):
     """Review N1: bytes that are not UTF-8 on stderr must not crash the chain."""
     before = _leftover_work_dirs("oda_file_converter-")
     oda = _raw_fake(
@@ -489,7 +501,7 @@ def test_non_utf8_converter_output_is_a_recorded_failure(tmp_path, template, dwg
     result = dwg_to_dxf(dwg, tmp_path / "w1", oda=oda, dwg2dxf=libre)
     assert result.attempts[0].status == "failed" and result.attempts[0].error
     assert result.converter == "libredwg_dwg2dxf"
-    assert _leftover_work_dirs("oda_file_converter-") <= before
+    assert _leftover_work_dirs("oda_file_converter-") == before == set()
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX exec format error")
@@ -504,7 +516,7 @@ def test_unexecutable_converter_is_a_recorded_failure(tmp_path, template, dwg):
     assert result.converter == "libredwg_dwg2dxf"
 
 
-def test_work_folder_is_removed_when_try_raises(tmp_path, template, dwg, monkeypatch):
+def test_work_folder_is_removed_when_try_raises(tmp_path, template, dwg, monkeypatch, private_tempdir):
     before = _leftover_work_dirs("oda_file_converter-")
 
     def boom(*_args, **_kwargs):
@@ -513,7 +525,7 @@ def test_work_folder_is_removed_when_try_raises(tmp_path, template, dwg, monkeyp
     monkeypatch.setattr(convert.subprocess, "run", boom)
     with pytest.raises(RuntimeError):
         dwg_to_dxf(dwg, tmp_path / "w1", oda=fake(tmp_path, "oda", ODA_OUT, True, template))
-    assert _leftover_work_dirs("oda_file_converter-") <= before
+    assert _leftover_work_dirs("oda_file_converter-") == before == set()
 
 
 def test_locked_entry_makes_refresh_fail_loudly(tmp_path, template, dwg, cache, monkeypatch):

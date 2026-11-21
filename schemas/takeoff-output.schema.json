@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:tekla-harness:schema:takeoff-output:0.1",
+  "title": "Output of the `harness takeoff` commands",
+  "description": "The stdout document of each `harness takeoff <action>`, one entry in `$defs` per command. Each document carries `command`, a const that tells them apart: `render` (E8b); `plan` (E8c); `check` (E8d).",
+  "anyOf": [{ "$ref": "#/$defs/render" }, { "$ref": "#/$defs/plan" }, { "$ref": "#/$defs/check" }],
+  "$defs": {
+    "file_name": {
+      "type": "string",
+      "pattern": "^[0-9]{2,}-[A-Za-z0-9][A-Za-z0-9_-]*\\.md$",
+      "description": "A take-off file name `<nn>-<part>.md`."
+    },
+    "render": {
+      "type": "object",
+      "description": "`harness takeoff render W (--part X | --all) [--out DIR]` (E8b): exit 0 when every file asked for is written or already equal, 1 when `--part` names a part that is not eligible (it is then in `skipped`) or a manifest, values or cited record is unusable. `written`: files created or changed; `unchanged`: files rendered equal to the disk; `removed`: files of a part that is no longer eligible (`--all`) or that carry an old rank number; `skipped`: non-bookkeeping parts with no file because their status is not `checked`, `reviewed` or `locked`.",
+      "required": ["command", "out", "written", "unchanged", "removed", "skipped"],
+      "additionalProperties": false,
+      "properties": {
+        "command": { "const": "render" },
+        "out": { "type": "string", "minLength": 1, "description": "The folder the files are in." },
+        "written": { "type": "array", "items": { "$ref": "#/$defs/file_name" }, "uniqueItems": true },
+        "unchanged": { "type": "array", "items": { "$ref": "#/$defs/file_name" }, "uniqueItems": true },
+        "removed": { "type": "array", "items": { "$ref": "#/$defs/file_name" }, "uniqueItems": true },
+        "skipped": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["part", "status"],
+            "additionalProperties": false,
+            "properties": {
+              "part": { "type": "string", "minLength": 1 },
+              "status": { "type": "string", "minLength": 1, "description": "The part's status in `harness status` parts[]." }
+            }
+          }
+        }
+      }
+    },
+    "plan": {
+      "type": "object",
+      "description": "`harness takeoff plan W [--out DIR]` (E8c): exit 0 when `00-plan.md` is written or already equal, 1 when the manifest, a value document or a cited record is unusable, 2 usage, 3 environment. `written`: the file was created or changed. `parts`: non-bookkeeping parts; `rendered`: those with a take-off file (status `checked`, `reviewed` or `locked`); `ready`: those that `harness status` calls ready; `blocking_open`: open blocking questions; `project_blocking`: the question ids in the `chặn mọi lô` row (the status `project_blocking_ids` plus every open blocking question that no part row holds).",
+      "required": ["command", "out", "written", "parts", "rendered", "ready", "blocking_open", "project_blocking"],
+      "additionalProperties": false,
+      "properties": {
+        "command": { "const": "plan" },
+        "out": { "type": "string", "minLength": 1, "description": "The folder the file is in." },
+        "written": { "type": "boolean" },
+        "parts": { "type": "integer", "minimum": 0 },
+        "rendered": { "type": "integer", "minimum": 0 },
+        "ready": { "type": "integer", "minimum": 0 },
+        "blocking_open": { "type": "integer", "minimum": 0 },
+        "project_blocking": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "check": {
+      "type": "object",
+      "description": "`harness takeoff check W [--out DIR]` (E8d, read-only): exit 0 when `ok`, 1 when a problem is found or the manifest, a value document or a cited record is unusable, 2 usage, 3 environment. `files`: the expected files (every eligible part and `00-plan.md`) that exist in the folder. Problems are sorted by file, line, code; `line` is null for a problem of a whole file (`file_missing`, `file_unexpected`, a missing slot marker). `generated_differs`: the file differs from a fresh render (the detail quotes the first differing line and the command to rerun); `slot_markers`: a slot marker is missing, doubled or out of order (the file gets no other check); `ai_slot_empty`, `ai_id`, `ai_code`, `ai_jargon`, `ai_number`: a slot is not written, or holds an id, a backtick, a word of the jargon list, or a number that no generated line of its file holds.",
+      "required": ["command", "ok", "files", "problems"],
+      "additionalProperties": false,
+      "properties": {
+        "command": { "const": "check" },
+        "ok": { "type": "boolean", "description": "True exactly when `problems` is empty (exit 0)." },
+        "files": { "type": "integer", "minimum": 0 },
+        "problems": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["code", "file", "line", "detail"],
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "enum": [
+                  "file_missing", "file_unexpected", "generated_differs", "slot_markers", "ai_slot_empty",
+                  "ai_id", "ai_code", "ai_jargon", "ai_number"
+                ]
+              },
+              "file": { "type": "string", "minLength": 1 },
+              "line": { "type": ["integer", "null"], "minimum": 1 },
+              "detail": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
+      }
+    }
+  }
+}

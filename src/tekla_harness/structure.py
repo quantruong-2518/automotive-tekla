@@ -49,7 +49,7 @@ from typing import Any
 from ezdxf.document import Drawing
 
 from tekla_harness.detect import sha256_file
-from tekla_harness.grids import extract_grids
+from tekla_harness.grids import extract_grids, question_families
 from tekla_harness.levels import extract_levels
 from tekla_harness.questions import (
     QuestionsError,
@@ -377,35 +377,68 @@ def _plan(work: Path, row: dict[str, Any], problems: list[str], input_dir: Path 
     return plan
 
 
-def _consolidate(per_file: list[tuple[str, list[dict[str, Any]], Counter[str]]]) -> list[dict[str, Any]]:
+Cited = list[tuple[dict[str, Any], list[str] | None]]  # extractor questions with the grid families each cites
+
+
+def _cited(docs: dict[str, dict[str, Any]]) -> Cited:
+    """Every question of one file's sheets, grids and levels documents, with the grid families it cites
+    (grids.question_families; None for sheets and levels questions and grid questions about no family)."""
+    return [
+        (q, question_families(q, docs["grids"]) if k == "grids" else None)
+        for k in _KINDS
+        for q in docs[k]["questions"]
+    ]
+
+
+def _families(refs: list[dict[str, Any]], dropped: list[list[str] | None], unknown: bool) -> None:
+    """Set `families` on the listed refs so that their union is the question's TRUE family list (lifecycle
+    closes a question only when every ref carries families): the last listed ref also takes the families of
+    the refs the cap did not list. When some are unknown (a ref the cap dropped cites no family, or the
+    extractor counted questions it did not list) no ref carries families."""
+    if unknown or any(f is None for f in dropped):
+        for ref in refs:
+            ref.pop("families", None)
+        return
+    if dropped and refs and "families" in refs[-1]:
+        refs[-1]["families"] = sorted({*refs[-1]["families"], *(f for fams in dropped if fams for f in fams)})
+
+
+def _consolidate(per_file: list[tuple[str, Cited, Counter[str]]]) -> list[dict[str, Any]]:
     """Group extractor questions by (blocking, code, file), over sheets, grids and levels of one file.
 
     `count` is the true total: questions an extractor counted but did not list (per-code cap, see
     `true_counts`) are added to the question of their code and file (a code has one blocking value per
-    extractor). Raw questions (no id, key or answer yet), blocking first, then by code, then by file."""
+    extractor). A grid ref names the grid `families` it cites (not part of the key; see _families for refs
+    the cap does not list). Raw questions (no id, key or answer yet), blocking first, then by code, then by
+    file."""
     groups: dict[tuple[bool, str, str], list[tuple[str, dict[str, Any]]]] = {}
+    cited: dict[tuple[bool, str, str], list[list[str] | None]] = {}
     unlisted: Counter[tuple[bool, str, str]] = Counter()
     for rel, questions, totals in per_file:
         listed_by_code: Counter[str] = Counter()
         key_of: dict[str, tuple[bool, str, str]] = {}
-        for q in questions:
+        for q, families in questions:
             ref: dict[str, Any] = {"file": rel}
             if "sheet" in q:
                 ref["sheet"] = q["sheet"]
             ref.update(where=q["where"], found=q["found"])
+            if families:
+                ref["families"] = families
             key = (not q["blocking"], q["code"], rel)
             groups.setdefault(key, []).append((q["message"], ref))
+            cited.setdefault(key, []).append(families)
             listed_by_code[q["code"]] += 1
             key_of.setdefault(q["code"], key)
         for code, n in totals.items():
             if n > listed_by_code[code] and code in key_of:
                 unlisted[key_of[code]] += n - listed_by_code[code]
-    return [
-        merged_question(
-            code, not non_blocking, rel, items, MAX_STRUCTURE_REFS, unlisted[(non_blocking, code, rel)]
-        )
-        for (non_blocking, code, rel), items in sorted(groups.items())
-    ]
+    out = []
+    for key, items in sorted(groups.items()):
+        non_blocking, code, rel = key
+        question = merged_question(code, not non_blocking, rel, items, MAX_STRUCTURE_REFS, unlisted[key])
+        _families(question["refs"], cited[key][len(question["refs"]) :], unlisted[key] > 0)
+        out.append(question)
+    return out
 
 
 def _file_row(plan: _Row) -> dict[str, Any]:
@@ -467,7 +500,7 @@ def read_structure(work_dir: Path, input_dir: Path | None = None) -> StructureRe
 
     rows: list[dict[str, Any]] = []
     texts: dict[str, str] = {}
-    per_file_questions: list[tuple[str, list[dict[str, Any]], Counter[str]]] = []
+    per_file_questions: list[tuple[str, Cited, Counter[str]]] = []
     for plan in plans:
         row = _file_row(plan)
         rows.append(row)
@@ -475,11 +508,10 @@ def read_structure(work_dir: Path, input_dir: Path | None = None) -> StructureRe
             continue
         docs = _extract_all(plan.dxf, plan.text_index, plan.rel, texts)
         outputs = {k: f"{STRUCTURE_DIR}/{plan.rel}.{k}.json" for k in _KINDS}
-        questions = [q for k in _KINDS for q in docs[k]["questions"]]
         totals: Counter[str] = Counter()
         for k in _KINDS:
             totals.update(true_counts(docs[k]))
-        per_file_questions.append((plan.rel, questions, totals))
+        per_file_questions.append((plan.rel, _cited(docs), totals))
         per_kind = {k: _question_counts(docs[k]) for k in _KINDS}
         counts = {k: per_kind[k]["total"] for k in _KINDS}
         counts["total"] = sum(counts.values())

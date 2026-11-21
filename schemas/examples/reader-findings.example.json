@@ -2,7 +2,7 @@
   "schema_version": "0.1",
   "kind": "reader_findings",
   "project_id": "demo-findings",
-  "next_id": 5,
+  "next_id": 6,
   "findings": [
     {
       "id": "F-001",
@@ -33,7 +33,8 @@
       "value": "Concrete grade C30/37 for all foundations and columns",
       "fields": { "topic": "concrete_class" },
       "questions": [],
-      "confidence": "medium"
+      "confidence": "medium",
+      "part": "all-notes-materials"
     },
     {
       "id": "F-003",
@@ -67,6 +68,59 @@
       "fields": {},
       "questions": ["Q-012"],
       "confidence": "medium"
+    },
+    {
+      "id": "F-005",
+      "kind": "measured",
+      "status": "active",
+      "file": "plans/set.dxf",
+      "file_sha256": "aa3cd98b17eb640c0f66a796c431bf33aecd884692d62168115020030cf1b050",
+      "sheet": "model#01",
+      "entries": [],
+      "value": "4 piles in cap 1700x3200",
+      "fields": { "quantity": "count" },
+      "questions": [],
+      "confidence": "medium",
+      "evidence": {
+        "source": "geometry/contents-model-01-01234567-89abcdef.json",
+        "sha256": "bb3cd98b17eb640c0f66a796c431bf33aecd884692d62168115020030cf1b051",
+        "command": "contents",
+        "query": {
+          "sheet": "model#01",
+          "outline_layers": ["S-CAP"],
+          "circle_layers": ["S-PILE"],
+          "max_long": 20000.0,
+          "marks": "DC-\\d+",
+          "mark_radius": 3000.0,
+          "detail": false,
+          "max": null,
+          "tol": 1.0
+        },
+        "items": [
+          {
+            "id": "G-abcdef0123",
+            "layer": "S-CAP",
+            "short": 1700.0,
+            "long": 3200.0,
+            "centre": [10850.0, 21600.0],
+            "symbols": 4,
+            "invisible": false,
+            "marks": [{ "text": "DC-1", "entry_id": "T000031", "distance": 0.0 }],
+            "axes": []
+          },
+          {
+            "id": "G-0123456789",
+            "layer": "S-CAP",
+            "short": 1700.0,
+            "long": 3200.0,
+            "centre": [20850.0, 21600.0],
+            "symbols": 4,
+            "invisible": false,
+            "marks": [],
+            "axes": []
+          }
+        ]
+      }
     }
   ]
 }

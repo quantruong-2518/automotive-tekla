@@ -31,6 +31,25 @@ No silent failures.
 **(proposed)** DXF checks: overridden dimension text vs measured value, multiple scales in model
 space, missing xrefs, `$INSUNITS`, legacy Vietnamese encodings (TCVN3/VNI).
 
+## Project stages and parts ([ADR-0019](decisions/0019-part-as-unit-of-work.md))
+
+The engineer's five project stages group the numbered steps below. "Step N" in `roadmap.md` is a
+build phase of the harness, not a project stage.
+
+| Stage | Steps | Ends with |
+|---|---|---|
+| 1 Analyse | I (1–3) | analysis report, parts broken down, blocking questions answered |
+| 2 Plan | II (4–8) | take-off plan and approach approved (gates 1–3) |
+| 3 Build | III (9–13) | every lot built, verified, reported (gate 4 per lot) |
+| 4 Review and index | IV (14–16) + connections, clash check, numbering (planned) | phase report (gate 5) |
+| 5 Drawings | planned | assembly and GA drawings from company templates |
+
+A **part** is one block × one member family (`NX1-piles`), plus `grid-levels`, `notes-materials`
+and the members with no sheet. The same part id runs through every stage. Each part is closed on
+its own: read → script checks → independent review → locked. A locked part with no open blocking
+question moves to the next stage; the others wait. No agent re-types a value another agent
+recorded.
+
 ## Steps
 
 ### I. Intake and reading
@@ -43,9 +62,11 @@ space, missing xrefs, `$INSUNITS`, legacy Vietnamese encodings (TCVN3/VNI).
    `render_tiles`. → `read-log.json`
 3. **Expert analysis** — sheet list, general notes, structural system, grids, levels,
    members, anomalies; `crosscheck` spans and grid counts across sheets.
-   → `01-analysis.md`, `questions.md`
-   - **(proposed)** split into 3a deterministic extraction (`grids.json`, `levels.json`,
-     `schedules.json`) and 3b AI analysis per sheet group.
+   → `01-analysis.md`, `takeoff/` (take-off plan per member family), `questions.md`
+   - Reading runs per part: a scout breaks the set down, one reader per part, the cross-cutting
+     parts first (ADR-0019).
+   - **(proposed)** 3a deterministic extraction (`grids.json`, `levels.json`, `schedules.json`)
+     ahead of the AI analysis.
 
 ### II. Planning
 4. **Plan** — scope, risks, assumptions; Tekla `info`, `validate` (read-only). → `02-plan.md`
@@ -59,6 +80,8 @@ space, missing xrefs, `$INSUNITS`, legacy Vietnamese encodings (TCVN3/VNI).
 ### III. Lot loop (9–13 for n = 1…N, strictly sequential)
 Lot n+1 starts only after gate 4 of lot n is approved. Nothing runs in parallel across lots:
 the engineer's 3D check may reject lot n, and a rejected lot can change the spec of later lots.
+Specs of other locked parts may be prepared ahead in parallel; a spec prepared ahead is validated
+again before its build (ADR-0019 decision 6, not yet confirmed).
 9. **Extract lot n** — every value with source sheet and confidence; `validate_spec`,
    `selfcheck`, `profile_map`. → `lots/n/spec.json` + its receipt `spec.json.receipt.json`
    (written only by `harness validate spec`, run by `doc-reader`; RTI-0008)

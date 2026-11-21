@@ -1,0 +1,23 @@
+{
+  "schema_version": "0.1",
+  "kind": "render",
+  "project_id": "demo-warehouse",
+  "file": "drawings/S-101.dwg",
+  "query": { "sheet": null, "bbox": [7370000, 5782000, 7395000, 5806000], "tiles": [1, 1], "layers": [], "max_px": 1568, "overlay": true },
+  "units": { "declared": "mm", "answered": "mm", "converted": false },
+  "images": [
+    {
+      "path": "/work/demo-warehouse/renders/bbox-3fa9c1d07b.png",
+      "region": [7370000, 5782000, 7395000, 5806000],
+      "width_px": 1123,
+      "height_px": 1024,
+      "units_per_px": 24.496232792611632,
+      "transform": { "left_margin_px": 94, "top_margin_px": 10, "units_per_px": 24.496232792611632, "x0": 7369994.673159372, "y1": 5806003.15406838 },
+      "est_image_tokens": 1534,
+      "entities_drawn": 812,
+      "entities_pruned": 41250,
+      "entities_invisible": 0
+    }
+  ],
+  "warnings": ["text in legacy fonts may render garbled and some diacritics are dropped: never read text from the image, use sheet-text"]
+}

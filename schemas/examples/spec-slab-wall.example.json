@@ -1,0 +1,229 @@
+{
+  "schema_version": "0.1",
+  "project_id": "demo-house",
+  "lot": 4,
+  "units": "mm",
+  "description": "Synthetic example: a 120 mm slab on level +3.600 with one stair opening, and a 200 mm wall with one door opening.",
+  "members": [],
+  "slabs": [
+    {
+      "spec_id": "L4-S-A1B2",
+      "mark": "S1",
+      "material": {"value": "C25/30", "provenance": {"file": "S-001.pdf", "sheet": "S-001", "revision": "A", "method": "engineer_answer", "question_id": "Q-012"}, "confidence": "high"},
+      "thickness": {"value": 120, "provenance": {"file": "S-103.dxf", "sheet": "S-103", "revision": "A", "region": {"detail": "SLAB NOTE S=120"}, "method": "dxf_entity"}, "confidence": "high"},
+      "outline": [
+        {
+          "x": 0,
+          "y": 0,
+          "z": 3600,
+          "chamfer": "none",
+          "provenance": {
+            "file": "S-103.dxf",
+            "sheet": "S-103",
+            "revision": "A",
+            "region": {"grid_ref": "A/1"},
+            "method": "derived",
+            "derived_from": [
+              {"file": "S-103.dxf", "sheet": "S-103", "revision": "A", "method": "dxf_entity"},
+              {"file": "S-201.dxf", "sheet": "S-201", "revision": "A", "method": "engineer_answer", "question_id": "Q-010"}
+            ]
+          },
+          "confidence": "high"
+        },
+        {
+          "x": 6000,
+          "y": 0,
+          "z": 3600,
+          "chamfer": "none",
+          "provenance": {
+            "file": "S-103.dxf",
+            "sheet": "S-103",
+            "revision": "A",
+            "region": {"grid_ref": "A/2"},
+            "method": "derived",
+            "derived_from": [
+              {"file": "S-103.dxf", "sheet": "S-103", "revision": "A", "method": "dxf_entity"},
+              {"file": "S-201.dxf", "sheet": "S-201", "revision": "A", "method": "engineer_answer", "question_id": "Q-010"}
+            ]
+          },
+          "confidence": "high"
+        },
+        {
+          "x": 6000,
+          "y": 7500,
+          "z": 3600,
+          "chamfer": "none",
+          "provenance": {
+            "file": "S-103.dxf",
+            "sheet": "S-103",
+            "revision": "A",
+            "region": {"grid_ref": "B/2"},
+            "method": "derived",
+            "derived_from": [
+              {"file": "S-103.dxf", "sheet": "S-103", "revision": "A", "method": "dxf_entity"},
+              {"file": "S-201.dxf", "sheet": "S-201", "revision": "A", "method": "engineer_answer", "question_id": "Q-010"}
+            ]
+          },
+          "confidence": "high"
+        },
+        {
+          "x": 0,
+          "y": 7500,
+          "z": 3600,
+          "chamfer": "none",
+          "provenance": {
+            "file": "S-103.dxf",
+            "sheet": "S-103",
+            "revision": "A",
+            "region": {"grid_ref": "B/1"},
+            "method": "derived",
+            "derived_from": [
+              {"file": "S-103.dxf", "sheet": "S-103", "revision": "A", "method": "dxf_entity"},
+              {"file": "S-201.dxf", "sheet": "S-201", "revision": "A", "method": "engineer_answer", "question_id": "Q-010"}
+            ]
+          },
+          "confidence": "high"
+        }
+      ],
+      "openings": [
+        {
+          "spec_id": "L4-S-A1B2-O1",
+          "mark": "STAIR",
+          "outline": [
+            {
+              "x": 1000,
+              "y": 1000,
+              "z": 3600,
+              "chamfer": "none",
+              "provenance": {"file": "S-103.dxf", "sheet": "S-103", "revision": "A", "region": {"detail": "STAIR OPENING"}, "method": "dxf_dimension_text"},
+              "confidence": "high"
+            },
+            {
+              "x": 3400,
+              "y": 1000,
+              "z": 3600,
+              "chamfer": "none",
+              "provenance": {"file": "S-103.dxf", "sheet": "S-103", "revision": "A", "region": {"detail": "STAIR OPENING"}, "method": "dxf_dimension_text"},
+              "confidence": "high"
+            },
+            {
+              "x": 3400,
+              "y": 2200,
+              "z": 3600,
+              "chamfer": "none",
+              "provenance": {"file": "S-103.dxf", "sheet": "S-103", "revision": "A", "region": {"detail": "STAIR OPENING"}, "method": "dxf_dimension_text"},
+              "confidence": "high"
+            },
+            {
+              "x": 1000,
+              "y": 2200,
+              "z": 3600,
+              "chamfer": "none",
+              "provenance": {"file": "S-103.dxf", "sheet": "S-103", "revision": "A", "region": {"detail": "STAIR OPENING"}, "method": "dxf_dimension_text"},
+              "confidence": "high"
+            }
+          ]
+        }
+      ],
+      "class": "5"
+    }
+  ],
+  "walls": [
+    {
+      "spec_id": "L4-W-C-12",
+      "mark": "V1",
+      "material": {"value": "C25/30", "provenance": {"file": "S-001.pdf", "sheet": "S-001", "revision": "A", "method": "engineer_answer", "question_id": "Q-012"}, "confidence": "high"},
+      "start": {
+        "x": 0,
+        "y": 9000,
+        "z": 3600,
+        "provenance": {
+          "file": "S-104.dxf",
+          "sheet": "S-104",
+          "revision": "A",
+          "region": {"grid_ref": "C/1"},
+          "method": "derived",
+          "derived_from": [
+            {"file": "S-104.dxf", "sheet": "S-104", "revision": "A", "method": "dxf_entity"},
+            {"file": "S-201.dxf", "sheet": "S-201", "revision": "A", "method": "engineer_answer", "question_id": "Q-010"}
+          ]
+        },
+        "confidence": "high"
+      },
+      "end": {
+        "x": 4000,
+        "y": 9000,
+        "z": 3600,
+        "provenance": {
+          "file": "S-104.dxf",
+          "sheet": "S-104",
+          "revision": "A",
+          "region": {"grid_ref": "C/2"},
+          "method": "derived",
+          "derived_from": [
+            {"file": "S-104.dxf", "sheet": "S-104", "revision": "A", "method": "dxf_entity"},
+            {"file": "S-201.dxf", "sheet": "S-201", "revision": "A", "method": "engineer_answer", "question_id": "Q-010"}
+          ]
+        },
+        "confidence": "high"
+      },
+      "thickness": {"value": 200, "provenance": {"file": "S-104.dxf", "sheet": "S-104", "revision": "A", "region": {"grid_ref": "C/1-2"}, "method": "dxf_dimension_text"}, "confidence": "high"},
+      "height": {
+        "value": 3480,
+        "provenance": {
+          "file": "S-201.dxf",
+          "sheet": "S-201",
+          "revision": "A",
+          "method": "derived",
+          "derived_from": [
+            {"file": "S-201.dxf", "sheet": "S-201", "revision": "A", "method": "engineer_answer", "question_id": "Q-010"},
+            {"file": "S-103.dxf", "sheet": "S-103", "revision": "A", "region": {"detail": "SLAB NOTE S=120"}, "method": "dxf_entity"}
+          ]
+        },
+        "confidence": "high"
+      },
+      "openings": [
+        {
+          "spec_id": "L4-W-C-12-D1",
+          "mark": "D1",
+          "outline": [
+            {
+              "x": 1000,
+              "y": 9000,
+              "z": 3600,
+              "chamfer": "none",
+              "provenance": {"file": "S-104.dxf", "sheet": "S-104", "revision": "A", "region": {"detail": "WALL V1 ELEVATION"}, "method": "dxf_dimension_text"},
+              "confidence": "high"
+            },
+            {
+              "x": 1000,
+              "y": 9000,
+              "z": 5700,
+              "chamfer": "none",
+              "provenance": {"file": "S-104.dxf", "sheet": "S-104", "revision": "A", "region": {"detail": "WALL V1 ELEVATION"}, "method": "dxf_dimension_text"},
+              "confidence": "high"
+            },
+            {
+              "x": 1900,
+              "y": 9000,
+              "z": 5700,
+              "chamfer": "none",
+              "provenance": {"file": "S-104.dxf", "sheet": "S-104", "revision": "A", "region": {"detail": "WALL V1 ELEVATION"}, "method": "dxf_dimension_text"},
+              "confidence": "high"
+            },
+            {
+              "x": 1900,
+              "y": 9000,
+              "z": 3600,
+              "chamfer": "none",
+              "provenance": {"file": "S-104.dxf", "sheet": "S-104", "revision": "A", "region": {"detail": "WALL V1 ELEVATION"}, "method": "dxf_dimension_text"},
+              "confidence": "high"
+            }
+          ]
+        }
+      ],
+      "class": "6"
+    }
+  ],
+  "open_questions": []
+}

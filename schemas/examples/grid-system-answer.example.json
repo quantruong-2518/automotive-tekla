@@ -1,0 +1,522 @@
+{
+  "schema_version": "0.1",
+  "project_id": "demo-project",
+  "inventory_sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+  "answers_sha256": "6666666666666666666666666666666666666666666666666666666666666666",
+  "heuristics": {
+    "drafting_tolerance": 0.0002,
+    "orthogonal_tolerance_deg": 0.5,
+    "max_confidence": "medium"
+  },
+  "files": [
+    {
+      "path": "structural-set.dxf",
+      "sha256": "05bb0d478faf8da29db658a0815c82d90be927e0c7e0c64e35fa79f83a6306e1",
+      "grids": "structure/structural-set.dxf.grids.json",
+      "status": "read",
+      "declared_unit": "mm",
+      "views": 3,
+      "families_usable": 6,
+      "grid_spacing_median": {
+        "value": 6000.0,
+        "count": 9
+      },
+      "units_answer": {
+        "status": "answered",
+        "unit": "mm"
+      }
+    }
+  ],
+  "systems": [
+    {
+      "system_id": "S001",
+      "status": "proposal",
+      "directions": [
+        {
+          "labels": [
+            "A",
+            "B",
+            "C",
+            "D"
+          ],
+          "spacings": [
+            6000.0,
+            6000.0,
+            4500.0
+          ],
+          "coordinates": "0 2*6000 4500",
+          "unit": "mm",
+          "rounding_step": 1.0,
+          "angle_deg": 0.0,
+          "max_relative_spread": 0.0,
+          "families": 2,
+          "representative": {
+            "file": "structural-set.dxf",
+            "sheet": "model#01",
+            "group_id": "V001",
+            "family_id": "F001"
+          },
+          "provenance": {
+            "file": "structural-set.dxf",
+            "sheet": "model#01",
+            "method": "derived"
+          },
+          "confidence": "medium",
+          "tekla_axis": "Y",
+          "mm": {
+            "spacings": [
+              6000.0,
+              6000.0,
+              4500.0
+            ],
+            "coordinates": "0 2*6000 4500"
+          }
+        },
+        {
+          "labels": [
+            "1",
+            "2",
+            "3"
+          ],
+          "spacings": [
+            7200.0,
+            7200.0
+          ],
+          "coordinates": "0 2*7200",
+          "unit": "mm",
+          "rounding_step": 1.0,
+          "angle_deg": 90.0,
+          "max_relative_spread": 0.0,
+          "families": 2,
+          "representative": {
+            "file": "structural-set.dxf",
+            "sheet": "model#01",
+            "group_id": "V001",
+            "family_id": "F002"
+          },
+          "provenance": {
+            "file": "structural-set.dxf",
+            "sheet": "model#01",
+            "method": "derived"
+          },
+          "confidence": "medium",
+          "tekla_axis": "X",
+          "mm": {
+            "spacings": [
+              7200.0,
+              7200.0
+            ],
+            "coordinates": "0 2*7200"
+          }
+        }
+      ],
+      "evidence": {
+        "views": 2,
+        "full_views": 2,
+        "partial_views": 0,
+        "independent_views": 2,
+        "sheets": 2,
+        "files": 1,
+        "contributors": [
+          {
+            "file": "structural-set.dxf",
+            "sheet": "model#01",
+            "group_id": "V001",
+            "role": "full",
+            "independence_group": 1,
+            "families": [
+              {
+                "family_id": "F001",
+                "direction": 0,
+                "labels": "A B C D",
+                "complete": true
+              },
+              {
+                "family_id": "F002",
+                "direction": 1,
+                "labels": "1 2 3",
+                "complete": true
+              }
+            ]
+          },
+          {
+            "file": "structural-set.dxf",
+            "sheet": "model#02",
+            "group_id": "V002",
+            "role": "full",
+            "independence_group": 2,
+            "families": [
+              {
+                "family_id": "F003",
+                "direction": 0,
+                "labels": "A B C D",
+                "complete": true
+              },
+              {
+                "family_id": "F004",
+                "direction": 1,
+                "labels": "1 2 3",
+                "complete": true
+              }
+            ]
+          }
+        ]
+      },
+      "flags": [
+        "conflict"
+      ],
+      "confidence": "medium",
+      "relations": {
+        "compatible_with": [],
+        "conflicts_with": [
+          "S002"
+        ],
+        "subset_of": []
+      },
+      "units": {
+        "declared": "mm",
+        "answered": "mm",
+        "status": "confirmed",
+        "reason": null
+      },
+      "axis_assignment": {
+        "status": "answered",
+        "reason": null
+      },
+      "tekla_grid": {
+        "unit": "mm",
+        "coordinate_x": "0 2*7200",
+        "label_x": "1 2 3",
+        "coordinate_y": "0 2*6000 4500",
+        "label_y": "A B C D"
+      },
+      "svg": "structure/grid-systems/S001.svg",
+      "note": "Proposal only: drawing-unit spacings of the representative family (never averaged). Confirm the system, its building, units and Tekla X/Y at gate 1.",
+      "axis_question_key": "3a1f0c9b7d2e4a61"
+    },
+    {
+      "system_id": "S002",
+      "status": "proposal",
+      "directions": [
+        {
+          "labels": [
+            "A",
+            "B",
+            "C"
+          ],
+          "spacings": [
+            3600.0,
+            4800.0
+          ],
+          "coordinates": "0 3600 4800",
+          "unit": "mm",
+          "rounding_step": 1.0,
+          "angle_deg": 0.0,
+          "max_relative_spread": 0.0,
+          "families": 1,
+          "representative": {
+            "file": "structural-set.dxf",
+            "sheet": "model#03",
+            "group_id": "V003",
+            "family_id": "F005"
+          },
+          "provenance": {
+            "file": "structural-set.dxf",
+            "sheet": "model#03",
+            "method": "derived"
+          },
+          "confidence": "medium",
+          "tekla_axis": null,
+          "mm": {
+            "spacings": [
+              3600.0,
+              4800.0
+            ],
+            "coordinates": "0 3600 4800"
+          }
+        },
+        {
+          "labels": [
+            "1",
+            "2",
+            "3"
+          ],
+          "spacings": [
+            5400.0,
+            5400.0
+          ],
+          "coordinates": "0 2*5400",
+          "unit": "mm",
+          "rounding_step": 1.0,
+          "angle_deg": 90.0,
+          "max_relative_spread": 0.0,
+          "families": 1,
+          "representative": {
+            "file": "structural-set.dxf",
+            "sheet": "model#03",
+            "group_id": "V003",
+            "family_id": "F006"
+          },
+          "provenance": {
+            "file": "structural-set.dxf",
+            "sheet": "model#03",
+            "method": "derived"
+          },
+          "confidence": "medium",
+          "tekla_axis": null,
+          "mm": {
+            "spacings": [
+              5400.0,
+              5400.0
+            ],
+            "coordinates": "0 2*5400"
+          }
+        }
+      ],
+      "evidence": {
+        "views": 1,
+        "full_views": 1,
+        "partial_views": 0,
+        "independent_views": 1,
+        "sheets": 1,
+        "files": 1,
+        "contributors": [
+          {
+            "file": "structural-set.dxf",
+            "sheet": "model#03",
+            "group_id": "V003",
+            "role": "full",
+            "independence_group": 1,
+            "families": [
+              {
+                "family_id": "F005",
+                "direction": 0,
+                "labels": "A B C",
+                "complete": true
+              },
+              {
+                "family_id": "F006",
+                "direction": 1,
+                "labels": "1 2 3",
+                "complete": true
+              }
+            ]
+          }
+        ]
+      },
+      "flags": [
+        "axis_unassigned",
+        "conflict",
+        "single_source"
+      ],
+      "confidence": "low",
+      "relations": {
+        "compatible_with": [],
+        "conflicts_with": [
+          "S001"
+        ],
+        "subset_of": []
+      },
+      "units": {
+        "declared": "mm",
+        "answered": "mm",
+        "status": "confirmed",
+        "reason": null
+      },
+      "axis_assignment": {
+        "status": "not_answered",
+        "reason": "no axis answer covers every direction"
+      },
+      "tekla_grid": null,
+      "svg": "structure/grid-systems/S002.svg",
+      "note": "Proposal only: drawing-unit spacings of the representative family (never averaged). Confirm the system, its building, units and Tekla X/Y at gate 1.",
+      "axis_question_key": "8c4d2b1a9e0f7c35"
+    },
+    {
+      "system_id": "S003",
+      "status": "proposal",
+      "source": "engineer_answer",
+      "source_answer": {
+        "question_id": "Q-031",
+        "key": "7c0d5e1a9b3f2468"
+      },
+      "directions": [
+        {
+          "labels": [
+            "1",
+            "2",
+            "3",
+            "4",
+            "5"
+          ],
+          "spacings": [
+            3130.0,
+            3540.0,
+            3520.0,
+            4590.0
+          ],
+          "coordinates": "0 3130 3540 3520 4590",
+          "unit": "mm",
+          "rounding_step": null,
+          "angle_deg": null,
+          "max_relative_spread": 0.0,
+          "families": 0,
+          "representative": null,
+          "provenance": {
+            "file": "house-285.dwg",
+            "sheet": "model#03",
+            "method": "engineer_answer",
+            "question_id": "Q-031"
+          },
+          "confidence": "medium",
+          "tekla_axis": null,
+          "mm": null
+        },
+        {
+          "labels": [
+            "A",
+            "B",
+            "C"
+          ],
+          "spacings": [
+            4250.0,
+            3730.0
+          ],
+          "coordinates": "0 4250 3730",
+          "unit": "mm",
+          "rounding_step": null,
+          "angle_deg": null,
+          "max_relative_spread": 0.0,
+          "families": 0,
+          "representative": null,
+          "provenance": {
+            "file": "house-285.dwg",
+            "sheet": "model#03",
+            "method": "engineer_answer",
+            "question_id": "Q-031"
+          },
+          "confidence": "medium",
+          "tekla_axis": null,
+          "mm": null
+        }
+      ],
+      "evidence": {
+        "views": 0,
+        "full_views": 0,
+        "partial_views": 0,
+        "independent_views": 0,
+        "sheets": 1,
+        "files": 1,
+        "contributors": []
+      },
+      "flags": [
+        "units_not_confirmed",
+        "axis_unassigned"
+      ],
+      "confidence": "medium",
+      "relations": {
+        "compatible_with": [],
+        "conflicts_with": [],
+        "subset_of": []
+      },
+      "units": {
+        "declared": "mm",
+        "answered": null,
+        "status": "not_confirmed",
+        "reason": "units not confirmed"
+      },
+      "axis_assignment": {
+        "status": "not_answered",
+        "reason": "no grid_system_axis_unassigned answer yet"
+      },
+      "tekla_grid": null,
+      "svg": "structure/grid-systems/S003.svg",
+      "note": "Built from the engineer's grid_system_missing answer Q-031 (labels and spacings as given, drawing units). Confirm the system, its building, units and Tekla X/Y at gate 1.",
+      "axis_question_key": "9e2b4c6d8f0a1357"
+    }
+  ],
+  "unassigned_families": [],
+  "summary": {
+    "files_read": 1,
+    "views": 3,
+    "views_used": 3,
+    "single_axis_families": 0,
+    "families_unassigned": 0,
+    "systems": 3,
+    "two_direction": 3,
+    "single_source": 1,
+    "conflicts": 1
+  },
+  "conflicts": [
+    {
+      "systems": [
+        "S001",
+        "S002"
+      ],
+      "blocking": true,
+      "closed_by": null,
+      "question_key": "5b7e2f90c1d84a36"
+    }
+  ],
+  "questions": [
+    {
+      "code": "grid_system_select",
+      "blocking": true,
+      "message": "Gate 1: which of these grid systems are the project's grids, and which building or structure is each? None is used until confirmed. Structured values (optional): systems=S001,S002 (the systems the project uses; the others stop blocking) and separate=S001,S002 (selected systems that are different buildings: closes the conflicts between them).",
+      "where": "S001, S002",
+      "found": "S001: A B C D x 1 2 3 (2 view(s), 2 independent, 1 file(s)); S002: A B C x 1 2 3 (1 view(s), 1 independent, 1 file(s))"
+    },
+    {
+      "code": "grid_system_conflict",
+      "blocking": true,
+      "message": "Two grid systems use the same axis labels with different spacings or order, so they are kept apart. Are they different buildings or structures, or is one of them wrong? An answer here closes nothing: answer grid_system_select with systems= leaving one of them out, or with separate=S001,S002 when they are different buildings, then rerun harness grid-system.",
+      "where": "S001 (structural-set.dxf, sheet model#01, V001/F001) vs S002 (structural-set.dxf, sheet model#03, V003/F005)",
+      "found": "A-B: 6000 vs 3600; B-C: 6000 vs 4800; 1-2: 7200 vs 5400; 2-3: 7200 vs 5400",
+      "file": "structural-set.dxf",
+      "sheet": "model#01"
+    },
+    {
+      "code": "grid_system_axis_unassigned",
+      "blocking": false,
+      "message": "Not blocking: Tekla X / Y is assigned. Grid system S001: which direction of this grid system is Tekla X (lines parallel to Y) and which is Y? Answer with --value for dir1 and dir2 as listed in found (e.g. dir1=X), or answer grid_family_axis_assignment per family.",
+      "where": "structural-set.dxf V001/F001 x V001/F002",
+      "found": "dir1: V001/F001 labels A B C D, angle 0 deg; dir2: V001/F002 labels 1 2 3, angle 90 deg",
+      "file": "structural-set.dxf",
+      "sheet": "model#01"
+    },
+    {
+      "code": "grid_system_axis_unassigned",
+      "blocking": true,
+      "message": "Grid system S002: which direction of this grid system is Tekla X (lines parallel to Y) and which is Y? Answer with --value for dir1 and dir2 as listed in found (e.g. dir1=X), or answer grid_family_axis_assignment per family. (no axis answer covers every direction)",
+      "where": "structural-set.dxf V003/F005 x V003/F006",
+      "found": "dir1: V003/F005 labels A B C, angle 0 deg; dir2: V003/F006 labels 1 2 3, angle 90 deg",
+      "file": "structural-set.dxf",
+      "sheet": "model#03"
+    },
+    {
+      "code": "grid_system_missing",
+      "blocking": true,
+      "message": "This drawing has plan sheets but no usable grid system (at least two labelled axes in each of two directions). Give the grid as you read it: --value dir1_labels=1,2,3 --value dir1_spacings=3130,3540 --value dir2_labels=A,B --value dir2_spacings=4250 [--value sheet=model#03], drawing units.",
+      "where": "house-285.dwg",
+      "found": "656 labelled bubbles, 0 axes; no system detected",
+      "file": "house-285.dwg"
+    },
+    {
+      "code": "grid_answer_contradicts_drawing",
+      "blocking": true,
+      "message": "The spacing the engineer gave between two axes differs from a linear dimension drawn between them. Check the answer or the drawing; the engineer's answer stays authoritative once confirmed.",
+      "where": "house-285.dwg dir1 2-3",
+      "found": "answer Q-031: 3540; dimension handle 4F2 on model#03: 3450",
+      "file": "house-285.dwg",
+      "sheet": "model#03"
+    }
+  ],
+  "question_counts": {
+    "grid_system_axis_unassigned": 2,
+    "grid_system_conflict": 1,
+    "grid_system_select": 1,
+    "grid_system_missing": 1,
+    "grid_answer_contradicts_drawing": 1
+  },
+  "warnings": []
+}
