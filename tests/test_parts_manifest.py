@@ -1722,7 +1722,9 @@ def test_a_dangling_symlink_at_the_manifest_path_is_not_a_regular_file(capsys, c
 def test_a_fifo_at_the_manifest_path_is_a_schema_problem_and_does_not_hang(capsys, copied):
     put(copied, None)
     path = copied / MANIFEST
-    os.mkfifo(path)
+    mkfifo = getattr(os, "mkfifo", None)  # by name: the type checker has no `os.mkfifo` on Windows
+    assert mkfifo is not None  # the skipif above guarantees it
+    mkfifo(path)
     result: list[tuple[int, str, str]] = []
     thread = threading.Thread(target=lambda: result.append(raw(capsys, copied)), daemon=True)
     thread.start()
